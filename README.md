@@ -14,10 +14,12 @@ A web UI for spawning and chatting with **Claude Code agents** against a target 
 
 ```sh
 npm install
-npm run dev /path/to/project
+npm run dev /path/to/project [/path/to/another ...]
 ```
 
-The path is resolved and exported as `PROJECT_DIR`; it's the working directory where `claude` runs. Then open the web UI on port 6180.
+Each path is resolved and the list is exported as `PROJECT_DIRS` (newline-separated); these are the working directories where `claude` runs. Then open the web UI on port 41414.
+
+Each project gets a URL slug from its path (e.g. `/Users/me/code/app` → `users-me-code-app`). The sidebar shows a dropdown to switch projects; choosing one pushes its slug into the URL (`/users-me-code-app/`). Visiting `/` redirects to the first project passed on the command line.
 
 ## Architecture
 
@@ -30,9 +32,12 @@ The path is resolved and exported as `PROJECT_DIR`; it's the working directory w
 
 ### API (`server/index.ts`)
 
-- `GET /api/tasks` — list all tasks (sorted newest-first).
-- `POST /api/tasks` — create a task; fires off `claude --session-id <uuid> -p <msg>` (fire-and-forget).
-- `POST /api/tasks/:id/messages` — append a user message; continues via `claude --resume <uuid> -p <msg>`.
+- `GET /api/projects` — list the configured projects (`{ path, slug }`); the first is the default.
+- `GET /api/:project/tasks` — list a project's tasks (sorted newest-first).
+- `POST /api/:project/tasks` — create a task; fires off `claude --session-id <uuid> -p <msg>` (fire-and-forget).
+- `POST /api/:project/tasks/:id/messages` — append a user message; continues via `claude --resume <uuid> -p <msg>`.
+
+All task routes are scoped by the project slug, which selects the working directory `claude` runs in and the on-disk data dir.
 - `runClaude()` shells out with `execFile` (10-min timeout, 50 MB buffer); errors are caught and written back as an assistant message.
 
 ### Storage

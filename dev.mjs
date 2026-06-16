@@ -1,17 +1,19 @@
 import { concurrently } from 'concurrently'
 import path from 'node:path'
 
-const arg = process.argv[2]
-if (!arg) {
-  console.error('usage: npm run dev /path/to/project')
+const args = process.argv.slice(2)
+if (args.length === 0) {
+  console.error('usage: npm run dev /path/to/project [/path/to/another ...]')
   process.exit(1)
 }
 
-const PROJECT_DIR = path.resolve(arg)
-console.log(`project: ${PROJECT_DIR}`)
+const projects = args.map((a) => path.resolve(a))
+console.log('projects:')
+for (const p of projects) console.log(`  ${p}`)
 
-// Inherited by both child processes; only the api server reads it.
-process.env.PROJECT_DIR = PROJECT_DIR
+// Inherited by both child processes; only the api server reads it. Newline-
+// separated so it survives a single env var (paths never contain newlines).
+process.env.PROJECT_DIRS = projects.join('\n')
 
 concurrently(
   [
