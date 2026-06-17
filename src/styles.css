@@ -710,6 +710,7 @@ body {
 }
 
 .message-text pre {
+  position: relative;
   margin: 0.4em 0;
   padding: 10px 12px;
   background: var(--bg);
@@ -717,6 +718,40 @@ body {
   border-radius: 6px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* Clipboard button in a code block's top-right corner, matching .message-copy.
+   Padded right so wrapped code never runs under the button. */
+.message-text pre.code-block {
+  padding-right: 36px;
+}
+
+.code-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+
+.message:hover .code-copy,
+.code-block:hover .code-copy,
+.code-copy:focus-visible {
+  opacity: 1;
+}
+
+.code-copy:hover {
+  color: var(--accent);
+  background: var(--bg-tinted);
 }
 
 .message-text pre code {

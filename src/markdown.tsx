@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 
 // A deliberately small, safe Markdown renderer. It returns React elements
 // (never HTML strings / dangerouslySetInnerHTML), so React escapes all text
@@ -87,6 +87,63 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
   }
 
   return nodes
+}
+
+// A fenced code block with a clipboard button in its corner, mirroring the
+// message-level copy button. Briefly flips to a checkmark after a copy.
+function CodeBlock({ text }: { text: string }): JSX.Element {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // Clipboard access can be denied (e.g. insecure context); ignore.
+    }
+  }
+  return (
+    <pre className="code-block">
+      <button
+        type="button"
+        className="code-copy"
+        onClick={copy}
+        title="Copy code"
+        aria-label={copied ? 'Copied' : 'Copy code'}
+      >
+        {copied ? (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path
+              d="M20 6 9 17l-5-5"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        ) : (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <rect
+              x="9"
+              y="9"
+              width="11"
+              height="11"
+              rx="2"
+              stroke="currentColor"
+              strokeWidth="2"
+            />
+            <path
+              d="M5 15V5a2 2 0 0 1 2-2h10"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+          </svg>
+        )}
+      </button>
+      <code>{text}</code>
+    </pre>
+  )
 }
 
 type Block =
@@ -314,11 +371,7 @@ function renderBlocks(blocks: Block[], keyPrefix: string): ReactNode[] {
               <blockquote key={key}>{renderInline(b.lines.join('\n'), key)}</blockquote>
             )
           case 'code':
-            return (
-              <pre key={key}>
-                <code>{b.text}</code>
-              </pre>
-            )
+            return <CodeBlock key={key} text={b.text} />
           case 'hr':
             return <hr key={key} />
           case 'table':
