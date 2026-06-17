@@ -126,6 +126,11 @@ type Task = {
   // streaming churn in between. Falls back to createdAt for tasks saved before
   // this field existed.
   updatedAt: string
+  // ISO timestamp of the latest completed update (message/event) the viewer has
+  // caught up to; drives the UI's unseen-update dot. Set to creation time on a
+  // new task, advanced monotonically by the /seen endpoint as the viewer reads,
+  // and backfilled at startup for tasks saved before this field existed.
+  seenAt?: string
   allowEdits: boolean
   allowCommits: boolean
   // Per-task secret minted at creation and injected into the agent's process as
@@ -189,6 +194,23 @@ async function readTask(dataDir: string, id: string): Promise<Task | null> {
 function publicTask(task: Task): Omit<Task, 'token'> {
   const { token: _token, ...rest } = task
   return rest
+}
+
+// The timestamp of a task's most recent *completed* update: the newest of its
+// finished messages (the in-flight, still-streaming one is skipped) and its
+// lifecycle events. Mirrors the client's helper of the same name; used to seed
+// `seenAt` for tasks that predate the field. ISO timestamps compare
+// lexicographically, so the string max is a chronological max.
+function latestUpdateAt(task: Task): string {
+  let latest = ''
+  for (const m of task.messages) {
+    if (m.pending) continue
+    if (m.createdAt > latest) latest = m.createdAt
+  }
+  for (const e of task.events ?? []) {
+    if (e.createdAt > latest) latest = e.createdAt
+  }
+  return latest
 }
 
 async function setTitle(
@@ -905,6 +927,11 @@ app.post('/api/:project/tasks', async (c) => {
       status: message.trim() ? 'riding' : 'wedged',
       createdAt: now,
       updatedAt: now,
+      // Caught up as of creation: the opening message (and launch event) are the
+      // creator's own, so they don't warrant an unseen dot. Anything that lands
+      // afterwards — claude's reply, lifecycle events — is newer than this and
+      // shows as unseen until viewed.
+      seenAt: now,
       allowEdits,
       allowCommits,
       // Authenticates this task's own callbacks (see Task.token).
@@ -1138,6 +1165,39 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
   }
 })
 
+// Mark a task seen up to the given ISO timestamp, clearing its unseen-update dot
+// in the UI. Advances `seenAt` monotonically — a stale or out-of-order `at`
+// never moves the marker backwards — so the browser can fire these freely as the
+// viewer reads. This is harmless view-state, so it isn't principal-gated.
+app.post('/api/:project/tasks/:id/seen', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  try {
+    const id = c.req.param('id')
+    if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    const file = path.join(project.dataDir, `${id}.json`)
+
+    const body = await c.req.json<{ at?: unknown }>()
+    const at = typeof body.at === 'string' ? body.at : ''
+    if (!at) return c.json({ error: 'at is required' }, 400)
+
+    // Read-modify-write under mutateTask so a concurrent streaming update (which
+    // rewrites the same file) can't clobber, or be clobbered by, this marker.
+    let updated: Task | null = null
+    try {
+      await mutateTask(file, (t) => {
+        if (!t.seenAt || at > t.seenAt) t.seenAt = at
+        updated = t
+      })
+    } catch {
+      return c.json({ error: 'task not found' }, 404)
+    }
+    return c.json(publicTask(updated!))
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
+  }
+})
+
 // On boot, resume any tasks that still have queued messages from before a
 // restart so they aren't stranded. Their in-flight run (if any) died with the
 // old process, so clear stale `pending` flags first, then drive the queue. A
@@ -1170,9 +1230,39 @@ async function recoverQueues(): Promise<void> {
   }
 }
 
+// One-time backfill of `seenAt` for tasks saved before the field existed: pin it
+// to the task's current latest update so they start out caught-up (no unseen
+// dot), and only genuinely newer activity lights it. Idempotent — a task that
+// already has a marker is left alone, so this is a no-op on every boot after the
+// first.
+async function backfillSeen(): Promise<void> {
+  for (const project of PROJECTS) {
+    let names: string[]
+    try {
+      names = await readdir(project.dataDir)
+    } catch {
+      continue
+    }
+    for (const name of names) {
+      if (!name.endsWith('.json')) continue
+      const file = path.join(project.dataDir, name)
+      try {
+        const task = JSON.parse(await readFile(file, 'utf8')) as Task
+        if (task.seenAt !== undefined) continue
+        await mutateTask(file, (t) => {
+          if (t.seenAt === undefined) t.seenAt = latestUpdateAt(t)
+        })
+      } catch {
+        // skip unreadable/invalid files
+      }
+    }
+  }
+}
+
 const port = Number(process.env.PORT ?? 6181)
 serve({ fetch: app.fetch, port })
 console.log(`api listening on http://localhost:${port}`)
 console.log('projects:')
 for (const p of PROJECTS) console.log(`  ${p.slug}  ${p.path}`)
+void backfillSeen()
 void recoverQueues()

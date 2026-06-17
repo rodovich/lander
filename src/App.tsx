@@ -60,6 +60,11 @@ type Task = {
   status: string
   createdAt: string
   updatedAt?: string
+  // ISO timestamp of the latest completed update the viewer has caught up to;
+  // a task shows the unseen-update dot when its latest update is newer. Advanced
+  // server-side (monotonically) via the /seen endpoint. Absent on tasks saved
+  // before this field existed, until the server backfills it.
+  seenAt?: string
   allowEdits: boolean
   allowCommits: boolean
   messages: Message[]
@@ -92,6 +97,24 @@ function formatTimestamp(iso: string): string {
 // in the task list without showing the whole path.
 function lastPathComponent(p: string): string {
   return p.split('/').filter(Boolean).pop() ?? p
+}
+
+// The timestamp of a task's most recent *completed* update: the newest of its
+// finished messages and its lifecycle events. The in-flight assistant message
+// (still streaming) is skipped, so per-chunk churn doesn't count until the
+// message lands — that's what keeps the unseen-update dot from flickering on
+// mid-stream. ISO timestamps compare lexicographically, so the string max is a
+// chronological max; empty string for a task with nothing complete yet.
+function latestUpdateAt(task: Task): string {
+  let latest = ''
+  for (const m of task.messages) {
+    if (m.pending) continue
+    if (m.createdAt > latest) latest = m.createdAt
+  }
+  for (const e of task.events ?? []) {
+    if (e.createdAt > latest) latest = e.createdAt
+  }
+  return latest
 }
 
 // The selected task's project is the first path segment, e.g.
@@ -633,6 +656,56 @@ export function App() {
     })
   }
 
+  // The two ambient conditions (alongside having a task open) that make the
+  // viewer "actively viewing" it: the conversation is scrolled to its bottom,
+  // and this browser tab is the active, focused one.
+  const [atBottom, setAtBottom] = useState(true)
+  const [tabActive, setTabActive] = useState(
+    () => !document.hidden && document.hasFocus(),
+  )
+
+  // Latest tasks readable from timer callbacks that outlive the render that
+  // scheduled them (the dwell timer below marks a task seen 3s later).
+  const tasksRef = useRef(tasks)
+  tasksRef.current = tasks
+
+  // Track whether this tab is the active one: visible and window-focused.
+  useEffect(() => {
+    const update = () => setTabActive(!document.hidden && document.hasFocus())
+    document.addEventListener('visibilitychange', update)
+    window.addEventListener('focus', update)
+    window.addEventListener('blur', update)
+    return () => {
+      document.removeEventListener('visibilitychange', update)
+      window.removeEventListener('focus', update)
+      window.removeEventListener('blur', update)
+    }
+  }, [])
+
+  // Mark a task caught-up: advance its server-side `seenAt` to its latest
+  // completed update, which clears its unseen dot. Optimistically advances the
+  // local copy so the dot clears at once; the 2s poll reconciles. The server
+  // stores the marker monotonically, so a stale/older value never moves it back.
+  // Reads tasksRef so a delayed (dwell-timer) call sees the freshest data.
+  async function markSeen(session: string) {
+    const task = tasksRef.current.find((t) => t.session === session)
+    if (!task) return
+    const at = latestUpdateAt(task)
+    if (!at || (task.seenAt && task.seenAt >= at)) return
+    setTasks((prev) =>
+      prev.map((t) => (t.session === session ? { ...t, seenAt: at } : t)),
+    )
+    try {
+      await fetch(`/api/${task.projectSlug}/tasks/${session}/seen`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ at }),
+      })
+    } catch {
+      // best-effort; a later dwell or the poll will retry the mark
+    }
+  }
+
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const [retitling, setRetitling] = useState(false)
@@ -671,6 +744,12 @@ export function App() {
       ? selectedSession
       : orderedTasks[0]?.session ?? null
   const current = tasks.find((t) => t.session === selected) ?? null
+
+  // The open task's latest completed update, and whether the viewer is actively
+  // viewing it (open + tab active + scrolled to the bottom where new content
+  // lands). These drive the seen-marker advancement effect further below.
+  const currentLatest = current ? latestUpdateAt(current) : ''
+  const activelyViewing = !!current && tabActive && atBottom
 
   // The open task's conversation as a single chronological stream: its messages
   // (keeping each message's own index so step/popup keys stay stable) merged
@@ -1040,7 +1119,9 @@ export function App() {
   function onMessagesScroll() {
     const el = messagesRef.current
     if (!el) return
-    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 32
+    const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < 32
+    atBottomRef.current = bottom
+    setAtBottom(bottom)
   }
 
   // Changes whenever the open task's last (typically streaming) message grows,
@@ -1063,8 +1144,50 @@ export function App() {
     const switched = prevSelectedRef.current !== selected
     prevSelectedRef.current = selected
     if (switched) atBottomRef.current = true
-    if (switched || atBottomRef.current) el.scrollTop = el.scrollHeight
+    if (switched || atBottomRef.current) {
+      el.scrollTop = el.scrollHeight
+      // Pinning leaves us at the bottom; mirror that into the state the
+      // active-viewing logic reads (a no-op when already true).
+      setAtBottom(true)
+    }
   }, [selected, current?.messages.length, current?.events?.length, streamSignal])
+
+  // Move the open task's seen marker per the viewing rules. When the viewer
+  // starts actively viewing a task (switches to it, focuses the tab, or scrolls
+  // to the bottom), treat whatever's already there as a baseline and arm a 3s
+  // dwell that marks it seen — so a glance that doesn't last doesn't clear the
+  // dot. An update that arrives *while* actively viewing is past that baseline,
+  // so it's marked seen at once.
+  const dwellTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const viewSessionRef = useRef<string | null>(null)
+  const viewBaselineRef = useRef<string>('')
+  useEffect(() => {
+    if (!activelyViewing || !current) {
+      if (dwellTimerRef.current) {
+        clearTimeout(dwellTimerRef.current)
+        dwellTimerRef.current = null
+      }
+      viewSessionRef.current = null
+      return
+    }
+    const session = current.session
+    if (viewSessionRef.current !== session) {
+      // Just began actively viewing this task: snapshot the baseline and arm the
+      // dwell. Anything already present clears only once the 3s elapses.
+      viewSessionRef.current = session
+      viewBaselineRef.current = currentLatest
+      if (dwellTimerRef.current) clearTimeout(dwellTimerRef.current)
+      dwellTimerRef.current = setTimeout(() => {
+        dwellTimerRef.current = null
+        void markSeen(session)
+      }, 3000)
+    } else if (currentLatest > viewBaselineRef.current) {
+      // A new update landed while actively viewing — seen immediately.
+      viewBaselineRef.current = currentLatest
+      void markSeen(session)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activelyViewing, currentLatest, current?.session])
 
   async function sendReply() {
     if (!current) return
@@ -1264,7 +1387,12 @@ export function App() {
           {tasks.length > 0 && orderedTasks.length === 0 && (
             <li className="empty" role="presentation">No matching tasks</li>
           )}
-          {orderedTasks.map((task, index) => (
+          {orderedTasks.map((task, index) => {
+            // The dot shows once the task has a seen marker (set on creation or
+            // backfilled) and its latest completed update is newer than it.
+            const unseen =
+              task.seenAt != null && latestUpdateAt(task) > task.seenAt
+            return (
             <li
               key={task.session}
               ref={(el) => {
@@ -1282,6 +1410,13 @@ export function App() {
               onKeyDown={(e) => onTaskKeyDown(e, index, task)}
             >
               <div className="task-title-row">
+                {unseen && (
+                  <span
+                    className="unseen-dot"
+                    aria-label="Unviewed updates"
+                    title="Unviewed updates"
+                  />
+                )}
                 <div className="task-title">{task.title}</div>
                 {showProjectLabels && (
                   <span className="task-project">
@@ -1308,7 +1443,8 @@ export function App() {
                 {formatTimestamp(task.updatedAt ?? task.createdAt)}
               </div>
             </li>
-          ))}
+            )
+          })}
         </ul>
 
         <form className="new-task" onSubmit={onSubmit}>

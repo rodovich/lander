@@ -207,6 +207,17 @@ body {
   white-space: nowrap;
 }
 
+/* A small accent dot marking a task whose latest update the viewer hasn't seen.
+   Sits before the title; centered against the baseline-aligned row. */
+.unseen-dot {
+  flex-shrink: 0;
+  align-self: center;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
 .task-item.landed:not(.selected) {
   background: var(--bg-tinted);
 }
