@@ -189,9 +189,22 @@ body {
   background: var(--selected);
 }
 
+/* Task name and its project leaf share a row; the project keeps its full
+   width and the name ellipsizes to make room. */
+.task-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
 .task-title {
   font-weight: 600;
-  margin-bottom: 2px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .task-item.landed:not(.selected) {
@@ -215,12 +228,12 @@ body {
   letter-spacing: 0.03em;
 }
 
-/* The project leaf shown next to a task's status when projects are intermixed. */
+/* The project leaf shown next to a task's name when projects are intermixed.
+   It claims the space it needs (the name yields), so it never shrinks. */
 .task-project {
   color: var(--muted);
   font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex-shrink: 0;
   white-space: nowrap;
 }
 
@@ -401,6 +414,23 @@ body {
   font-size: 20px;
 }
 
+/* Stacks the project name above the task title in the header. */
+.detail-header-title {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.detail-project {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* The title row and the inline editor share the h1 box model so swapping
    between display and edit never shifts the header height. */
 .title-row {
@@ -510,8 +540,14 @@ body {
 .detail-meta {
   display: flex;
   gap: 12px;
-  align-items: center;
+  align-items: baseline;
   margin-bottom: 20px;
+}
+
+/* The list layout stacks the time under the status with a small offset; in
+   the header's single row that offset would knock it out of line. */
+.detail-meta .task-time {
+  margin-top: 0;
 }
 
 .messages {

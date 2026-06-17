@@ -1180,7 +1180,16 @@ export function App() {
               onClick={() => selectTask(task.session, task.projectSlug)}
               onKeyDown={(e) => onTaskKeyDown(e, index, task)}
             >
-              <div className="task-title">{task.title}</div>
+              <div className="task-title-row">
+                <div className="task-title">{task.title}</div>
+                {showProjectLabels && (
+                  <span className="task-project">
+                    {lastPathComponent(
+                      pathBySlug.get(task.projectSlug) ?? task.projectSlug,
+                    )}
+                  </span>
+                )}
+              </div>
               <div className="task-meta-row">
                 <span
                   className={
@@ -1191,13 +1200,6 @@ export function App() {
                 >
                   {task.status}
                 </span>
-                {showProjectLabels && (
-                  <span className="task-project">
-                    {lastPathComponent(
-                      pathBySlug.get(task.projectSlug) ?? task.projectSlug,
-                    )}
-                  </span>
-                )}
               </div>
               <div className="task-time">
                 {formatTimestamp(task.updatedAt ?? task.createdAt)}
@@ -1265,17 +1267,26 @@ export function App() {
           <>
             <div className="detail-header">
               <div className="detail-header-top">
-                {editingTitle ? (
-                  <input
-                    ref={titleInputRef}
-                    className="title-input"
-                    value={titleDraft}
-                    onChange={(e) => setTitleDraft(e.target.value)}
-                    onKeyDown={onTitleKeyDown}
-                    onBlur={() => setEditingTitle(false)}
-                  />
-                ) : (
-                  <div className="title-row">
+                <div className="detail-header-title">
+                  {projects.length > 1 && (
+                    <div className="detail-project">
+                      {lastPathComponent(
+                        pathBySlug.get(current.projectSlug) ??
+                          current.projectSlug,
+                      )}
+                    </div>
+                  )}
+                  {editingTitle ? (
+                    <input
+                      ref={titleInputRef}
+                      className="title-input"
+                      value={titleDraft}
+                      onChange={(e) => setTitleDraft(e.target.value)}
+                      onKeyDown={onTitleKeyDown}
+                      onBlur={() => setEditingTitle(false)}
+                    />
+                  ) : (
+                    <div className="title-row">
                     <h1>{current.title}</h1>
                     <button
                       className="edit-title-button"
@@ -1318,7 +1329,8 @@ export function App() {
                       </svg>
                     </button>
                   </div>
-                )}
+                  )}
+                </div>
                 <div className="header-actions">
                   <button
                     className="wedged-button"
@@ -1346,15 +1358,8 @@ export function App() {
                 >
                   {current.status}
                 </span>
-                {projects.length > 1 && (
-                  <span className="task-project">
-                    {lastPathComponent(
-                      pathBySlug.get(current.projectSlug) ?? current.projectSlug,
-                    )}
-                  </span>
-                )}
                 <span className="task-time">
-                  {formatTimestamp(current.createdAt)}
+                  {formatTimestamp(current.updatedAt ?? current.createdAt)}
                 </span>
               </div>
             </div>
