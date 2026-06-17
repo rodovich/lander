@@ -482,7 +482,7 @@ export function App() {
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   const [message, setMessage] = useState('')
-  const [newAllowEdits, setNewAllowEdits] = useState(false)
+  const [newAllowEdits, setNewAllowEdits] = useState(true)
   const [newAllowCommits, setNewAllowCommits] = useState(false)
   // Explicit project override for the new-task form; empty means "follow the
   // default" (targetSlug below).
@@ -794,6 +794,8 @@ export function App() {
       setTasks(await loadShownTasks(shown))
       selectTask(created.session, targetSlug)
       setMessage('')
+      // Edits default on for the next task; commits stay as the user left them.
+      setNewAllowEdits(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -1203,7 +1205,7 @@ export function App() {
             type="submit"
             disabled={submitting || !message.trim()}
           >
-            {submitting ? 'Creating…' : 'Create task'}
+            {submitting ? 'Launching…' : 'Launch task'}
           </button>
         </form>
 
@@ -1230,27 +1232,8 @@ export function App() {
                     <h1>{current.title}</h1>
                     <button
                       className="edit-title-button"
-                      title="Edit title"
-                      aria-label="Edit title"
-                      onClick={startTitleEdit}
-                    >
-                      <svg
-                        width="15"
-                        height="15"
-                        viewBox="0 0 16 16"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M11.5 2.5l2 2L6 12l-2.5.5L4 10z" />
-                      </svg>
-                    </button>
-                    <button
-                      className="edit-title-button"
-                      title="Suggest a title with haiku"
-                      aria-label="Suggest a title"
+                      title="Regenerate title"
+                      aria-label="Regenerate title"
                       disabled={retitling}
                       onClick={() => void generateTitle()}
                     >
@@ -1266,6 +1249,25 @@ export function App() {
                       >
                         <path d="M8 1.5l1.4 3.6 3.6 1.4-3.6 1.4L8 11.5 6.6 7.9 3 6.5l3.6-1.4z" />
                         <path d="M13 10.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z" />
+                      </svg>
+                    </button>
+                    <button
+                      className="edit-title-button"
+                      title="Edit title"
+                      aria-label="Edit title"
+                      onClick={startTitleEdit}
+                    >
+                      <svg
+                        width="15"
+                        height="15"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M11.5 2.5l2 2L6 12l-2.5.5L4 10z" />
                       </svg>
                     </button>
                   </div>
