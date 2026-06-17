@@ -901,12 +901,16 @@ export function App() {
 
   // Changes whenever the open task's last (typically streaming) message grows,
   // even when the message count stays the same, so the effect re-pins as an
-  // assistant turn fills in.
+  // assistant turn fills in. The trailing fields track the two "claude is
+  // working…" spinners (the per-message pending one and the standalone riding
+  // one); they add and remove a row, so the timeline's height changes without
+  // any message text changing and the effect must re-pin for those too.
   const lastMessage = current?.messages[current.messages.length - 1]
   const streamSignal = lastMessage
     ? `${lastMessage.steps?.length ?? 0}:` +
       `${lastMessage.steps?.reduce((n, s) => n + (s.text?.length ?? 0), 0) ?? 0}:` +
-      `${lastMessage.text?.length ?? 0}`
+      `${lastMessage.text?.length ?? 0}:` +
+      `${lastMessage.pending ? 1 : 0}:${current?.status}`
     : ''
 
   useEffect(() => {
