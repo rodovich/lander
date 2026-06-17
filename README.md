@@ -44,12 +44,33 @@ All task routes are scoped by the project slug, which selects the working direct
 
 Flat JSON files, one per task, no database. Tasks live under `./data/<normalized-project-path>/tasks/<uuid>.json`, where the project path is slugified (e.g. `/Users/me/code/app` → `Users-me-code-app`). This namespaces tasks per target project. The task `id` doubles as the Claude `--session-id`.
 
+### Self-management (`bin/lander`)
+
+A task's agent can call back into lander to manage itself. When `runClaude` spawns `claude`, it injects `LANDER_API`, `LANDER_PROJECT`, and `LANDER_TASK` into the environment, prepends `bin/` to `PATH`, pre-approves `Bash(lander:*)`, and appends a system-prompt note describing the commands. So inside any task the agent can run:
+
+| Command | Effect |
+|---------|--------|
+| `lander land` | Mark **this** task `landed` (shorthand for `status landed`). |
+| `lander status <status>` | Set this task's status to any string. |
+| `lander new <message>` | Spawn a **sibling** task that runs independently; prints its id. |
+
+`land` and `status` act on the current task via `LANDER_TASK`; `new` only needs `LANDER_API`/`LANDER_PROJECT`. `lander new` reads the message from the argument, or from stdin if it's `-`, and accepts `--project <slug>`, `--edits`, and `--commits`. The CLI is a zero-dependency Node script that talks to the local HTTP API, so the server stays the single source of truth (e.g. `new` goes through `POST /tasks`, which also fires off the spawned agent and auto-titles it).
+
+This makes orchestration patterns possible — e.g. a task that fans out a review per assigned PR:
+
+```sh
+gh pr list --search "review-requested:@me" --json number -q '.[].number' |
+  while read pr; do lander new "Review PR #$pr using \`gh pr diff $pr\`."; done
+```
+
+So that an agent-set status survives, `runClaude` only resets `riding → wedged` on exit — it won't clobber a terminal status like `landed` the agent set mid-run.
+
 ### Frontend (`src/App.tsx`)
 
 Single component: sidebar (task list + new-task form) and a detail pane (message thread + reply composer). Enter submits, Shift/Option+Enter for newlines; shows a "claude is working…" indicator when the last message is from the user.
 
 ## Notable details
 
-- `status` is hardcoded to `"wedged"` on creation and never updated — it's display-only and currently vestigial.
+- `status` moves through `riding` (agent working) → `wedged` (at rest), and an agent can set its own status — including the terminal `landed` — via the `lander` CLI (see Self-management).
 - No auth, no streaming (replies land only when the subprocess fully exits), no websockets — it relies on 2s polling.
 - Task IDs are validated as UUIDs before filesystem access, which guards against path traversal on the `:id` route.

@@ -1,0 +1,67 @@
+#!/usr/bin/env node
+// lander — lets an in-task agent call back into the lander server.
+// Identity is injected by runClaude: LANDER_API, LANDER_PROJECT, LANDER_TASK.
+const { LANDER_API: API, LANDER_PROJECT: PROJECT, LANDER_TASK: TASK } = process.env
+
+const die = (m) => {
+  console.error(`lander: ${m}`)
+  process.exit(1)
+}
+
+async function call(project, path, init) {
+  if (!API) die('not inside a lander task (LANDER_API unset)')
+  const res = await fetch(`${API}/api/${project}${path}`, {
+    ...init,
+    headers: { 'content-type': 'application/json', ...init?.headers },
+  })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) die(body.error || `${res.status} ${res.statusText}`)
+  return body
+}
+
+async function setStatus(status) {
+  if (!TASK) die('no current task (LANDER_TASK unset)')
+  await call(PROJECT, `/tasks/${TASK}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status }),
+  })
+  console.log(`status → ${status}`)
+}
+
+async function readStdin() {
+  const chunks = []
+  for await (const c of process.stdin) chunks.push(c)
+  return Buffer.concat(chunks).toString('utf8')
+}
+
+async function newTask(rest) {
+  const o = { project: PROJECT, allowEdits: false, allowCommits: false }
+  const pos = []
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i]
+    if (a === '--project') o.project = rest[++i]
+    else if (a === '--message') o.message = rest[++i]
+    else if (a === '--edits') o.allowEdits = true
+    else if (a === '--commits') o.allowCommits = true
+    else pos.push(a)
+  }
+  o.message ??= pos.shift()
+  if (o.message === '-') o.message = await readStdin()
+  if (!o.message?.trim()) die('usage: lander new <message>')
+  // Title is omitted; the server names the task from the message via haiku.
+  const task = await call(o.project, '/tasks', {
+    method: 'POST',
+    body: JSON.stringify(o),
+  })
+  console.log(task.session) // print new task id for the orchestrator to track
+}
+
+const [cmd, ...rest] = process.argv.slice(2)
+const run = {
+  land: () => setStatus('landed'),
+  status: () => setStatus(rest[0] || die('usage: lander status <status>')),
+  new: () => newTask(rest),
+}[cmd]
+if (!run)
+  die(`unknown command: ${cmd ?? '(none)'} — try land | status <status> | new <message>`)
+run().catch((e) => die(e.message))

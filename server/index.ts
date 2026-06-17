@@ -132,17 +132,6 @@ async function setTitle(
   await writeFile(file, JSON.stringify(task, null, 2))
 }
 
-async function setStatus(
-  dataDir: string,
-  id: string,
-  status: string,
-): Promise<void> {
-  const file = path.join(dataDir, `${id}.json`)
-  const task = JSON.parse(await readFile(file, 'utf8')) as Task
-  task.status = status
-  await writeFile(file, JSON.stringify(task, null, 2))
-}
-
 // Ask haiku for a short 2-5 word title summarizing the task's first message.
 // Falls back to a default if generation fails so task creation never blocks.
 async function generateTitle(
@@ -249,7 +238,7 @@ async function runClaude(
   const file = path.join(project.dataDir, `${id}.json`)
   try {
     const task = JSON.parse(await readFile(file, 'utf8')) as Task
-    const allowed: string[] = []
+    const allowed: string[] = ['Bash(lander:*)']
     if (task.allowEdits) allowed.push('Edit', 'Write', 'MultiEdit')
     if (task.allowCommits) allowed.push('Bash(git:*)')
     const editArgs = allowed.length ? ['--allowedTools', allowed.join(' ')] : []
@@ -271,6 +260,11 @@ async function runClaude(
     const args = [
       ...sessionArgs,
       ...editArgs,
+      '--append-system-prompt',
+      'You are running inside a lander task. Manage yourself with the `lander` ' +
+        'CLI: `lander land` marks this task landed; `lander status <state>` sets ' +
+        'any status; `lander new <message>` spawns a sibling task that runs ' +
+        'independently.',
       '--output-format',
       'stream-json',
       '--verbose',
@@ -279,7 +273,16 @@ async function runClaude(
     ]
 
     await new Promise<void>((resolve) => {
-      const child = spawn('claude', args, { cwd: project.path })
+      const child = spawn('claude', args, {
+        cwd: project.path,
+        env: {
+          ...process.env,
+          PATH: `${path.join(ROOT, 'bin')}:${process.env.PATH ?? ''}`,
+          LANDER_API: `http://localhost:${port}`,
+          LANDER_PROJECT: project.slug,
+          LANDER_TASK: id,
+        },
+      })
       let buf = ''
       let stderr = ''
       let finalText = ''
@@ -390,8 +393,12 @@ async function runClaude(
       }
     }).catch(() => {})
   } finally {
-    // Done riding, whether claude replied or errored; come to rest at "wedged".
-    await setStatus(project.dataDir, id, 'wedged').catch(() => {})
+    // Done riding, whether claude replied or errored; come to rest at "wedged" —
+    // but only if the agent didn't set its own terminal status mid-run (e.g.
+    // `lander land`), which we must not clobber.
+    await mutateTask(file, (t) => {
+      if (t.status === 'riding') t.status = 'wedged'
+    }).catch(() => {})
   }
 }
 
