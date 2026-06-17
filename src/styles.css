@@ -665,9 +665,28 @@ body {
 }
 
 .message-pending {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: var(--muted);
   font-style: italic;
   padding: 4px 2px;
+}
+
+.spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--muted);
+  border-top-color: transparent;
+  border-radius: 50%;
+  opacity: 0.5;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* A status transition in the conversation timeline: unbubbled and muted like

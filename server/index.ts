@@ -330,6 +330,26 @@ function pendingMessage(task: Task): Message | undefined {
   return undefined
 }
 
+// Get the in-flight assistant message, creating it on first use. We hold off on
+// adding it until claude actually starts responding so its `createdAt` reflects
+// when the agent began — not when the turn was queued — and so the UI can show a
+// spinner under the user's message during the wait. Until then a riding task has
+// no trailing assistant message.
+function ensurePending(task: Task): Message {
+  let msg = pendingMessage(task)
+  if (!msg) {
+    msg = {
+      role: 'assistant',
+      text: '',
+      createdAt: new Date().toISOString(),
+      steps: [],
+      pending: true,
+    }
+    task.messages.push(msg)
+  }
+  return msg
+}
+
 // Run claude in the project directory and stream its output onto the task as an
 // in-flight assistant message. The first turn uses `--session-id <id>` to
 // establish the session; later turns use `--resume <id>` to continue it. We
@@ -358,17 +378,12 @@ async function runClaude(
     // silently drops it. Separate argv entries keep each rule intact.
     const editArgs = allowed.length ? ['--allowedTools', ...allowed] : []
 
-    // Seed the in-flight assistant message up front so the UI has something to
-    // grow as the stream arrives.
+    // Mark the task riding now, but don't create the assistant message yet — it
+    // gets added on the first stream event (see ensurePending) so its timestamp
+    // marks when claude actually began responding. Until then the UI shows a
+    // spinner under the last user message.
     const startedAt = new Date().toISOString()
     await mutateTask(file, (t) => {
-      t.messages.push({
-        role: 'assistant',
-        text: '',
-        createdAt: startedAt,
-        steps: [],
-        pending: true,
-      })
       t.status = 'riding'
       t.updatedAt = startedAt
     })
@@ -413,11 +428,9 @@ async function runClaude(
         settled = true
         clearTimeout(timer)
         await mutateTask(file, (t) => {
-          const msg = pendingMessage(t)
-          if (msg) {
-            msg.text = errText ?? finalText
-            msg.pending = false
-          }
+          const msg = ensurePending(t)
+          msg.text = errText ?? finalText
+          msg.pending = false
           t.updatedAt = new Date().toISOString()
         }).catch(() => {})
         resolve()
@@ -476,8 +489,7 @@ async function runClaude(
         }
         if (steps.length)
           void mutateTask(file, (t) => {
-            const msg = pendingMessage(t)
-            if (!msg) return
+            const msg = ensurePending(t)
             msg.steps = [...(msg.steps ?? []), ...steps]
             t.updatedAt = new Date().toISOString()
           }).catch(() => {})

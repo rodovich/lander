@@ -1320,13 +1320,24 @@ export function App() {
                     )
                   )}
                   {m.pending && (
-                    <div className="message-pending">claude is working…</div>
+                    <div className="message-pending">
+                      <span className="spinner" aria-hidden />
+                      claude is working…
+                    </div>
                   )}
                 </div>
                 )
               })}
-              {current.messages[current.messages.length - 1]?.role ===
-                'user' && <div className="message-pending">claude is working…</div>}
+              {/* No assistant message yet but the task is riding: claude has been
+                  launched and we're waiting for its first output. */}
+              {current.status === 'riding' &&
+                current.messages[current.messages.length - 1]?.role ===
+                  'user' && (
+                  <div className="message-pending">
+                    <span className="spinner" aria-hidden />
+                    claude is working…
+                  </div>
+                )}
             </div>
             <div className="composer-bar">
               <textarea
