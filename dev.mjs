@@ -1,4 +1,6 @@
 import { concurrently } from 'concurrently'
+import { randomUUID } from 'node:crypto'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
 const args = process.argv.slice(2)
@@ -14,6 +16,27 @@ for (const p of projects) console.log(`  ${p}`)
 // Inherited by both child processes; only the api server reads it. Newline-
 // separated so it survives a single env var (paths never contain newlines).
 process.env.PROJECT_DIRS = projects.join('\n')
+
+// A shared secret that lets the browser prove its requests are the human's, so
+// the API can refuse a task trying to grant itself (or a task it spawns) more
+// permission than it has. The same value goes to Vite — which inlines it into
+// the client as VITE_LANDER_UI_TOKEN — and to the API server as
+// LANDER_UI_TOKEN. Persisted under data/ (gitignored) so a manual API restart
+// keeps the value the running browser already holds; mode 0600.
+const tokenFile = path.resolve('data', '.ui-token')
+let uiToken
+try {
+  uiToken = readFileSync(tokenFile, 'utf8').trim()
+} catch {
+  // not yet created
+}
+if (!uiToken) {
+  uiToken = randomUUID()
+  mkdirSync(path.dirname(tokenFile), { recursive: true })
+  writeFileSync(tokenFile, uiToken + '\n', { mode: 0o600 })
+}
+process.env.LANDER_UI_TOKEN = uiToken
+process.env.VITE_LANDER_UI_TOKEN = uiToken
 
 concurrently(
   [

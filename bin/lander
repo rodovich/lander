@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 // lander — lets an in-task agent call back into the lander server.
-// Identity is injected by runClaude: LANDER_API, LANDER_PROJECT, LANDER_TASK.
-const { LANDER_API: API, LANDER_PROJECT: PROJECT, LANDER_TASK: TASK } = process.env
+// Identity is injected by runClaude: LANDER_API, LANDER_PROJECT, LANDER_TASK,
+// and LANDER_TOKEN (the per-task secret that authenticates these callbacks).
+const {
+  LANDER_API: API,
+  LANDER_PROJECT: PROJECT,
+  LANDER_TASK: TASK,
+  LANDER_TOKEN: TOKEN,
+} = process.env
 
 const die = (m) => {
   console.error(`lander: ${m}`)
@@ -10,9 +16,16 @@ const die = (m) => {
 
 async function call(project, path, init) {
   if (!API) die('not inside a lander task (LANDER_API unset)')
+  // Identify the calling task so the server can authenticate it (e.g. to cap
+  // the permissions a spawned task may be granted to this task's own). Sent on
+  // every call; only permission-sensitive endpoints consult it.
+  const auth = {}
+  if (TASK) auth['x-lander-task'] = TASK
+  if (PROJECT) auth['x-lander-project'] = PROJECT
+  if (TOKEN) auth['x-lander-token'] = TOKEN
   const res = await fetch(`${API}/api/${project}${path}`, {
     ...init,
-    headers: { 'content-type': 'application/json', ...init?.headers },
+    headers: { 'content-type': 'application/json', ...auth, ...init?.headers },
   })
   const body = await res.json().catch(() => ({}))
   if (!res.ok) die(body.error || `${res.status} ${res.statusText}`)
@@ -45,6 +58,9 @@ async function newTask(rest) {
     else if (a === '--commits') o.allowCommits = true
     else pos.push(a)
   }
+  // The server caps the requested --edits/--commits to what this (spawning)
+  // task holds, authenticating us by the caller headers `call` attaches; a task
+  // can't grant a child access it lacks.
   o.message ??= pos.shift()
   if (o.message === '-') o.message = await readStdin()
   if (!o.message?.trim()) die('usage: lander new <message>')

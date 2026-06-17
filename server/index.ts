@@ -120,6 +120,13 @@ type Task = {
   updatedAt: string
   allowEdits: boolean
   allowCommits: boolean
+  // Per-task secret minted at creation and injected into the agent's process as
+  // LANDER_TOKEN. The `lander` CLI sends it back as the X-Lander-Token header so
+  // the server can authenticate which task made a request — used to cap the
+  // permissions a task may grant to one it spawns to its own. Never returned
+  // over HTTP (see publicTask), so one task can't read another's token. Absent
+  // on tasks saved before this field existed; backfilled on the next run.
+  token?: string
   // Extra permission rules granted from the UI's "allow in task" action; passed
   // to claude as --allowedTools on every future turn for this task. Absent on
   // tasks saved before this field existed — treat undefined as empty.
@@ -156,6 +163,23 @@ async function readTasks(dataDir: string): Promise<Task[]> {
     (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt),
   )
   return tasks
+}
+
+// Read a single task by id, or null if it's missing/unreadable.
+async function readTask(dataDir: string, id: string): Promise<Task | null> {
+  try {
+    const raw = await readFile(path.join(dataDir, `${id}.json`), 'utf8')
+    return JSON.parse(raw) as Task
+  } catch {
+    return null
+  }
+}
+
+// Strip the secret `token` before sending a task over HTTP, so the UI (and any
+// task scraping the API) can't read another task's token and impersonate it.
+function publicTask(task: Task): Omit<Task, 'token'> {
+  const { token: _token, ...rest } = task
+  return rest
 }
 
 async function setTitle(
@@ -368,6 +392,9 @@ async function runClaude(
   const file = path.join(project.dataDir, `${id}.json`)
   try {
     const task = JSON.parse(await readFile(file, 'utf8')) as Task
+    // The token the in-task `lander` CLI sends back to authenticate as this
+    // task. Backfilled for tasks created before tokens existed.
+    const token = task.token ?? randomUUID()
     const allowed: string[] = ['Bash(lander:*)']
     if (task.allowEdits) allowed.push('Edit', 'Write', 'MultiEdit')
     if (task.allowCommits) allowed.push('Bash(git:*)')
@@ -386,7 +413,21 @@ async function runClaude(
     await mutateTask(file, (t) => {
       t.status = 'riding'
       t.updatedAt = startedAt
+      if (!t.token) t.token = token
     })
+
+    // Tell the agent what edit/commit permissions it holds, so it knows what it
+    // is allowed to forward to a task it spawns. A task can only pass on access
+    // it has itself.
+    const held = [
+      task.allowEdits && 'editing files',
+      task.allowCommits && 'git commits',
+    ].filter(Boolean) as string[]
+    const forwardable = held.length
+      ? `You currently have permission for ${held.join(' and ')}, and can ` +
+        'forward that to a spawned task'
+      : 'You currently have no edit or commit permissions, so a spawned task ' +
+        'cannot be granted them either'
 
     const args = [
       ...sessionArgs,
@@ -395,7 +436,10 @@ async function runClaude(
       'You are running inside a lander task. Manage yourself with the `lander` ' +
         'CLI: `lander land` marks this task landed; `lander status <state>` sets ' +
         'any status; `lander new <message>` spawns a sibling task that runs ' +
-        'independently.',
+        'independently. A spawned task starts with no edit or commit access; ' +
+        'decide deliberately whether it needs them and, if so, pass `--edits` ' +
+        '(file edits) and/or `--commits` (git) to `lander new` to grant them. ' +
+        `${forwardable}.`,
       '--output-format',
       'stream-json',
       '--verbose',
@@ -412,6 +456,7 @@ async function runClaude(
           LANDER_API: `http://localhost:${port}`,
           LANDER_PROJECT: project.slug,
           LANDER_TASK: id,
+          LANDER_TOKEN: token,
         },
       })
       let buf = ''
@@ -641,6 +686,57 @@ function pickWindow(obj: unknown): UsageWindow | null {
 let usageCache: { at: number; body: unknown } | null = null
 const USAGE_TTL_MS = 60_000
 
+// The shared secret that marks a request as coming from the human's browser
+// (vs. a task's `lander` CLI). Prefer the env var dev.mjs sets — it hands the
+// same value to Vite so the client can send it — and fall back to a persisted
+// file so a manual API restart keeps the value the running browser already
+// holds. Generated on first use. Tasks don't get this in their env; a fully
+// adversarial task on the same machine could still read the file, which is
+// inherent to running untrusted agents as the same user.
+async function loadUiToken(): Promise<string> {
+  const fromEnv = process.env.LANDER_UI_TOKEN?.trim()
+  if (fromEnv) return fromEnv
+  const file = path.join(ROOT, 'data', '.ui-token')
+  try {
+    const existing = (await readFile(file, 'utf8')).trim()
+    if (existing) return existing
+  } catch {
+    // not yet created
+  }
+  const token = randomUUID()
+  await mkdir(path.dirname(file), { recursive: true })
+  await writeFile(file, token + '\n', { mode: 0o600 })
+  return token
+}
+
+const UI_TOKEN = await loadUiToken()
+
+// Who made a mutating request. `ui` is the trusted human browser (presented the
+// UI token) and may grant any permission. `task` is an authenticated task (sent
+// a matching X-Lander-Token for the id it claims) and may only pass on perms it
+// holds itself. `anon` is an unidentified caller and may grant nothing.
+type Principal =
+  | { kind: 'ui' }
+  | { kind: 'task'; task: Task }
+  | { kind: 'anon' }
+
+async function resolvePrincipal(req: {
+  header(name: string): string | undefined
+}): Promise<Principal> {
+  if (req.header('x-lander-ui-token') === UI_TOKEN) return { kind: 'ui' }
+  const token = req.header('x-lander-token')
+  const taskId = req.header('x-lander-task')
+  const projectSlug = req.header('x-lander-project')
+  if (token && taskId && projectSlug && UUID.test(taskId)) {
+    const project = PROJECT_BY_SLUG.get(projectSlug)
+    const task = project && (await readTask(project.dataDir, taskId))
+    // Constant value compare is fine here: the token is a random UUID, so a
+    // timing side-channel doesn't meaningfully narrow the search space.
+    if (task && task.token && task.token === token) return { kind: 'task', task }
+  }
+  return { kind: 'anon' }
+}
+
 const app = new Hono()
 
 // Current Claude subscription usage: the 5-hour session window and the 7-day
@@ -686,7 +782,7 @@ app.get('/api/:project/tasks', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
   try {
-    return c.json(await readTasks(project.dataDir))
+    return c.json((await readTasks(project.dataDir)).map(publicTask))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
@@ -709,6 +805,31 @@ app.post('/api/:project/tasks', async (c) => {
     if (!title && !message.trim())
       return c.json({ error: 'title or message is required' }, 400)
 
+    // Granting a spawned task edit/commit access requires a caller that holds
+    // it. The human (UI token) may grant anything; an authenticated task may
+    // only pass on perms it has itself — so a task can't spawn a child more
+    // privileged than itself; an unidentified caller may grant nothing.
+    if (allowEdits || allowCommits) {
+      const principal = await resolvePrincipal(c.req)
+      if (principal.kind === 'task') {
+        if (allowEdits && !principal.task.allowEdits)
+          return c.json(
+            { error: 'spawning task lacks edit permission to pass on' },
+            403,
+          )
+        if (allowCommits && !principal.task.allowCommits)
+          return c.json(
+            { error: 'spawning task lacks commit permission to pass on' },
+            403,
+          )
+      } else if (principal.kind !== 'ui') {
+        return c.json(
+          { error: 'not authorized to grant edit/commit permissions' },
+          403,
+        )
+      }
+    }
+
     // Title is optional; when omitted, show a "…" placeholder and have haiku
     // name the task in the background so creation never blocks on it.
     const id = randomUUID()
@@ -723,6 +844,8 @@ app.post('/api/:project/tasks', async (c) => {
       updatedAt: now,
       allowEdits,
       allowCommits,
+      // Authenticates this task's own callbacks (see Task.token).
+      token: randomUUID(),
       messages: [{ role: 'user', text: message, createdAt: now }],
       // A launch event, timestamped a hair before the opening message so the
       // timeline shows it ahead of that message. Untitled until the first
@@ -754,7 +877,7 @@ app.post('/api/:project/tasks', async (c) => {
     // Kick off claude in the project directory; reply is appended when it finishes.
     if (message.trim()) void driveTask(project, id, 'start')
 
-    return c.json(task, 201)
+    return c.json(publicTask(task), 201)
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
@@ -796,15 +919,30 @@ app.patch('/api/:project/tasks/:id', async (c) => {
         })
       task.title = next
     }
-    if (typeof body.allowEdits === 'boolean') task.allowEdits = body.allowEdits
-    if (typeof body.allowCommits === 'boolean')
-      task.allowCommits = body.allowCommits
+    // Changing a task's own edit/commit grant is a privilege escalation, so
+    // only the human (UI token) may do it — otherwise a task could PATCH itself
+    // to gain access it was never given. Title and status stay open: the CLI's
+    // `lander status`/`land` set status, and renames are harmless.
+    if (
+      typeof body.allowEdits === 'boolean' ||
+      typeof body.allowCommits === 'boolean'
+    ) {
+      const principal = await resolvePrincipal(c.req)
+      if (principal.kind !== 'ui')
+        return c.json(
+          { error: 'only the UI may change a task’s edit/commit permissions' },
+          403,
+        )
+      if (typeof body.allowEdits === 'boolean') task.allowEdits = body.allowEdits
+      if (typeof body.allowCommits === 'boolean')
+        task.allowCommits = body.allowCommits
+    }
     if (typeof body.status === 'string') {
       recordLandedTransition(task, body.status, new Date().toISOString())
       task.status = body.status
     }
     await writeFile(file, JSON.stringify(task, null, 2))
-    return c.json(task)
+    return c.json(publicTask(task))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
@@ -842,7 +980,7 @@ app.post('/api/:project/tasks/:id/retitle', async (c) => {
       })
     task.title = next
     await writeFile(file, JSON.stringify(task, null, 2))
-    return c.json(task)
+    return c.json(publicTask(task))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
@@ -884,7 +1022,7 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
     // finishes; otherwise start a drainer to resume the session now.
     if (!running.has(id)) void driveTask(project, id, 'resume')
 
-    return c.json(task)
+    return c.json(publicTask(task))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
@@ -902,6 +1040,11 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
     const id = c.req.param('id')
     if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
     const file = path.join(project.dataDir, `${id}.json`)
+
+    // Granting a tool rule widens what the agent can run, so it's the human's
+    // call: only the UI may do it. A task can't self-grant past its sandbox.
+    if ((await resolvePrincipal(c.req)).kind !== 'ui')
+      return c.json({ error: 'not authorized to grant tool permissions' }, 403)
 
     const body = await c.req.json<{ rule?: unknown; scope?: unknown }>()
     const rule = typeof body.rule === 'string' ? body.rule.trim() : ''

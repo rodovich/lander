@@ -36,7 +36,7 @@ Each project gets a URL slug from its path (e.g. `/Users/me/code/app` → `users
 - `GET /api/:project/tasks` — list a project's tasks (sorted newest-first).
 - `POST /api/:project/tasks` — create a task; fires off `claude --session-id <uuid> -p <msg>` (fire-and-forget).
 - `POST /api/:project/tasks/:id/messages` — append a user message; continues via `claude --resume <uuid> -p <msg>`.
-- `POST /api/:project/tasks/:id/allow` — grant a permission rule the agent was blocked on. `{ rule, scope }`: `scope: "task"` appends `rule` to the task's `allow` list (fed to `--allowedTools` on future turns); `scope: "project"` writes it to the project's `.claude/settings.local.json`.
+- `POST /api/:project/tasks/:id/allow` — grant a permission rule the agent was blocked on. `{ rule, scope }`: `scope: "task"` appends `rule` to the task's `allow` list (fed to `--allowedTools` on future turns); `scope: "project"` writes it to the project's `.claude/settings.local.json`. Human-only (see [Authenticated permission grants](#authenticated-permission-grants)).
 
 All task routes are scoped by the project slug, which selects the working directory `claude` runs in and the on-disk data dir.
 - `runClaude()` shells out with `execFile` (10-min timeout, 50 MB buffer); errors are caught and written back as an assistant message.
@@ -49,7 +49,7 @@ Flat JSON files, one per task, no database. Tasks live under `./data/<normalized
 
 ### Self-management (`bin/lander`)
 
-A task's agent can call back into lander to manage itself. When `runClaude` spawns `claude`, it injects `LANDER_API`, `LANDER_PROJECT`, and `LANDER_TASK` into the environment, prepends `bin/` to `PATH`, pre-approves `Bash(lander:*)`, and appends a system-prompt note describing the commands. So inside any task the agent can run:
+A task's agent can call back into lander to manage itself. When `runClaude` spawns `claude`, it injects `LANDER_API`, `LANDER_PROJECT`, `LANDER_TASK`, and `LANDER_TOKEN` (a per-task secret) into the environment, prepends `bin/` to `PATH`, pre-approves `Bash(lander:*)`, and appends a system-prompt note describing the commands. So inside any task the agent can run:
 
 | Command | Effect |
 |---------|--------|
@@ -57,7 +57,22 @@ A task's agent can call back into lander to manage itself. When `runClaude` spaw
 | `lander status <status>` | Set this task's status to any string. |
 | `lander new <message>` | Spawn a **sibling** task that runs independently; prints its id. |
 
-`land` and `status` act on the current task via `LANDER_TASK`; `new` only needs `LANDER_API`/`LANDER_PROJECT`. `lander new` reads the message from the argument, or from stdin if it's `-`, and accepts `--project <slug>`, `--edits`, and `--commits`. The CLI is a zero-dependency Node script that talks to the local HTTP API, so the server stays the single source of truth (e.g. `new` goes through `POST /tasks`, which also fires off the spawned agent and auto-titles it).
+`land` and `status` act on the current task via `LANDER_TASK`; `new` only needs `LANDER_API`/`LANDER_PROJECT`. `lander new` reads the message from the argument, or from stdin if it's `-`, and accepts `--project <slug>`, `--edits`, and `--commits`. `--edits`/`--commits` are inherit-only: a child may be granted edit/commit access only if the spawning task already has it. The CLI is a zero-dependency Node script that talks to the local HTTP API, so the server stays the single source of truth (e.g. `new` goes through `POST /tasks`, which also fires off the spawned agent and auto-titles it).
+
+#### Authenticated permission grants
+
+Every request to the local API is unauthenticated by default, so the server distinguishes two **principals** before honoring any permission change, identifying the caller from request headers:
+
+- **The human** — the browser sends a shared UI secret (`X-Lander-UI-Token`). `dev.mjs` mints it once, persists it under `data/.ui-token` (gitignored, mode 0600), inlines it into the client as `VITE_LANDER_UI_TOKEN`, and passes it to the API as `LANDER_UI_TOKEN`. The human may grant anything.
+- **A task** — the `lander` CLI sends its `LANDER_TOKEN` plus its task id/project (`X-Lander-Token`/`X-Lander-Task`/`X-Lander-Project`); the server matches the token against the task's stored secret. A task may only pass on permissions it already holds, and **cannot** change its own grants or add tool rules. Tokens are never returned over HTTP, so one task can't read another's to impersonate it.
+
+Concretely, the server enforces:
+
+- `POST /tasks` with `allowEdits`/`allowCommits` — the human may set either; a task may set only those it holds (else `403`); an unidentified caller may set neither.
+- `PATCH /tasks/:id` of `allowEdits`/`allowCommits` — human only (a task `403`s, so it can't self-escalate). Status/title stay open so the CLI's `land`/`status` keep working.
+- `POST /tasks/:id/allow` — human only.
+
+This is best-effort for a single-user local tool: a fully adversarial task running as the same user could still read `data/.ui-token` off disk. It blocks the realistic failure mode — an agent escalating itself or a child via the documented API — not a determined local attacker.
 
 This makes orchestration patterns possible — e.g. a task that fans out a review per assigned PR:
 

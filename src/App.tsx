@@ -1,6 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
 import { Markdown } from './markdown'
 
+// Request headers that mark a call as coming from the human's browser. The
+// server gates permission-granting endpoints (creating a task with edit/commit
+// access, toggling those grants, allowing a tool) on this token so a task can't
+// hit the same API to escalate itself. dev.mjs hands the value to both Vite
+// (here) and the API server. JSON content-type rides along since every caller
+// that needs the token also sends a JSON body.
+const uiHeaders = (): Record<string, string> => {
+  const token = import.meta.env.VITE_LANDER_UI_TOKEN
+  return {
+    'content-type': 'application/json',
+    ...(token ? { 'x-lander-ui-token': token } : {}),
+  }
+}
+
 type Step = {
   kind: 'text' | 'tool_use' | 'tool_result'
   text?: string
@@ -781,7 +795,7 @@ export function App() {
     try {
       const r = await fetch(`/api/${targetSlug}/tasks`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: uiHeaders(),
         body: JSON.stringify({
           message,
           allowEdits: newAllowEdits,
@@ -960,7 +974,7 @@ export function App() {
     try {
       const r = await fetch(`/api/${proj}/tasks/${id}/allow`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: uiHeaders(),
         body: JSON.stringify({ rule, scope }),
       })
       const body = await r.json()
@@ -982,7 +996,7 @@ export function App() {
     try {
       const r = await fetch(`/api/${proj}/tasks/${id}`, {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        headers: uiHeaders(),
         body: JSON.stringify({ allowEdits: checked }),
       })
       if (!r.ok) {
@@ -1005,7 +1019,7 @@ export function App() {
     try {
       const r = await fetch(`/api/${proj}/tasks/${id}`, {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        headers: uiHeaders(),
         body: JSON.stringify({ allowCommits: checked }),
       })
       if (!r.ok) {
