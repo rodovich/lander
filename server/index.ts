@@ -78,6 +78,11 @@ type Step = {
   // tool_use only: the call rendered as a settings.json permission string
   // (e.g. `Bash(npm run build)`), used to seed the "allow" popup.
   rule?: string
+  // tool_use only, for the file-writing tools (Edit/Write/MultiEdit): the change
+  // as before/after hunks, so the UI can reveal a diff under the chip. One hunk
+  // per edit (MultiEdit has several); Write has a single hunk with empty `old`.
+  // Absent for every other tool.
+  edits?: { old: string; new: string }[]
   // tool_result only: whether the call errored, and whether that error was a
   // permission refusal (vs. the tool running and failing for some other reason).
   isError?: boolean
@@ -114,9 +119,11 @@ type Task = {
   title: string
   status: string
   createdAt: string
-  // Bumped to the latest message's timestamp whenever a message is sent or
-  // received; drives the sidebar sort order. Falls back to createdAt for tasks
-  // saved before this field existed.
+  // Drives the sidebar sort order. Bumped only on meaningful turn boundaries —
+  // when a user message is sent, when the assistant begins its reply, when the
+  // agent finishes, and on a status or rename event — never on the per-chunk
+  // streaming churn in between. Falls back to createdAt for tasks saved before
+  // this field existed.
   updatedAt: string
   allowEdits: boolean
   allowCommits: boolean
@@ -295,6 +302,38 @@ function toolRule(name: string, input: unknown): string {
   return spec ? `${name}(${spec})` : name
 }
 
+// Pull the before/after hunks out of a file-writing tool's input so the UI can
+// show its diff: Edit is one hunk (old_string → new_string), MultiEdit is one
+// per entry, and Write is a single hunk against an empty original. Returns
+// undefined for any other tool. Each side is capped so a giant edit can't bloat
+// the task file; the UI only needs a readable peek.
+function diffEdits(
+  name: string,
+  input: unknown,
+): { old: string; new: string }[] | undefined {
+  if (!input || typeof input !== 'object') return undefined
+  const i = input as Record<string, unknown>
+  const cap = (v: unknown) => {
+    const s = typeof v === 'string' ? v : ''
+    return s.length > 4000 ? s.slice(0, 4000) + '\n…' : s
+  }
+  if (name === 'Edit') {
+    if (typeof i.old_string === 'string' && typeof i.new_string === 'string')
+      return [{ old: cap(i.old_string), new: cap(i.new_string) }]
+  } else if (name === 'Write') {
+    if (typeof i.content === 'string') return [{ old: '', new: cap(i.content) }]
+  } else if (name === 'MultiEdit') {
+    if (Array.isArray(i.edits))
+      return i.edits
+        .filter((e) => e && typeof e === 'object')
+        .map((e) => ({
+          old: cap((e as Record<string, unknown>).old_string),
+          new: cap((e as Record<string, unknown>).new_string),
+        }))
+  }
+  return undefined
+}
+
 // Whether a tool_result's text reads like a permission refusal — the agent
 // asked to use a tool it wasn't granted — rather than the tool running and
 // failing for some other reason. Claude Code phrases non-interactive denials a
@@ -409,10 +448,11 @@ async function runClaude(
     // gets added on the first stream event (see ensurePending) so its timestamp
     // marks when claude actually began responding. Until then the UI shows a
     // spinner under the last user message.
-    const startedAt = new Date().toISOString()
+    // Don't bump updatedAt here: the riding flip isn't a turn boundary, and the
+    // user message that triggered this run already set it. updatedAt next moves
+    // when the assistant actually begins responding (see the stream handler).
     await mutateTask(file, (t) => {
       t.status = 'riding'
-      t.updatedAt = startedAt
       if (!t.token) t.token = token
     })
 
@@ -509,6 +549,7 @@ async function runClaude(
                   input: summarizeToolInput(block.input),
                   toolUseId: block.id,
                   rule: toolRule(block.name, block.input),
+                  edits: diffEdits(block.name, block.input),
                   createdAt: at,
                 })
               }
@@ -534,9 +575,13 @@ async function runClaude(
         }
         if (steps.length)
           void mutateTask(file, (t) => {
+            // Bump updatedAt only on the batch that begins the assistant message
+            // (i.e. creates the pending message), not on every streamed batch:
+            // streaming churn shouldn't keep reordering the sidebar.
+            const begun = !pendingMessage(t)
             const msg = ensurePending(t)
             msg.steps = [...(msg.steps ?? []), ...steps]
-            t.updatedAt = new Date().toISOString()
+            if (begun) t.updatedAt = msg.createdAt
           }).catch(() => {})
       })
 
@@ -911,12 +956,14 @@ app.patch('/api/:project/tasks/:id', async (c) => {
       // A user rename; record it (snapshotting the new name) when it actually
       // changes the title. The initial generated name goes through setTitle,
       // which amends the launch event instead — so it never lands here.
-      if (next !== task.title)
+      if (next !== task.title) {
         (task.events ??= []).push({
           kind: 'renamed',
           title: next,
           createdAt: new Date().toISOString(),
         })
+        task.updatedAt = new Date().toISOString()
+      }
       task.title = next
     }
     // Changing a task's own edit/commit grant is a privilege escalation, so
@@ -938,7 +985,9 @@ app.patch('/api/:project/tasks/:id', async (c) => {
         task.allowCommits = body.allowCommits
     }
     if (typeof body.status === 'string') {
-      recordLandedTransition(task, body.status, new Date().toISOString())
+      const at = new Date().toISOString()
+      recordLandedTransition(task, body.status, at)
+      if (body.status !== task.status) task.updatedAt = at
       task.status = body.status
     }
     await writeFile(file, JSON.stringify(task, null, 2))
@@ -972,12 +1021,14 @@ app.post('/api/:project/tasks/:id/retitle', async (c) => {
     const next = await generateTitle(project.path, transcript)
     // A deliberate re-title (the "suggest a title" button), so record it as a
     // rename — unlike the automatic first naming, which amends the launch event.
-    if (next !== task.title)
+    if (next !== task.title) {
       (task.events ??= []).push({
         kind: 'renamed',
         title: next,
         createdAt: new Date().toISOString(),
       })
+      task.updatedAt = new Date().toISOString()
+    }
     task.title = next
     await writeFile(file, JSON.stringify(task, null, 2))
     return c.json(publicTask(task))
