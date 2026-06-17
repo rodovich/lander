@@ -45,11 +45,11 @@ type Message = {
 }
 
 // A lifecycle event interleaved with messages in the conversation timeline: the
-// task's launch, a rename, or a crossing into/out of the terminal landed state.
-// `title` is the task's name as of the event (absent on an untitled launch or
-// on events saved before titles were captured).
+// task's launch, a rename, or a crossing into/out of the wedged (needs the
+// user) or terminal landed state. `title` is the task's name as of the event
+// (absent on an untitled launch or on events saved before titles were captured).
 type TaskEvent = {
-  kind: 'launched' | 'landed' | 'unlanded' | 'renamed'
+  kind: 'launched' | 'wedged' | 'unwedged' | 'landed' | 'unlanded' | 'renamed'
   title?: string
   createdAt: string
 }
@@ -493,6 +493,8 @@ function Step({
 // How each lifecycle event verb reads in the timeline.
 const EVENT_VERB: Record<TaskEvent['kind'], string> = {
   launched: 'launched',
+  wedged: 'wedged',
+  unwedged: 'un-wedged',
   landed: 'landed',
   unlanded: 'un-landed',
   renamed: 'renamed',
@@ -501,7 +503,8 @@ const EVENT_VERB: Record<TaskEvent['kind'], string> = {
 // A lifecycle event shown inline in the conversation: the task's name (as of
 // that moment) followed by the verb — e.g. "Fix the parser launched". The name
 // is italic and the verb is set apart by weight/color (blue for launched like
-// the riding status, green for landed, plain otherwise). Presented like the
+// the riding status, amber for wedged, green for landed, plain otherwise).
+// Presented like the
 // working-spinner row (unbubbled, muted) but without the spinner, since the
 // event is complete.
 function StatusTransition({ event }: { event: TaskEvent }) {
@@ -647,11 +650,19 @@ export function App() {
     ? tasks.filter((t) => t.title.toLowerCase().includes(query))
     : tasks
 
-  // Show non-landed tasks above landed ones, preserving order within each group.
-  const orderedTasks = [
-    ...matchedTasks.filter((t) => t.status !== 'landed'),
-    ...matchedTasks.filter((t) => t.status === 'landed'),
-  ]
+  // Group tasks by status — wedged (needs the user) first, then riding,
+  // resting, and landed last — preserving each group's recency order within it
+  // (matchedTasks is already sorted by updatedAt, and sort is stable). Unknown
+  // statuses sort just ahead of landed.
+  const STATUS_RANK: Record<string, number> = {
+    wedged: 0,
+    riding: 1,
+    resting: 2,
+    landed: 4,
+  }
+  const orderedTasks = [...matchedTasks].sort(
+    (a, b) => (STATUS_RANK[a.status] ?? 3) - (STATUS_RANK[b.status] ?? 3),
+  )
 
   // The effective selection: the user's pick if it's still visible, otherwise
   // the first task in the list (e.g. after filtering hides the prior pick).
@@ -1284,7 +1295,9 @@ export function App() {
                 <span
                   className={
                     'task-status' +
+                    (task.status === 'wedged' ? ' wedged' : '') +
                     (task.status === 'riding' ? ' riding' : '') +
+                    (task.status === 'resting' ? ' resting' : '') +
                     (task.status === 'landed' ? ' landed' : '')
                   }
                 >
@@ -1430,6 +1443,15 @@ export function App() {
                     wedged
                   </button>
                   <button
+                    className="resting-button"
+                    disabled={
+                      current.status !== 'wedged' && current.status !== 'landed'
+                    }
+                    onClick={() => void setStatus('resting')}
+                  >
+                    resting
+                  </button>
+                  <button
                     className="landed-button"
                     disabled={current.status === 'landed'}
                     onClick={() => void setStatus('landed')}
@@ -1442,7 +1464,9 @@ export function App() {
                 <span
                   className={
                     'task-status' +
+                    (current.status === 'wedged' ? ' wedged' : '') +
                     (current.status === 'riding' ? ' riding' : '') +
+                    (current.status === 'resting' ? ' resting' : '') +
                     (current.status === 'landed' ? ' landed' : '')
                   }
                 >

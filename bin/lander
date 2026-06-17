@@ -75,9 +75,13 @@ async function newTask(rest) {
 const [cmd, ...rest] = process.argv.slice(2)
 const run = {
   land: () => setStatus('landed'),
+  wedge: () => setStatus('wedged'),
   status: () => setStatus(rest[0] || die('usage: lander status <status>')),
   new: () => newTask(rest),
 }[cmd]
 if (!run)
-  die(`unknown command: ${cmd ?? '(none)'} — try land | status <status> | new <message>`)
+  die(
+    `unknown command: ${cmd ?? '(none)'} — try ` +
+      'land | wedge | status <status> | new <message>',
+  )
 run().catch((e) => die(e.message))

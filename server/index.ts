@@ -102,11 +102,12 @@ type Message = {
 
 // A noteworthy point in a task's life, shown inline in the conversation
 // timeline: its creation ("launched"), a rename, or a crossing into/out of the
-// terminal "landed" status. The riding/wedged churn during a run isn't
-// interesting, so it isn't recorded. Each event captures the task's title as of
-// that moment so a later rename doesn't change how earlier events read.
+// "wedged" (needs the user) or terminal "landed" status. The quiet riding↔
+// resting churn during and after a run isn't interesting, so it isn't recorded.
+// Each event captures the task's title as of that moment so a later rename
+// doesn't change how earlier events read.
 type TaskEvent = {
-  kind: 'launched' | 'landed' | 'unlanded' | 'renamed'
+  kind: 'launched' | 'wedged' | 'unwedged' | 'landed' | 'unlanded' | 'renamed'
   // The task's title at the time of the event. Absent on a launch event until
   // the first generated name amends it, and on events saved before titles were
   // captured.
@@ -139,8 +140,9 @@ type Task = {
   // tasks saved before this field existed — treat undefined as empty.
   allow?: string[]
   messages: Message[]
-  // Lifecycle events (launch, rename, landed/un-landed), interleaved with
-  // messages by timestamp in the UI. Absent on tasks saved before this existed.
+  // Lifecycle events (launch, rename, wedged/un-wedged, landed/un-landed),
+  // interleaved with messages by timestamp in the UI. Absent on tasks saved
+  // before this existed.
   events?: TaskEvent[]
   // Follow-up prompts sent while a run was in flight, awaiting their turn.
   // Persisted so they survive a server restart; drained one turn at a time by
@@ -250,17 +252,26 @@ async function mutateTask(
   await writeTask(file, task)
 }
 
-// Record a crossing into or out of the terminal "landed" status as a timeline
-// event, so the UI can show it inline among the messages. A no-op for moves
-// that don't touch "landed" (e.g. riding↔wedged) or that don't change status.
-// Call before assigning the new status, while task.status still holds the old.
-function recordLandedTransition(task: Task, next: string, at: string): void {
+// Record a crossing into or out of a "notable" status — "wedged" (the task
+// needs the user) or the terminal "landed" — as a timeline event, so the UI can
+// show it inline among the messages. Entering a notable status records it
+// ("wedged"/"landed"); leaving one for an un-notable status (riding/resting)
+// records the inverse ("unwedged"/"unlanded"). A no-op for moves between two
+// quiet statuses (e.g. riding↔resting) or that don't change status. Moving
+// straight between two notable statuses (wedged↔landed) records the arrival
+// only. Call before assigning the new status, while task.status holds the old.
+function recordStatusTransition(task: Task, next: string, at: string): void {
   const prev = task.status
   if (prev === next) return
-  if (next === 'landed')
-    (task.events ??= []).push({ kind: 'landed', title: task.title, createdAt: at })
-  else if (prev === 'landed')
-    (task.events ??= []).push({ kind: 'unlanded', title: task.title, createdAt: at })
+  const events = (task.events ??= [])
+  if (next === 'wedged' || next === 'landed')
+    events.push({ kind: next, title: task.title, createdAt: at })
+  else if (prev === 'wedged' || prev === 'landed')
+    events.push({
+      kind: prev === 'wedged' ? 'unwedged' : 'unlanded',
+      title: task.title,
+      createdAt: at,
+    })
 }
 
 // Boil a tool call's input down to one line for the activity trace: prefer the
@@ -419,7 +430,7 @@ function ensurePending(task: Task): Message {
 // spawn with `--output-format stream-json` and append a `step` per event so the
 // polling UI can watch progress instead of waiting for the whole run. Fire-and-
 // forget; callers set the task to "riding" before invoking and we clear it back
-// to "wedged" once claude returns.
+// to "resting" once claude returns.
 async function runClaude(
   project: Project,
   id: string,
@@ -474,9 +485,14 @@ async function runClaude(
       ...editArgs,
       '--append-system-prompt',
       'You are running inside a lander task. Manage yourself with the `lander` ' +
-        'CLI: `lander land` marks this task landed; `lander status <state>` sets ' +
-        'any status; `lander new <message>` spawns a sibling task that runs ' +
-        'independently. A spawned task starts with no edit or commit access; ' +
+        'CLI: `lander land` marks this task landed; `lander wedge` marks it ' +
+        'wedged; `lander status <state>` sets any status; `lander new <message>` ' +
+        'spawns a sibling task that runs independently. When you finish a turn ' +
+        'the task comes to rest on its own — you need do nothing. Mark it wedged ' +
+        '(`lander wedge`) only when you cannot make progress without the user: ' +
+        'you need tool permissions granted, a manual step performed, or a ' +
+        'blocking question answered. A spawned task starts with no edit or ' +
+        'commit access; ' +
         'decide deliberately whether it needs them and, if so, pass `--edits` ' +
         '(file edits) and/or `--commits` (git) to `lander new` to grant them. ' +
         `${forwardable}.`,
@@ -629,8 +645,9 @@ const running = new Set<string>()
 // Drive a task's turns to completion: run the given opening turn, then drain
 // any messages queued onto the task while it ran — one resume turn each — until
 // the queue empties. Only one drainer runs per task at a time. We come to rest
-// at "wedged" once the queue is empty, unless the agent set its own terminal
-// status mid-run (e.g. `lander land`), which we must not clobber.
+// at "resting" once the queue is empty, unless the agent set its own status
+// mid-run (e.g. `lander wedge` to ask for input, or `lander land`), which we
+// must not clobber.
 async function driveTask(
   project: Project,
   id: string,
@@ -653,7 +670,7 @@ async function driveTask(
   } finally {
     running.delete(id)
     await mutateTask(file, (t) => {
-      if (t.status === 'riding') t.status = 'wedged'
+      if (t.status === 'riding') t.status = 'resting'
     }).catch(() => {})
   }
 
@@ -882,8 +899,9 @@ app.post('/api/:project/tasks', async (c) => {
     const task: Task = {
       session: id,
       title: title || '…',
-      // "riding" while claude works on the opening message; runClaude flips it
-      // to "wedged" when it returns. With no message there's nothing to run.
+      // "riding" while claude works on the opening message; driveTask flips it
+      // to "resting" when it returns. With no message there's nothing to run,
+      // and the task is "wedged" — it needs the user to supply a first prompt.
       status: message.trim() ? 'riding' : 'wedged',
       createdAt: now,
       updatedAt: now,
@@ -986,7 +1004,7 @@ app.patch('/api/:project/tasks/:id', async (c) => {
     }
     if (typeof body.status === 'string') {
       const at = new Date().toISOString()
-      recordLandedTransition(task, body.status, at)
+      recordStatusTransition(task, body.status, at)
       if (body.status !== task.status) task.updatedAt = at
       task.status = body.status
     }
@@ -1057,14 +1075,14 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
     if (!message.trim()) return c.json({ error: 'message is required' }, 400)
 
     const now = new Date().toISOString()
-    // Sending revives a landed (terminal) task — record the "un-landed"
-    // transition a hair before the message's own timestamp so the timeline
-    // shows it ahead of the message that caused it, not after.
-    recordLandedTransition(task, 'riding', new Date(Date.parse(now) - 1).toISOString())
+    // Sending revives a wedged or landed (terminal) task — record the
+    // "un-wedged"/"un-landed" transition a hair before the message's own
+    // timestamp so the timeline shows it ahead of the message that caused it.
+    recordStatusTransition(task, 'riding', new Date(Date.parse(now) - 1).toISOString())
     task.messages.push({ role: 'user', text: message, createdAt: now })
     task.updatedAt = now
     // Queue the prompt for the session and go "riding". driveTask clears it to
-    // "wedged" once the queue drains.
+    // "resting" once the queue drains.
     task.queued = [...(task.queued ?? []), message]
     task.status = 'riding'
     await writeFile(file, JSON.stringify(task, null, 2))

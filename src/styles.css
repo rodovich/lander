@@ -260,8 +260,17 @@ body {
   cursor: pointer;
 }
 
+.task-status.wedged {
+  color: #bf8700;
+}
+
 .task-status.riding {
   color: #0969da;
+}
+
+/* The quiet default once a turn finishes — neither blocked nor done. */
+.task-status.resting {
+  color: var(--muted);
 }
 
 .task-status.landed {
@@ -512,7 +521,8 @@ body {
 }
 
 .landed-button,
-.wedged-button {
+.wedged-button,
+.resting-button {
   font: inherit;
   font-weight: 600;
   flex-shrink: 0;
@@ -528,11 +538,16 @@ body {
 }
 
 .wedged-button {
-  color: var(--accent);
+  color: #bf8700;
+}
+
+.resting-button {
+  color: var(--muted);
 }
 
 .landed-button:disabled,
-.wedged-button:disabled {
+.wedged-button:disabled,
+.resting-button:disabled {
   opacity: 0.5;
   cursor: default;
 }
@@ -779,6 +794,11 @@ body {
 /* Same blue as the "riding" status pill. */
 .status-transition-label.launched {
   color: #0969da;
+}
+
+/* Same amber as the "wedged" status pill. */
+.status-transition-label.wedged {
+  color: #bf8700;
 }
 
 /* Same green as the "landed" status pill. */
