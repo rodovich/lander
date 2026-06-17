@@ -6,8 +6,18 @@ type Step = {
   text?: string
   tool?: string
   input?: string
+  // Pairs a tool_use step with its tool_result step.
+  toolUseId?: string
+  // tool_use: the call as a settings.json permission rule, e.g. `Bash(ls)`.
+  rule?: string
+  // tool_result: outcome flags (set by the server from the stream).
+  isError?: boolean
+  blocked?: boolean
   createdAt: string
 }
+
+// Whether a tool call was permitted, refused, or has no result yet.
+type ToolStatus = 'allowed' | 'blocked' | 'pending'
 
 type Message = {
   role: 'user' | 'assistant'
@@ -228,15 +238,129 @@ function UsageSummary({ refreshSignal }: { refreshSignal: number }) {
   )
 }
 
+// The grant popup anchored under a tool chip: shows the call as an editable
+// settings.json rule plus its permission status, and — when the call was
+// blocked — buttons to allow it for just this task or the whole project. The
+// textarea seeds from the rule but the user can edit it before granting.
+function ToolPopup({
+  step,
+  status,
+  onAllow,
+}: {
+  step: Step
+  status: ToolStatus
+  onAllow: (rule: string, scope: 'task' | 'project') => void
+}) {
+  // `rule` is computed server-side (see toolRule). Steps saved before that field
+  // existed fall back to the bare tool name; they predate blocked/isError too, so
+  // they never offer the allow buttons anyway — the textarea is just a view.
+  const [rule, setRule] = useState(step.rule ?? step.tool ?? '')
+  return (
+    <div className="tool-popup" onClick={(e) => e.stopPropagation()}>
+      <div className="tool-popup-head">
+        <span className="tool-popup-tool">{step.tool}</span>
+        <span className={'tool-popup-status' + (status === 'blocked' ? ' blocked' : '')}>
+          {status}
+        </span>
+      </div>
+      <textarea
+        className="tool-popup-input"
+        rows={3}
+        value={rule}
+        onChange={(e) => setRule(e.target.value)}
+      />
+      {status === 'blocked' && (
+        <div className="tool-popup-actions">
+          <button type="button" onClick={() => onAllow(rule, 'task')}>
+            allow in task
+          </button>
+          <button type="button" onClick={() => onAllow(rule, 'project')}>
+            allow in project
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// A tool call in the activity trace: a clickable chip (red when the call was
+// blocked) that toggles a grant popup. The chip + popup share one ref so an
+// outside click — anywhere but here — dismisses the popup.
+function ToolStep({
+  step,
+  status,
+  open,
+  onToggle,
+  onClose,
+  onAllow,
+}: {
+  step: Step
+  status: ToolStatus
+  open: boolean
+  onToggle: () => void
+  onClose: () => void
+  onAllow: (rule: string, scope: 'task' | 'project') => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open, onClose])
+
+  return (
+    <div className="step-tool" ref={ref}>
+      <button
+        type="button"
+        className={'step-tool-name' + (status === 'blocked' ? ' blocked' : '')}
+        aria-expanded={open}
+        onClick={onToggle}
+      >
+        {step.tool}
+      </button>
+      {step.input && <span className="step-tool-input">{step.input}</span>}
+      {open && <ToolPopup step={step} status={status} onAllow={onAllow} />}
+    </div>
+  )
+}
+
 // One entry in a streamed assistant turn: prose as markdown, a tool call as a
-// compact chip, or a dimmed peek at a tool result.
-function Step({ step }: { step: Step }) {
+// clickable chip, or a dimmed peek at a tool result.
+function Step({
+  step,
+  status,
+  open,
+  onToggle,
+  onClose,
+  onAllow,
+}: {
+  step: Step
+  status: ToolStatus
+  open: boolean
+  onToggle: () => void
+  onClose: () => void
+  onAllow: (rule: string, scope: 'task' | 'project') => void
+}) {
   if (step.kind === 'tool_use') {
     return (
-      <div className="step-tool">
-        <span className="step-tool-name">{step.tool}</span>
-        {step.input && <span className="step-tool-input">{step.input}</span>}
-      </div>
+      <ToolStep
+        step={step}
+        status={status}
+        open={open}
+        onToggle={onToggle}
+        onClose={onClose}
+        onAllow={onAllow}
+      />
     )
   }
   if (step.kind === 'tool_result') {
@@ -311,6 +435,10 @@ export function App() {
   // can start a reply in one task, switch away, and come back to finish it.
   const [replies, setReplies] = useState<Record<string, string>>({})
   const [sendingBy, setSendingBy] = useState<Record<string, boolean>>({})
+
+  // The tool chip whose grant popup is open, keyed "<messageIndex>:<stepIndex>".
+  // Only one is open at a time; null means none.
+  const [openTool, setOpenTool] = useState<string | null>(null)
 
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
@@ -601,9 +729,11 @@ export function App() {
     }
   }
 
-  // Leave edit mode when switching tasks so a draft never bleeds across them.
+  // Leave edit mode (and close any tool popup) when switching tasks so neither
+  // bleeds across them.
   useEffect(() => {
     setEditingTitle(false)
+    setOpenTool(null)
   }, [selected])
 
   // Focus and select the title when entering edit mode.
@@ -736,6 +866,30 @@ export function App() {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setSendingBy((prev) => ({ ...prev, [id]: false }))
+    }
+  }
+
+  // Grant a blocked tool call from its popup: "task" scope persists the rule on
+  // the task (used on future turns), "project" scope writes it to the project's
+  // settings.local.json. Close the popup either way; refresh so a task-scoped
+  // grant shows up.
+  async function allowTool(rule: string, scope: 'task' | 'project') {
+    if (!current) return
+    const id = current.session
+    const proj = current.projectSlug
+    setOpenTool(null)
+    setError(null)
+    try {
+      const r = await fetch(`/api/${proj}/tasks/${id}/allow`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ rule, scope }),
+      })
+      const body = await r.json()
+      if (!r.ok) throw new Error(body.error ?? r.statusText)
+      if (scope === 'task') setTasks(await loadShownTasks(shown))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -1107,9 +1261,56 @@ export function App() {
                       user and legacy messages just render their text. */}
                   {m.steps && m.steps.length > 0 ? (
                     <div className="steps">
-                      {m.steps.map((s, j) => (
-                        <Step key={j} step={s} />
-                      ))}
+                      {(() => {
+                        // Map each tool call's id to its result outcome so a
+                        // tool_use chip can show whether it was allowed/blocked,
+                        // and to the tool that produced it so we can suppress a
+                        // successful Edit's (noisy) result peek.
+                        const outcomes = new Map<string, boolean>()
+                        const toolById = new Map<string, string>()
+                        for (const s of m.steps) {
+                          if (s.kind === 'tool_result' && s.toolUseId)
+                            outcomes.set(s.toolUseId, !!s.blocked)
+                          if (s.kind === 'tool_use' && s.toolUseId && s.tool)
+                            toolById.set(s.toolUseId, s.tool)
+                        }
+                        return m.steps.map((s, j) => {
+                          const key = `${i}:${j}`
+                          const blocked = s.toolUseId
+                            ? outcomes.get(s.toolUseId)
+                            : undefined
+                          const status: ToolStatus =
+                            s.kind !== 'tool_use'
+                              ? 'pending'
+                              : blocked === undefined
+                                ? 'pending'
+                                : blocked
+                                  ? 'blocked'
+                                  : 'allowed'
+                          // A successful Edit's result is just a confirmation/
+                          // diff dump — skip it to keep the trace readable.
+                          if (
+                            s.kind === 'tool_result' &&
+                            !s.isError &&
+                            s.toolUseId &&
+                            toolById.get(s.toolUseId) === 'Edit'
+                          )
+                            return null
+                          return (
+                            <Step
+                              key={j}
+                              step={s}
+                              status={status}
+                              open={openTool === key}
+                              onToggle={() =>
+                                setOpenTool(openTool === key ? null : key)
+                              }
+                              onClose={() => setOpenTool(null)}
+                              onAllow={allowTool}
+                            />
+                          )
+                        })
+                      })()}
                     </div>
                   ) : (
                     m.text && (

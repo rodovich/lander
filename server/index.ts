@@ -72,6 +72,16 @@ type Step = {
   text?: string
   tool?: string
   input?: string
+  // The tool call's id, carried on both the tool_use step and its matching
+  // tool_result step so the UI can pair a call with its outcome.
+  toolUseId?: string
+  // tool_use only: the call rendered as a settings.json permission string
+  // (e.g. `Bash(npm run build)`), used to seed the "allow" popup.
+  rule?: string
+  // tool_result only: whether the call errored, and whether that error was a
+  // permission refusal (vs. the tool running and failing for some other reason).
+  isError?: boolean
+  blocked?: boolean
   createdAt: string
 }
 
@@ -110,6 +120,10 @@ type Task = {
   updatedAt: string
   allowEdits: boolean
   allowCommits: boolean
+  // Extra permission rules granted from the UI's "allow in task" action; passed
+  // to claude as --allowedTools on every future turn for this task. Absent on
+  // tasks saved before this field existed — treat undefined as empty.
+  allow?: string[]
   messages: Message[]
   // Lifecycle events (launch, rename, landed/un-landed), interleaved with
   // messages by timestamp in the UI. Absent on tasks saved before this existed.
@@ -238,17 +252,73 @@ function summarizeToolInput(input: unknown): string {
   return flat.length > 200 ? flat.slice(0, 200) + '…' : flat
 }
 
-// Pull a short text peek out of a tool_result block, whose content is either a
-// plain string or an array of content blocks.
-function summarizeToolResult(content: unknown): string {
+// Render a tool call as a settings.json-style permission rule, e.g.
+// `Bash(npm run build)` or `Read(/path/to/file)`. Keys off the same identifying
+// field as summarizeToolInput but leaves it untruncated, so the popup can show —
+// and let the user grant — the exact invocation. A tool with no obvious
+// specifier becomes a bare tool name.
+function toolRule(name: string, input: unknown): string {
+  if (!input || typeof input !== 'object') return name
+  const i = input as Record<string, unknown>
+  const str = (k: string) => (typeof i[k] === 'string' ? (i[k] as string) : '')
+  const spec =
+    str('command') ||
+    str('file_path') ||
+    str('path') ||
+    str('pattern') ||
+    str('query') ||
+    str('url')
+  return spec ? `${name}(${spec})` : name
+}
+
+// Whether a tool_result's text reads like a permission refusal — the agent
+// asked to use a tool it wasn't granted — rather than the tool running and
+// failing for some other reason. Claude Code phrases non-interactive denials a
+// few ways; match the common ones. Only consulted when is_error is set.
+function isPermissionDenial(text: string): boolean {
+  return /requested permissions|permission to use|haven't granted|hasn't been granted|requires approval|permission denied|not allowed to use|isn't allowed|user (has )?(denied|rejected)/i.test(
+    text,
+  )
+}
+
+// Flatten a tool_result block's content (a plain string or an array of content
+// blocks) to a single whitespace-collapsed line.
+function flattenToolResult(content: unknown): string {
   let text = ''
   if (typeof content === 'string') text = content
   else if (Array.isArray(content))
     text = content
       .map((b) => (b && typeof b === 'object' ? String((b as any).text ?? '') : ''))
       .join('')
-  const flat = text.replace(/\s+/g, ' ').trim()
+  return text.replace(/\s+/g, ' ').trim()
+}
+
+// A short text peek at a tool_result for the activity trace.
+function summarizeToolResult(content: unknown): string {
+  const flat = flattenToolResult(content)
   return flat.length > 200 ? flat.slice(0, 200) + '…' : flat
+}
+
+// Append a permission rule to a project's .claude/settings.local.json — the
+// gitignored per-user overrides file the CLI already reads — creating the file
+// and directory as needed. Deduped so repeated grants don't pile up.
+async function addProjectAllow(projectPath: string, rule: string): Promise<void> {
+  const dir = path.join(projectPath, '.claude')
+  const file = path.join(dir, 'settings.local.json')
+  let settings: Record<string, any> = {}
+  try {
+    const parsed = JSON.parse(await readFile(file, 'utf8'))
+    if (parsed && typeof parsed === 'object') settings = parsed
+  } catch {
+    // missing or invalid — start fresh
+  }
+  const perms = (settings.permissions ??= {})
+  const allow: string[] = Array.isArray(perms.allow)
+    ? perms.allow
+    : (perms.allow = [])
+  if (!allow.includes(rule)) allow.push(rule)
+  await mkdir(dir, { recursive: true })
+  await writeFile(file, JSON.stringify(settings, null, 2) + '\n')
 }
 
 // Locate the in-flight assistant message (the one runClaude is streaming into).
@@ -281,7 +351,12 @@ async function runClaude(
     const allowed: string[] = ['Bash(lander:*)']
     if (task.allowEdits) allowed.push('Edit', 'Write', 'MultiEdit')
     if (task.allowCommits) allowed.push('Bash(git:*)')
-    const editArgs = allowed.length ? ['--allowedTools', allowed.join(' ')] : []
+    if (task.allow?.length) allowed.push(...task.allow)
+    // Pass each rule as its own argument (the flag is variadic) rather than one
+    // space-joined string: a rule like `Bash(sed -n '1,5p':*)` contains spaces,
+    // and joining leaves claude to re-split on them, which mangles the rule and
+    // silently drops it. Separate argv entries keep each rule intact.
+    const editArgs = allowed.length ? ['--allowedTools', ...allowed] : []
 
     // Seed the in-flight assistant message up front so the UI has something to
     // grow as the stream arrives.
@@ -374,6 +449,8 @@ async function runClaude(
                   kind: 'tool_use',
                   tool: block.name,
                   input: summarizeToolInput(block.input),
+                  toolUseId: block.id,
+                  rule: toolRule(block.name, block.input),
                   createdAt: at,
                 })
               }
@@ -381,9 +458,14 @@ async function runClaude(
           } else if (ev.type === 'user' && Array.isArray(ev.message?.content)) {
             for (const block of ev.message.content) {
               if (block.type === 'tool_result') {
+                const flat = flattenToolResult(block.content)
+                const isError = block.is_error === true
                 steps.push({
                   kind: 'tool_result',
-                  text: summarizeToolResult(block.content),
+                  text: flat.length > 200 ? flat.slice(0, 200) + '…' : flat,
+                  toolUseId: block.tool_use_id,
+                  isError,
+                  blocked: isError && isPermissionDenial(flat),
                   createdAt: at,
                 })
               }
@@ -791,6 +873,42 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
     if (!running.has(id)) void driveTask(project, id, 'resume')
 
     return c.json(task)
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
+  }
+})
+
+// Grant a permission rule the agent was blocked on. scope "task" appends it to
+// this task's `allow` list (fed to --allowedTools on future turns); scope
+// "project" writes it to the project's .claude/settings.local.json so every
+// task in the project inherits it. The rule comes from the popup's textarea, so
+// the user may have edited it before granting.
+app.post('/api/:project/tasks/:id/allow', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  try {
+    const id = c.req.param('id')
+    if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    const file = path.join(project.dataDir, `${id}.json`)
+
+    const body = await c.req.json<{ rule?: unknown; scope?: unknown }>()
+    const rule = typeof body.rule === 'string' ? body.rule.trim() : ''
+    const scope = body.scope === 'project' ? 'project' : 'task'
+    if (!rule) return c.json({ error: 'rule is required' }, 400)
+
+    if (scope === 'project') {
+      await addProjectAllow(project.path, rule)
+    } else {
+      try {
+        await mutateTask(file, (t) => {
+          const allow = (t.allow ??= [])
+          if (!allow.includes(rule)) allow.push(rule)
+        })
+      } catch {
+        return c.json({ error: 'task not found' }, 404)
+      }
+    }
+    return c.json({ ok: true, rule, scope })
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
