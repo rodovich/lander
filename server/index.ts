@@ -5,6 +5,7 @@ import { readdir, readFile, writeFile, mkdir, rename } from 'node:fs/promises'
 import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import path from 'node:path'
+import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 const execFileAsync = promisify(execFile)
@@ -96,6 +97,11 @@ type Task = {
   allowEdits: boolean
   allowCommits: boolean
   messages: Message[]
+  // Follow-up prompts sent while a run was in flight, awaiting their turn.
+  // Persisted so they survive a server restart; drained one turn at a time by
+  // driveTask when the current run finishes. Absent on tasks saved before this
+  // field existed — treat undefined as empty.
+  queued?: string[]
 }
 
 async function readTasks(dataDir: string): Promise<Task[]> {
@@ -254,6 +260,7 @@ async function runClaude(
         steps: [],
         pending: true,
       })
+      t.status = 'riding'
       t.updatedAt = startedAt
     })
 
@@ -392,17 +399,155 @@ async function runClaude(
         })
       }
     }).catch(() => {})
+  }
+}
+
+// Tasks with a claude run (and its queue drain) in flight, keyed by task id.
+// Guards against spawning a second concurrent process on the same session: a
+// follow-up that arrives while this is set is appended to the task's `queued`
+// array and picked up by the active drainer instead.
+const running = new Set<string>()
+
+// Drive a task's turns to completion: run the given opening turn, then drain
+// any messages queued onto the task while it ran — one resume turn each — until
+// the queue empties. Only one drainer runs per task at a time. We come to rest
+// at "wedged" once the queue is empty, unless the agent set its own terminal
+// status mid-run (e.g. `lander land`), which we must not clobber.
+async function driveTask(
+  project: Project,
+  id: string,
+  firstMode: 'start' | 'resume',
+): Promise<void> {
+  if (running.has(id)) return
+  running.add(id)
+  const file = path.join(project.dataDir, `${id}.json`)
+  let mode = firstMode
+  try {
+    while (true) {
+      let prompt: string | undefined
+      await mutateTask(file, (t) => {
+        if (t.queued && t.queued.length) prompt = t.queued.shift()
+      }).catch(() => {})
+      if (prompt === undefined) break
+      await runClaude(project, id, prompt, mode)
+      mode = 'resume'
+    }
   } finally {
-    // Done riding, whether claude replied or errored; come to rest at "wedged" —
-    // but only if the agent didn't set its own terminal status mid-run (e.g.
-    // `lander land`), which we must not clobber.
+    running.delete(id)
     await mutateTask(file, (t) => {
       if (t.status === 'riding') t.status = 'wedged'
     }).catch(() => {})
   }
+
+  // A follow-up can land after our final drain read but before we left the
+  // running set, with the sender seeing us as still active and so not starting
+  // its own drainer. Re-check once and pick it back up if so. The session
+  // already exists by now, so resume.
+  let leftover = false
+  await mutateTask(file, (t) => {
+    leftover = !!(t.queued && t.queued.length)
+  }).catch(() => {})
+  if (leftover) void driveTask(project, id, 'resume')
 }
 
+// Read the Claude Code OAuth access token the same way the CLI stores it: from
+// the macOS keychain under "Claude Code-credentials", falling back to the
+// ~/.claude/.credentials.json file used on Linux. Returns null if neither is
+// available (e.g. API-key auth), which the /api/usage route reports as 503.
+async function readOAuthToken(): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync('security', [
+      'find-generic-password',
+      '-s',
+      'Claude Code-credentials',
+      '-w',
+    ])
+    const token = JSON.parse(stdout)?.claudeAiOauth?.accessToken
+    if (typeof token === 'string' && token) return token
+  } catch {
+    // not on macOS, or no keychain entry — try the file fallback
+  }
+  try {
+    const raw = await readFile(
+      path.join(os.homedir(), '.claude', '.credentials.json'),
+      'utf8',
+    )
+    const token = JSON.parse(raw)?.claudeAiOauth?.accessToken
+    if (typeof token === 'string' && token) return token
+  } catch {
+    // no credentials file either
+  }
+  return null
+}
+
+type UsageWindow = { utilization: number; resetsAt: string | null }
+
+// Coerce a reset moment to an ISO string. The rate-limit data carries it as a
+// Unix epoch (seconds) — the statusline feeds it straight to `date -r` — so a
+// bare number (or all-digit string) is seconds-since-epoch; anything else is
+// assumed already ISO.
+function toIso(v: unknown): string | null {
+  if (typeof v === 'number' && Number.isFinite(v))
+    return new Date(v * 1000).toISOString()
+  if (typeof v === 'string' && v)
+    return /^\d+$/.test(v) ? new Date(Number(v) * 1000).toISOString() : v
+  return null
+}
+
+// Normalize one window of the usage payload. Mirrors the fields the statusline
+// reads (`used_percentage`, `resets_at`); `utilization` is the 0-100 percentage.
+// The shape isn't a stable public API, so older spellings are tolerated too.
+function pickWindow(obj: unknown): UsageWindow | null {
+  if (!obj || typeof obj !== 'object') return null
+  const o = obj as Record<string, unknown>
+  const raw = o.used_percentage ?? o.utilization ?? o.percent ?? 0
+  const utilization = typeof raw === 'number' ? raw : Number(raw)
+  return {
+    utilization: Number.isFinite(utilization) ? utilization : 0,
+    resetsAt: toIso(o.resets_at ?? o.resetsAt ?? o.reset_at ?? o.reset),
+  }
+}
+
+// Cache usage briefly so the UI's poll doesn't hammer the upstream endpoint or
+// the keychain. The window resets/utilization move slowly, so 60s is plenty.
+let usageCache: { at: number; body: unknown } | null = null
+const USAGE_TTL_MS = 60_000
+
 const app = new Hono()
+
+// Current Claude subscription usage: the 5-hour session window and the 7-day
+// weekly window, each as { utilization (0-100), resetsAt }. Mirrors what the
+// `/usage` command in the Claude CLI shows, read from the same OAuth endpoint.
+app.get('/api/usage', async (c) => {
+  if (usageCache && Date.now() - usageCache.at < USAGE_TTL_MS)
+    return c.json(usageCache.body)
+  const token = await readOAuthToken()
+  if (!token)
+    return c.json({ error: 'no Claude OAuth token available' }, 503)
+  try {
+    const res = await fetch('https://api.anthropic.com/api/oauth/usage', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'anthropic-beta': 'oauth-2025-04-20',
+      },
+    })
+    if (!res.ok)
+      return c.json({ error: `usage endpoint returned ${res.status}` }, 502)
+    const data = (await res.json()) as Record<string, unknown>
+    // The statusline reads `.rate_limits.{five_hour,seven_day}`; tolerate the
+    // windows living at the top level too in case the endpoint differs.
+    const rl =
+      (data.rate_limits as Record<string, unknown> | undefined) ?? data
+    const body = {
+      session: pickWindow(rl.five_hour ?? rl.fiveHour ?? rl.session),
+      weekly: pickWindow(rl.seven_day ?? rl.sevenDay ?? rl.weekly),
+    }
+    usageCache = { at: Date.now(), body }
+    return c.json(body)
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 502)
+  }
+})
 
 // List the configured projects; the first is the default the UI redirects to.
 app.get('/api/projects', (c) =>
@@ -451,6 +596,9 @@ app.post('/api/:project/tasks', async (c) => {
       allowEdits,
       allowCommits,
       messages: [{ role: 'user', text: message, createdAt: now }],
+      // The opening message rides the same queue as follow-ups; driveTask
+      // drains it. It stays in `messages` above for display.
+      queued: message.trim() ? [message] : [],
     }
 
     await mkdir(project.dataDir, { recursive: true })
@@ -466,7 +614,7 @@ app.post('/api/:project/tasks', async (c) => {
         .catch(() => {})
 
     // Kick off claude in the project directory; reply is appended when it finishes.
-    if (message.trim()) void runClaude(project, id, message, 'start')
+    if (message.trim()) void driveTask(project, id, 'start')
 
     return c.json(task, 201)
   } catch (e) {
@@ -561,13 +709,16 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
     const now = new Date().toISOString()
     task.messages.push({ role: 'user', text: message, createdAt: now })
     task.updatedAt = now
-    // Back to "riding" while claude responds; this also revives a landed
-    // (terminal) task. runClaude clears it to "wedged" when it returns.
+    // Queue the prompt for the session and go "riding"; this also revives a
+    // landed (terminal) task. driveTask clears it to "wedged" once the queue
+    // drains.
+    task.queued = [...(task.queued ?? []), message]
     task.status = 'riding'
     await writeFile(file, JSON.stringify(task, null, 2))
 
-    // Continue the same claude session; reply is appended when it finishes.
-    void runClaude(project, id, message, 'resume')
+    // If a run is already in flight it will drain this message when it
+    // finishes; otherwise start a drainer to resume the session now.
+    if (!running.has(id)) void driveTask(project, id, 'resume')
 
     return c.json(task)
   } catch (e) {
@@ -575,8 +726,41 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
   }
 })
 
+// On boot, resume any tasks that still have queued messages from before a
+// restart so they aren't stranded. Their in-flight run (if any) died with the
+// old process, so clear stale `pending` flags first, then drive the queue. A
+// task with no assistant turn yet never established its session — start it.
+async function recoverQueues(): Promise<void> {
+  for (const project of PROJECTS) {
+    let names: string[]
+    try {
+      names = await readdir(project.dataDir)
+    } catch {
+      continue
+    }
+    for (const name of names) {
+      if (!name.endsWith('.json')) continue
+      const id = name.slice(0, -'.json'.length)
+      const file = path.join(project.dataDir, name)
+      let task: Task
+      try {
+        task = JSON.parse(await readFile(file, 'utf8')) as Task
+      } catch {
+        continue
+      }
+      if (!task.queued || task.queued.length === 0) continue
+      const everRan = task.messages.some((m) => m.role === 'assistant')
+      await mutateTask(file, (t) => {
+        for (const m of t.messages) if (m.pending) m.pending = false
+      }).catch(() => {})
+      void driveTask(project, id, everRan ? 'resume' : 'start')
+    }
+  }
+}
+
 const port = Number(process.env.PORT ?? 6181)
 serve({ fetch: app.fetch, port })
 console.log(`api listening on http://localhost:${port}`)
 console.log('projects:')
 for (const p of PROJECTS) console.log(`  ${p.slug}  ${p.path}`)
+void recoverQueues()

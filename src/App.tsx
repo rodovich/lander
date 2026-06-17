@@ -37,6 +37,9 @@ type Project = {
   slug: string
 }
 
+type UsageWindow = { utilization: number; resetsAt: string | null }
+type Usage = { session: UsageWindow | null; weekly: UsageWindow | null }
+
 function formatTimestamp(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
@@ -59,6 +62,159 @@ function slugFromPath(): string {
 // "/users-me-code-app/task1/" -> "task1". Empty when no task is in the URL.
 function sessionFromPath(): string {
   return window.location.pathname.split('/').filter(Boolean)[1] ?? ''
+}
+
+// A clock time like "3:45 PM" for when a window resets.
+function formatResetTime(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+}
+
+// How a reset moment reads: the clock time if it lands today, otherwise the
+// weekday (e.g. "Mon"). Used for the weekly window, which usually resets on a
+// later day.
+function formatResetWhen(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const now = new Date()
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  return sameDay
+    ? formatResetTime(iso)
+    : d.toLocaleDateString([], { weekday: 'short' })
+}
+
+// One labeled progress bar: a percentage of a usage window plus when it resets.
+function UsageBar({
+  label,
+  window,
+  reset,
+}: {
+  label: string
+  window: UsageWindow
+  reset: string
+}) {
+  const pct = Math.max(0, Math.min(100, Math.round(window.utilization)))
+  // Same thresholds as the statusline: green under 70, amber 70-89, red 90+.
+  const level = pct >= 90 ? 'high' : pct >= 70 ? 'medium' : ''
+  return (
+    <div className="usage-window">
+      <div className="usage-window-head">
+        <span className="usage-label">{label}</span>
+        <span className="usage-pct">{pct}%</span>
+      </div>
+      <div
+        className="usage-bar"
+        role="progressbar"
+        aria-valuenow={pct}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={label}
+      >
+        <div
+          className={'usage-bar-fill' + (level ? ' ' + level : '')}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      {reset && <div className="usage-reset">resets {reset}</div>}
+    </div>
+  )
+}
+
+const USAGE_MIN_INTERVAL_MS = 60_000
+
+// Compact Claude subscription usage shown under the new-task form: the current
+// 5-hour session window and the 7-day weekly window, each a small progress bar
+// with its reset time. Fetched from the server, which proxies the OAuth usage
+// endpoint. Refreshed on mount and whenever `refreshSignal` changes (the parent
+// bumps it as agent responses complete), but no more than once a minute: a
+// request inside that window keeps the cached value and schedules a single
+// trailing refresh at the minute mark instead.
+function UsageSummary({ refreshSignal }: { refreshSignal: number }) {
+  const [usage, setUsage] = useState<Usage | null>(null)
+  const [failed, setFailed] = useState(false)
+
+  const cancelledRef = useRef(false)
+  const lastFetchRef = useRef(0)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const fetchNow = () => {
+    lastFetchRef.current = Date.now()
+    fetch('/api/usage')
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((u: Usage) => {
+        if (!cancelledRef.current) {
+          setUsage(u)
+          setFailed(false)
+        }
+      })
+      .catch(() => {
+        if (!cancelledRef.current) setFailed(true)
+      })
+  }
+
+  // Refresh now if it's been at least a minute since the last fetch; otherwise
+  // leave the displayed value as-is and arm a single timer to refresh once the
+  // minute is up. A timer already in flight absorbs further requests.
+  const requestRefresh = () => {
+    const elapsed = Date.now() - lastFetchRef.current
+    if (elapsed >= USAGE_MIN_INTERVAL_MS) {
+      fetchNow()
+    } else if (!timerRef.current) {
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null
+        if (!cancelledRef.current) fetchNow()
+      }, USAGE_MIN_INTERVAL_MS - elapsed)
+    }
+  }
+
+  // Runs on mount (page load) and on every refreshSignal change.
+  useEffect(() => {
+    requestRefresh()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshSignal])
+
+  useEffect(() => {
+    cancelledRef.current = false
+    return () => {
+      cancelledRef.current = true
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
+  }, [])
+
+  // Stay quiet until we have something to show; a missing token or endpoint
+  // error shouldn't clutter the sidebar.
+  if (failed || !usage || (!usage.session && !usage.weekly)) return null
+
+  return (
+    <div className="usage-summary">
+      <div className="usage-windows">
+        {usage.session && (
+          <UsageBar
+            label="Session"
+            window={usage.session}
+            reset={
+              usage.session.resetsAt
+                ? formatResetTime(usage.session.resetsAt)
+                : ''
+            }
+          />
+        )}
+        {usage.weekly && (
+          <UsageBar
+            label="Weekly"
+            window={usage.weekly}
+            reset={
+              usage.weekly.resetsAt ? formatResetWhen(usage.weekly.resetsAt) : ''
+            }
+          />
+        )}
+      </div>
+    </div>
+  )
 }
 
 // One entry in a streamed assistant turn: prose as markdown, a tool call as a
@@ -143,6 +299,16 @@ export function App() {
       ? selectedSession
       : orderedTasks[0]?.session ?? null
   const current = tasks.find((t) => t.session === selected) ?? null
+
+  // A monotonically rising count of finished assistant turns across all tasks.
+  // It ticks up each time a pending message lands (the poll flips `pending` to
+  // false), which UsageSummary watches as its cue to refresh — agent activity is
+  // exactly when usage moves.
+  const completedResponses = tasks.reduce(
+    (n, t) =>
+      n + t.messages.filter((m) => m.role === 'assistant' && !m.pending).length,
+    0,
+  )
 
   // Roving-tabindex bookkeeping for the task list: the selected row is the one
   // reachable with Tab, and arrow keys move DOM focus between rows.
@@ -747,6 +913,8 @@ export function App() {
             {submitting ? 'Creating…' : 'Create task'}
           </button>
         </form>
+
+        <UsageSummary refreshSignal={completedResponses} />
       </div>
 
       <div className="detail">
