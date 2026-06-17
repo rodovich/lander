@@ -801,7 +801,7 @@ const UI_TOKEN = await loadUiToken()
 // holds itself. `anon` is an unidentified caller and may grant nothing.
 type Principal =
   | { kind: 'ui' }
-  | { kind: 'task'; task: Task }
+  | { kind: 'task'; task: Task; slug: string }
   | { kind: 'anon' }
 
 async function resolvePrincipal(req: {
@@ -816,7 +816,8 @@ async function resolvePrincipal(req: {
     const task = project && (await readTask(project.dataDir, taskId))
     // Constant value compare is fine here: the token is a random UUID, so a
     // timing side-channel doesn't meaningfully narrow the search space.
-    if (task && task.token && task.token === token) return { kind: 'task', task }
+    if (task && task.token && task.token === token)
+      return { kind: 'task', task, slug: projectSlug }
   }
   return { kind: 'anon' }
 }
@@ -883,18 +884,21 @@ app.post('/api/:project/tasks', async (c) => {
       allowCommits?: unknown
     }>()
     const title = typeof body.title === 'string' ? body.title.trim() : ''
-    const message = typeof body.message === 'string' ? body.message : ''
+    const rawMessage = typeof body.message === 'string' ? body.message : ''
     const allowEdits = body.allowEdits === true
     const allowCommits = body.allowCommits === true
-    if (!title && !message.trim())
+    if (!title && !rawMessage.trim())
       return c.json({ error: 'title or message is required' }, 400)
+
+    // Identify the caller once: it gates edit/commit grants below and, when a
+    // task spawned this one, supplies the backlink we prepend to the message.
+    const principal = await resolvePrincipal(c.req)
 
     // Granting a spawned task edit/commit access requires a caller that holds
     // it. The human (UI token) may grant anything; an authenticated task may
     // only pass on perms it has itself — so a task can't spawn a child more
     // privileged than itself; an unidentified caller may grant nothing.
     if (allowEdits || allowCommits) {
-      const principal = await resolvePrincipal(c.req)
       if (principal.kind === 'task') {
         if (allowEdits && !principal.task.allowEdits)
           return c.json(
@@ -913,6 +917,14 @@ app.post('/api/:project/tasks', async (c) => {
         )
       }
     }
+
+    // When a task spawns this one, lead the opening message with a link back to
+    // the spawner so both the agent and a human reader can trace its origin.
+    // The title is generated from rawMessage so the backlink can't skew it.
+    const message =
+      principal.kind === 'task'
+        ? `↩ Spawned from [${principal.task.title}](/${principal.slug}/${principal.task.session})\n\n${rawMessage}`
+        : rawMessage
 
     // Title is optional; when omitted, show a "…" placeholder and have haiku
     // name the task in the background so creation never blocks on it.
@@ -960,7 +972,7 @@ app.post('/api/:project/tasks', async (c) => {
 
     // Fire-and-forget the title generation; the UI polls and picks it up.
     if (!title)
-      void generateTitle(project.path, message)
+      void generateTitle(project.path, rawMessage)
         .then((t) => setTitle(project.dataDir, id, t))
         .catch(() => {})
 
