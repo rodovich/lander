@@ -44,11 +44,27 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
     },
     {
       re: /\*\*([^*]+)\*\*|__([^_]+)__/,
-      render: (m, k) => <strong key={k}>{m[1] ?? m[2]}</strong>,
+      render: (m, k) => <strong key={k}>{renderInline(m[1] ?? m[2], k)}</strong>,
     },
     {
       re: /\*([^*]+)\*|_([^_]+)_/,
-      render: (m, k) => <em key={k}>{m[1] ?? m[2]}</em>,
+      render: (m, k) => <em key={k}>{renderInline(m[1] ?? m[2], k)}</em>,
+    },
+    {
+      // Bare URLs. The greedy body plus a non-punctuation final char keeps
+      // trailing punctuation (".", ")", etc.) out of the link. Markdown links
+      // win over this since their "[" sits at an earlier index.
+      re: /(?:https?:\/\/|www\.)[^\s]*[^\s.,;:!?)\]}'"]/i,
+      render: (m, k) => {
+        const raw = m[0]
+        const href = safeHref(raw.startsWith('www.') ? `https://${raw}` : raw)
+        if (!href) return <Fragment key={k}>{raw}</Fragment>
+        return (
+          <a key={k} href={href} target="_blank" rel="noopener noreferrer">
+            {raw}
+          </a>
+        )
+      },
     },
   ]
 

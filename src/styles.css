@@ -42,7 +42,17 @@ body {
   border-right: 1px solid var(--border);
 }
 
+/* The project dropdown is a custom popup (the native <select> can't show
+   checkmarks or a "Show all" footer), so it's positioned relative to anchor
+   the absolutely-positioned menu beneath the trigger. */
+.project-filter {
+  position: relative;
+}
+
 .project-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
   padding: 12px 16px;
   border: none;
@@ -52,13 +62,78 @@ body {
   color: var(--muted);
   font: inherit;
   font-size: 12px;
+  text-align: left;
   cursor: pointer;
   appearance: none;
 }
 
-.project-select:focus {
+.project-select:focus-visible {
   outline: none;
   box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.project-select-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-select-caret {
+  flex-shrink: 0;
+  font-size: 10px;
+}
+
+.project-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-top: none;
+  box-shadow: 0 8px 24px rgba(17, 0, 0, 0.12);
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.project-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 16px;
+  border: none;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.project-menu-item:hover {
+  background: var(--bg-tinted);
+}
+
+.project-menu-all {
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.project-menu-check {
+  flex-shrink: 0;
+  width: 12px;
+  color: var(--accent);
+}
+
+.project-menu-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .task-search {
@@ -101,6 +176,15 @@ body {
   background: var(--bg-tinted);
 }
 
+.task-item:focus {
+  outline: none;
+}
+
+.task-item:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
 .task-item.selected {
   background: var(--selected);
 }
@@ -118,11 +202,49 @@ body {
   opacity: 0.75;
 }
 
+.task-meta-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
 .task-status {
   color: var(--accent);
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
+}
+
+/* The project leaf shown next to a task's status when projects are intermixed. */
+.task-project {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.new-task-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.new-task-head h2 {
+  margin: 0;
+}
+
+.new-task-project {
+  font: inherit;
+  font-size: 12px;
+  max-width: 50%;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--muted);
+  cursor: pointer;
 }
 
 .task-status.riding {
@@ -436,7 +558,8 @@ body {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
-  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .message-text pre code {
@@ -524,12 +647,19 @@ body {
   word-break: break-word;
 }
 
+.composer-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 28px;
+  border-top: 1px solid var(--border);
+}
+
 .composer {
   font: inherit;
   width: 100%;
-  padding: 16px 28px;
+  padding: 8px 10px;
   border: none;
-  border-top: 1px solid var(--border);
   background: var(--bg);
   color: var(--fg);
   resize: vertical;
@@ -542,7 +672,6 @@ body {
 .allow-row {
   display: flex;
   gap: 20px;
-  padding: 12px 28px;
 }
 
 .allow-edits {

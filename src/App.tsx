@@ -28,6 +28,10 @@ type Task = {
   messages: Message[]
 }
 
+// A task tagged with the slug of the project it came from, so the merged
+// cross-project list knows which project's API to hit for each task.
+type TaskWithProject = Task & { projectSlug: string }
+
 type Project = {
   path: string
   slug: string
@@ -39,8 +43,14 @@ function formatTimestamp(iso: string): string {
   return d.toLocaleString()
 }
 
-// The project slug is the first path segment, e.g. "/users-me-code-app/task1/"
-// -> "users-me-code-app". Empty on "/" until we redirect to the first project.
+// "/Users/me/code/myapp" -> "myapp"; the leaf is enough to tell projects apart
+// in the task list without showing the whole path.
+function lastPathComponent(p: string): string {
+  return p.split('/').filter(Boolean).pop() ?? p
+}
+
+// The selected task's project is the first path segment, e.g.
+// "/users-me-code-app/task1/" -> "users-me-code-app". Empty on "/".
 function slugFromPath(): string {
   return window.location.pathname.split('/').filter(Boolean)[0] ?? ''
 }
@@ -73,22 +83,29 @@ function Step({ step }: { step: Step }) {
 }
 
 export function App() {
-  const [tasks, setTasks] = useState<Task[]>([])
+  const [tasks, setTasks] = useState<TaskWithProject[]>([])
   const [projects, setProjects] = useState<Project[]>([])
-  const [slug, setSlug] = useState<string>(slugFromPath)
-  // The most recently selected task per project, keyed by slug, so switching
-  // projects restores where you left off instead of resetting the selection.
-  const [selectedByProject, setSelectedByProject] = useState<
-    Record<string, string>
-  >({})
+  // The project dropdown acts as a filter: `shown` holds the slugs whose tasks
+  // are merged into the list. It is always either a single project or every
+  // project ("show all"); see showOnly/showAll below.
+  const [shown, setShown] = useState<string[]>([])
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  // The user's explicit task pick. The effective selection (`selected`, below)
+  // falls back to the first visible task when this one is filtered away.
+  const [selectedSession, setSelectedSession] = useState<string | null>(
+    () => sessionFromPath() || null,
+  )
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
   const searchInputRef = useRef<HTMLInputElement>(null)
 
-  const [title, setTitle] = useState('')
   const [message, setMessage] = useState('')
   const [newAllowEdits, setNewAllowEdits] = useState(false)
   const [newAllowCommits, setNewAllowCommits] = useState(false)
+  // Explicit project override for the new-task form; empty means "follow the
+  // default" (targetSlug below).
+  const [newProject, setNewProject] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   // Each task keeps its own draft and in-flight state, keyed by session, so you
@@ -100,6 +117,12 @@ export function App() {
   const [titleDraft, setTitleDraft] = useState('')
   const [retitling, setRetitling] = useState(false)
   const titleInputRef = useRef<HTMLInputElement>(null)
+
+  const pathBySlug = new Map(projects.map((p) => [p.slug, p.path]))
+  const allShown = projects.length > 0 && shown.length === projects.length
+  // Tag each task row with its project's leaf only when more than one project's
+  // tasks can be intermixed; with a single project shown it's just noise.
+  const showProjectLabels = shown.length > 1
 
   // Filter by title (case-insensitive) before grouping.
   const query = filter.trim().toLowerCase()
@@ -113,78 +136,127 @@ export function App() {
     ...matchedTasks.filter((t) => t.status === 'landed'),
   ]
 
-  // The effective selection for this project: the remembered task if it still
-  // exists, otherwise the first task in the list. Only real user selections are
-  // remembered, so an unvisited project always opens on its first task.
-  const remembered = selectedByProject[slug]
+  // The effective selection: the user's pick if it's still visible, otherwise
+  // the first task in the list (e.g. after filtering hides the prior pick).
   const selected =
-    remembered && tasks.some((t) => t.session === remembered)
-      ? remembered
+    selectedSession && tasks.some((t) => t.session === selectedSession)
+      ? selectedSession
       : orderedTasks[0]?.session ?? null
   const current = tasks.find((t) => t.session === selected) ?? null
 
-  function selectTask(session: string) {
-    setSelectedByProject((prev) => ({ ...prev, [slug]: session }))
-    window.history.pushState(null, '', `/${slug}/${session}`)
+  // Roving-tabindex bookkeeping for the task list: the selected row is the one
+  // reachable with Tab, and arrow keys move DOM focus between rows.
+  const taskItemRefs = useRef<(HTMLLIElement | null)[]>([])
+  const selectedIndex = orderedTasks.findIndex((t) => t.session === selected)
+  const rovingIndex = selectedIndex >= 0 ? selectedIndex : 0
+
+  function selectTask(session: string, projectSlug: string) {
+    setSelectedSession(session)
+    window.history.pushState(null, '', `/${projectSlug}/${session}`)
   }
 
-  async function loadTasks(): Promise<Task[]> {
-    const r = await fetch(`/api/${slug}/tasks`)
-    const body = await r.json()
-    if (!r.ok) throw new Error(body.error ?? r.statusText)
-    return body as Task[]
+  function focusTaskAt(index: number) {
+    const clamped = Math.max(0, Math.min(orderedTasks.length - 1, index))
+    taskItemRefs.current[clamped]?.focus()
   }
 
-  // Load the project list once, then make sure the URL names a real project:
-  // visiting "/" (or an unknown slug) redirects to the first project.
+  function onTaskKeyDown(
+    e: React.KeyboardEvent<HTMLLIElement>,
+    index: number,
+    task: TaskWithProject,
+  ) {
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault()
+        focusTaskAt(index + 1)
+        break
+      case 'ArrowUp':
+        e.preventDefault()
+        focusTaskAt(index - 1)
+        break
+      case 'Home':
+        e.preventDefault()
+        focusTaskAt(0)
+        break
+      case 'End':
+        e.preventDefault()
+        focusTaskAt(orderedTasks.length - 1)
+        break
+      case 'Enter':
+      case ' ':
+        e.preventDefault()
+        selectTask(task.session, task.projectSlug)
+        break
+    }
+  }
+
+  // Clicking a project shows only that project — unless it was already the only
+  // one shown, in which case it expands back to all projects.
+  function showOnly(slug: string) {
+    if (shown.length === 1 && shown[0] === slug) {
+      setShown(projects.map((p) => p.slug))
+    } else {
+      setShown([slug])
+    }
+    setMenuOpen(false)
+  }
+
+  function showAll() {
+    setShown(projects.map((p) => p.slug))
+    setMenuOpen(false)
+  }
+
+  // Fetch and merge tasks across every shown project, tagging each with its
+  // project slug and sorting the combined list by recency.
+  async function loadShownTasks(slugs: string[]): Promise<TaskWithProject[]> {
+    const lists = await Promise.all(
+      slugs.map(async (slug) => {
+        const r = await fetch(`/api/${slug}/tasks`)
+        const body = await r.json()
+        if (!r.ok) throw new Error(body.error ?? r.statusText)
+        return (body as Task[]).map((t) => ({ ...t, projectSlug: slug }))
+      }),
+    )
+    const merged = lists.flat()
+    merged.sort((a, b) =>
+      (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt),
+    )
+    return merged
+  }
+
+  // Load the project list once and show all projects by default. A task named
+  // in the URL is seeded as the selection so a shared/reloaded link opens on it.
   useEffect(() => {
     fetch('/api/projects')
       .then((r) => r.json())
       .then((list: Project[]) => {
         setProjects(list)
-        const current = slugFromPath()
-        if (list.some((p) => p.slug === current)) {
-          setSlug(current)
-          // Seed the selection from the URL so a shared/reloaded link to a
-          // specific task opens on it (validated against tasks once they load).
-          const session = sessionFromPath()
-          if (session) {
-            setSelectedByProject((prev) => ({ ...prev, [current]: session }))
-          }
-        } else if (list.length > 0) {
-          window.history.replaceState(null, '', `/${list[0].slug}/`)
-          setSlug(list[0].slug)
-        }
+        setShown(list.map((p) => p.slug))
       })
       .catch(() => {})
   }, [])
 
-  // Keep the slug and selection in sync when the user navigates with the
-  // browser back/forward buttons.
+  // Keep the selection in sync when navigating with the browser back/forward
+  // buttons.
   useEffect(() => {
-    const onPop = () => {
-      const s = slugFromPath()
-      setSlug(s)
-      const session = sessionFromPath()
-      if (session) {
-        setSelectedByProject((prev) => ({ ...prev, [s]: session }))
-      }
-    }
+    const onPop = () => setSelectedSession(sessionFromPath() || null)
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
 
-  // Keep the URL's task segment matched to the effective selection. This covers
-  // the cases selectTask/selectProject can't push directly — chiefly the first
-  // task being auto-selected once a project's tasks load. replaceState (not
-  // push) corrects the URL in place without adding spurious history entries.
+  // Mirror the effective selection into the URL as /<project>/<session>. Held
+  // off until tasks have loaded so a deep-linked session isn't clobbered before
+  // its project's tasks arrive. replaceState (not push) corrects the URL in
+  // place without adding spurious history entries.
+  const hasLoadedRef = useRef(false)
   useEffect(() => {
-    if (!slug) return
-    const desired = selected ? `/${slug}/${selected}` : `/${slug}/`
+    if (!hasLoadedRef.current) return
+    const cur = tasks.find((t) => t.session === selected)
+    const desired = cur ? `/${cur.projectSlug}/${cur.session}` : '/'
     if (window.location.pathname !== desired) {
       window.history.replaceState(null, '', desired)
     }
-  }, [slug, selected])
+  }, [selected, tasks])
 
   // Cmd/Ctrl+Shift+F focuses the task search field.
   useEffect(() => {
@@ -200,13 +272,36 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
+  // Close the project menu on an outside click or Escape.
   useEffect(() => {
-    if (!slug) return
+    if (!menuOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false)
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [menuOpen])
+
+  const shownKey = shown.join(',')
+  useEffect(() => {
+    if (shown.length === 0) return
     let cancelled = false
     const refresh = () =>
-      loadTasks()
+      loadShownTasks(shown)
         .then((t) => {
-          if (!cancelled) setTasks(t)
+          if (!cancelled) {
+            setTasks(t)
+            hasLoadedRef.current = true
+          }
         })
         .catch((e) => {
           if (!cancelled) setError(e.message ?? String(e))
@@ -219,18 +314,19 @@ export function App() {
       clearInterval(timer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slug])
+  }, [shownKey])
 
-  function selectProject(next: string) {
-    if (next === slug) return
-    // Carry the project's remembered task into the URL when there is one; the
-    // sync effect fills in the first task once this project's tasks load.
-    const session = selectedByProject[next]
-    window.history.pushState(null, '', session ? `/${next}/${session}` : `/${next}/`)
-    setSlug(next)
-    setTasks([])
-    setError(null)
-  }
+  // The project a new task is created in: an explicit pick from the form's
+  // dropdown if made, else the single shown project, else the project of the
+  // task currently open, else the first project.
+  const defaultTargetSlug =
+    shown.length === 1
+      ? shown[0]
+      : current?.projectSlug ?? projects[0]?.slug ?? ''
+  const targetSlug =
+    newProject && projects.some((p) => p.slug === newProject)
+      ? newProject
+      : defaultTargetSlug
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -246,15 +342,14 @@ export function App() {
   }
 
   async function createTask() {
-    if ((!title.trim() && !message.trim()) || submitting) return
+    if (!message.trim() || submitting || !targetSlug) return
     setSubmitting(true)
     setError(null)
     try {
-      const r = await fetch(`/api/${slug}/tasks`, {
+      const r = await fetch(`/api/${targetSlug}/tasks`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          title,
           message,
           allowEdits: newAllowEdits,
           allowCommits: newAllowCommits,
@@ -263,9 +358,8 @@ export function App() {
       const body = await r.json()
       if (!r.ok) throw new Error(body.error ?? r.statusText)
       const created = body as Task
-      setTasks(await loadTasks())
-      selectTask(created.session)
-      setTitle('')
+      setTasks(await loadShownTasks(shown))
+      selectTask(created.session, targetSlug)
       setMessage('')
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -297,6 +391,7 @@ export function App() {
   async function saveTitle() {
     if (!current) return
     const id = current.session
+    const proj = current.projectSlug
     const next = titleDraft.trim()
     setEditingTitle(false)
     if (!next || next === current.title) return
@@ -305,7 +400,7 @@ export function App() {
       prev.map((t) => (t.session === id ? { ...t, title: next } : t)),
     )
     try {
-      const r = await fetch(`/api/${slug}/tasks/${id}`, {
+      const r = await fetch(`/api/${proj}/tasks/${id}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ title: next }),
@@ -323,10 +418,11 @@ export function App() {
   async function generateTitle() {
     if (!current || retitling) return
     const id = current.session
+    const proj = current.projectSlug
     setRetitling(true)
     setError(null)
     try {
-      const r = await fetch(`/api/${slug}/tasks/${id}/retitle`, {
+      const r = await fetch(`/api/${proj}/tasks/${id}/retitle`, {
         method: 'POST',
       })
       const body = await r.json()
@@ -388,12 +484,13 @@ export function App() {
   async function sendReply() {
     if (!current) return
     const id = current.session
+    const proj = current.projectSlug
     const draft = replies[id] ?? ''
     if (!draft.trim() || sendingBy[id]) return
     setSendingBy((prev) => ({ ...prev, [id]: true }))
     setError(null)
     try {
-      const r = await fetch(`/api/${slug}/tasks/${id}/messages`, {
+      const r = await fetch(`/api/${proj}/tasks/${id}/messages`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ message: draft }),
@@ -401,7 +498,7 @@ export function App() {
       const body = await r.json()
       if (!r.ok) throw new Error(body.error ?? r.statusText)
       setReplies((prev) => ({ ...prev, [id]: '' }))
-      setTasks(await loadTasks())
+      setTasks(await loadShownTasks(shown))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -412,12 +509,13 @@ export function App() {
   async function setAllowEdits(checked: boolean) {
     if (!current) return
     const id = current.session
+    const proj = current.projectSlug
     // Optimistic; the PATCH persists it and polling will reconcile.
     setTasks((prev) =>
       prev.map((t) => (t.session === id ? { ...t, allowEdits: checked } : t)),
     )
     try {
-      const r = await fetch(`/api/${slug}/tasks/${id}`, {
+      const r = await fetch(`/api/${proj}/tasks/${id}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ allowEdits: checked }),
@@ -434,12 +532,13 @@ export function App() {
   async function setAllowCommits(checked: boolean) {
     if (!current) return
     const id = current.session
+    const proj = current.projectSlug
     // Optimistic; the PATCH persists it and polling will reconcile.
     setTasks((prev) =>
       prev.map((t) => (t.session === id ? { ...t, allowCommits: checked } : t)),
     )
     try {
-      const r = await fetch(`/api/${slug}/tasks/${id}`, {
+      const r = await fetch(`/api/${proj}/tasks/${id}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ allowCommits: checked }),
@@ -456,12 +555,13 @@ export function App() {
   async function setStatus(status: string) {
     if (!current) return
     const id = current.session
+    const proj = current.projectSlug
     // Optimistic; the PATCH persists it and polling will reconcile.
     setTasks((prev) =>
       prev.map((t) => (t.session === id ? { ...t, status } : t)),
     )
     try {
-      const r = await fetch(`/api/${slug}/tasks/${id}`, {
+      const r = await fetch(`/api/${proj}/tasks/${id}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ status }),
@@ -483,21 +583,62 @@ export function App() {
     }
   }
 
+  // Dropdown summary: "All projects" when every project is shown, otherwise the
+  // single shown project's path.
+  const filterSummary =
+    projects.length === 0
+      ? ''
+      : allShown && projects.length > 1
+        ? 'All projects'
+        : shown.length === 1
+          ? pathBySlug.get(shown[0]) ?? shown[0]
+          : `${shown.length} of ${projects.length}`
+
   return (
     <div className="layout">
       <div className="sidebar">
         {projects.length > 0 && (
-          <select
-            className="project-select"
-            value={slug}
-            onChange={(e) => selectProject(e.target.value)}
-          >
-            {projects.map((p) => (
-              <option key={p.slug} value={p.slug}>
-                {p.path}
-              </option>
-            ))}
-          </select>
+          <div className="project-filter" ref={menuRef}>
+            <button
+              type="button"
+              className="project-select"
+              aria-haspopup="listbox"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((o) => !o)}
+            >
+              <span className="project-select-label">{filterSummary}</span>
+              <span className="project-select-caret">▾</span>
+            </button>
+            {menuOpen && (
+              <div className="project-menu" role="listbox">
+                {projects.map((p) => (
+                  <button
+                    key={p.slug}
+                    type="button"
+                    role="option"
+                    aria-selected={shown.includes(p.slug)}
+                    className="project-menu-item"
+                    onClick={() => showOnly(p.slug)}
+                  >
+                    <span className="project-menu-check">
+                      {shown.includes(p.slug) ? '✓' : ''}
+                    </span>
+                    <span className="project-menu-path">{p.path}</span>
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className="project-menu-item project-menu-all"
+                  onClick={showAll}
+                >
+                  <span className="project-menu-check">
+                    {allShown ? '✓' : ''}
+                  </span>
+                  <span className="project-menu-path">Show all</span>
+                </button>
+              </div>
+            )}
+          </div>
         )}
         <input
           ref={searchInputRef}
@@ -507,32 +648,48 @@ export function App() {
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
-        <ul className="task-list">
+        <ul className="task-list" role="listbox" aria-label="Tasks">
           {tasks.length === 0 && (
-            <li className="empty">No tasks yet</li>
+            <li className="empty" role="presentation">No tasks yet</li>
           )}
           {tasks.length > 0 && orderedTasks.length === 0 && (
-            <li className="empty">No matching tasks</li>
+            <li className="empty" role="presentation">No matching tasks</li>
           )}
-          {orderedTasks.map((task) => (
+          {orderedTasks.map((task, index) => (
             <li
               key={task.session}
+              ref={(el) => {
+                taskItemRefs.current[index] = el
+              }}
+              role="option"
+              aria-selected={task.session === selected}
+              tabIndex={index === rovingIndex ? 0 : -1}
               className={
                 'task-item' +
                 (task.session === selected ? ' selected' : '') +
                 (task.status === 'landed' ? ' landed' : '')
               }
-              onClick={() => selectTask(task.session)}
+              onClick={() => selectTask(task.session, task.projectSlug)}
+              onKeyDown={(e) => onTaskKeyDown(e, index, task)}
             >
               <div className="task-title">{task.title}</div>
-              <div
-                className={
-                  'task-status' +
-                  (task.status === 'riding' ? ' riding' : '') +
-                  (task.status === 'landed' ? ' landed' : '')
-                }
-              >
-                {task.status}
+              <div className="task-meta-row">
+                <span
+                  className={
+                    'task-status' +
+                    (task.status === 'riding' ? ' riding' : '') +
+                    (task.status === 'landed' ? ' landed' : '')
+                  }
+                >
+                  {task.status}
+                </span>
+                {showProjectLabels && (
+                  <span className="task-project">
+                    {lastPathComponent(
+                      pathBySlug.get(task.projectSlug) ?? task.projectSlug,
+                    )}
+                  </span>
+                )}
               </div>
               <div className="task-time">
                 {formatTimestamp(task.updatedAt ?? task.createdAt)}
@@ -542,13 +699,22 @@ export function App() {
         </ul>
 
         <form className="new-task" onSubmit={onSubmit}>
-          <h2>New task</h2>
-          <input
-            type="text"
-            placeholder="Title (optional)"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
+          <div className="new-task-head">
+            <h2>New task</h2>
+            {projects.length > 1 && (
+              <select
+                className="new-task-project"
+                value={targetSlug}
+                onChange={(e) => setNewProject(e.target.value)}
+              >
+                {projects.map((p) => (
+                  <option key={p.slug} value={p.slug}>
+                    {lastPathComponent(p.path)}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
           <textarea
             placeholder="Message"
             rows={4}
@@ -576,7 +742,7 @@ export function App() {
           </div>
           <button
             type="submit"
-            disabled={submitting || (!title.trim() && !message.trim())}
+            disabled={submitting || !message.trim()}
           >
             {submitting ? 'Creating…' : 'Create task'}
           </button>
@@ -670,6 +836,13 @@ export function App() {
                 >
                   {current.status}
                 </span>
+                {projects.length > 1 && (
+                  <span className="task-project">
+                    {lastPathComponent(
+                      pathBySlug.get(current.projectSlug) ?? current.projectSlug,
+                    )}
+                  </span>
+                )}
                 <span className="task-time">
                   {formatTimestamp(current.createdAt)}
                 </span>
@@ -707,37 +880,39 @@ export function App() {
               {current.messages[current.messages.length - 1]?.role ===
                 'user' && <div className="message-pending">claude is working…</div>}
             </div>
-            <textarea
-              className="composer"
-              placeholder="Reply…"
-              rows={3}
-              value={replies[current.session] ?? ''}
-              disabled={sendingBy[current.session] ?? false}
-              onChange={(e) =>
-                setReplies((prev) => ({
-                  ...prev,
-                  [current.session]: e.target.value,
-                }))
-              }
-              onKeyDown={onReplyKeyDown}
-            />
-            <div className="allow-row">
-              <label className="allow-edits">
-                <input
-                  type="checkbox"
-                  checked={current.allowEdits}
-                  onChange={(e) => void setAllowEdits(e.target.checked)}
-                />
-                allow edits
-              </label>
-              <label className="allow-edits">
-                <input
-                  type="checkbox"
-                  checked={current.allowCommits}
-                  onChange={(e) => void setAllowCommits(e.target.checked)}
-                />
-                allow commits
-              </label>
+            <div className="composer-bar">
+              <textarea
+                className="composer"
+                placeholder="Reply…"
+                rows={3}
+                value={replies[current.session] ?? ''}
+                disabled={sendingBy[current.session] ?? false}
+                onChange={(e) =>
+                  setReplies((prev) => ({
+                    ...prev,
+                    [current.session]: e.target.value,
+                  }))
+                }
+                onKeyDown={onReplyKeyDown}
+              />
+              <div className="allow-row">
+                <label className="allow-edits">
+                  <input
+                    type="checkbox"
+                    checked={current.allowEdits}
+                    onChange={(e) => void setAllowEdits(e.target.checked)}
+                  />
+                  allow edits
+                </label>
+                <label className="allow-edits">
+                  <input
+                    type="checkbox"
+                    checked={current.allowCommits}
+                    onChange={(e) => void setAllowCommits(e.target.checked)}
+                  />
+                  allow commits
+                </label>
+              </div>
             </div>
           </>
         ) : (
