@@ -670,6 +670,42 @@ body {
   padding: 4px 2px;
 }
 
+/* A status transition in the conversation timeline: unbubbled and muted like
+   the working-spinner row, but without the spinner since the change is done. */
+.status-transition {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  padding: 4px 0;
+}
+
+/* Name + verb travel together, more tightly spaced than the row's own gap. */
+.status-transition-event {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.status-transition-label {
+  font-weight: 600;
+}
+
+/* Same blue as the "riding" status pill. */
+.status-transition-label.launched {
+  color: #0969da;
+}
+
+/* Same green as the "landed" status pill. */
+.status-transition-label.landed {
+  color: #1a7f37;
+}
+
+.status-transition-time {
+  font-size: 12px;
+  color: var(--muted);
+}
+
 /* ---- streamed activity trace ---- */
 
 .steps {

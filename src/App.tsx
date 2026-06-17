@@ -17,6 +17,16 @@ type Message = {
   pending?: boolean
 }
 
+// A lifecycle event interleaved with messages in the conversation timeline: the
+// task's launch, a rename, or a crossing into/out of the terminal landed state.
+// `title` is the task's name as of the event (absent on an untitled launch or
+// on events saved before titles were captured).
+type TaskEvent = {
+  kind: 'launched' | 'landed' | 'unlanded' | 'renamed'
+  title?: string
+  createdAt: string
+}
+
 type Task = {
   session: string
   title: string
@@ -26,6 +36,7 @@ type Task = {
   allowEdits: boolean
   allowCommits: boolean
   messages: Message[]
+  events?: TaskEvent[]
 }
 
 // A task tagged with the slug of the project it came from, so the merged
@@ -238,6 +249,38 @@ function Step({ step }: { step: Step }) {
   )
 }
 
+// How each lifecycle event verb reads in the timeline.
+const EVENT_VERB: Record<TaskEvent['kind'], string> = {
+  launched: 'launched',
+  landed: 'landed',
+  unlanded: 'un-landed',
+  renamed: 'renamed',
+}
+
+// A lifecycle event shown inline in the conversation: the task's name (as of
+// that moment) followed by the verb — e.g. "Fix the parser launched". The name
+// is italic and the verb is set apart by weight/color (blue for launched like
+// the riding status, green for landed, plain otherwise). Presented like the
+// working-spinner row (unbubbled, muted) but without the spinner, since the
+// event is complete.
+function StatusTransition({ event }: { event: TaskEvent }) {
+  return (
+    <div className="status-transition">
+      <span className="status-transition-event">
+        {event.title && (
+          <span className="status-transition-name">{event.title}</span>
+        )}
+        <span className={`status-transition-label ${event.kind}`}>
+          {EVENT_VERB[event.kind]}
+        </span>
+      </span>
+      <span className="status-transition-time">
+        {formatTimestamp(event.createdAt)}
+      </span>
+    </div>
+  )
+}
+
 export function App() {
   const [tasks, setTasks] = useState<TaskWithProject[]>([])
   const [projects, setProjects] = useState<Project[]>([])
@@ -299,6 +342,30 @@ export function App() {
       ? selectedSession
       : orderedTasks[0]?.session ?? null
   const current = tasks.find((t) => t.session === selected) ?? null
+
+  // The open task's conversation as a single chronological stream: its messages
+  // (keeping each message's own index so step/popup keys stay stable) merged
+  // with its lifecycle events, sorted by timestamp. Array.sort is stable, so an
+  // event sharing a timestamp with a message keeps insertion order (messages
+  // first), which reads naturally.
+  type TimelineItem =
+    | { kind: 'message'; at: string; message: Message; index: number }
+    | { kind: 'event'; at: string; event: TaskEvent }
+  const timeline: TimelineItem[] = current
+    ? [
+        ...current.messages.map((message, index) => ({
+          kind: 'message' as const,
+          at: message.createdAt,
+          message,
+          index,
+        })),
+        ...(current.events ?? []).map((event) => ({
+          kind: 'event' as const,
+          at: event.createdAt,
+          event,
+        })),
+      ].sort((a, b) => a.at.localeCompare(b.at))
+    : []
 
   // A monotonically rising count of finished assistant turns across all tasks.
   // It ticks up each time a pending message lands (the poll flips `pending` to
@@ -645,7 +712,7 @@ export function App() {
     prevSelectedRef.current = selected
     if (switched) atBottomRef.current = true
     if (switched || atBottomRef.current) el.scrollTop = el.scrollHeight
-  }, [selected, current?.messages.length, streamSignal])
+  }, [selected, current?.messages.length, current?.events?.length, streamSignal])
 
   async function sendReply() {
     if (!current) return
@@ -1017,8 +1084,19 @@ export function App() {
               </div>
             </div>
             <div className="messages" ref={messagesRef} onScroll={onMessagesScroll}>
-              {current.messages.map((m, i) => (
-                <div className={`message message-${m.role}`} key={i}>
+              {timeline.map((item) => {
+                if (item.kind === 'event') {
+                  return (
+                    <StatusTransition
+                      key={`e-${item.event.kind}-${item.at}`}
+                      event={item.event}
+                    />
+                  )
+                }
+                const m = item.message
+                const i = item.index
+                return (
+                <div className={`message message-${m.role}`} key={`m-${i}`}>
                   <div className="message-head">
                     <span className="message-role">{m.role}</span>
                     <span className="message-time">
@@ -1044,7 +1122,8 @@ export function App() {
                     <div className="message-pending">claude is working…</div>
                   )}
                 </div>
-              ))}
+                )
+              })}
               {current.messages[current.messages.length - 1]?.role ===
                 'user' && <div className="message-pending">claude is working…</div>}
             </div>

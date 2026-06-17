@@ -85,6 +85,20 @@ type Message = {
   pending?: boolean
 }
 
+// A noteworthy point in a task's life, shown inline in the conversation
+// timeline: its creation ("launched"), a rename, or a crossing into/out of the
+// terminal "landed" status. The riding/wedged churn during a run isn't
+// interesting, so it isn't recorded. Each event captures the task's title as of
+// that moment so a later rename doesn't change how earlier events read.
+type TaskEvent = {
+  kind: 'launched' | 'landed' | 'unlanded' | 'renamed'
+  // The task's title at the time of the event. Absent on a launch event until
+  // the first generated name amends it, and on events saved before titles were
+  // captured.
+  title?: string
+  createdAt: string
+}
+
 type Task = {
   session: string
   title: string
@@ -97,6 +111,9 @@ type Task = {
   allowEdits: boolean
   allowCommits: boolean
   messages: Message[]
+  // Lifecycle events (launch, rename, landed/un-landed), interleaved with
+  // messages by timestamp in the UI. Absent on tasks saved before this existed.
+  events?: TaskEvent[]
   // Follow-up prompts sent while a run was in flight, awaiting their turn.
   // Persisted so they survive a server restart; drained one turn at a time by
   // driveTask when the current run finishes. Absent on tasks saved before this
@@ -135,6 +152,10 @@ async function setTitle(
   const file = path.join(dataDir, `${id}.json`)
   const task = JSON.parse(await readFile(file, 'utf8')) as Task
   task.title = title
+  // This is the first generated name for a task launched untitled: fill it into
+  // the launch event rather than recording it as a rename.
+  const launch = task.events?.find((e) => e.kind === 'launched')
+  if (launch && !launch.title) launch.title = title
   await writeFile(file, JSON.stringify(task, null, 2))
 }
 
@@ -182,6 +203,19 @@ async function mutateTask(
   const task = JSON.parse(await readFile(file, 'utf8')) as Task
   fn(task)
   await writeTask(file, task)
+}
+
+// Record a crossing into or out of the terminal "landed" status as a timeline
+// event, so the UI can show it inline among the messages. A no-op for moves
+// that don't touch "landed" (e.g. riding↔wedged) or that don't change status.
+// Call before assigning the new status, while task.status still holds the old.
+function recordLandedTransition(task: Task, next: string, at: string): void {
+  const prev = task.status
+  if (prev === next) return
+  if (next === 'landed')
+    (task.events ??= []).push({ kind: 'landed', title: task.title, createdAt: at })
+  else if (prev === 'landed')
+    (task.events ??= []).push({ kind: 'unlanded', title: task.title, createdAt: at })
 }
 
 // Boil a tool call's input down to one line for the activity trace: prefer the
@@ -596,6 +630,16 @@ app.post('/api/:project/tasks', async (c) => {
       allowEdits,
       allowCommits,
       messages: [{ role: 'user', text: message, createdAt: now }],
+      // A launch event, timestamped a hair before the opening message so the
+      // timeline shows it ahead of that message. Untitled until the first
+      // generated name amends it (setTitle), unless one was supplied up front.
+      events: [
+        {
+          kind: 'launched',
+          title: title || undefined,
+          createdAt: new Date(Date.parse(now) - 1).toISOString(),
+        },
+      ],
       // The opening message rides the same queue as follow-ups; driveTask
       // drains it. It stays in `messages` above for display.
       queued: message.trim() ? [message] : [],
@@ -645,12 +689,26 @@ app.patch('/api/:project/tasks/:id', async (c) => {
       allowCommits?: unknown
       status?: unknown
     }>()
-    if (typeof body.title === 'string' && body.title.trim())
-      task.title = body.title.trim()
+    if (typeof body.title === 'string' && body.title.trim()) {
+      const next = body.title.trim()
+      // A user rename; record it (snapshotting the new name) when it actually
+      // changes the title. The initial generated name goes through setTitle,
+      // which amends the launch event instead — so it never lands here.
+      if (next !== task.title)
+        (task.events ??= []).push({
+          kind: 'renamed',
+          title: next,
+          createdAt: new Date().toISOString(),
+        })
+      task.title = next
+    }
     if (typeof body.allowEdits === 'boolean') task.allowEdits = body.allowEdits
     if (typeof body.allowCommits === 'boolean')
       task.allowCommits = body.allowCommits
-    if (typeof body.status === 'string') task.status = body.status
+    if (typeof body.status === 'string') {
+      recordLandedTransition(task, body.status, new Date().toISOString())
+      task.status = body.status
+    }
     await writeFile(file, JSON.stringify(task, null, 2))
     return c.json(task)
   } catch (e) {
@@ -679,7 +737,16 @@ app.post('/api/:project/tasks/:id/retitle', async (c) => {
     const transcript = task.messages
       .map((m) => `${m.role}: ${m.text}`)
       .join('\n\n')
-    task.title = await generateTitle(project.path, transcript)
+    const next = await generateTitle(project.path, transcript)
+    // A deliberate re-title (the "suggest a title" button), so record it as a
+    // rename — unlike the automatic first naming, which amends the launch event.
+    if (next !== task.title)
+      (task.events ??= []).push({
+        kind: 'renamed',
+        title: next,
+        createdAt: new Date().toISOString(),
+      })
+    task.title = next
     await writeFile(file, JSON.stringify(task, null, 2))
     return c.json(task)
   } catch (e) {
@@ -707,11 +774,14 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
     if (!message.trim()) return c.json({ error: 'message is required' }, 400)
 
     const now = new Date().toISOString()
+    // Sending revives a landed (terminal) task — record the "un-landed"
+    // transition a hair before the message's own timestamp so the timeline
+    // shows it ahead of the message that caused it, not after.
+    recordLandedTransition(task, 'riding', new Date(Date.parse(now) - 1).toISOString())
     task.messages.push({ role: 'user', text: message, createdAt: now })
     task.updatedAt = now
-    // Queue the prompt for the session and go "riding"; this also revives a
-    // landed (terminal) task. driveTask clears it to "wedged" once the queue
-    // drains.
+    // Queue the prompt for the session and go "riding". driveTask clears it to
+    // "wedged" once the queue drains.
     task.queued = [...(task.queued ?? []), message]
     task.status = 'riding'
     await writeFile(file, JSON.stringify(task, null, 2))
