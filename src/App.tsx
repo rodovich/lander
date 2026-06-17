@@ -24,6 +24,9 @@ type Step = {
   toolUseId?: string
   // tool_use: the call as a settings.json permission rule, e.g. `Bash(ls)`.
   rule?: string
+  // tool_use, for the file-writing tools (Edit/Write/MultiEdit): the change as
+  // before/after hunks, revealed as a diff under the chip's disclosure triangle.
+  edits?: { old: string; new: string }[]
   // tool_result: outcome flags (set by the server from the stream).
   isError?: boolean
   blocked?: boolean
@@ -309,9 +312,46 @@ function ToolPopup({
   )
 }
 
+// The before/after hunks of a file-writing tool call, rendered as a unified
+// diff: the old text as removed (red) lines, the new text as added (green) ones.
+// One block per edit (MultiEdit carries several); a Write has empty `old`, so it
+// shows up as all additions.
+function DiffView({ edits }: { edits: { old: string; new: string }[] }) {
+  // Split into lines, dropping a single trailing empty line so a string ending
+  // in "\n" doesn't render a spurious blank row. An empty side (e.g. a Write's
+  // absent "before") contributes no lines at all.
+  const lines = (s: string) => {
+    if (s === '') return []
+    const parts = s.split('\n')
+    if (parts.length > 1 && parts[parts.length - 1] === '') parts.pop()
+    return parts
+  }
+  return (
+    <div className="step-diff">
+      {edits.map((e, k) => (
+        <pre className="diff-hunk" key={k}>
+          {lines(e.old).map((l, n) => (
+            <div className="diff-line del" key={`o${n}`}>
+              {'- ' + l}
+            </div>
+          ))}
+          {lines(e.new).map((l, n) => (
+            <div className="diff-line add" key={`n${n}`}>
+              {'+ ' + l}
+            </div>
+          ))}
+        </pre>
+      ))}
+    </div>
+  )
+}
+
 // A tool call in the activity trace: a clickable chip (red when the call was
-// blocked) that toggles a grant popup. The chip + popup share one ref so an
-// outside click — anywhere but here — dismisses the popup.
+// blocked) that toggles a grant popup. For the file-writing tools the chip also
+// gets a disclosure triangle to its left that reveals the edit's diff (default
+// closed); option/shift-clicking it toggles every diff in the message at once.
+// The chip + popup share one ref so an outside click — anywhere but here —
+// dismisses the popup.
 function ToolStep({
   step,
   status,
@@ -319,6 +359,8 @@ function ToolStep({
   onToggle,
   onClose,
   onAllow,
+  diffOpen,
+  onToggleDiff,
 }: {
   step: Step
   status: ToolStatus
@@ -326,7 +368,12 @@ function ToolStep({
   onToggle: () => void
   onClose: () => void
   onAllow: (rule: string, scope: 'task' | 'project') => void
+  diffOpen: boolean
+  // `all` is set when the user option/shift-clicked, asking to toggle every
+  // diff in the message rather than just this one.
+  onToggleDiff: (all: boolean) => void
 }) {
+  const hasDiff = !!step.edits && step.edits.length > 0
   const ref = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
   // The popup is fixed-positioned (so the scrolling timeline can't clip it), so
@@ -364,16 +411,33 @@ function ToolStep({
 
   return (
     <div className="step-tool" ref={ref}>
-      <button
-        ref={buttonRef}
-        type="button"
-        className={'step-tool-name' + (status === 'blocked' ? ' blocked' : '')}
-        aria-expanded={open}
-        onClick={onToggle}
-      >
-        {step.tool}
-      </button>
-      {step.input && <span className="step-tool-input">{step.input}</span>}
+      <div className="step-tool-row">
+        {hasDiff && (
+          <button
+            type="button"
+            className="step-diff-toggle"
+            aria-expanded={diffOpen}
+            aria-label={diffOpen ? 'Hide diff' : 'Show diff'}
+            title={
+              diffOpen ? 'Hide diff (⌥/⇧ for all)' : 'Show diff (⌥/⇧ for all)'
+            }
+            onClick={(e) => onToggleDiff(e.altKey || e.shiftKey)}
+          >
+            <span className={'step-diff-caret' + (diffOpen ? ' open' : '')}>▶</span>
+          </button>
+        )}
+        <button
+          ref={buttonRef}
+          type="button"
+          className={'step-tool-name' + (status === 'blocked' ? ' blocked' : '')}
+          aria-expanded={open}
+          onClick={onToggle}
+        >
+          {step.tool}
+        </button>
+        {step.input && <span className="step-tool-input">{step.input}</span>}
+      </div>
+      {hasDiff && diffOpen && <DiffView edits={step.edits!} />}
       {open && anchor && (
         <ToolPopup step={step} status={status} anchor={anchor} onAllow={onAllow} />
       )}
@@ -390,6 +454,8 @@ function Step({
   onToggle,
   onClose,
   onAllow,
+  diffOpen,
+  onToggleDiff,
 }: {
   step: Step
   status: ToolStatus
@@ -397,6 +463,8 @@ function Step({
   onToggle: () => void
   onClose: () => void
   onAllow: (rule: string, scope: 'task' | 'project') => void
+  diffOpen: boolean
+  onToggleDiff: (all: boolean) => void
 }) {
   if (step.kind === 'tool_use') {
     return (
@@ -407,6 +475,8 @@ function Step({
         onToggle={onToggle}
         onClose={onClose}
         onAllow={onAllow}
+        diffOpen={diffOpen}
+        onToggleDiff={onToggleDiff}
       />
     )
   }
@@ -540,6 +610,25 @@ export function App() {
   // The tool chip whose grant popup is open, keyed "<messageIndex>:<stepIndex>".
   // Only one is open at a time; null means none.
   const [openTool, setOpenTool] = useState<string | null>(null)
+
+  // The set of file-writing tool chips whose diff is revealed, keyed the same
+  // "<messageIndex>:<stepIndex>". Diffs start closed and several can be open at
+  // once (option/shift-click toggles a whole message's worth).
+  const [openDiffs, setOpenDiffs] = useState<Set<string>>(new Set())
+
+  // Toggle one chip's diff, or — when option/shift was held — every diff in its
+  // message together, driving them all to this chip's new (opposite) state.
+  function toggleDiff(key: string, messageKeys: string[]) {
+    setOpenDiffs((prev) => {
+      const next = new Set(prev)
+      const willOpen = !prev.has(key)
+      for (const k of messageKeys) {
+        if (willOpen) next.add(k)
+        else next.delete(k)
+      }
+      return next
+    })
+  }
 
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
@@ -851,6 +940,7 @@ export function App() {
   useEffect(() => {
     setEditingTitle(false)
     setOpenTool(null)
+    setOpenDiffs(new Set())
   }, [selected])
 
   // Focus and select the title when entering edit mode.
@@ -1404,6 +1494,15 @@ export function App() {
                           if (s.kind === 'tool_use' && s.toolUseId && s.tool)
                             toolById.set(s.toolUseId, s.tool)
                         }
+                        // Keys of every diff-bearing chip in this message, so an
+                        // option/shift-click on one can toggle them all together.
+                        const diffKeys = m.steps!
+                          .map((s, j) =>
+                            s.kind === 'tool_use' && s.edits?.length
+                              ? `${i}:${j}`
+                              : null,
+                          )
+                          .filter((k): k is string => k !== null)
                         return m.steps.map((s, j) => {
                           const key = `${i}:${j}`
                           const blocked = s.toolUseId
@@ -1437,6 +1536,10 @@ export function App() {
                               }
                               onClose={() => setOpenTool(null)}
                               onAllow={allowTool}
+                              diffOpen={openDiffs.has(key)}
+                              onToggleDiff={(all) =>
+                                toggleDiff(key, all ? diffKeys : [key])
+                              }
                             />
                           )
                         })

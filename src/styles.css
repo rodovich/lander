@@ -802,10 +802,80 @@ body {
 .step-tool {
   position: relative;
   display: flex;
-  align-items: baseline;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.85em;
+}
+
+.step-tool-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+/* The disclosure triangle left of a file-writing chip. A bare caret that rotates
+   when its diff is open; kept narrow so it reads as a hinge on the chip. */
+.step-diff-toggle {
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  line-height: 1;
+  align-self: center;
+}
+
+.step-diff-toggle:hover {
+  color: var(--fg);
+}
+
+.step-diff-toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+  border-radius: 3px;
+}
+
+.step-diff-caret {
+  display: inline-block;
+  font-size: 0.7em;
+  transition: transform 0.12s ease;
+}
+
+.step-diff-caret.open {
+  transform: rotate(90deg);
+}
+
+/* The revealed diff: removed lines red, added lines green, in a tinted block
+   indented to sit under the chip. */
+.step-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-left: 16px;
+}
+
+.diff-hunk {
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-tinted);
+  overflow-x: auto;
+  white-space: pre;
+  font-size: 0.95em;
+  line-height: 1.45;
+}
+
+.diff-line.add {
+  color: #1a7f37;
+  background: color-mix(in srgb, #1a7f37 8%, transparent);
+}
+
+.diff-line.del {
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 8%, transparent);
 }
 
 .step-tool-name {
