@@ -47,6 +47,10 @@ type Task = {
   allowCommits: boolean
   messages: Message[]
   events?: TaskEvent[]
+  // Follow-ups sent while the agent is busy wait here until a drainer picks
+  // them up. They're also appended to `messages` for display; this array holds
+  // the trailing user messages, in order, that claude hasn't read yet.
+  queued?: string[]
 }
 
 // A task tagged with the slug of the project it came from, so the merged
@@ -405,6 +409,60 @@ function StatusTransition({ event }: { event: TaskEvent }) {
   )
 }
 
+// A clipboard button shown in a message's top-right corner. Briefly flips to a
+// checkmark after a successful copy so the click registers.
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // Clipboard access can be denied (e.g. insecure context); ignore.
+    }
+  }
+  return (
+    <button
+      type="button"
+      className="message-copy"
+      onClick={copy}
+      title="Copy message"
+      aria-label={copied ? 'Copied' : 'Copy message'}
+    >
+      {copied ? (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path
+            d="M20 6 9 17l-5-5"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      ) : (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <rect
+            x="9"
+            y="9"
+            width="11"
+            height="11"
+            rx="2"
+            stroke="currentColor"
+            strokeWidth="2"
+          />
+          <path
+            d="M5 15V5a2 2 0 0 1 2-2h10"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
+        </svg>
+      )}
+    </button>
+  )
+}
+
 export function App() {
   const [tasks, setTasks] = useState<TaskWithProject[]>([])
   const [projects, setProjects] = useState<Project[]>([])
@@ -494,6 +552,20 @@ export function App() {
         })),
       ].sort((a, b) => a.at.localeCompare(b.at))
     : []
+
+  // The message indices of follow-ups still waiting in the queue. `queued` is
+  // drained in order, so it always corresponds to the last N user messages —
+  // dim those in the timeline to signal claude hasn't read them yet.
+  const queuedIndices = new Set<number>()
+  if (current) {
+    let remaining = current.queued?.length ?? 0
+    for (let i = current.messages.length - 1; i >= 0 && remaining > 0; i--) {
+      if (current.messages[i].role === 'user') {
+        queuedIndices.add(i)
+        remaining--
+      }
+    }
+  }
 
   // A monotonically rising count of finished assistant turns across all tasks.
   // It ticks up each time a pending message lands (the poll flips `pending` to
@@ -1250,12 +1322,16 @@ export function App() {
                 const m = item.message
                 const i = item.index
                 return (
-                <div className={`message message-${m.role}`} key={`m-${i}`}>
+                <div
+                  className={`message message-${m.role}${queuedIndices.has(i) ? ' message-queued' : ''}`}
+                  key={`m-${i}`}
+                >
                   <div className="message-head">
                     <span className="message-role">{m.role}</span>
                     <span className="message-time">
                       {formatTimestamp(m.createdAt)}
                     </span>
+                    {m.text && <CopyButton text={m.text} />}
                   </div>
                   {/* Streamed assistant turns render their live activity trace;
                       user and legacy messages just render their text. */}
