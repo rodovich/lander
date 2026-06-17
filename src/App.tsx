@@ -39,10 +39,16 @@ function formatTimestamp(iso: string): string {
   return d.toLocaleString()
 }
 
-// The project slug is the first path segment, e.g. "/users-me-code-app/" ->
-// "users-me-code-app". Empty on "/" until we redirect to the first project.
+// The project slug is the first path segment, e.g. "/users-me-code-app/task1/"
+// -> "users-me-code-app". Empty on "/" until we redirect to the first project.
 function slugFromPath(): string {
   return window.location.pathname.split('/').filter(Boolean)[0] ?? ''
+}
+
+// The selected task's session is the second path segment, e.g.
+// "/users-me-code-app/task1/" -> "task1". Empty when no task is in the URL.
+function sessionFromPath(): string {
+  return window.location.pathname.split('/').filter(Boolean)[1] ?? ''
 }
 
 // One entry in a streamed assistant turn: prose as markdown, a tool call as a
@@ -70,7 +76,11 @@ export function App() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [slug, setSlug] = useState<string>(slugFromPath)
-  const [selected, setSelected] = useState<string | null>(null)
+  // The most recently selected task per project, keyed by slug, so switching
+  // projects restores where you left off instead of resetting the selection.
+  const [selectedByProject, setSelectedByProject] = useState<
+    Record<string, string>
+  >({})
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -91,6 +101,33 @@ export function App() {
   const [retitling, setRetitling] = useState(false)
   const titleInputRef = useRef<HTMLInputElement>(null)
 
+  // Filter by title (case-insensitive) before grouping.
+  const query = filter.trim().toLowerCase()
+  const matchedTasks = query
+    ? tasks.filter((t) => t.title.toLowerCase().includes(query))
+    : tasks
+
+  // Show non-landed tasks above landed ones, preserving order within each group.
+  const orderedTasks = [
+    ...matchedTasks.filter((t) => t.status !== 'landed'),
+    ...matchedTasks.filter((t) => t.status === 'landed'),
+  ]
+
+  // The effective selection for this project: the remembered task if it still
+  // exists, otherwise the first task in the list. Only real user selections are
+  // remembered, so an unvisited project always opens on its first task.
+  const remembered = selectedByProject[slug]
+  const selected =
+    remembered && tasks.some((t) => t.session === remembered)
+      ? remembered
+      : orderedTasks[0]?.session ?? null
+  const current = tasks.find((t) => t.session === selected) ?? null
+
+  function selectTask(session: string) {
+    setSelectedByProject((prev) => ({ ...prev, [slug]: session }))
+    window.history.pushState(null, '', `/${slug}/${session}`)
+  }
+
   async function loadTasks(): Promise<Task[]> {
     const r = await fetch(`/api/${slug}/tasks`)
     const body = await r.json()
@@ -108,6 +145,12 @@ export function App() {
         const current = slugFromPath()
         if (list.some((p) => p.slug === current)) {
           setSlug(current)
+          // Seed the selection from the URL so a shared/reloaded link to a
+          // specific task opens on it (validated against tasks once they load).
+          const session = sessionFromPath()
+          if (session) {
+            setSelectedByProject((prev) => ({ ...prev, [current]: session }))
+          }
         } else if (list.length > 0) {
           window.history.replaceState(null, '', `/${list[0].slug}/`)
           setSlug(list[0].slug)
@@ -116,12 +159,32 @@ export function App() {
       .catch(() => {})
   }, [])
 
-  // Keep the slug in sync when the user navigates with the browser back/forward.
+  // Keep the slug and selection in sync when the user navigates with the
+  // browser back/forward buttons.
   useEffect(() => {
-    const onPop = () => setSlug(slugFromPath())
+    const onPop = () => {
+      const s = slugFromPath()
+      setSlug(s)
+      const session = sessionFromPath()
+      if (session) {
+        setSelectedByProject((prev) => ({ ...prev, [s]: session }))
+      }
+    }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
+
+  // Keep the URL's task segment matched to the effective selection. This covers
+  // the cases selectTask/selectProject can't push directly — chiefly the first
+  // task being auto-selected once a project's tasks load. replaceState (not
+  // push) corrects the URL in place without adding spurious history entries.
+  useEffect(() => {
+    if (!slug) return
+    const desired = selected ? `/${slug}/${selected}` : `/${slug}/`
+    if (window.location.pathname !== desired) {
+      window.history.replaceState(null, '', desired)
+    }
+  }, [slug, selected])
 
   // Cmd/Ctrl+Shift+F focuses the task search field.
   useEffect(() => {
@@ -160,9 +223,11 @@ export function App() {
 
   function selectProject(next: string) {
     if (next === slug) return
-    window.history.pushState(null, '', `/${next}/`)
+    // Carry the project's remembered task into the URL when there is one; the
+    // sync effect fills in the first task once this project's tasks load.
+    const session = selectedByProject[next]
+    window.history.pushState(null, '', session ? `/${next}/${session}` : `/${next}/`)
     setSlug(next)
-    setSelected(null)
     setTasks([])
     setError(null)
   }
@@ -199,7 +264,7 @@ export function App() {
       if (!r.ok) throw new Error(body.error ?? r.statusText)
       const created = body as Task
       setTasks(await loadTasks())
-      setSelected(created.session)
+      selectTask(created.session)
       setTitle('')
       setMessage('')
     } catch (err) {
@@ -208,8 +273,6 @@ export function App() {
       setSubmitting(false)
     }
   }
-
-  const current = tasks.find((t) => t.session === selected) ?? null
 
   // Leave edit mode when switching tasks so a draft never bleeds across them.
   useEffect(() => {
@@ -289,25 +352,38 @@ export function App() {
     }
   }
 
-  // Scroll to the latest message when switching tasks or when a new message
-  // arrives on the open task.
+  // Keep the conversation pinned to the latest content. We always jump to the
+  // bottom when switching tasks, but when new content streams in we only follow
+  // along if the reader was already at the bottom — otherwise scrolling up to
+  // read earlier messages would be yanked back down on every poll.
   const messagesRef = useRef<HTMLDivElement>(null)
+  const atBottomRef = useRef(true)
+  const prevSelectedRef = useRef<string | null>(null)
+
+  function onMessagesScroll() {
+    const el = messagesRef.current
+    if (!el) return
+    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 32
+  }
+
+  // Changes whenever the open task's last (typically streaming) message grows,
+  // even when the message count stays the same, so the effect re-pins as an
+  // assistant turn fills in.
+  const lastMessage = current?.messages[current.messages.length - 1]
+  const streamSignal = lastMessage
+    ? `${lastMessage.steps?.length ?? 0}:` +
+      `${lastMessage.steps?.reduce((n, s) => n + (s.text?.length ?? 0), 0) ?? 0}:` +
+      `${lastMessage.text?.length ?? 0}`
+    : ''
+
   useEffect(() => {
     const el = messagesRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [selected, current?.messages.length])
-
-  // Filter by title (case-insensitive) before grouping.
-  const query = filter.trim().toLowerCase()
-  const matchedTasks = query
-    ? tasks.filter((t) => t.title.toLowerCase().includes(query))
-    : tasks
-
-  // Show non-landed tasks above landed ones, preserving order within each group.
-  const orderedTasks = [
-    ...matchedTasks.filter((t) => t.status !== 'landed'),
-    ...matchedTasks.filter((t) => t.status === 'landed'),
-  ]
+    if (!el) return
+    const switched = prevSelectedRef.current !== selected
+    prevSelectedRef.current = selected
+    if (switched) atBottomRef.current = true
+    if (switched || atBottomRef.current) el.scrollTop = el.scrollHeight
+  }, [selected, current?.messages.length, streamSignal])
 
   async function sendReply() {
     if (!current) return
@@ -446,7 +522,7 @@ export function App() {
                 (task.session === selected ? ' selected' : '') +
                 (task.status === 'landed' ? ' landed' : '')
               }
-              onClick={() => setSelected(task.session)}
+              onClick={() => selectTask(task.session)}
             >
               <div className="task-title">{task.title}</div>
               <div
@@ -599,7 +675,7 @@ export function App() {
                 </span>
               </div>
             </div>
-            <div className="messages" ref={messagesRef}>
+            <div className="messages" ref={messagesRef} onScroll={onMessagesScroll}>
               {current.messages.map((m, i) => (
                 <div className={`message message-${m.role}`} key={i}>
                   <div className="message-head">
