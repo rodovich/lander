@@ -263,10 +263,14 @@ function UsageSummary({ refreshSignal }: { refreshSignal: number }) {
 function ToolPopup({
   step,
   status,
+  anchor,
   onAllow,
 }: {
   step: Step
   status: ToolStatus
+  // Viewport coords of the chip's bottom-left, so the fixed-position popup can
+  // anchor under the chip while escaping the scrolling timeline's clipping.
+  anchor: { top: number; left: number }
   onAllow: (rule: string, scope: 'task' | 'project') => void
 }) {
   // `rule` is computed server-side (see toolRule). Steps saved before that field
@@ -274,7 +278,11 @@ function ToolPopup({
   // they never offer the allow buttons anyway — the textarea is just a view.
   const [rule, setRule] = useState(step.rule ?? step.tool ?? '')
   return (
-    <div className="tool-popup" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="tool-popup"
+      style={{ top: anchor.top, left: anchor.left }}
+      onClick={(e) => e.stopPropagation()}
+    >
       <div className="tool-popup-head">
         <span className="tool-popup-tool">{step.tool}</span>
         <span className={'tool-popup-status' + (status === 'blocked' ? ' blocked' : '')}>
@@ -320,8 +328,21 @@ function ToolStep({
   onAllow: (rule: string, scope: 'task' | 'project') => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  // The popup is fixed-positioned (so the scrolling timeline can't clip it), so
+  // we anchor it to the chip's live viewport rect and re-measure as the timeline
+  // scrolls or the window resizes.
+  const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null)
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      setAnchor(null)
+      return
+    }
+    const place = () => {
+      const r = buttonRef.current?.getBoundingClientRect()
+      if (r) setAnchor({ top: r.bottom + 6, left: r.left })
+    }
+    place()
     const onDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose()
     }
@@ -330,15 +351,21 @@ function ToolStep({
     }
     window.addEventListener('mousedown', onDown)
     window.addEventListener('keydown', onKey)
+    window.addEventListener('resize', place)
+    // Capture phase so the timeline's own scroll (not just window scroll) repositions.
+    window.addEventListener('scroll', place, true)
     return () => {
       window.removeEventListener('mousedown', onDown)
       window.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
     }
   }, [open, onClose])
 
   return (
     <div className="step-tool" ref={ref}>
       <button
+        ref={buttonRef}
         type="button"
         className={'step-tool-name' + (status === 'blocked' ? ' blocked' : '')}
         aria-expanded={open}
@@ -347,7 +374,9 @@ function ToolStep({
         {step.tool}
       </button>
       {step.input && <span className="step-tool-input">{step.input}</span>}
-      {open && <ToolPopup step={step} status={status} onAllow={onAllow} />}
+      {open && anchor && (
+        <ToolPopup step={step} status={status} anchor={anchor} onAllow={onAllow} />
+      )}
     </div>
   )
 }

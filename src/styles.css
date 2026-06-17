@@ -803,15 +803,14 @@ body {
   background: color-mix(in srgb, var(--error) 22%, transparent);
 }
 
-/* The grant popup, anchored under the tool chip. */
+/* The grant popup, anchored under the tool chip. Fixed-positioned (with top/left
+   set inline from the chip's measured rect) so the scrolling timeline can't clip
+   it and the composer bar can't paint over it. */
 .tool-popup {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  z-index: 20;
+  position: fixed;
+  z-index: 100;
   width: 380px;
   max-width: 70vw;
-  margin-top: 6px;
   padding: 12px;
   display: flex;
   flex-direction: column;
