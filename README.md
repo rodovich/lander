@@ -8,7 +8,7 @@ A web UI for spawning and chatting with **Claude Code agents** against a target 
 - The server launches `claude` as a CLI subprocess **in the target project directory**, passing your message as the prompt.
 - Claude's stdout is captured and appended back to the task as an assistant reply.
 - You can keep **replying** in a task; follow-up turns resume the same Claude session, so context is preserved across the conversation.
-- The UI polls every 2s, so replies appear once the subprocess finishes.
+- Activity streams into the task as it happens; the UI polls every 2s, so steps and the final reply surface within a couple seconds.
 
 ## Usage
 
@@ -39,7 +39,7 @@ Each project gets a URL slug from its path (e.g. `/Users/me/code/app` → `users
 - `POST /api/:project/tasks/:id/allow` — grant a permission rule the agent was blocked on. `{ rule, scope }`: `scope: "task"` appends `rule` to the task's `allow` list (fed to `--allowedTools` on future turns); `scope: "project"` writes it to the project's `.claude/settings.local.json`. Human-only (see [Authenticated permission grants](#authenticated-permission-grants)).
 
 All task routes are scoped by the project slug, which selects the working directory `claude` runs in and the on-disk data dir.
-- `runClaude()` shells out with `execFile` (10-min timeout, 50 MB buffer); errors are caught and written back as an assistant message.
+- `runClaude()` spawns `claude` with `spawn` and parses its `stream-json` output, writing steps to the task as they arrive (10-min **idle** timeout — reset on each chunk, so a still-streaming turn isn't killed); errors are caught and written back as an assistant message.
 
 ### Storage
 
@@ -93,5 +93,5 @@ Each streamed turn renders its activity trace as steps. A `tool_use` step is a c
 ## Notable details
 
 - `status` moves through `riding` (agent working) → `resting` (idle) when a turn finishes; an agent can also set its own status — `wedged` (needs the user) or the terminal `landed` — via the `lander` CLI (see Self-management).
-- No auth, no streaming (replies land only when the subprocess fully exits), no websockets — it relies on 2s polling.
+- Reads are unauthenticated (only permission *changes* check a principal — see Authenticated permission grants); delivery is by 2s polling, not SSE/websockets — though the turn itself streams (see Frontend).
 - Task IDs are validated as UUIDs before filesystem access, which guards against path traversal on the `:id` route.
