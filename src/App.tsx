@@ -751,29 +751,56 @@ export function App() {
   const currentLatest = current ? latestUpdateAt(current) : ''
   const activelyViewing = !!current && tabActive && atBottom
 
-  // The open task's conversation as a single chronological stream: its messages
-  // (keeping each message's own index so step/popup keys stay stable) merged
-  // with its lifecycle events, sorted by timestamp. Array.sort is stable, so an
-  // event sharing a timestamp with a message keeps insertion order (messages
-  // first), which reads naturally.
+  // The open task's conversation as a single stream: its messages in turn order,
+  // merged with its lifecycle events by timestamp.
+  //
+  // We can't just sort messages by `createdAt`: a follow-up sent while the agent
+  // is spinning up (queued, and so appended to the array) gets an earlier
+  // timestamp than the assistant reply it's waiting on, because that reply's
+  // timestamp is stamped lazily when claude's first token arrives (see the
+  // server's ensurePending). Sorting by time would then float the follow-up
+  // above the response it follows. Instead we pair turns positionally: every turn
+  // is one user prompt answered by one assistant message, so the k-th assistant
+  // belongs after the k-th user. Still-queued prompts have no assistant yet and
+  // simply trail at the end, which is where they belong.
   type TimelineItem =
     | { kind: 'message'; at: string; message: Message; index: number }
     | { kind: 'event'; at: string; event: TaskEvent }
-  const timeline: TimelineItem[] = current
-    ? [
-        ...current.messages.map((message, index) => ({
-          kind: 'message' as const,
-          at: message.createdAt,
-          message,
-          index,
-        })),
-        ...(current.events ?? []).map((event) => ({
-          kind: 'event' as const,
-          at: event.createdAt,
-          event,
-        })),
-      ].sort((a, b) => a.at.localeCompare(b.at))
-    : []
+  const timeline: TimelineItem[] = []
+  if (current) {
+    const userIdx: number[] = []
+    const asstIdx: number[] = []
+    current.messages.forEach((m, i) =>
+      (m.role === 'user' ? userIdx : asstIdx).push(i),
+    )
+    // Interleave user[k], assistant[k] in turn order; tolerate either list
+    // running long (e.g. a stray legacy message) by emitting whatever remains.
+    const ordered: TimelineItem[] = []
+    const turns = Math.max(userIdx.length, asstIdx.length)
+    for (let k = 0; k < turns; k++) {
+      for (const i of [userIdx[k], asstIdx[k]]) {
+        if (i === undefined) continue
+        const message = current.messages[i]
+        ordered.push({ kind: 'message', at: message.createdAt, message, index: i })
+      }
+    }
+    // Splice lifecycle events into the turn-ordered stream by timestamp: each
+    // event surfaces just before the first message it predates. Events are sparse
+    // and mark deliberate status crossings (wedged/landed and their inverses), so
+    // this reads naturally even where a trailing queued prompt sits out of strict
+    // time order.
+    const events = [...(current.events ?? [])].sort((a, b) =>
+      a.createdAt.localeCompare(b.createdAt),
+    )
+    let e = 0
+    for (const item of ordered) {
+      while (e < events.length && events[e].createdAt <= item.at)
+        timeline.push({ kind: 'event', at: events[e].createdAt, event: events[e++] })
+      timeline.push(item)
+    }
+    while (e < events.length)
+      timeline.push({ kind: 'event', at: events[e].createdAt, event: events[e++] })
+  }
 
   // The message indices of follow-ups still waiting in the queue. `queued` is
   // drained in order, so it always corresponds to the last N user messages —
