@@ -239,6 +239,13 @@ body {
   letter-spacing: 0.03em;
 }
 
+/* The crescent that marks a resting task as scheduled to launch. It inherits
+   the status color via currentColor and sits on the text baseline. */
+.scheduled-moon {
+  margin-left: 4px;
+  vertical-align: -1px;
+}
+
 /* The project leaf shown next to a task's name when projects are intermixed.
    It claims the space it needs (the name yields), so it never shrinks. */
 .task-project {

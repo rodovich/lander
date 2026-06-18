@@ -1514,6 +1514,22 @@ export function App() {
                   }
                 >
                   {task.status}
+                  {task.status === 'resting' && task.scheduledFor && (
+                    <svg
+                      className="scheduled-moon"
+                      width="11"
+                      height="11"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-label="Scheduled"
+                    >
+                      <path d="M13.5 9.5A5.5 5.5 0 1 1 6.5 2.5 4.3 4.3 0 0 0 13.5 9.5z" />
+                    </svg>
+                  )}
                 </span>
               </div>
               <div className="task-time">
