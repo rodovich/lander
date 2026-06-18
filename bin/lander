@@ -32,13 +32,18 @@ async function call(project, path, init) {
   return body
 }
 
-async function setStatus(status) {
+async function setStatus(status, { quiet = false } = {}) {
   if (!TASK) die('no current task (LANDER_TASK unset)')
   await call(PROJECT, `/tasks/${TASK}`, {
     method: 'PATCH',
     body: JSON.stringify({ status }),
   })
-  console.log(`status → ${status}`)
+  // `land` stays silent on success. It's terminal, so a "status → landed"
+  // confirmation does nothing but invite the agent to echo it back — the
+  // trailing "Landed." we're trying to kill. Nothing to react to, nothing to
+  // say. Failures still surface via die(); wedge/status keep their line since
+  // the agent works on past them.
+  if (!quiet) console.log(`status → ${status}`)
 }
 
 async function readStdin() {
@@ -74,7 +79,7 @@ async function newTask(rest) {
 
 const [cmd, ...rest] = process.argv.slice(2)
 const run = {
-  land: () => setStatus('landed'),
+  land: () => setStatus('landed', { quiet: true }),
   wedge: () => setStatus('wedged'),
   status: () => setStatus(rest[0] || die('usage: lander status <status>')),
   new: () => newTask(rest),

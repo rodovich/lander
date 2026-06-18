@@ -507,14 +507,13 @@ async function runClaude(
       ...editArgs,
       '--append-system-prompt',
       'You are running inside a lander task. Manage yourself with the `lander` ' +
-        'CLI: `lander land` marks this task landed; `lander wedge` marks it ' +
-        'wedged; `lander status <state>` sets any status; `lander new <message>` ' +
-        'spawns a sibling task that runs independently. Do everything else — ' +
-        'other tool calls, printing your summary — before calling `lander land`, ' +
-        'and end the turn immediately after calling it, unless the call fails or ' +
-        'the user explicitly told you to land before doing something else. When ' +
-        'you finish a turn ' +
-        'the task comes to rest on its own — you need do nothing. Mark it wedged ' +
+        'CLI: `lander status <state>` sets any status; `lander wedge` marks it ' +
+        'wedged; `lander land` marks it landed; `lander new <message>` ' +
+        'spawns a sibling task that runs independently. When the user asks you ' +
+        'to land a task, do so with `lander land`. Say everything you mean to ' +
+        'say first — your summary, your sign-off, every last word — because ' +
+        'running `lander land` ends the task: the user can see it land, so once ' +
+        'you have run it there is nothing left to confirm or say. Mark it wedged ' +
         '(`lander wedge`) only when you cannot make progress without the user: ' +
         'you need tool permissions granted, a manual step performed, or a ' +
         'blocking question answered. A spawned task starts with no edit or ' +
