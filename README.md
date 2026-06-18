@@ -27,7 +27,7 @@ Each project gets a URL slug from its path (e.g. `/Users/me/code/app` → `users
 
 | Part | Stack | Port | Role |
 |------|-------|------|------|
-| Web | React 18 + Vite | 6180 | SPA, proxies `/api` → 6181 |
+| Web | React 18 + Vite | 41414 | SPA, proxies `/api` → 6181 |
 | API | Hono on `@hono/node-server` | 6181 | Task CRUD + drives the `claude` CLI |
 
 ### API (`server/index.ts`)
