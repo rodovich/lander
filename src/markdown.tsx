@@ -43,11 +43,14 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
       },
     },
     {
-      re: /\*\*([^*]+)\*\*|__([^_]+)__/,
+      // Underscore variants require a non-word boundary on each side, so
+      // intraword underscores (e.g. patch_based_saving) don't become emphasis,
+      // matching CommonMark/GFM. Asterisks still allow intraword emphasis.
+      re: /\*\*([^*]+)\*\*|(?<![\p{L}\p{N}])__([^_]+)__(?![\p{L}\p{N}])/u,
       render: (m, k) => <strong key={k}>{renderInline(m[1] ?? m[2], k)}</strong>,
     },
     {
-      re: /\*([^*]+)\*|_([^_]+)_/,
+      re: /\*([^*]+)\*|(?<![\p{L}\p{N}])_([^_]+)_(?![\p{L}\p{N}])/u,
       render: (m, k) => <em key={k}>{renderInline(m[1] ?? m[2], k)}</em>,
     },
     {
