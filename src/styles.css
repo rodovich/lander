@@ -533,7 +533,8 @@ body {
 
 .landed-button,
 .wedged-button,
-.resting-button {
+.resting-button,
+.launch-button {
   font: inherit;
   font-weight: 600;
   flex-shrink: 0;
@@ -542,6 +543,11 @@ body {
   border-radius: 6px;
   background: var(--bg-tinted);
   cursor: pointer;
+}
+
+/* Same blue as the "riding" status — launching sets the task riding. */
+.launch-button {
+  color: #0969da;
 }
 
 .landed-button {
@@ -850,6 +856,16 @@ body {
 /* Same green as the "landed" status pill. */
 .status-transition-label.landed {
   color: #1a7f37;
+}
+
+/* Same muted tone as the "resting" status pill — a scheduled task rests. */
+.status-transition-label.scheduled {
+  color: var(--muted);
+}
+
+/* The launch time trailing a "scheduled" event reads as a quiet timestamp. */
+.status-transition-when {
+  font-weight: 400;
 }
 
 .status-transition-time {

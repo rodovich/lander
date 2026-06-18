@@ -49,8 +49,17 @@ type Message = {
 // user) or terminal landed state. `title` is the task's name as of the event
 // (absent on an untitled launch or on events saved before titles were captured).
 type TaskEvent = {
-  kind: 'launched' | 'wedged' | 'unwedged' | 'landed' | 'unlanded' | 'renamed'
+  kind:
+    | 'launched'
+    | 'scheduled'
+    | 'wedged'
+    | 'unwedged'
+    | 'landed'
+    | 'unlanded'
+    | 'renamed'
   title?: string
+  // 'scheduled' only: when the task is set to launch, shown beside the verb.
+  scheduledFor?: string
   createdAt: string
 }
 
@@ -67,6 +76,9 @@ type Task = {
   seenAt?: string
   allowEdits: boolean
   allowCommits: boolean
+  // ISO timestamp a scheduled task is set to launch; present only while the
+  // task is resting and waiting for the server's scheduler (or a manual launch).
+  scheduledFor?: string
   messages: Message[]
   events?: TaskEvent[]
   // Follow-ups sent while the agent is busy wait here until a drainer picks
@@ -516,6 +528,7 @@ function Step({
 // How each lifecycle event verb reads in the timeline.
 const EVENT_VERB: Record<TaskEvent['kind'], string> = {
   launched: 'launched',
+  scheduled: 'scheduled',
   wedged: 'wedged',
   unwedged: 'un-wedged',
   landed: 'landed',
@@ -539,6 +552,12 @@ function StatusTransition({ event }: { event: TaskEvent }) {
         )}
         <span className={`status-transition-label ${event.kind}`}>
           {EVENT_VERB[event.kind]}
+          {event.kind === 'scheduled' && event.scheduledFor && (
+            <span className="status-transition-when">
+              {' '}
+              {formatTimestamp(event.scheduledFor)}
+            </span>
+          )}
         </span>
       </span>
       <span className="status-transition-time">
@@ -1334,6 +1353,37 @@ export function App() {
     }
   }
 
+  // Launch a scheduled task now, ahead of its time (the header's "launch"
+  // button). The server clears the schedule, records the launch, and starts the
+  // agent; polling reconciles the new status.
+  async function launchNow() {
+    if (!current) return
+    const id = current.session
+    const proj = current.projectSlug
+    setError(null)
+    // Optimistic: drop the schedule and flip to riding so the button clears at
+    // once and the launch button gives way to the resting one.
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.session === id
+          ? { ...t, status: 'riding', scheduledFor: undefined }
+          : t,
+      ),
+    )
+    try {
+      const r = await fetch(`/api/${proj}/tasks/${id}/launch`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+      })
+      if (!r.ok) {
+        const body = await r.json()
+        throw new Error(body.error ?? r.statusText)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   function onReplyKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     // Plain Enter sends; Shift+Enter / Option(Alt)+Enter inserts a newline.
     if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
@@ -1598,6 +1648,17 @@ export function App() {
                   )}
                 </div>
                 <div className="header-actions">
+                  {/* A scheduled (resting + scheduledFor) task can be launched
+                      now from here; it has no "resting" button since it already
+                      rests, and launching is the meaningful action. */}
+                  {current.status === 'resting' && current.scheduledFor && (
+                    <button
+                      className="launch-button"
+                      onClick={() => void launchNow()}
+                    >
+                      launch
+                    </button>
+                  )}
                   <button
                     className="wedged-button"
                     disabled={current.status === 'wedged'}
@@ -1605,15 +1666,18 @@ export function App() {
                   >
                     wedged
                   </button>
-                  <button
-                    className="resting-button"
-                    disabled={
-                      current.status !== 'wedged' && current.status !== 'landed'
-                    }
-                    onClick={() => void setStatus('resting')}
-                  >
-                    resting
-                  </button>
+                  {!(current.status === 'resting' && current.scheduledFor) && (
+                    <button
+                      className="resting-button"
+                      disabled={
+                        current.status !== 'wedged' &&
+                        current.status !== 'landed'
+                      }
+                      onClick={() => void setStatus('resting')}
+                    >
+                      resting
+                    </button>
+                  )}
                   <button
                     className="landed-button"
                     disabled={current.status === 'landed'}

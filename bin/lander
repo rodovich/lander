@@ -59,6 +59,8 @@ async function newTask(rest) {
     const a = rest[i]
     if (a === '--project') o.project = rest[++i]
     else if (a === '--message') o.message = rest[++i]
+    else if (a === '--title') o.title = rest[++i]
+    else if (a === '--schedule') o.schedule = rest[++i]
     else if (a === '--edits') o.allowEdits = true
     else if (a === '--commits') o.allowCommits = true
     else pos.push(a)
@@ -69,7 +71,8 @@ async function newTask(rest) {
   o.message ??= pos.shift()
   if (o.message === '-') o.message = await readStdin()
   if (!o.message?.trim()) die('usage: lander new <message>')
-  // Title is omitted; the server names the task from the message via haiku.
+  // --title sets the name directly; without it the server asks haiku. --schedule
+  // defers the launch: the server parses the date/time and runs the task then.
   const task = await call(o.project, '/tasks', {
     method: 'POST',
     body: JSON.stringify(o),

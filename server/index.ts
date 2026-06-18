@@ -107,11 +107,21 @@ type Message = {
 // Each event captures the task's title as of that moment so a later rename
 // doesn't change how earlier events read.
 type TaskEvent = {
-  kind: 'launched' | 'wedged' | 'unwedged' | 'landed' | 'unlanded' | 'renamed'
-  // The task's title at the time of the event. Absent on a launch event until
-  // the first generated name amends it, and on events saved before titles were
-  // captured.
+  kind:
+    | 'launched'
+    | 'scheduled'
+    | 'wedged'
+    | 'unwedged'
+    | 'landed'
+    | 'unlanded'
+    | 'renamed'
+  // The task's title at the time of the event. Absent on a launch/schedule event
+  // until the first generated name amends it, and on events saved before titles
+  // were captured.
   title?: string
+  // 'scheduled' only: the date/time the task is set to launch, shown beside the
+  // verb (the event's own createdAt is when it was scheduled).
+  scheduledFor?: string
   createdAt: string
 }
 
@@ -154,6 +164,11 @@ type Task = {
   // driveTask when the current run finishes. Absent on tasks saved before this
   // field existed — treat undefined as empty.
   queued?: string[]
+  // ISO timestamp a scheduled task is set to launch. Set at creation via
+  // `--schedule`; the task rests (its queued opening message untouched) until
+  // the scheduler reaches this time, which clears the field, records a
+  // "launched" event, and drives the queue. Absent on un-scheduled tasks.
+  scheduledFor?: string
 }
 
 async function readTasks(dataDir: string): Promise<Task[]> {
@@ -221,10 +236,13 @@ async function setTitle(
   const file = path.join(dataDir, `${id}.json`)
   const task = JSON.parse(await readFile(file, 'utf8')) as Task
   task.title = title
-  // This is the first generated name for a task launched untitled: fill it into
-  // the launch event rather than recording it as a rename.
-  const launch = task.events?.find((e) => e.kind === 'launched')
-  if (launch && !launch.title) launch.title = title
+  // This is the first generated name for a task created untitled: fill it into
+  // the creation event (a launch, or a "scheduled" event for a deferred task)
+  // rather than recording it as a rename.
+  const created = task.events?.find(
+    (e) => e.kind === 'launched' || e.kind === 'scheduled',
+  )
+  if (created && !created.title) created.title = title
   await writeFile(file, JSON.stringify(task, null, 2))
 }
 
@@ -509,11 +527,16 @@ async function runClaude(
       'You are running inside a lander task. Manage yourself with the `lander` ' +
         'CLI: `lander status <state>` sets any status; `lander wedge` marks it ' +
         'wedged; `lander land` marks it landed; `lander new <message>` ' +
-        'spawns a sibling task that runs independently. When the user asks you ' +
-        'to land a task, do so with `lander land`. Say everything you mean to ' +
-        'say first — your summary, your sign-off, every last word — because ' +
-        'running `lander land` ends the task: the user can see it land, so once ' +
-        'you have run it there is nothing left to confirm or say. Mark it wedged ' +
+        'spawns a sibling task that runs independently. Pass `--title <title>` to ' +
+        'name the spawned task yourself instead of having one generated — use a ' +
+        'concise 2-5 word title in sentence case, with no quotes and no trailing ' +
+        'punctuation. Pass `--schedule <when>` (any date/time the server can ' +
+        'parse, e.g. an ISO timestamp) to defer its launch: it rests until then ' +
+        'and the server runs it at that time. When the user asks you to land a ' +
+        'task, do so with `lander land`. Say everything you mean to say first — ' +
+        'your summary, your sign-off, every last word — because running ' +
+        '`lander land` ends the task: the user can see it land, so once you have ' +
+        'run it there is nothing left to confirm or say. Mark it wedged ' +
         '(`lander wedge`) only when you cannot make progress without the user: ' +
         'you need tool permissions granted, a manual step performed, or a ' +
         'blocking question answered. A spawned task starts with no edit or ' +
@@ -710,6 +733,62 @@ async function driveTask(
   if (leftover) void driveTask(project, id, 'resume')
 }
 
+// Launch a deferred (scheduled) task now: clear its scheduledFor, record the
+// "launched" event, mark it riding, and drive its queued opening message.
+// Drives "start" if it never established a session, "resume" otherwise. A no-op
+// (returns false) if the task isn't actually scheduled or is already running —
+// so the scheduler sweep and a manual launch racing on the same task can't
+// double-launch it or push two "launched" events.
+async function launchTask(project: Project, id: string): Promise<boolean> {
+  const file = path.join(project.dataDir, `${id}.json`)
+  let go = false
+  let everRan = false
+  await mutateTask(file, (t) => {
+    if (!t.scheduledFor || running.has(id)) return
+    everRan = t.messages.some((m) => m.role === 'assistant')
+    delete t.scheduledFor
+    const at = new Date().toISOString()
+    ;(t.events ??= []).push({ kind: 'launched', title: t.title, createdAt: at })
+    t.status = 'riding'
+    t.updatedAt = at
+    go = true
+  }).catch(() => {})
+  if (go) void driveTask(project, id, everRan ? 'resume' : 'start')
+  return go
+}
+
+// Scan every project for scheduled tasks whose launch time has arrived and run
+// them. Best-effort: a periodic sweep (and one on boot) launches each as soon
+// as it's due, or right away if its time already passed while the server was
+// down. launchTask guards against launching one twice.
+async function launchScheduled(): Promise<void> {
+  const now = Date.now()
+  for (const project of PROJECTS) {
+    let names: string[]
+    try {
+      names = await readdir(project.dataDir)
+    } catch {
+      continue
+    }
+    for (const name of names) {
+      if (!name.endsWith('.json')) continue
+      const id = name.slice(0, -'.json'.length)
+      if (running.has(id)) continue
+      let task: Task
+      try {
+        task = JSON.parse(
+          await readFile(path.join(project.dataDir, name), 'utf8'),
+        ) as Task
+      } catch {
+        continue
+      }
+      if (!task.scheduledFor) continue
+      if (Date.parse(task.scheduledFor) > now) continue
+      await launchTask(project, id)
+    }
+  }
+}
+
 // Read the Claude Code OAuth access token the same way the CLI stores it: from
 // the macOS keychain under "Claude Code-credentials", falling back to the
 // ~/.claude/.credentials.json file used on Linux. Returns null if neither is
@@ -883,6 +962,7 @@ app.post('/api/:project/tasks', async (c) => {
     const body = await c.req.json<{
       title?: unknown
       message?: unknown
+      schedule?: unknown
       allowEdits?: unknown
       allowCommits?: unknown
     }>()
@@ -892,6 +972,20 @@ app.post('/api/:project/tasks', async (c) => {
     const allowCommits = body.allowCommits === true
     if (!title && !rawMessage.trim())
       return c.json({ error: 'title or message is required' }, 400)
+
+    // A scheduled task is created at rest and launched later by the scheduler.
+    // Parse the requested launch time up front so a bad value fails loudly
+    // rather than silently creating a task that never runs.
+    let scheduledFor: string | undefined
+    if (typeof body.schedule === 'string' && body.schedule.trim()) {
+      const when = new Date(body.schedule)
+      if (Number.isNaN(when.getTime()))
+        return c.json({ error: 'invalid schedule date/time' }, 400)
+      scheduledFor = when.toISOString()
+    }
+    // Only defer when there's actually a message to run later; a scheduled
+    // task with nothing to do would just sit resting forever.
+    const deferred = scheduledFor !== undefined && rawMessage.trim() !== ''
 
     // Identify the caller once: it gates edit/commit grants below and, when a
     // task spawned this one, supplies the backlink we prepend to the message.
@@ -936,10 +1030,11 @@ app.post('/api/:project/tasks', async (c) => {
     const task: Task = {
       session: id,
       title: title || '…',
-      // "riding" while claude works on the opening message; driveTask flips it
-      // to "resting" when it returns. With no message there's nothing to run,
-      // and the task is "wedged" — it needs the user to supply a first prompt.
-      status: message.trim() ? 'riding' : 'wedged',
+      // A deferred task rests until the scheduler launches it at scheduledFor.
+      // Otherwise "riding" while claude works on the opening message (driveTask
+      // flips it to "resting" when it returns), or "wedged" with no message —
+      // it needs the user to supply a first prompt.
+      status: deferred ? 'resting' : message.trim() ? 'riding' : 'wedged',
       createdAt: now,
       updatedAt: now,
       // Caught up as of creation: the opening message (and launch event) are the
@@ -952,19 +1047,25 @@ app.post('/api/:project/tasks', async (c) => {
       // Authenticates this task's own callbacks (see Task.token).
       token: randomUUID(),
       messages: [{ role: 'user', text: message, createdAt: now }],
-      // A launch event, timestamped a hair before the opening message so the
-      // timeline shows it ahead of that message. Untitled until the first
-      // generated name amends it (setTitle), unless one was supplied up front.
+      // A creation event, timestamped a hair before the opening message so the
+      // timeline shows it ahead of that message. A deferred task gets a
+      // "scheduled" event (carrying the launch time) instead of "launched"; the
+      // matching "launched" event is recorded later when it actually runs.
+      // Untitled until the first generated name amends it (setTitle), unless one
+      // was supplied up front.
       events: [
         {
-          kind: 'launched',
+          kind: deferred ? 'scheduled' : 'launched',
           title: title || undefined,
+          ...(deferred ? { scheduledFor } : {}),
           createdAt: new Date(Date.parse(now) - 1).toISOString(),
         },
       ],
       // The opening message rides the same queue as follow-ups; driveTask
-      // drains it. It stays in `messages` above for display.
+      // drains it (immediately, or when the scheduler launches a deferred task).
+      // It stays in `messages` above for display.
       queued: message.trim() ? [message] : [],
+      ...(deferred ? { scheduledFor } : {}),
     }
 
     await mkdir(project.dataDir, { recursive: true })
@@ -979,8 +1080,9 @@ app.post('/api/:project/tasks', async (c) => {
         .then((t) => setTitle(project.dataDir, id, t))
         .catch(() => {})
 
-    // Kick off claude in the project directory; reply is appended when it finishes.
-    if (message.trim()) void driveTask(project, id, 'start')
+    // Kick off claude in the project directory; reply is appended when it
+    // finishes. A deferred task waits for the scheduler instead.
+    if (message.trim() && !deferred) void driveTask(project, id, 'start')
 
     return c.json(publicTask(task), 201)
   } catch (e) {
@@ -1051,6 +1153,26 @@ app.patch('/api/:project/tasks/:id', async (c) => {
       task.status = body.status
     }
     await writeFile(file, JSON.stringify(task, null, 2))
+    return c.json(publicTask(task))
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
+  }
+})
+
+// Launch a scheduled task immediately, ahead of its scheduled time (the UI's
+// "launch" button on a resting, scheduled task). Clears the schedule, records
+// the "launched" event, and drives the queued opening message.
+app.post('/api/:project/tasks/:id/launch', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  try {
+    const id = c.req.param('id')
+    if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    const launched = await launchTask(project, id)
+    if (!launched)
+      return c.json({ error: 'task is not scheduled' }, 409)
+    const task = await readTask(project.dataDir, id)
+    if (!task) return c.json({ error: 'task not found' }, 404)
     return c.json(publicTask(task))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
@@ -1236,6 +1358,9 @@ async function recoverQueues(): Promise<void> {
         continue
       }
       if (!task.queued || task.queued.length === 0) continue
+      // A scheduled task also carries a queued opening message, but it must wait
+      // for its launch time — launchScheduled owns it, not the queue recovery.
+      if (task.scheduledFor) continue
       const everRan = task.messages.some((m) => m.role === 'assistant')
       await mutateTask(file, (t) => {
         for (const m of t.messages) if (m.pending) m.pending = false
@@ -1281,3 +1406,7 @@ console.log('projects:')
 for (const p of PROJECTS) console.log(`  ${p.slug}  ${p.path}`)
 void backfillSeen()
 void recoverQueues()
+// Launch due scheduled tasks on boot (catching any whose time passed while the
+// server was down), then sweep every 15s to launch each as it comes due.
+void launchScheduled()
+setInterval(() => void launchScheduled(), 15_000)
