@@ -574,9 +574,17 @@ async function runClaude(
       let finalText = ''
       let settled = false
 
-      // spawn has no built-in timeout; kill the run after 10 minutes like the
-      // old execFile timeout did.
-      const timer = setTimeout(() => child.kill('SIGKILL'), 10 * 60_000)
+      // spawn has no built-in timeout. Kill the run after 10 minutes of
+      // silence, rather than 10 minutes total: a turn that's still streaming
+      // output (text, tool calls, tool results) is making progress and should
+      // be allowed to continue. armTimer() resets the clock on every chunk, so
+      // it only fires once the child has gone quiet for the full window.
+      let timer: ReturnType<typeof setTimeout>
+      const armTimer = () => {
+        clearTimeout(timer)
+        timer = setTimeout(() => child.kill('SIGKILL'), 10 * 60_000)
+      }
+      armTimer()
 
       const finish = async (errText?: string) => {
         if (settled) return
@@ -593,6 +601,7 @@ async function runClaude(
 
       child.stdout.setEncoding('utf8')
       child.stdout.on('data', (chunk: string) => {
+        armTimer()
         buf += chunk
         const steps: Step[] = []
         let nl: number
@@ -657,6 +666,7 @@ async function runClaude(
 
       child.stderr.setEncoding('utf8')
       child.stderr.on('data', (chunk: string) => {
+        armTimer()
         stderr += chunk
       })
 
