@@ -165,9 +165,11 @@ type Task = {
   // field existed — treat undefined as empty.
   queued?: string[]
   // ISO timestamp a scheduled task is set to launch. Set at creation via
-  // `--schedule`; the task rests (its queued opening message untouched) until
-  // the scheduler reaches this time, which clears the field, records a
-  // "launched" event, and drives the queue. Absent on un-scheduled tasks.
+  // `--date`/`--wait`, or later via `lander rest` to re-sleep a running task;
+  // the task rests until the scheduler reaches this time, which clears the
+  // field, records a "launched" event, and drives the queue (a deferred new
+  // task's opening message, or a generated "Resumed at …" prompt for a rested
+  // one). Absent on un-scheduled tasks.
   scheduledFor?: string
 }
 
@@ -530,10 +532,14 @@ async function runClaude(
         'spawns a sibling task that runs independently. Pass `--title <title>` to ' +
         'name the spawned task yourself instead of having one generated — use a ' +
         'concise 2-5 word title in sentence case, with no quotes and no trailing ' +
-        'punctuation. Pass `--schedule <when>` (any date/time the server can ' +
-        'parse, e.g. an ISO timestamp) to defer its launch: it rests until then ' +
-        'and the server runs it at that time. When the user asks you to land a ' +
-        'task, do so with `lander land`. Say everything you mean to say first — ' +
+        'punctuation. Pass `--date <when>` (any date/time the server can parse, ' +
+        'e.g. an ISO timestamp) or `--wait <minutes>` (a number of minutes from ' +
+        'now) to defer its launch: it rests until then and the server runs it at ' +
+        'that time; the two are mutually exclusive. `lander rest` takes the same ' +
+        '`--date`/`--wait` flags to put the current task to rest with a scheduled ' +
+        'wakeup — it resumes then with a generated "Resumed at …" message. When ' +
+        'the user asks you to land a task, do so with `lander land`. Say ' +
+        'everything you mean to say first — ' +
         'your summary, your sign-off, every last word — because running ' +
         '`lander land` ends the task: the user can see it land, so once you have ' +
         'run it there is nothing left to confirm or say. Mark it wedged ' +
@@ -751,6 +757,15 @@ async function launchTask(project: Project, id: string): Promise<boolean> {
     ;(t.events ??= []).push({ kind: 'launched', title: t.title, createdAt: at })
     t.status = 'riding'
     t.updatedAt = at
+    // A task put to rest with `lander rest` has already run its opening turn, so
+    // nothing is queued to wake it — give the agent a prompt announcing it's
+    // back. A task scheduled at creation (`new --date`) still has its opening
+    // message queued and drives that instead, so skip the synthetic prompt.
+    if (everRan && !(t.queued && t.queued.length)) {
+      const text = `Resumed at ${new Date(at).toLocaleString()}.`
+      t.messages.push({ role: 'user', text, createdAt: at })
+      ;(t.queued ??= []).push(text)
+    }
     go = true
   }).catch(() => {})
   if (go) void driveTask(project, id, everRan ? 'resume' : 'start')
@@ -955,6 +970,38 @@ app.get('/api/:project/tasks', async (c) => {
   }
 })
 
+// Resolve a requested wakeup time from either `date` (any date/time the server
+// can parse) or `wait` (minutes from now). The two are mutually exclusive. Used
+// by task creation (`--date`/`--wait` on `lander new`) and by `lander rest`.
+// Returns the ISO launch time, null when neither was given, or an error string
+// for a bad/conflicting value — so a bad request fails loudly rather than
+// silently creating something that never wakes.
+function resolveSchedule(body: {
+  date?: unknown
+  wait?: unknown
+}): { scheduledFor: string | null } | { error: string } {
+  const hasDate = typeof body.date === 'string' && body.date.trim() !== ''
+  const hasWait = body.wait !== undefined && body.wait !== null
+  if (hasDate && hasWait)
+    return { error: '--date and --wait are mutually exclusive' }
+  if (hasDate) {
+    const when = new Date((body.date as string).trim())
+    if (Number.isNaN(when.getTime()))
+      return { error: 'invalid schedule date/time' }
+    return { scheduledFor: when.toISOString() }
+  }
+  if (hasWait) {
+    const minutes =
+      typeof body.wait === 'number' ? body.wait : Number(body.wait)
+    if (!Number.isFinite(minutes) || minutes <= 0)
+      return { error: 'invalid wait minutes' }
+    return {
+      scheduledFor: new Date(Date.now() + minutes * 60_000).toISOString(),
+    }
+  }
+  return { scheduledFor: null }
+}
+
 app.post('/api/:project/tasks', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
@@ -962,7 +1009,8 @@ app.post('/api/:project/tasks', async (c) => {
     const body = await c.req.json<{
       title?: unknown
       message?: unknown
-      schedule?: unknown
+      date?: unknown
+      wait?: unknown
       allowEdits?: unknown
       allowCommits?: unknown
     }>()
@@ -974,15 +1022,11 @@ app.post('/api/:project/tasks', async (c) => {
       return c.json({ error: 'title or message is required' }, 400)
 
     // A scheduled task is created at rest and launched later by the scheduler.
-    // Parse the requested launch time up front so a bad value fails loudly
+    // Resolve the requested launch time up front so a bad value fails loudly
     // rather than silently creating a task that never runs.
-    let scheduledFor: string | undefined
-    if (typeof body.schedule === 'string' && body.schedule.trim()) {
-      const when = new Date(body.schedule)
-      if (Number.isNaN(when.getTime()))
-        return c.json({ error: 'invalid schedule date/time' }, 400)
-      scheduledFor = when.toISOString()
-    }
+    const sched = resolveSchedule(body)
+    if ('error' in sched) return c.json({ error: sched.error }, 400)
+    const scheduledFor = sched.scheduledFor ?? undefined
     // Only defer when there's actually a message to run later; a scheduled
     // task with nothing to do would just sit resting forever.
     const deferred = scheduledFor !== undefined && rawMessage.trim() !== ''
@@ -1171,6 +1215,53 @@ app.post('/api/:project/tasks/:id/launch', async (c) => {
     const launched = await launchTask(project, id)
     if (!launched)
       return c.json({ error: 'task is not scheduled' }, 409)
+    const task = await readTask(project.dataDir, id)
+    if (!task) return c.json({ error: 'task not found' }, 404)
+    return c.json(publicTask(task))
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
+  }
+})
+
+// Put a task to rest with a scheduled wakeup (`lander rest`). Mirrors a deferred
+// `new`: it records a `scheduled` event carrying the wakeup time and sets
+// scheduledFor, so the scheduler relaunches it then. Unlike `new --date`, the
+// task has already run, so launchTask wakes the agent with a generated "Resumed
+// at …" message rather than a queued opening one. Called by the in-task CLI
+// while the agent's turn is in flight, so it goes through mutateTask to avoid
+// clobbering the concurrent streaming writes.
+app.post('/api/:project/tasks/:id/rest', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  try {
+    const id = c.req.param('id')
+    if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    const file = path.join(project.dataDir, `${id}.json`)
+    if (!(await readTask(project.dataDir, id)))
+      return c.json({ error: 'task not found' }, 404)
+
+    const body = await c.req.json<{ date?: unknown; wait?: unknown }>()
+    const sched = resolveSchedule(body)
+    if ('error' in sched) return c.json({ error: sched.error }, 400)
+    if (!sched.scheduledFor)
+      return c.json({ error: 'a date/time (--date) or wait (--wait) is required' }, 400)
+    const scheduledFor = sched.scheduledFor
+
+    const at = new Date().toISOString()
+    await mutateTask(file, (t) => {
+      // Record leaving any notable status (wedged/landed); resting itself is a
+      // quiet status, so this is usually a no-op for the riding agent.
+      recordStatusTransition(t, 'resting', at)
+      t.scheduledFor = scheduledFor
+      ;(t.events ??= []).push({
+        kind: 'scheduled',
+        title: t.title,
+        scheduledFor,
+        createdAt: at,
+      })
+      t.status = 'resting'
+      t.updatedAt = at
+    })
     const task = await readTask(project.dataDir, id)
     if (!task) return c.json({ error: 'task not found' }, 404)
     return c.json(publicTask(task))

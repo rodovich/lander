@@ -52,6 +52,16 @@ async function readStdin() {
   return Buffer.concat(chunks).toString('utf8')
 }
 
+// --date (a date/time the server parses) and --wait (minutes from now) both set
+// a wakeup time; they're mutually exclusive, and --wait must be a positive
+// number. Shared by `new` (where a wakeup is optional) and `rest`.
+function validateSchedule(o) {
+  if (o.date != null && o.wait != null)
+    die('--date and --wait are mutually exclusive')
+  if (o.wait != null && !(Number.isFinite(o.wait) && o.wait > 0))
+    die('--wait expects a positive number of minutes')
+}
+
 async function newTask(rest) {
   const o = { project: PROJECT, allowEdits: false, allowCommits: false }
   const pos = []
@@ -60,7 +70,8 @@ async function newTask(rest) {
     if (a === '--project') o.project = rest[++i]
     else if (a === '--message') o.message = rest[++i]
     else if (a === '--title') o.title = rest[++i]
-    else if (a === '--schedule') o.schedule = rest[++i]
+    else if (a === '--date') o.date = rest[++i]
+    else if (a === '--wait') o.wait = Number(rest[++i])
     else if (a === '--edits') o.allowEdits = true
     else if (a === '--commits') o.allowCommits = true
     else pos.push(a)
@@ -71,8 +82,10 @@ async function newTask(rest) {
   o.message ??= pos.shift()
   if (o.message === '-') o.message = await readStdin()
   if (!o.message?.trim()) die('usage: lander new <message>')
-  // --title sets the name directly; without it the server asks haiku. --schedule
-  // defers the launch: the server parses the date/time and runs the task then.
+  validateSchedule(o)
+  // --title sets the name directly; without it the server asks haiku. --date or
+  // --wait defers the launch (a date/time the server parses, or N minutes from
+  // now) and the server runs the task then.
   const task = await call(o.project, '/tasks', {
     method: 'POST',
     body: JSON.stringify(o),
@@ -80,16 +93,40 @@ async function newTask(rest) {
   console.log(task.session) // print new task id for the orchestrator to track
 }
 
+// Put the current task to rest with a scheduled wakeup. Takes the same
+// --date/--wait flags as `new`, but one is required (a wakeup needs a time).
+// The server flips the task to resting, records a `scheduled` event, and wakes
+// it at that time with a generated "Resumed at …" message.
+async function restTask(args) {
+  if (!TASK) die('no current task (LANDER_TASK unset)')
+  const o = {}
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]
+    if (a === '--date') o.date = args[++i]
+    else if (a === '--wait') o.wait = Number(args[++i])
+    else die(`rest: unexpected argument ${a}`)
+  }
+  if (o.date == null && o.wait == null)
+    die('usage: lander rest (--date <when> | --wait <minutes>)')
+  validateSchedule(o)
+  await call(PROJECT, `/tasks/${TASK}/rest`, {
+    method: 'POST',
+    body: JSON.stringify(o),
+  })
+  console.log('resting')
+}
+
 const [cmd, ...rest] = process.argv.slice(2)
 const run = {
   land: () => setStatus('landed', { quiet: true }),
   wedge: () => setStatus('wedged'),
+  rest: () => restTask(rest),
   status: () => setStatus(rest[0] || die('usage: lander status <status>')),
   new: () => newTask(rest),
 }[cmd]
 if (!run)
   die(
     `unknown command: ${cmd ?? '(none)'} — try ` +
-      'land | wedge | status <status> | new <message>',
+      'land | wedge | rest (--date|--wait) | status <status> | new <message>',
   )
 run().catch((e) => die(e.message))
