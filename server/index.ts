@@ -1426,10 +1426,24 @@ app.post('/api/:project/tasks/:id/seen', async (c) => {
   }
 })
 
-// On boot, resume any tasks that still have queued messages from before a
-// restart so they aren't stranded. Their in-flight run (if any) died with the
-// old process, so clear stale `pending` flags first, then drive the queue. A
-// task with no assistant turn yet never established its session — start it.
+// On boot, recover tasks the previous process left mid-flight so they aren't
+// stranded. Two cases, both detectable now that the in-memory `running` set is
+// empty (so nothing in this process is driving them, and no `close` handler
+// will ever fire to flip them out of "riding"):
+//
+//   - queued messages that never got drained — resume and drain them.
+//   - interrupted mid-run: left "riding" with an empty queue, because driveTask
+//     shifts a prompt off the queue *before* running it, so a crash/restart
+//     mid-turn loses the queue entry and the run's `finally` never resets the
+//     status. These are invisible to the queue check above and would otherwise
+//     sit "riding" with a stale `pending` message forever.
+//
+// Either way, clear stale `pending` flags first. For an interrupted task with
+// nothing left queued, re-supply a prompt so driveTask has a turn to run: a
+// "Resumed at …" nudge (mirroring launchTask) for one that already replied, or
+// — for one whose opening run died before any reply — the original opening
+// message replayed (no session exists yet, so it starts fresh). A task with no
+// assistant turn yet never established its session — start it; otherwise resume.
 async function recoverQueues(): Promise<void> {
   for (const project of PROJECTS) {
     let names: string[]
@@ -1448,13 +1462,34 @@ async function recoverQueues(): Promise<void> {
       } catch {
         continue
       }
-      if (!task.queued || task.queued.length === 0) continue
-      // A scheduled task also carries a queued opening message, but it must wait
-      // for its launch time — launchScheduled owns it, not the queue recovery.
+      // A scheduled task waits for its launch time — launchScheduled owns it,
+      // not the queue recovery (it carries a queued opening message too).
       if (task.scheduledFor) continue
+      const hasQueue = !!(task.queued && task.queued.length)
+      // "riding" at boot can only be a run interrupted by the previous process
+      // dying, since nothing is driving it now.
+      const interrupted = task.status === 'riding' && !hasQueue
+      if (!hasQueue && !interrupted) continue
       const everRan = task.messages.some((m) => m.role === 'assistant')
       await mutateTask(file, (t) => {
         for (const m of t.messages) if (m.pending) m.pending = false
+        if (interrupted) {
+          if (everRan) {
+            const at = new Date().toISOString()
+            const text = `Resumed at ${new Date(at).toLocaleString()} after the previous run was interrupted.`
+            t.messages.push({ role: 'user', text, createdAt: at })
+            ;(t.queued ??= []).push(text)
+            t.updatedAt = at
+          } else {
+            // The opening run died before any reply. Replay the original opening
+            // prompt (the last/only user message) without adding a duplicate
+            // display message; driveTask will run it as a fresh "start".
+            const opening = [...t.messages]
+              .reverse()
+              .find((m) => m.role === 'user')
+            if (opening) (t.queued ??= []).push(opening.text)
+          }
+        }
       }).catch(() => {})
       void driveTask(project, id, everRan ? 'resume' : 'start')
     }
