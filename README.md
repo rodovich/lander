@@ -82,7 +82,7 @@ gh pr list --search "review-requested:@me" --json number -q '.[].number' |
   while read pr; do lander new "Review PR #$pr using \`gh pr diff $pr\`."; done
 ```
 
-So that an agent-set status survives, `runClaude` only resets `riding → wedged` on exit — it won't clobber a terminal status like `landed` the agent set mid-run.
+So that an agent-set status survives, `driveTask` only resets `riding → resting` on exit — it won't clobber a status like `wedged` or the terminal `landed` the agent set mid-run.
 
 ### Frontend (`src/App.tsx`)
 
@@ -92,6 +92,6 @@ Each streamed turn renders its activity trace as steps. A `tool_use` step is a c
 
 ## Notable details
 
-- `status` moves through `riding` (agent working) → `wedged` (at rest), and an agent can set its own status — including the terminal `landed` — via the `lander` CLI (see Self-management).
+- `status` moves through `riding` (agent working) → `resting` (idle) when a turn finishes; an agent can also set its own status — `wedged` (needs the user) or the terminal `landed` — via the `lander` CLI (see Self-management).
 - No auth, no streaming (replies land only when the subprocess fully exits), no websockets — it relies on 2s polling.
 - Task IDs are validated as UUIDs before filesystem access, which guards against path traversal on the `:id` route.
