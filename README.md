@@ -17,6 +17,8 @@ npm install
 npm run dev /path/to/project [/path/to/another ...]
 ```
 
+Type-check with `npm run typecheck`.
+
 Each path is resolved and the list is exported as `PROJECT_DIRS` (newline-separated); these are the working directories where `claude` runs. Then open the web UI on port 41414.
 
 Each project gets a URL slug from its path (e.g. `/Users/me/code/app` → `users-me-code-app`). The sidebar shows a dropdown to switch projects; choosing one pushes its slug into the URL (`/users-me-code-app/`). Visiting `/` redirects to the first project passed on the command line.
