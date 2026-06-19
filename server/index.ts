@@ -181,6 +181,12 @@ type Task = {
   // driveTask when the current run finishes. Absent on tasks saved before this
   // field existed — treat undefined as empty.
   queued?: string[]
+  // Messages addressed to this task with a future delivery time, sent by another
+  // task via `lander send --date/--wait`. The scheduler delivers each when due —
+  // appending it as a user message, queueing it, and driving the task, exactly
+  // as an immediate send would — then drops it. The text already carries its
+  // sender backlink. Absent when none are pending.
+  scheduledMessages?: { text: string; deliverAt: string }[]
   // ISO timestamp a scheduled task is set to launch. Set at creation via
   // `--date`/`--wait`, or later via `lander rest` to re-sleep a running task;
   // the task rests until the scheduler reaches this time, which clears the
@@ -668,7 +674,12 @@ function buildClaudeArgs(
       'now) to defer its launch: it rests until then and the server runs it at ' +
       'that time; the two are mutually exclusive. `lander rest` takes the same ' +
       '`--date`/`--wait` flags to put the current task to rest with a scheduled ' +
-      'wakeup — it resumes then with a generated "Resumed at …" message. When ' +
+      'wakeup — it resumes then with a generated "Resumed at …" message. ' +
+      '`lander list` lists this project\'s tasks (`--status` filters, `--json` ' +
+      'for raw); `lander view <id>` shows one task (id or unambiguous short-id ' +
+      'prefix); `lander send <id> <message>` messages another task in this ' +
+      'project — immediately (queued behind any turn it is mid-way through), or ' +
+      'deferred with the same `--date`/`--wait` flags. When ' +
       'the user asks you to land a task, do so with `lander land`. Say ' +
       'everything you mean to say first — ' +
       'your summary, your sign-off, every last word — because running ' +
@@ -997,10 +1008,51 @@ async function launchTask(project: Project, id: string): Promise<boolean> {
   return go
 }
 
+// Deliver a task's now-due scheduled messages (from `lander send --date/--wait`):
+// append each as a user message, queue it, and drive the task — the same path an
+// immediate send takes. Not-yet-due messages stay put. Skipped while the task is
+// itself awaiting a future scheduled launch, so a queued message can't wake a
+// deferred task ahead of its time; it'll be delivered once the task launches.
+async function deliverScheduledMessages(
+  project: Project,
+  id: string,
+  now: number,
+): Promise<void> {
+  const file = path.join(project.dataDir, `${id}.json`)
+  let drive = false
+  let everRan = false
+  await mutateTask(file, (t) => {
+    if (t.scheduledFor && Date.parse(t.scheduledFor) > now) return
+    const pending = t.scheduledMessages ?? []
+    const due = pending.filter((m) => Date.parse(m.deliverAt) <= now)
+    if (!due.length) return
+    const rest = pending.filter((m) => Date.parse(m.deliverAt) > now)
+    if (rest.length) t.scheduledMessages = rest
+    else delete t.scheduledMessages
+    everRan = t.messages.some((m) => m.role === 'assistant')
+    const at = new Date().toISOString()
+    // Delivery revives a wedged/landed recipient, same as a live send; record
+    // the transition a hair ahead of the messages so the timeline orders right.
+    recordStatusTransition(t, 'riding', new Date(Date.parse(at) - 1).toISOString())
+    for (const m of due) {
+      t.messages.push({ role: 'user', text: m.text, createdAt: at })
+      ;(t.queued ??= []).push(m.text)
+    }
+    t.status = 'riding'
+    t.updatedAt = at
+    drive = true
+  }).catch(() => {})
+  // Mirror the /messages endpoint: a run already in flight drains the queue when
+  // it finishes; otherwise start a drainer now. Resume if the session exists.
+  if (drive && !running.has(id))
+    void driveTask(project, id, everRan ? 'resume' : 'start')
+}
+
 // Scan every project for scheduled tasks whose launch time has arrived and run
-// them. Best-effort: a periodic sweep (and one on boot) launches each as soon
-// as it's due, or right away if its time already passed while the server was
-// down. launchTask guards against launching one twice.
+// them, and deliver any due scheduled messages. Best-effort: a periodic sweep
+// (and one on boot) acts as soon as each is due, or right away if its time
+// already passed while the server was down. launchTask guards against launching
+// one twice.
 async function launchScheduled(): Promise<void> {
   const now = Date.now()
   for (const project of PROJECTS) {
@@ -1013,7 +1065,6 @@ async function launchScheduled(): Promise<void> {
     for (const name of names) {
       if (!name.endsWith('.json')) continue
       const id = name.slice(0, -'.json'.length)
-      if (running.has(id)) continue
       let task: Task
       try {
         task = JSON.parse(
@@ -1022,6 +1073,12 @@ async function launchScheduled(): Promise<void> {
       } catch {
         continue
       }
+      // Deliver due scheduled messages first — independent of the task's own
+      // scheduled launch, and even while it's running (delivery just enqueues).
+      if (task.scheduledMessages?.some((m) => Date.parse(m.deliverAt) <= now))
+        await deliverScheduledMessages(project, id, now)
+      // Then launch a deferred task whose time has come.
+      if (running.has(id)) continue
       if (!task.scheduledFor) continue
       if (Date.parse(task.scheduledFor) > now) continue
       await launchTask(project, id)
@@ -1193,6 +1250,17 @@ app.get('/api/:project/tasks', async (c) => {
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
+})
+
+// A single task by id (for `lander view`). Same public shape as the list.
+app.get('/api/:project/tasks/:id', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  const id = c.req.param('id')
+  if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+  const task = await readTask(project.dataDir, id)
+  if (!task) return c.json({ error: 'task not found' }, 404)
+  return c.json(publicTask(task))
 })
 
 // Resolve a requested wakeup time from either `date` (any date/time the server
@@ -1550,9 +1618,47 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
       return c.json({ error: 'task not found' }, 404)
     }
 
-    const body = await c.req.json<{ message?: unknown }>()
-    const message = typeof body.message === 'string' ? body.message : ''
-    if (!message.trim()) return c.json({ error: 'message is required' }, 400)
+    const body = await c.req.json<{
+      message?: unknown
+      date?: unknown
+      wait?: unknown
+    }>()
+    const rawMessage = typeof body.message === 'string' ? body.message : ''
+    if (!rawMessage.trim()) return c.json({ error: 'message is required' }, 400)
+
+    // A task may only message tasks in its own project (the human, via the UI
+    // token, may message any). The `lander send` CLI always targets the caller's
+    // own project, so this just enforces that server-side.
+    const principal = await resolvePrincipal(c.req)
+    if (principal.kind === 'task' && principal.slug !== c.req.param('project'))
+      return c.json(
+        { error: 'a task may only message tasks in its own project' },
+        403,
+      )
+
+    // When one task messages another, lead with a backlink to the sender, just
+    // like the spawn backlink, so the recipient (and a human reader) can trace
+    // who sent it. A task messaging itself, or the human via the UI, is bare.
+    const message =
+      principal.kind === 'task' && principal.task.session !== id
+        ? `✉ From [${principal.task.title}](/${principal.slug}/${principal.task.session})\n\n${rawMessage}`
+        : rawMessage
+
+    // A `--date`/`--wait` send defers delivery; absent both, deliver now.
+    const sched = resolveSchedule(body)
+    if ('error' in sched) return c.json({ error: sched.error }, 400)
+
+    if (sched.scheduledFor) {
+      // Stash on the recipient; the scheduler delivers and drives it when due.
+      // Don't touch status or queue now — the task may be resting (or even
+      // landed) until then. mutateTask avoids clobbering a concurrent run.
+      const deliverAt = sched.scheduledFor
+      await mutateTask(file, (t) => {
+        ;(t.scheduledMessages ??= []).push({ text: message, deliverAt })
+      })
+      const updated = await readTask(project.dataDir, id)
+      return c.json(publicTask(updated ?? task))
+    }
 
     const now = new Date().toISOString()
     // Sending revives a wedged or landed (terminal) task — record the

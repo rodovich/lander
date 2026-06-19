@@ -122,6 +122,89 @@ async function restTask(args) {
   console.log('resting')
 }
 
+// Resolve a task id from a full id or any unambiguous prefix (so an agent can
+// paste the short id `lander list` prints). Matches within the caller's project.
+async function resolveId(idOrPrefix) {
+  if (!idOrPrefix) die('a task id is required')
+  const tasks = await call(PROJECT, '/tasks', { method: 'GET' })
+  const matches = tasks.filter((t) => t.session.startsWith(idOrPrefix))
+  if (matches.length === 0) die(`no task matching ${idOrPrefix}`)
+  if (matches.length > 1)
+    die(`ambiguous task id ${idOrPrefix} (${matches.length} matches)`)
+  return matches[0].session
+}
+
+// `lander list [--status <s>] [--json]` — the project's tasks, newest first.
+async function listTasks(args) {
+  let status
+  let json = false
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]
+    if (a === '--status') status = args[++i]
+    else if (a === '--json') json = true
+    else die(`list: unexpected argument ${a}`)
+  }
+  let tasks = await call(PROJECT, '/tasks', { method: 'GET' })
+  if (status) tasks = tasks.filter((t) => t.status === status)
+  if (json) return void console.log(JSON.stringify(tasks, null, 2))
+  if (!tasks.length) return void console.log('(no tasks)')
+  for (const t of tasks) {
+    const sched = t.scheduledFor ? `  ⏰ ${t.scheduledFor}` : ''
+    console.log(
+      `${t.session.slice(0, 8)}  ${t.status.padEnd(7)}  ${t.title}${sched}`,
+    )
+  }
+}
+
+// `lander view <id> [--json]` — one task's status and recent conversation.
+async function viewTask(args) {
+  let json = false
+  const pos = []
+  for (const a of args) {
+    if (a === '--json') json = true
+    else pos.push(a)
+  }
+  if (!pos[0]) die('usage: lander view <id>')
+  const id = await resolveId(pos[0])
+  const task = await call(PROJECT, `/tasks/${id}`, { method: 'GET' })
+  if (json) return void console.log(JSON.stringify(task, null, 2))
+  console.log(`${task.title}  [${task.status}]`)
+  console.log(`id: ${task.session}`)
+  if (task.scheduledFor) console.log(`scheduled: ${task.scheduledFor}`)
+  console.log(`edits: ${task.allowEdits}  commits: ${task.allowCommits}`)
+  for (const m of task.messages.slice(-6)) {
+    const text = m.text.length > 600 ? `${m.text.slice(0, 600)}…` : m.text
+    console.log(`\n${m.role}:\n${text}`)
+  }
+}
+
+// `lander send <id> <message|-> [--date <when> | --wait <minutes>]` — message
+// another task in this project. Without a schedule the message is delivered now
+// (queued behind any in-flight turn); --date/--wait defer delivery to that time.
+async function sendTask(args) {
+  const o = {}
+  const pos = []
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]
+    if (a === '--date') o.date = args[++i]
+    else if (a === '--wait') o.wait = Number(args[++i])
+    else pos.push(a)
+  }
+  const target = pos.shift()
+  if (!target) die('usage: lander send <id> <message>')
+  let message = pos.shift()
+  if (message === '-') message = await readStdin()
+  if (!message?.trim()) die('usage: lander send <id> <message|->')
+  validateSchedule(o)
+  const id = await resolveId(target)
+  await call(PROJECT, `/tasks/${id}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ message, date: o.date, wait: o.wait }),
+  })
+  const verb = o.date != null || o.wait != null ? 'scheduled' : 'sent'
+  console.log(`${verb} → ${id.slice(0, 8)}`)
+}
+
 // `lander run <jobfile>` — the detached turn runner the server launches (not for
 // agents). It owns the claude child, appends its raw stream-json stdout to the
 // run's log, and records liveness (lease.json, refreshed while running) and
@@ -219,11 +302,15 @@ const run = {
   rest: () => restTask(rest),
   status: () => setStatus(rest[0] || die('usage: lander status <status>')),
   new: () => newTask(rest),
+  list: () => listTasks(rest),
+  view: () => viewTask(rest),
+  send: () => sendTask(rest),
   run: () => runJob(rest),
 }[cmd]
 if (!run)
   die(
     `unknown command: ${cmd ?? '(none)'} — try ` +
-      'land | wedge | rest (--date|--wait) | status <status> | new <message>',
+      'land | wedge | rest (--date|--wait) | status <status> | new <message> | ' +
+      'list | view <id> | send <id> <message>',
   )
 run().catch((e) => die(e.message))
