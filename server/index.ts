@@ -397,22 +397,37 @@ function isPermissionDenial(text: string): boolean {
   )
 }
 
-// Flatten a tool_result block's content (a plain string or an array of content
-// blocks) to a single whitespace-collapsed line.
-function flattenToolResult(content: unknown): string {
-  let text = ''
-  if (typeof content === 'string') text = content
-  else if (Array.isArray(content))
-    text = content
+// Concatenate a tool_result block's content (a plain string or an array of
+// content blocks) into its raw text, preserving newlines.
+function rawToolResultText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content))
+    return content
       .map((b) => (b && typeof b === 'object' ? String((b as any).text ?? '') : ''))
       .join('')
-  return text.replace(/\s+/g, ' ').trim()
+  return ''
 }
 
-// A short text peek at a tool_result for the activity trace.
+// Flatten a tool_result's content to a single whitespace-collapsed line — for
+// substring matching (e.g. permission-denial detection), not for display.
+function flattenToolResult(content: unknown): string {
+  return rawToolResultText(content).replace(/\s+/g, ' ').trim()
+}
+
+// A short text peek at a tool_result for the activity trace. Keeps line breaks
+// so multi-line output stays readable, but caps the peek at 200 characters or 3
+// lines, whichever comes first. A character cap appends an inline ellipsis; a
+// line cap puts the ellipsis on its own line.
 function summarizeToolResult(content: unknown): string {
-  const flat = flattenToolResult(content)
-  return flat.length > 200 ? flat.slice(0, 200) + '…' : flat
+  let text = rawToolResultText(content).trim()
+  let charCapped = false
+  if (text.length > 200) {
+    text = text.slice(0, 200)
+    charCapped = true
+  }
+  const lines = text.split('\n')
+  if (lines.length > 3) return lines.slice(0, 3).join('\n') + '\n…'
+  return charCapped ? text + '…' : text
 }
 
 // Append a permission rule to a project's .claude/settings.local.json — the
@@ -640,7 +655,7 @@ async function runClaude(
                 const isError = block.is_error === true
                 steps.push({
                   kind: 'tool_result',
-                  text: flat.length > 200 ? flat.slice(0, 200) + '…' : flat,
+                  text: summarizeToolResult(block.content),
                   toolUseId: block.tool_use_id,
                   isError,
                   blocked: isError && isPermissionDenial(flat),
