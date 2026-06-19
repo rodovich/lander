@@ -1,7 +1,13 @@
 #!/usr/bin/env node
-// lander — lets an in-task agent call back into the lander server.
-// Identity is injected by runClaude: LANDER_API, LANDER_PROJECT, LANDER_TASK,
-// and LANDER_TOKEN (the per-task secret that authenticates these callbacks).
+// lander — lets an in-task agent call back into the lander server, and (via the
+// internal `run` command) is the detached process the server launches to drive
+// one claude turn.
+// Identity is injected when the server runs a turn: LANDER_API, LANDER_PROJECT,
+// LANDER_TASK, and LANDER_TOKEN (the per-task secret that authenticates these
+// callbacks).
+import { spawn } from 'node:child_process'
+import { createWriteStream, readFileSync, writeFileSync } from 'node:fs'
+
 const {
   LANDER_API: API,
   LANDER_PROJECT: PROJECT,
@@ -116,6 +122,96 @@ async function restTask(args) {
   console.log('resting')
 }
 
+// `lander run <jobfile>` — the detached turn runner the server launches (not for
+// agents). It owns the claude child, appends its raw stream-json stdout to the
+// run's log, and records liveness (lease.json, refreshed while running) and
+// completion (done.json). The server only ever reads these files, so the agent
+// keeps working even if the server restarts mid-turn. Everything it needs comes
+// from the job file; it ignores the LANDER_* identity env above — that identity
+// is injected into claude through the job's own `env`.
+async function runJob(args) {
+  const jobPath = args[0]
+  if (!jobPath) die('usage: lander run <jobfile>')
+  let job
+  try {
+    job = JSON.parse(readFileSync(jobPath, 'utf8'))
+  } catch (e) {
+    die(`run: cannot read job ${jobPath}: ${e.message}`)
+  }
+
+  const startedAt = new Date().toISOString()
+  const writeLease = () => {
+    try {
+      writeFileSync(
+        job.leasePath,
+        JSON.stringify({
+          pid: process.pid,
+          startedAt,
+          heartbeatAt: new Date().toISOString(),
+        }),
+      )
+    } catch {}
+  }
+  // Write the lease before spawning so a reattaching server finds a live pid
+  // immediately, then refresh it while we run so a stale heartbeat marks a death.
+  writeLease()
+  const heartbeat = setInterval(writeLease, 5000)
+
+  const log = createWriteStream(job.logPath, { flags: 'a' })
+  let stderr = ''
+  let settled = false
+  const finish = (exitCode) => {
+    if (settled) return
+    settled = true
+    clearTimeout(timer)
+    clearInterval(heartbeat)
+    // Flush the log, then record completion so the server's reducer finalizes
+    // the turn (and surfaces a non-zero exit, with stderr, as an error reply).
+    log.end(() => {
+      try {
+        writeFileSync(
+          job.donePath,
+          JSON.stringify({
+            exitCode,
+            stderr: stderr.trim(),
+            endedAt: new Date().toISOString(),
+          }),
+        )
+      } catch {}
+      process.exit(0)
+    })
+  }
+
+  const child = spawn('claude', job.claudeArgs, {
+    cwd: job.cwd,
+    env: { ...process.env, ...job.env },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+
+  // Kill the run after the idle window with no output; a still-streaming turn
+  // resets the clock and keeps going.
+  let timer
+  const arm = () => {
+    clearTimeout(timer)
+    timer = setTimeout(() => child.kill('SIGKILL'), job.idleTimeoutMs)
+  }
+  arm()
+
+  child.stdout.on('data', (chunk) => {
+    arm()
+    log.write(chunk)
+  })
+  child.stderr.on('data', (chunk) => {
+    arm()
+    stderr += chunk.toString()
+  })
+  child.on('error', (e) => {
+    stderr += `error running claude: ${e.message}`
+    finish(1)
+  })
+  child.on('close', (code) => finish(code == null ? 1 : code))
+}
+
 const [cmd, ...rest] = process.argv.slice(2)
 const run = {
   land: () => setStatus('landed', { quiet: true }),
@@ -123,6 +219,7 @@ const run = {
   rest: () => restTask(rest),
   status: () => setStatus(rest[0] || die('usage: lander status <status>')),
   new: () => newTask(rest),
+  run: () => runJob(rest),
 }[cmd]
 if (!run)
   die(

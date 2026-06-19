@@ -1,7 +1,15 @@
 import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
 import { randomUUID } from 'node:crypto'
-import { readdir, readFile, writeFile, mkdir, rename } from 'node:fs/promises'
+import {
+  readdir,
+  readFile,
+  writeFile,
+  mkdir,
+  rename,
+  open,
+  stat,
+} from 'node:fs/promises'
 import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import path from 'node:path'
@@ -30,7 +38,15 @@ function projectSlug(p: string): string {
   return normalizeProjectPath(p).toLowerCase()
 }
 
-type Project = { path: string; slug: string; dataDir: string }
+type Project = {
+  path: string
+  slug: string
+  dataDir: string
+  // Sibling of dataDir: ./data/<normalized-project-path>/runs, holding one
+  // <runId>/ directory per turn (job spec, append-only output log, lease, done
+  // marker). The runner writes these; the server only reads them.
+  runsDir: string
+}
 
 // Projects come in newline-separated via PROJECT_DIRS (set by dev.mjs from the
 // command-line args), falling back to the legacy single PROJECT_DIR, then cwd.
@@ -53,6 +69,7 @@ function parseProjects(): Project[] {
       path: resolved,
       slug,
       dataDir: path.join(ROOT, 'data', normalizeProjectPath(resolved), 'tasks'),
+      runsDir: path.join(ROOT, 'data', normalizeProjectPath(resolved), 'runs'),
     })
   }
   return projects
@@ -171,6 +188,15 @@ type Task = {
   // task's opening message, or a generated "Resumed at …" prompt for a rested
   // one). Absent on un-scheduled tasks.
   scheduledFor?: string
+  // The id of the run (under the project's runs dir) currently being reduced
+  // onto this task, and how many bytes of that run's output log have already
+  // been folded in. Set when a turn's runner is launched, cleared when its
+  // output is fully reduced. Because the runner is a detached process that
+  // outlives this server, these let a fresh process reattach to a still-live run
+  // and resume reducing exactly where it left off. Internal — stripped from the
+  // public task (see publicTask). Absent when no run is in flight.
+  runId?: string
+  runCursor?: number
 }
 
 async function readTasks(dataDir: string): Promise<Task[]> {
@@ -208,8 +234,10 @@ async function readTask(dataDir: string, id: string): Promise<Task | null> {
 
 // Strip the secret `token` before sending a task over HTTP, so the UI (and any
 // task scraping the API) can't read another task's token and impersonate it.
-function publicTask(task: Task): Omit<Task, 'token'> {
-  const { token: _token, ...rest } = task
+function publicTask(
+  task: Task,
+): Omit<Task, 'token' | 'runId' | 'runCursor'> {
+  const { token: _token, runId: _runId, runCursor: _runCursor, ...rest } = task
   return rest
 }
 
@@ -535,183 +563,150 @@ function reduceStreamLine(
   return { steps, finalText }
 }
 
-// Run claude in the project directory and stream its output onto the task as an
-// in-flight assistant message. The first turn uses `--session-id <id>` to
-// establish the session; later turns use `--resume <id>` to continue it. We
-// spawn with `--output-format stream-json` and append a `step` per event so the
-// polling UI can watch progress instead of waiting for the whole run. Fire-and-
-// forget; callers set the task to "riding" before invoking and we clear it back
-// to "resting" once claude returns.
-async function runClaude(
+// The shape a turn's runner reads from its run dir's job.json. The server writes
+// it; bin/lander's `run` command consumes it. Everything the runner needs to
+// launch claude and where to record its progress lives here, so the runner needs
+// no other knowledge of tasks or the server.
+type RunJob = {
+  runId: string
+  taskId: string
+  project: string
+  cwd: string
+  claudeArgs: string[]
+  env: Record<string, string>
+  logPath: string
+  leasePath: string
+  donePath: string
+  idleTimeoutMs: number
+}
+
+// The runner refreshes its lease while alive; the server treats a lease whose
+// heartbeat is older than this (and whose pid is gone) as a dead run.
+const HEARTBEAT_STALE_MS = 20_000
+// How long to wait for a freshly-launched runner to write its first lease before
+// concluding it failed to start. Generous: a cold `node` start can take a beat.
+const RUN_START_GRACE_MS = 20_000
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+// Read a file, or null if it's missing/unreadable — used for the optional
+// lease/done markers a run may or may not have written yet.
+async function readFileMaybe(file: string): Promise<string | null> {
+  try {
+    return await readFile(file, 'utf8')
+  } catch {
+    return null
+  }
+}
+
+function safeParse<T>(raw: string | null): T | null {
+  if (raw == null) return null
+  try {
+    return JSON.parse(raw) as T
+  } catch {
+    return null
+  }
+}
+
+// Whether a process is still around. kill(pid, 0) sends no signal but throws if
+// the pid is gone; EPERM means it exists but isn't ours, which still counts.
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+// Build the argv for one claude turn from the task's permissions and the prompt.
+// The first turn establishes the session with `--session-id`; later turns
+// continue it with `--resume`. Output is stream-json so the runner can stream
+// each event to the log as it arrives.
+function buildClaudeArgs(
+  task: Task,
+  id: string,
+  prompt: string,
+  mode: 'start' | 'resume',
+): string[] {
+  const sessionArgs = mode === 'start' ? ['--session-id', id] : ['--resume', id]
+  const allowed: string[] = ['Bash(lander:*)']
+  if (task.allowEdits) allowed.push('Edit', 'Write', 'MultiEdit')
+  if (task.allowCommits) allowed.push('Bash(git:*)')
+  if (task.allow?.length) allowed.push(...task.allow)
+  // Pass each rule as its own argument (the flag is variadic) rather than one
+  // space-joined string: a rule like `Bash(sed -n '1,5p':*)` contains spaces,
+  // and joining leaves claude to re-split on them, which mangles the rule and
+  // silently drops it. Separate argv entries keep each rule intact.
+  const editArgs = allowed.length ? ['--allowedTools', ...allowed] : []
+
+  // Tell the agent what edit/commit permissions it holds, so it knows what it
+  // is allowed to forward to a task it spawns. A task can only pass on access
+  // it has itself.
+  const held = [
+    task.allowEdits && 'editing files',
+    task.allowCommits && 'git commits',
+  ].filter(Boolean) as string[]
+  const forwardable = held.length
+    ? `You currently have permission for ${held.join(' and ')}, and can ` +
+      'forward that to a spawned task'
+    : 'You currently have no edit or commit permissions, so a spawned task ' +
+      'cannot be granted them either'
+
+  return [
+    ...sessionArgs,
+    ...editArgs,
+    '--append-system-prompt',
+    'You are running inside a lander task. Manage yourself with the `lander` ' +
+      'CLI: `lander status <state>` sets any status; `lander wedge` marks it ' +
+      'wedged; `lander land` marks it landed; `lander new <message>` ' +
+      'spawns a sibling task that runs independently. Pass `--title <title>` to ' +
+      'name the spawned task yourself instead of having one generated — use a ' +
+      'concise 2-5 word title in sentence case, with no quotes and no trailing ' +
+      'punctuation. Pass `--date <when>` (any date/time the server can parse, ' +
+      'e.g. an ISO timestamp) or `--wait <minutes>` (a number of minutes from ' +
+      'now) to defer its launch: it rests until then and the server runs it at ' +
+      'that time; the two are mutually exclusive. `lander rest` takes the same ' +
+      '`--date`/`--wait` flags to put the current task to rest with a scheduled ' +
+      'wakeup — it resumes then with a generated "Resumed at …" message. When ' +
+      'the user asks you to land a task, do so with `lander land`. Say ' +
+      'everything you mean to say first — ' +
+      'your summary, your sign-off, every last word — because running ' +
+      '`lander land` ends the task: the user can see it land, so once you have ' +
+      'run it there is nothing left to confirm or say. Mark it wedged ' +
+      '(`lander wedge`) only when you cannot make progress without the user: ' +
+      'you need tool permissions granted, a manual step performed, or a ' +
+      'blocking question answered. A spawned task starts with no edit or ' +
+      'commit access; ' +
+      'decide deliberately whether it needs them and, if so, pass `--edits` ' +
+      '(file edits) and/or `--commits` (git) to `lander new` to grant them. ' +
+      `${forwardable}.`,
+    '--output-format',
+    'stream-json',
+    '--verbose',
+    '-p',
+    prompt,
+  ]
+}
+
+// Launch one claude turn as a detached runner that outlives this server process,
+// then reduce its streamed output onto the task. The runner (bin/lander run)
+// owns the claude child and appends raw stream-json to a per-run log; we only
+// read that log and write task state. So if the server restarts mid-turn the
+// agent keeps working, and a fresh process reattaches to the still-live run (see
+// driveTask / recoverQueues). The first turn establishes the session, later ones
+// resume it. Callers set "riding" via this; we record which run we're tracking
+// so a reattach can find it.
+async function runTurn(
   project: Project,
   id: string,
   prompt: string,
   mode: 'start' | 'resume',
-): Promise<void> {
-  const sessionArgs =
-    mode === 'start' ? ['--session-id', id] : ['--resume', id]
+): Promise<'done' | 'crashed'> {
   const file = path.join(project.dataDir, `${id}.json`)
+  let task: Task
   try {
-    const task = JSON.parse(await readFile(file, 'utf8')) as Task
-    // The token the in-task `lander` CLI sends back to authenticate as this
-    // task. Backfilled for tasks created before tokens existed.
-    const token = task.token ?? randomUUID()
-    const allowed: string[] = ['Bash(lander:*)']
-    if (task.allowEdits) allowed.push('Edit', 'Write', 'MultiEdit')
-    if (task.allowCommits) allowed.push('Bash(git:*)')
-    if (task.allow?.length) allowed.push(...task.allow)
-    // Pass each rule as its own argument (the flag is variadic) rather than one
-    // space-joined string: a rule like `Bash(sed -n '1,5p':*)` contains spaces,
-    // and joining leaves claude to re-split on them, which mangles the rule and
-    // silently drops it. Separate argv entries keep each rule intact.
-    const editArgs = allowed.length ? ['--allowedTools', ...allowed] : []
-
-    // Mark the task riding now, but don't create the assistant message yet — it
-    // gets added on the first stream event (see ensurePending) so its timestamp
-    // marks when claude actually began responding. Until then the UI shows a
-    // spinner under the last user message.
-    // Don't bump updatedAt here: the riding flip isn't a turn boundary, and the
-    // user message that triggered this run already set it. updatedAt next moves
-    // when the assistant actually begins responding (see the stream handler).
-    await mutateTask(file, (t) => {
-      t.status = 'riding'
-      if (!t.token) t.token = token
-    })
-
-    // Tell the agent what edit/commit permissions it holds, so it knows what it
-    // is allowed to forward to a task it spawns. A task can only pass on access
-    // it has itself.
-    const held = [
-      task.allowEdits && 'editing files',
-      task.allowCommits && 'git commits',
-    ].filter(Boolean) as string[]
-    const forwardable = held.length
-      ? `You currently have permission for ${held.join(' and ')}, and can ` +
-        'forward that to a spawned task'
-      : 'You currently have no edit or commit permissions, so a spawned task ' +
-        'cannot be granted them either'
-
-    const args = [
-      ...sessionArgs,
-      ...editArgs,
-      '--append-system-prompt',
-      'You are running inside a lander task. Manage yourself with the `lander` ' +
-        'CLI: `lander status <state>` sets any status; `lander wedge` marks it ' +
-        'wedged; `lander land` marks it landed; `lander new <message>` ' +
-        'spawns a sibling task that runs independently. Pass `--title <title>` to ' +
-        'name the spawned task yourself instead of having one generated — use a ' +
-        'concise 2-5 word title in sentence case, with no quotes and no trailing ' +
-        'punctuation. Pass `--date <when>` (any date/time the server can parse, ' +
-        'e.g. an ISO timestamp) or `--wait <minutes>` (a number of minutes from ' +
-        'now) to defer its launch: it rests until then and the server runs it at ' +
-        'that time; the two are mutually exclusive. `lander rest` takes the same ' +
-        '`--date`/`--wait` flags to put the current task to rest with a scheduled ' +
-        'wakeup — it resumes then with a generated "Resumed at …" message. When ' +
-        'the user asks you to land a task, do so with `lander land`. Say ' +
-        'everything you mean to say first — ' +
-        'your summary, your sign-off, every last word — because running ' +
-        '`lander land` ends the task: the user can see it land, so once you have ' +
-        'run it there is nothing left to confirm or say. Mark it wedged ' +
-        '(`lander wedge`) only when you cannot make progress without the user: ' +
-        'you need tool permissions granted, a manual step performed, or a ' +
-        'blocking question answered. A spawned task starts with no edit or ' +
-        'commit access; ' +
-        'decide deliberately whether it needs them and, if so, pass `--edits` ' +
-        '(file edits) and/or `--commits` (git) to `lander new` to grant them. ' +
-        `${forwardable}.`,
-      '--output-format',
-      'stream-json',
-      '--verbose',
-      '-p',
-      prompt,
-    ]
-
-    await new Promise<void>((resolve) => {
-      const child = spawn('claude', args, {
-        cwd: project.path,
-        env: {
-          ...process.env,
-          PATH: `${path.join(ROOT, 'bin')}:${process.env.PATH ?? ''}`,
-          LANDER_API: `http://localhost:${port}`,
-          LANDER_PROJECT: project.slug,
-          LANDER_TASK: id,
-          LANDER_TOKEN: token,
-        },
-      })
-      let buf = ''
-      let stderr = ''
-      let finalText = ''
-      let settled = false
-
-      // spawn has no built-in timeout. Kill the run after 10 minutes of
-      // silence, rather than 10 minutes total: a turn that's still streaming
-      // output (text, tool calls, tool results) is making progress and should
-      // be allowed to continue. armTimer() resets the clock on every chunk, so
-      // it only fires once the child has gone quiet for the full window.
-      let timer: ReturnType<typeof setTimeout>
-      const armTimer = () => {
-        clearTimeout(timer)
-        timer = setTimeout(() => child.kill('SIGKILL'), 10 * 60_000)
-      }
-      armTimer()
-
-      const finish = async (errText?: string) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        await mutateTask(file, (t) => {
-          const msg = ensurePending(t)
-          msg.text = errText ?? finalText
-          msg.pending = false
-          t.updatedAt = new Date().toISOString()
-        }).catch(() => {})
-        resolve()
-      }
-
-      child.stdout.setEncoding('utf8')
-      child.stdout.on('data', (chunk: string) => {
-        armTimer()
-        buf += chunk
-        const steps: Step[] = []
-        let nl: number
-        while ((nl = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, nl).trim()
-          buf = buf.slice(nl + 1)
-          if (!line) continue
-          const reduced = reduceStreamLine(line, new Date().toISOString())
-          steps.push(...reduced.steps)
-          if (reduced.finalText !== undefined) finalText = reduced.finalText
-        }
-        if (steps.length)
-          void mutateTask(file, (t) => {
-            // Bump updatedAt only on the batch that begins the assistant message
-            // (i.e. creates the pending message), not on every streamed batch:
-            // streaming churn shouldn't keep reordering the sidebar.
-            const begun = !pendingMessage(t)
-            const msg = ensurePending(t)
-            msg.steps = [...(msg.steps ?? []), ...steps]
-            if (begun) t.updatedAt = msg.createdAt
-          }).catch(() => {})
-      })
-
-      child.stderr.setEncoding('utf8')
-      child.stderr.on('data', (chunk: string) => {
-        armTimer()
-        stderr += chunk
-      })
-
-      child.on('error', (e) => {
-        void finish(`error running claude: ${e.message}`)
-      })
-      child.on('close', (code) => {
-        if (code === 0 || finalText) void finish()
-        else
-          void finish(
-            `error running claude: exited ${code}` +
-              (stderr.trim() ? `\n${stderr.trim()}` : ''),
-          )
-      })
-    })
+    task = JSON.parse(await readFile(file, 'utf8')) as Task
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     await mutateTask(file, (t) => {
@@ -727,6 +722,183 @@ async function runClaude(
         })
       }
     }).catch(() => {})
+    return 'crashed'
+  }
+
+  // The token the in-task `lander` CLI sends back to authenticate as this task.
+  // Backfilled for tasks created before tokens existed.
+  const token = task.token ?? randomUUID()
+  const claudeArgs = buildClaudeArgs(task, id, prompt, mode)
+
+  const runId = randomUUID()
+  const runDir = path.join(project.runsDir, runId)
+  await mkdir(runDir, { recursive: true })
+  const job: RunJob = {
+    runId,
+    taskId: id,
+    project: project.slug,
+    cwd: project.path,
+    claudeArgs,
+    env: {
+      PATH: `${path.join(ROOT, 'bin')}:${process.env.PATH ?? ''}`,
+      LANDER_API: `http://localhost:${port}`,
+      LANDER_PROJECT: project.slug,
+      LANDER_TASK: id,
+      LANDER_TOKEN: token,
+    },
+    logPath: path.join(runDir, 'out.jsonl'),
+    leasePath: path.join(runDir, 'lease.json'),
+    donePath: path.join(runDir, 'done.json'),
+    idleTimeoutMs: 10 * 60_000,
+  }
+  await writeFile(path.join(runDir, 'job.json'), JSON.stringify(job, null, 2))
+
+  // Mark riding and record the run before launching, so a crash between here and
+  // the first reduce still leaves a reattachable pointer. Don't bump updatedAt:
+  // the riding flip isn't a turn boundary, and the user message that triggered
+  // this run already set it. updatedAt next moves when the assistant begins.
+  await mutateTask(file, (t) => {
+    t.status = 'riding'
+    if (!t.token) t.token = token
+    t.runId = runId
+    t.runCursor = 0
+  })
+
+  // Detached and unref'd, in its own process group: a signal to this server's
+  // group (a manual restart, or the watcher in dev) won't reach it, so the agent
+  // runs on. stdio is ignored — the runner records everything to files.
+  const child = spawn(
+    process.execPath,
+    [path.join(ROOT, 'bin', 'lander'), 'run', path.join(runDir, 'job.json')],
+    { detached: true, stdio: 'ignore' },
+  )
+  child.unref()
+
+  return reduceRun(project, id, runId)
+}
+
+// Tail a run's append-only output log, reducing each stream-json line onto the
+// task, until the runner signals completion (writes done.json) or dies without
+// doing so. Resumes from the byte cursor persisted on the task, so a server that
+// restarts mid-run reattaches and picks up exactly where it left off. Returns
+// 'done' on normal completion (success or claude error) or 'crashed' if the
+// runner vanished mid-stream.
+async function reduceRun(
+  project: Project,
+  id: string,
+  runId: string,
+): Promise<'done' | 'crashed'> {
+  const file = path.join(project.dataDir, `${id}.json`)
+  const runDir = path.join(project.runsDir, runId)
+  const logPath = path.join(runDir, 'out.jsonl')
+  const leasePath = path.join(runDir, 'lease.json')
+  const donePath = path.join(runDir, 'done.json')
+
+  // The cursor lives on the task; we own it for the duration of this run (only
+  // one reducer runs per task — see driveTask's `running` guard), so a local
+  // copy is authoritative once seeded from disk.
+  const seed = await readTask(project.dataDir, id)
+  let cursor = seed?.runCursor ?? 0
+  let sawLease = false
+  const startedAt = Date.now()
+
+  while (true) {
+    const doneRaw = await readFileMaybe(donePath)
+    const done = safeParse<{ exitCode: number; stderr?: string }>(doneRaw)
+
+    // Fold in any new bytes. Read only the slice past the cursor so a long run's
+    // log isn't re-read each poll. Stop at the last newline (a partial trailing
+    // line isn't a complete event yet) — except once done, when EOF terminates
+    // the final line too.
+    const st = await stat(logPath).catch(() => null)
+    if (st && st.size > cursor) {
+      const len = st.size - cursor
+      const b = Buffer.alloc(len)
+      const fh = await open(logPath, 'r')
+      try {
+        await fh.read(b, 0, len, cursor)
+      } finally {
+        await fh.close()
+      }
+      let take = b.length
+      if (!done) {
+        const lastNl = b.lastIndexOf(0x0a)
+        take = lastNl >= 0 ? lastNl + 1 : 0
+      }
+      if (take > 0) {
+        const text = b.subarray(0, take).toString('utf8')
+        const steps: Step[] = []
+        let finalText: string | undefined
+        for (const raw of text.split('\n')) {
+          const line = raw.trim()
+          if (!line) continue
+          const reduced = reduceStreamLine(line, new Date().toISOString())
+          steps.push(...reduced.steps)
+          if (reduced.finalText !== undefined) finalText = reduced.finalText
+        }
+        cursor += take
+        await mutateTask(file, (t) => {
+          if (steps.length || finalText !== undefined) {
+            // Bump updatedAt only on the batch that begins the assistant message
+            // (creates the pending one), not on every streamed batch: streaming
+            // churn shouldn't keep reordering the sidebar.
+            const begun = !pendingMessage(t)
+            const msg = ensurePending(t)
+            if (steps.length) msg.steps = [...(msg.steps ?? []), ...steps]
+            // Carry the running reply text onto the message as it lands so it
+            // survives a restart (the cursor won't replay it).
+            if (finalText !== undefined) msg.text = finalText
+            if (begun) t.updatedAt = msg.createdAt
+          }
+          t.runCursor = cursor
+        }).catch(() => {})
+      }
+    }
+
+    if (done) {
+      await mutateTask(file, (t) => {
+        const msg = ensurePending(t)
+        // A non-zero exit with no reply text is an error to surface; otherwise
+        // the reduced text stands as the reply.
+        if (!msg.text && done.exitCode !== 0)
+          msg.text =
+            `error running claude: exited ${done.exitCode}` +
+            (done.stderr?.trim() ? `\n${done.stderr.trim()}` : '')
+        msg.pending = false
+        t.updatedAt = new Date().toISOString()
+        delete t.runId
+        delete t.runCursor
+      }).catch(() => {})
+      return 'done'
+    }
+
+    // No done marker yet: is the runner still alive? It refreshes its lease while
+    // running, so a stale heartbeat with a gone pid means it died mid-stream.
+    const lease = safeParse<{ pid: number; heartbeatAt: string }>(
+      await readFileMaybe(leasePath),
+    )
+    if (lease) sawLease = true
+    const fresh =
+      lease?.heartbeatAt &&
+      Date.now() - Date.parse(lease.heartbeatAt) < HEARTBEAT_STALE_MS
+    const alive = lease?.pid != null && pidAlive(lease.pid)
+    const startupExpired =
+      !sawLease && Date.now() - startedAt > RUN_START_GRACE_MS
+    if ((sawLease && !fresh && !alive) || startupExpired) {
+      await mutateTask(file, (t) => {
+        const msg = pendingMessage(t)
+        if (msg) {
+          if (!msg.text) msg.text = 'error running claude: run interrupted'
+          msg.pending = false
+          t.updatedAt = new Date().toISOString()
+        }
+        delete t.runId
+        delete t.runCursor
+      }).catch(() => {})
+      return 'crashed'
+    }
+
+    await sleep(200)
   }
 }
 
@@ -752,13 +924,26 @@ async function driveTask(
   const file = path.join(project.dataDir, `${id}.json`)
   let mode = firstMode
   try {
+    // Reattach first: if a previous turn's run is still tracked (its runner
+    // outlived a server restart, or finished while we were down), finish
+    // reducing it before starting anything queued. Afterwards the session is
+    // established iff the task has any assistant turn, so derive the mode for
+    // the queue drain from that rather than the caller's hint.
+    const existing = await readTask(project.dataDir, id)
+    if (existing?.runId) {
+      await reduceRun(project, id, existing.runId)
+      const after = await readTask(project.dataDir, id)
+      mode = after?.messages.some((m) => m.role === 'assistant')
+        ? 'resume'
+        : 'start'
+    }
     while (true) {
       let prompt: string | undefined
       await mutateTask(file, (t) => {
         if (t.queued && t.queued.length) prompt = t.queued.shift()
       }).catch(() => {})
       if (prompt === undefined) break
-      await runClaude(project, id, prompt, mode)
+      await runTurn(project, id, prompt, mode)
       mode = 'resume'
     }
   } finally {
@@ -1467,23 +1652,27 @@ app.post('/api/:project/tasks/:id/seen', async (c) => {
 })
 
 // On boot, recover tasks the previous process left mid-flight so they aren't
-// stranded. Two cases, both detectable now that the in-memory `running` set is
-// empty (so nothing in this process is driving them, and no `close` handler
-// will ever fire to flip them out of "riding"):
+// stranded. Nothing in this fresh process is driving them yet (the in-memory
+// `running` set is empty), so a task can be left in one of these states:
 //
+//   - a run still in flight: it carries a runId. Its detached runner may still
+//     be alive (it outlived the server) or have finished while we were down —
+//     either way driveTask reattaches and finishes reducing it, uninterrupted.
+//     Only if the runner is gone without having written its done marker was the
+//     run truly interrupted; that falls through to the replay handling below.
 //   - queued messages that never got drained — resume and drain them.
-//   - interrupted mid-run: left "riding" with an empty queue, because driveTask
-//     shifts a prompt off the queue *before* running it, so a crash/restart
-//     mid-turn loses the queue entry and the run's `finally` never resets the
-//     status. These are invisible to the queue check above and would otherwise
-//     sit "riding" with a stale `pending` message forever.
+//   - interrupted mid-run with no recoverable runner: left "riding" with an
+//     empty queue, because driveTask shifts a prompt off the queue *before*
+//     running it, so a restart mid-turn loses the queue entry and the status is
+//     never reset. These would otherwise sit "riding" with a stale `pending`
+//     message forever.
 //
-// Either way, clear stale `pending` flags first. For an interrupted task with
-// nothing left queued, re-supply a prompt so driveTask has a turn to run: a
-// "Resumed at …" nudge (mirroring launchTask) for one that already replied, or
-// — for one whose opening run died before any reply — the original opening
-// message replayed (no session exists yet, so it starts fresh). A task with no
-// assistant turn yet never established its session — start it; otherwise resume.
+// For the interrupted cases we clear stale `pending` flags and, if nothing is
+// queued, re-supply a prompt so driveTask has a turn to run: a "Resumed at …"
+// nudge (mirroring launchTask) for one that already replied, or — for one whose
+// opening run died before any reply — the original opening message replayed (no
+// session exists yet, so it starts fresh). A task with no assistant turn yet
+// never established its session — start it; otherwise resume.
 async function recoverQueues(): Promise<void> {
   for (const project of PROJECTS) {
     let names: string[]
@@ -1505,12 +1694,36 @@ async function recoverQueues(): Promise<void> {
       // A scheduled task waits for its launch time — launchScheduled owns it,
       // not the queue recovery (it carries a queued opening message too).
       if (task.scheduledFor) continue
+      const everRan = task.messages.some((m) => m.role === 'assistant')
+
+      // A tracked run: reattach if its runner is still alive or already wrote a
+      // done marker (driveTask reduces it to completion). If neither, the run
+      // was interrupted — drop the tracking and fall through to replay it.
+      if (task.runId) {
+        const runDir = path.join(project.runsDir, task.runId)
+        const done = (await readFileMaybe(path.join(runDir, 'done.json'))) != null
+        const lease = safeParse<{ pid: number; heartbeatAt: string }>(
+          await readFileMaybe(path.join(runDir, 'lease.json')),
+        )
+        const fresh =
+          lease?.heartbeatAt &&
+          Date.now() - Date.parse(lease.heartbeatAt) < HEARTBEAT_STALE_MS
+        const alive = lease?.pid != null && pidAlive(lease.pid)
+        if (done || fresh || alive) {
+          void driveTask(project, id, 'resume')
+          continue
+        }
+        await mutateTask(file, (t) => {
+          delete t.runId
+          delete t.runCursor
+        }).catch(() => {})
+      }
+
       const hasQueue = !!(task.queued && task.queued.length)
-      // "riding" at boot can only be a run interrupted by the previous process
-      // dying, since nothing is driving it now.
+      // "riding" at boot with no live run is a turn interrupted by the previous
+      // process dying, since nothing is driving it now.
       const interrupted = task.status === 'riding' && !hasQueue
       if (!hasQueue && !interrupted) continue
-      const everRan = task.messages.some((m) => m.role === 'assistant')
       await mutateTask(file, (t) => {
         for (const m of t.messages) if (m.pending) m.pending = false
         if (interrupted) {
