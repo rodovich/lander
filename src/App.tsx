@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import type { Dispatch, SetStateAction } from 'react'
 import { Markdown } from './markdown'
 
 // Request headers that mark a call as coming from the human's browser. The
@@ -98,6 +99,35 @@ type Project = {
 
 type UsageWindow = { utilization: number; resetsAt: string | null }
 type Usage = { session: UsageWindow | null; weekly: UsageWindow | null }
+
+// useState that mirrors itself to localStorage under `key`, so the value
+// survives a dev hot reload, a full page reload, or accidental navigation —
+// without which an in-progress draft (a half-typed task or reply) is lost the
+// moment React Fast Refresh remounts the component. The stored value is JSON;
+// every store access tolerates an unavailable or corrupt store (private mode,
+// quota) by falling back to `initial`. Drives only deliberately-kept *draft*
+// state — ephemeral UI (open menus, popups, focus) is left to reset.
+function usePersistentState<T>(
+  key: string,
+  initial: T,
+): [T, Dispatch<SetStateAction<T>>] {
+  const [value, setValue] = useState<T>(() => {
+    try {
+      const raw = localStorage.getItem(key)
+      return raw != null ? (JSON.parse(raw) as T) : initial
+    } catch {
+      return initial
+    }
+  })
+  useEffect(() => {
+    try {
+      localStorage.setItem(key, JSON.stringify(value))
+    } catch {
+      // storage unavailable — the value simply won't persist
+    }
+  }, [key, value])
+  return [value, setValue]
+}
 
 function formatTimestamp(iso: string): string {
   const d = new Date(iso)
@@ -639,17 +669,33 @@ export function App() {
   const [filter, setFilter] = useState('')
   const searchInputRef = useRef<HTMLInputElement>(null)
 
-  const [message, setMessage] = useState('')
-  const [newAllowEdits, setNewAllowEdits] = useState(true)
-  const [newAllowCommits, setNewAllowCommits] = useState(false)
+  // The new-task form's draft fields persist across reloads so a half-composed
+  // task — its message and its edit/commit/project choices — isn't lost to a
+  // hot reload or refresh.
+  const [message, setMessage] = usePersistentState('lander:draft:newTask', '')
+  const [newAllowEdits, setNewAllowEdits] = usePersistentState(
+    'lander:draft:newAllowEdits',
+    true,
+  )
+  const [newAllowCommits, setNewAllowCommits] = usePersistentState(
+    'lander:draft:newAllowCommits',
+    false,
+  )
   // Explicit project override for the new-task form; empty means "follow the
   // default" (targetSlug below).
-  const [newProject, setNewProject] = useState('')
+  const [newProject, setNewProject] = usePersistentState(
+    'lander:draft:newProject',
+    '',
+  )
   const [submitting, setSubmitting] = useState(false)
 
   // Each task keeps its own draft and in-flight state, keyed by session, so you
-  // can start a reply in one task, switch away, and come back to finish it.
-  const [replies, setReplies] = useState<Record<string, string>>({})
+  // can start a reply in one task, switch away, and come back to finish it; the
+  // drafts persist across reloads alongside the new-task message.
+  const [replies, setReplies] = usePersistentState<Record<string, string>>(
+    'lander:draft:replies',
+    {},
+  )
   const [sendingBy, setSendingBy] = useState<Record<string, boolean>>({})
 
   // The tool chip whose grant popup is open, keyed "<messageIndex>:<stepIndex>".
