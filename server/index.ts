@@ -481,6 +481,60 @@ function ensurePending(task: Task): Message {
   return msg
 }
 
+// Parse one line of claude's stream-json output into the activity steps it
+// contributes and any final reply text it carries. Pure — given a line, it
+// returns what to append — so the same reduction serves both a live child
+// process and a run read back from its on-disk log.
+function reduceStreamLine(
+  line: string,
+  at: string,
+): { steps: Step[]; finalText?: string } {
+  let ev: any
+  try {
+    ev = JSON.parse(line)
+  } catch {
+    return { steps: [] }
+  }
+  const steps: Step[] = []
+  let finalText: string | undefined
+  if (ev.type === 'assistant' && Array.isArray(ev.message?.content)) {
+    for (const block of ev.message.content) {
+      if (block.type === 'text' && block.text) {
+        steps.push({ kind: 'text', text: block.text, createdAt: at })
+        finalText = block.text
+      } else if (block.type === 'tool_use') {
+        steps.push({
+          kind: 'tool_use',
+          tool: block.name,
+          input: summarizeToolInput(block.input),
+          toolUseId: block.id,
+          rule: toolRule(block.name, block.input),
+          edits: diffEdits(block.name, block.input),
+          createdAt: at,
+        })
+      }
+    }
+  } else if (ev.type === 'user' && Array.isArray(ev.message?.content)) {
+    for (const block of ev.message.content) {
+      if (block.type === 'tool_result') {
+        const flat = flattenToolResult(block.content)
+        const isError = block.is_error === true
+        steps.push({
+          kind: 'tool_result',
+          text: summarizeToolResult(block.content),
+          toolUseId: block.tool_use_id,
+          isError,
+          blocked: isError && isPermissionDenial(flat),
+          createdAt: at,
+        })
+      }
+    }
+  } else if (ev.type === 'result' && typeof ev.result === 'string') {
+    finalText = ev.result
+  }
+  return { steps, finalText }
+}
+
 // Run claude in the project directory and stream its output onto the task as an
 // in-flight assistant message. The first turn uses `--session-id <id>` to
 // establish the session; later turns use `--resume <id>` to continue it. We
@@ -624,48 +678,9 @@ async function runClaude(
           const line = buf.slice(0, nl).trim()
           buf = buf.slice(nl + 1)
           if (!line) continue
-          let ev: any
-          try {
-            ev = JSON.parse(line)
-          } catch {
-            continue
-          }
-          const at = new Date().toISOString()
-          if (ev.type === 'assistant' && Array.isArray(ev.message?.content)) {
-            for (const block of ev.message.content) {
-              if (block.type === 'text' && block.text) {
-                steps.push({ kind: 'text', text: block.text, createdAt: at })
-                finalText = block.text
-              } else if (block.type === 'tool_use') {
-                steps.push({
-                  kind: 'tool_use',
-                  tool: block.name,
-                  input: summarizeToolInput(block.input),
-                  toolUseId: block.id,
-                  rule: toolRule(block.name, block.input),
-                  edits: diffEdits(block.name, block.input),
-                  createdAt: at,
-                })
-              }
-            }
-          } else if (ev.type === 'user' && Array.isArray(ev.message?.content)) {
-            for (const block of ev.message.content) {
-              if (block.type === 'tool_result') {
-                const flat = flattenToolResult(block.content)
-                const isError = block.is_error === true
-                steps.push({
-                  kind: 'tool_result',
-                  text: summarizeToolResult(block.content),
-                  toolUseId: block.tool_use_id,
-                  isError,
-                  blocked: isError && isPermissionDenial(flat),
-                  createdAt: at,
-                })
-              }
-            }
-          } else if (ev.type === 'result' && typeof ev.result === 'string') {
-            finalText = ev.result
-          }
+          const reduced = reduceStreamLine(line, new Date().toISOString())
+          steps.push(...reduced.steps)
+          if (reduced.finalText !== undefined) finalText = reduced.finalText
         }
         if (steps.length)
           void mutateTask(file, (t) => {
