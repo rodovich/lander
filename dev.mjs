@@ -41,13 +41,14 @@ process.env.VITE_LANDER_UI_TOKEN = uiToken
 concurrently(
   [
     { command: 'vite', name: 'web', prefixColor: 'blue' },
-    // No `watch`: the API drives long-running `claude` subprocesses whose
-    // replies are only recorded by an in-memory continuation in runClaude. If
-    // tsx restarted the server on a file change — and claude edits files in the
-    // target project, including server/index.ts when lander runs on its own
-    // repo — every in-flight run would be orphaned, leaving its task stuck in
-    // "riding" with no reply. Restart the API manually to pick up server edits.
-    { command: 'tsx server/index.ts', name: 'api', prefixColor: 'green' },
+    // `watch` reloads the API on server edits. This is safe because each turn
+    // runs in a detached `lander run` process that outlives the server: an
+    // in-flight run keeps going across a reload, the fresh process reattaches to
+    // it (see recoverQueues), and the server drains open requests before exiting
+    // (graceful shutdown in server/index.ts). So a restart — including when
+    // claude edits server/index.ts while lander runs on its own repo — no longer
+    // orphans a run or loses a reply.
+    { command: 'tsx watch server/index.ts', name: 'api', prefixColor: 'green' },
   ],
   { killOthers: ['failure', 'success'] },
 ).result.catch(() => process.exit(1))

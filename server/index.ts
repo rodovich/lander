@@ -1779,7 +1779,7 @@ async function backfillSeen(): Promise<void> {
 }
 
 const port = Number(process.env.PORT ?? 6181)
-serve({ fetch: app.fetch, port })
+const server = serve({ fetch: app.fetch, port })
 console.log(`api listening on http://localhost:${port}`)
 console.log('projects:')
 for (const p of PROJECTS) console.log(`  ${p.slug}  ${p.path}`)
@@ -1788,4 +1788,25 @@ void recoverQueues()
 // Launch due scheduled tasks on boot (catching any whose time passed while the
 // server was down), then sweep every 15s to launch each as it comes due.
 void launchScheduled()
-setInterval(() => void launchScheduled(), 15_000)
+const scheduler = setInterval(() => void launchScheduled(), 15_000)
+
+// Shut down cleanly when the watcher restarts us (or on Ctrl-C): stop the
+// scheduler and let the HTTP server finish the requests already in flight before
+// exiting, so a reload doesn't drop a write mid-flight. In-flight runs need no
+// special handling — they're detached and keep going, and the fresh process
+// reattaches to them via the cursor persisted on each task. A timeout forces the
+// exit if a connection refuses to close, so a reload can't hang.
+let shuttingDown = false
+function shutdown(): void {
+  if (shuttingDown) return
+  shuttingDown = true
+  clearInterval(scheduler)
+  const force = setTimeout(() => process.exit(0), 3_000)
+  force.unref()
+  server.close(() => {
+    clearTimeout(force)
+    process.exit(0)
+  })
+}
+process.on('SIGTERM', shutdown)
+process.on('SIGINT', shutdown)
