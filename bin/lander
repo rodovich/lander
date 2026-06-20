@@ -209,8 +209,8 @@ async function sendTask(args) {
   console.log(`${verb} → ${id.slice(0, 8)}`)
 }
 
-// `lander archive <id> [--restore]` — move a task out of the list into the
-// project's archived/ dir (or back, with --restore). Archiving needs a
+// `lander archive <id...> [--restore]` — move one or more tasks out of the list
+// into the project's archived/ dir (or back, with --restore). Archiving needs a
 // non-riding task; the server rejects a riding one. Resolves a full id or an
 // unambiguous prefix — among active tasks to archive, among archived ones to
 // restore.
@@ -221,13 +221,15 @@ async function archiveTask(args) {
     if (a === '--restore') restore = true
     else pos.push(a)
   }
-  if (!pos[0]) die('usage: lander archive <id> [--restore]')
-  const id = await resolveId(pos[0], { archived: restore })
-  await call(PROJECT, `/tasks/${id}/archive`, {
-    method: 'POST',
-    body: JSON.stringify({ archived: !restore }),
-  })
-  console.log(`${restore ? 'restored' : 'archived'} → ${id.slice(0, 8)}`)
+  if (!pos[0]) die('usage: lander archive <id...> [--restore]')
+  for (const arg of pos) {
+    const id = await resolveId(arg, { archived: restore })
+    await call(PROJECT, `/tasks/${id}/archive`, {
+      method: 'POST',
+      body: JSON.stringify({ archived: !restore }),
+    })
+    console.log(`${restore ? 'restored' : 'archived'} → ${id.slice(0, 8)}`)
+  }
 }
 
 // `lander run <jobfile>` — the detached turn runner the server launches (not for
@@ -337,6 +339,6 @@ if (!run)
   die(
     `unknown command: ${cmd ?? '(none)'} — try ` +
       'land | wedge | rest (--date|--wait) | status <status> | new <message> | ' +
-      'list | view <id> | send <id> <message> | archive <id> [--restore]',
+      'list | view <id> | send <id> <message> | archive <id...> [--restore]',
   )
 run().catch((e) => die(e.message))
