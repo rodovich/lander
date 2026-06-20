@@ -46,6 +46,11 @@ type Project = {
   // <runId>/ directory per turn (job spec, append-only output log, lease, done
   // marker). The runner writes these; the server only reads them.
   runsDir: string
+  // Sibling of dataDir: ./data/<normalized-project-path>/archived, holding the
+  // <uuid>.json files of archived tasks. Moving a task here takes it out of the
+  // list (and out of the scheduler's and recovery's view, which only scan
+  // dataDir); the UI's "Show archived" toggle reads it back in.
+  archiveDir: string
 }
 
 // Projects come in newline-separated via PROJECT_DIRS (set by dev.mjs from the
@@ -70,6 +75,12 @@ function parseProjects(): Project[] {
       slug,
       dataDir: path.join(ROOT, 'data', normalizeProjectPath(resolved), 'tasks'),
       runsDir: path.join(ROOT, 'data', normalizeProjectPath(resolved), 'runs'),
+      archiveDir: path.join(
+        ROOT,
+        'data',
+        normalizeProjectPath(resolved),
+        'archived',
+      ),
     })
   }
   return projects
@@ -194,6 +205,11 @@ type Task = {
   // task's opening message, or a generated "Resumed at …" prompt for a rested
   // one). Absent on un-scheduled tasks.
   scheduledFor?: string
+  // Transient flag set when a task is read from the project's archive dir, so
+  // the UI can mark archived rows and offer "Restore" instead of "Archive". Not
+  // persisted: a task's location on disk (archived/ vs tasks/) is the source of
+  // truth, and archiving moves the file rather than setting a field.
+  archived?: boolean
   // The id of the run (under the project's runs dir) currently being reduced
   // onto this task, and how many bytes of that run's output log have already
   // been folded in. Set when a turn's runner is launched, cleared when its
@@ -1246,7 +1262,19 @@ app.get('/api/:project/tasks', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
   try {
-    return c.json((await readTasks(project.dataDir)).map(publicTask))
+    const active = await readTasks(project.dataDir)
+    // By default archived tasks are hidden; `?archived=1` merges them in, each
+    // tagged so the UI can mark the row and offer Restore.
+    if (c.req.query('archived') !== '1')
+      return c.json(active.map(publicTask))
+    const archived = (await readTasks(project.archiveDir)).map((t) => ({
+      ...t,
+      archived: true,
+    }))
+    const merged = [...active, ...archived].sort((a, b) =>
+      (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt),
+    )
+    return c.json(merged.map(publicTask))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
@@ -1558,6 +1586,40 @@ app.post('/api/:project/tasks/:id/rest', async (c) => {
     const task = await readTask(project.dataDir, id)
     if (!task) return c.json({ error: 'task not found' }, 404)
     return c.json(publicTask(task))
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
+  }
+})
+
+// Archive or restore a task by moving its JSON between the project's tasks/ and
+// archived/ dirs. Archiving takes a (non-riding) task out of the list and out of
+// the scheduler's and recovery's view — both of which scan only tasks/ — so an
+// archived task is inert; restoring (`{ archived: false }`) moves it back. A
+// riding task can't be archived: it has a live run the reducer must keep
+// reattaching to, so the caller has to let it come to rest first.
+app.post('/api/:project/tasks/:id/archive', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  try {
+    const id = c.req.param('id')
+    if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    const body = await c.req
+      .json<{ archived?: unknown }>()
+      .catch(() => ({}) as { archived?: unknown })
+    const archived = body.archived !== false // default: archive
+    const fromDir = archived ? project.dataDir : project.archiveDir
+    const toDir = archived ? project.archiveDir : project.dataDir
+    const task = await readTask(fromDir, id)
+    if (!task)
+      return c.json(
+        { error: archived ? 'task not found' : 'archived task not found' },
+        404,
+      )
+    if (archived && (task.status === 'riding' || task.runId))
+      return c.json({ error: 'cannot archive a task while it is riding' }, 409)
+    await mkdir(toDir, { recursive: true })
+    await rename(path.join(fromDir, `${id}.json`), path.join(toDir, `${id}.json`))
+    return c.json(publicTask({ ...task, archived }))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }

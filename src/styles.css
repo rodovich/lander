@@ -255,6 +255,123 @@ body {
   white-space: nowrap;
 }
 
+/* The kebab (⋮) trigger and its menu sit at the right of a task row. The
+   wrapper holds the button; the menu itself is position:fixed (see below) so
+   the scrolling list can't clip it. */
+.task-menu {
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.task-kebab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.task-kebab:hover {
+  background: var(--border);
+  color: var(--fg);
+}
+
+.task-kebab:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+/* Fixed-positioned (anchored to the kebab's live rect) so the scrolling task
+   list never clips it. Right-aligned under the trigger. */
+.task-menu-popup {
+  position: fixed;
+  z-index: 100;
+  min-width: 130px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(17, 0, 0, 0.16);
+  font-size: 13px;
+}
+
+.task-menu-item {
+  padding: 7px 10px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.task-menu-item:hover {
+  background: var(--bg-tinted);
+}
+
+/* Each action wears the color its status carries elsewhere (status pills,
+   timeline labels): launch matches riding's blue, since launching sets the task
+   riding. Archive/restore aren't statuses — both muted. */
+.task-menu-item-launch {
+  color: #0969da;
+}
+
+.task-menu-item-wedge {
+  color: #bf8700;
+}
+
+.task-menu-item-rest {
+  color: var(--muted);
+}
+
+.task-menu-item-land {
+  color: #1a7f37;
+}
+
+.task-menu-item-archive {
+  color: var(--muted);
+}
+
+.task-menu-item-restore {
+  color: var(--muted);
+}
+
+/* Divider setting the archive action apart from the status actions above. */
+.task-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
+/* An archived row reads as set-aside: dimmed like a landed one, with a small
+   tag next to its status. */
+.task-item.archived .task-title {
+  opacity: 0.75;
+}
+
+.task-archived-tag {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+.project-menu-toggle {
+  color: var(--muted);
+}
+
 .new-task-head {
   display: flex;
   align-items: center;
@@ -530,50 +647,6 @@ body {
 .title-input:focus {
   outline: none;
   box-shadow: inset 0 0 0 2px var(--accent);
-}
-
-.header-actions {
-  display: flex;
-  flex-shrink: 0;
-  gap: 6px;
-}
-
-.landed-button,
-.wedged-button,
-.resting-button,
-.launch-button {
-  font: inherit;
-  font-weight: 600;
-  flex-shrink: 0;
-  padding: 6px 14px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-tinted);
-  cursor: pointer;
-}
-
-/* Same blue as the "riding" status — launching sets the task riding. */
-.launch-button {
-  color: #0969da;
-}
-
-.landed-button {
-  color: #1a7f37;
-}
-
-.wedged-button {
-  color: #bf8700;
-}
-
-.resting-button {
-  color: var(--muted);
-}
-
-.landed-button:disabled,
-.wedged-button:disabled,
-.resting-button:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 
 .detail-meta {

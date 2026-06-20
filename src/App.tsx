@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { Markdown } from './markdown'
 
@@ -77,6 +77,10 @@ type Task = {
   seenAt?: string
   allowEdits: boolean
   allowCommits: boolean
+  // Set on tasks the server reads from the archive dir (when the list is
+  // fetched with ?archived=1). Marks the row and swaps the kebab's Archive item
+  // for Restore. Absent on active tasks.
+  archived?: boolean
   // ISO timestamp a scheduled task is set to launch; present only while the
   // task is resting and waiting for the server's scheduler (or a manual launch).
   scheduledFor?: string
@@ -651,6 +655,187 @@ function CopyButton({ text }: { text: string }) {
   )
 }
 
+// The status actions a task's kebab menu can fire, mirroring the buttons the
+// detail header used to carry, plus archive/restore.
+type TaskAction = 'launch' | 'wedge' | 'rest' | 'land' | 'archive' | 'restore'
+
+// The kebab (⋮) menu on a task list row. It carries the status actions that
+// used to live as buttons in the detail header, plus Archive/Restore — but only
+// the items that would be both *visible and enabled* for the task's current
+// status, so e.g. a landed task offers Wedge/Rest/Archive but not Land. An
+// archived task collapses to a single Restore. The button stops click
+// propagation so opening the menu doesn't also select the row, and the menu is
+// fixed-positioned (anchored to the button's live rect, re-measured on
+// scroll/resize) so the scrolling task list can't clip it.
+function TaskActionsMenu({
+  task,
+  onAction,
+}: {
+  task: TaskWithProject
+  onAction: (action: TaskAction) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
+  const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(
+    null,
+  )
+
+  // Build the items from the same per-status rules the header buttons encoded:
+  //  - launch:  a scheduled (resting + scheduledFor) task, to run it early
+  //  - wedge:   any task not already wedged
+  //  - rest:    a wedged or landed task, to return it to rest
+  //  - land:    any task not already landed
+  //  - archive: any non-riding task (a riding one has a live run)
+  const items: { action: TaskAction; label: string }[] = []
+  if (task.archived) {
+    items.push({ action: 'restore', label: 'Restore' })
+  } else {
+    if (task.status === 'resting' && task.scheduledFor)
+      items.push({ action: 'launch', label: 'Launch' })
+    if (task.status !== 'wedged') items.push({ action: 'wedge', label: 'Wedge' })
+    if (task.status === 'wedged' || task.status === 'landed')
+      items.push({ action: 'rest', label: 'Rest' })
+    if (task.status !== 'landed') items.push({ action: 'land', label: 'Land' })
+    if (task.status !== 'riding')
+      items.push({ action: 'archive', label: 'Archive' })
+  }
+
+  useEffect(() => {
+    if (!open) {
+      setAnchor(null)
+      return
+    }
+    const place = () => {
+      const r = buttonRef.current?.getBoundingClientRect()
+      if (r) setAnchor({ top: r.bottom + 4, left: r.left })
+    }
+    place()
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [open])
+
+  // Move focus into the menu once it's mounted (anchor placed), so the arrow
+  // keys have somewhere to start.
+  useEffect(() => {
+    if (open && anchor) itemRefs.current[0]?.focus()
+  }, [open, anchor])
+
+  // Roving arrow-key navigation within the open menu. Each key is stopped from
+  // bubbling to the row's own key handler (which would move row focus or select
+  // the task); Enter/Space fall through to the focused item's click.
+  function onMenuKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    const count = items.length
+    const focusAt = (i: number) =>
+      itemRefs.current[((i % count) + count) % count]?.focus()
+    const idx = itemRefs.current.findIndex((el) => el === document.activeElement)
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault()
+        e.stopPropagation()
+        focusAt(idx + 1)
+        break
+      case 'ArrowUp':
+        e.preventDefault()
+        e.stopPropagation()
+        focusAt(idx < 0 ? count - 1 : idx - 1)
+        break
+      case 'Home':
+        e.preventDefault()
+        e.stopPropagation()
+        focusAt(0)
+        break
+      case 'End':
+        e.preventDefault()
+        e.stopPropagation()
+        focusAt(count - 1)
+        break
+      case 'Enter':
+      case ' ':
+        e.stopPropagation()
+        break
+      case 'Escape':
+        e.stopPropagation()
+        setOpen(false)
+        buttonRef.current?.focus()
+        break
+    }
+  }
+
+  if (items.length === 0) return null
+
+  return (
+    <div className="task-menu" ref={ref}>
+      <button
+        ref={buttonRef}
+        type="button"
+        className="task-kebab"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Task actions"
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen((o) => !o)
+        }}
+        // Keep Enter/Space (and arrows) from bubbling to the row's key handler,
+        // which would otherwise select the task or move row focus.
+        onKeyDown={(e) => e.stopPropagation()}
+      >
+        ⋮
+      </button>
+      {open && anchor && (
+        <div
+          className="task-menu-popup"
+          role="menu"
+          style={{ top: anchor.top, left: anchor.left }}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={onMenuKeyDown}
+        >
+          {items.map((it, i) => (
+            <Fragment key={it.action}>
+              {/* Set the archive action apart from the status actions. */}
+              {it.action === 'archive' && (
+                <div className="task-menu-sep" role="separator" />
+              )}
+              <button
+                ref={(el) => {
+                  itemRefs.current[i] = el
+                }}
+                type="button"
+                role="menuitem"
+                tabIndex={-1}
+                className={`task-menu-item task-menu-item-${it.action}`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setOpen(false)
+                  onAction(it.action)
+                }}
+              >
+                {it.label}
+              </button>
+            </Fragment>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function App() {
   const [tasks, setTasks] = useState<TaskWithProject[]>([])
   const [projects, setProjects] = useState<Project[]>([])
@@ -660,6 +845,12 @@ export function App() {
   const [shown, setShown] = useState<string[]>([])
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+  // Whether archived tasks are merged into the list (toggled from the project
+  // dropdown). Persisted so the choice survives a reload.
+  const [showArchived, setShowArchived] = usePersistentState(
+    'lander:showArchived',
+    false,
+  )
   // The user's explicit task pick. The effective selection (`selected`, below)
   // falls back to the first visible task when this one is filtered away.
   const [selectedSession, setSelectedSession] = useState<string | null>(
@@ -955,10 +1146,15 @@ export function App() {
 
   // Fetch and merge tasks across every shown project, tagging each with its
   // project slug and sorting the combined list by recency.
-  async function loadShownTasks(slugs: string[]): Promise<TaskWithProject[]> {
+  async function loadShownTasks(
+    slugs: string[],
+    includeArchived: boolean = showArchived,
+  ): Promise<TaskWithProject[]> {
     const lists = await Promise.all(
       slugs.map(async (slug) => {
-        const r = await fetch(`/api/${slug}/tasks`)
+        const r = await fetch(
+          `/api/${slug}/tasks${includeArchived ? '?archived=1' : ''}`,
+        )
         const body = await r.json()
         if (!r.ok) throw new Error(body.error ?? r.statusText)
         return (body as Task[]).map((t) => ({ ...t, projectSlug: slug }))
@@ -1043,7 +1239,7 @@ export function App() {
     if (shown.length === 0) return
     let cancelled = false
     const refresh = () =>
-      loadShownTasks(shown)
+      loadShownTasks(shown, showArchived)
         .then((t) => {
           if (!cancelled) {
             setTasks(t)
@@ -1061,7 +1257,7 @@ export function App() {
       clearInterval(timer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shownKey])
+  }, [shownKey, showArchived])
 
   // The project a new task is created in: an explicit pick from the form's
   // dropdown if made, else the single shown project, else the project of the
@@ -1376,10 +1572,10 @@ export function App() {
     }
   }
 
-  async function setStatus(status: string) {
-    if (!current) return
-    const id = current.session
-    const proj = current.projectSlug
+  async function setStatus(task: TaskWithProject, status: string) {
+    const id = task.session
+    const proj = task.projectSlug
+    setError(null)
     // Optimistic; the PATCH persists it and polling will reconcile.
     setTasks((prev) =>
       prev.map((t) => (t.session === id ? { ...t, status } : t)),
@@ -1399,13 +1595,41 @@ export function App() {
     }
   }
 
+  // Archive (or restore) a task by moving it between the project's tasks/ and
+  // archived/ dirs. Optimistic: when archiving drops it from the list (unless
+  // archived rows are being shown, where it just gets tagged); when restoring
+  // clears the tag. A reload reconciles in either case.
+  async function archiveTask(task: TaskWithProject, archived: boolean) {
+    const id = task.session
+    const proj = task.projectSlug
+    setError(null)
+    setTasks((prev) =>
+      archived && !showArchived
+        ? prev.filter((t) => t.session !== id)
+        : prev.map((t) => (t.session === id ? { ...t, archived } : t)),
+    )
+    try {
+      const r = await fetch(`/api/${proj}/tasks/${id}/archive`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ archived }),
+      })
+      if (!r.ok) {
+        const body = await r.json()
+        throw new Error(body.error ?? r.statusText)
+      }
+      setTasks(await loadShownTasks(shown))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   // Launch a scheduled task now, ahead of its time (the header's "launch"
   // button). The server clears the schedule, records the launch, and starts the
   // agent; polling reconciles the new status.
-  async function launchNow() {
-    if (!current) return
-    const id = current.session
-    const proj = current.projectSlug
+  async function launchNow(task: TaskWithProject) {
+    const id = task.session
+    const proj = task.projectSlug
     setError(null)
     // Optimistic: drop the schedule and flip to riding so the button clears at
     // once and the launch button gives way to the resting one.
@@ -1491,6 +1715,21 @@ export function App() {
                   </span>
                   <span className="project-menu-path">Show all</span>
                 </button>
+                <button
+                  type="button"
+                  className="project-menu-item project-menu-toggle"
+                  role="menuitemcheckbox"
+                  aria-checked={showArchived}
+                  onClick={() => {
+                    setShowArchived((v) => !v)
+                    setMenuOpen(false)
+                  }}
+                >
+                  <span className="project-menu-check">
+                    {showArchived ? '✓' : ''}
+                  </span>
+                  <span className="project-menu-path">Show archived</span>
+                </button>
               </div>
             )}
           </div>
@@ -1527,7 +1766,8 @@ export function App() {
               className={
                 'task-item' +
                 (task.session === selected ? ' selected' : '') +
-                (task.status === 'landed' ? ' landed' : '')
+                (task.status === 'landed' ? ' landed' : '') +
+                (task.archived ? ' archived' : '')
               }
               onClick={() => selectTask(task.session, task.projectSlug)}
               onKeyDown={(e) => onTaskKeyDown(e, index, task)}
@@ -1548,6 +1788,17 @@ export function App() {
                     )}
                   </span>
                 )}
+                <TaskActionsMenu
+                  task={task}
+                  onAction={(action) => {
+                    if (action === 'launch') void launchNow(task)
+                    else if (action === 'wedge') void setStatus(task, 'wedged')
+                    else if (action === 'rest') void setStatus(task, 'resting')
+                    else if (action === 'land') void setStatus(task, 'landed')
+                    else if (action === 'archive') void archiveTask(task, true)
+                    else if (action === 'restore') void archiveTask(task, false)
+                  }}
+                />
               </div>
               <div className="task-meta-row">
                 <span
@@ -1577,6 +1828,9 @@ export function App() {
                     </svg>
                   )}
                 </span>
+                {task.archived && (
+                  <span className="task-archived-tag">archived</span>
+                )}
               </div>
               <div className="task-time">
                 {formatTimestamp(task.updatedAt ?? task.createdAt)}
@@ -1709,45 +1963,9 @@ export function App() {
                   </div>
                   )}
                 </div>
-                <div className="header-actions">
-                  {/* A scheduled (resting + scheduledFor) task can be launched
-                      now from here; it has no "resting" button since it already
-                      rests, and launching is the meaningful action. */}
-                  {current.status === 'resting' && current.scheduledFor && (
-                    <button
-                      className="launch-button"
-                      onClick={() => void launchNow()}
-                    >
-                      launch
-                    </button>
-                  )}
-                  <button
-                    className="wedged-button"
-                    disabled={current.status === 'wedged'}
-                    onClick={() => void setStatus('wedged')}
-                  >
-                    wedged
-                  </button>
-                  {!(current.status === 'resting' && current.scheduledFor) && (
-                    <button
-                      className="resting-button"
-                      disabled={
-                        current.status !== 'wedged' &&
-                        current.status !== 'landed'
-                      }
-                      onClick={() => void setStatus('resting')}
-                    >
-                      resting
-                    </button>
-                  )}
-                  <button
-                    className="landed-button"
-                    disabled={current.status === 'landed'}
-                    onClick={() => void setStatus('landed')}
-                  >
-                    landed
-                  </button>
-                </div>
+                {/* The status actions that used to live here as buttons now
+                    ride each row's kebab menu in the task list (including this
+                    open task's own row). */}
               </div>
               <div className="detail-meta">
                 <span
@@ -1888,10 +2106,14 @@ export function App() {
             <div className="composer-bar">
               <textarea
                 className="composer"
-                placeholder="Reply…"
+                placeholder={
+                  current.archived ? 'Restore this task to reply' : 'Reply…'
+                }
                 rows={3}
                 value={replies[current.session] ?? ''}
-                disabled={sendingBy[current.session] ?? false}
+                disabled={
+                  (sendingBy[current.session] ?? false) || !!current.archived
+                }
                 onChange={(e) =>
                   setReplies((prev) => ({
                     ...prev,
@@ -1905,6 +2127,7 @@ export function App() {
                   <input
                     type="checkbox"
                     checked={current.allowEdits}
+                    disabled={!!current.archived}
                     onChange={(e) => void setAllowEdits(e.target.checked)}
                   />
                   allow edits
@@ -1913,6 +2136,7 @@ export function App() {
                   <input
                     type="checkbox"
                     checked={current.allowCommits}
+                    disabled={!!current.archived}
                     onChange={(e) => void setAllowCommits(e.target.checked)}
                   />
                   allow commits
