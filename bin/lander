@@ -60,7 +60,7 @@ async function readStdin() {
 
 // --date (a date/time the server parses) and --time (minutes from now) both set
 // a wakeup time; they're mutually exclusive, and --time must be a positive
-// number. Shared by `new` (where a wakeup is optional), `rest`, and `send`.
+// number. Shared by `launch` (where a wakeup is optional), `rest`, and `send`.
 // --await (a wakeup *condition* — other tasks landing) is orthogonal and may
 // combine with either, so it isn't checked here; see resolveAwait.
 function validateSchedule(o) {
@@ -89,7 +89,7 @@ async function resolveAwait(value, { self } = {}) {
   return ids
 }
 
-async function newTask(rest) {
+async function launchTask(rest) {
   const o = { project: PROJECT, allowEdits: false, allowCommits: false }
   const pos = []
   for (let i = 0; i < rest.length; i++) {
@@ -109,7 +109,7 @@ async function newTask(rest) {
   // can't grant a child access it lacks.
   o.message ??= pos.shift()
   if (o.message === '-') o.message = await readStdin()
-  if (!o.message?.trim()) die('usage: lander new <message>')
+  if (!o.message?.trim()) die('usage: lander launch <message>')
   validateSchedule(o)
   // --await defers the launch until the named tasks land (resolved to full ids
   // here); combinable with --date/--time, in which case launch fires on
@@ -126,7 +126,7 @@ async function newTask(rest) {
 }
 
 // Put the current task to rest with a scheduled wakeup. Takes the same
-// --date/--wait flags as `new`, but one is required (a wakeup needs a time).
+// --date/--time flags as `launch`, but one is required (a wakeup needs a time).
 // The server flips the task to resting, records a `scheduled` event, and wakes
 // it at that time with a generated "Resumed at …" message.
 async function restTask(args) {
@@ -359,7 +359,7 @@ const run = {
   wedge: () => setStatus('wedged'),
   rest: () => restTask(rest),
   status: () => setStatus(rest[0] || die('usage: lander status <status>')),
-  new: () => newTask(rest),
+  launch: () => launchTask(rest),
   list: () => listTasks(rest),
   view: () => viewTask(rest),
   send: () => sendTask(rest),
@@ -370,7 +370,7 @@ if (!run)
   die(
     `unknown command: ${cmd ?? '(none)'} — try ` +
       'land | wedge | rest (--date|--time|--await) | status <status> | ' +
-      'new <message> | list | view <id> | send <id> <message> | ' +
+      'launch <message> | list | view <id> | send <id> <message> | ' +
       'archive <id...> [--restore]',
   )
 run().catch((e) => die(e.message))
