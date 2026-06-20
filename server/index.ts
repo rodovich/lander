@@ -138,6 +138,7 @@ type TaskEvent = {
   kind:
     | 'launched'
     | 'scheduled'
+    | 'awaiting'
     | 'wedged'
     | 'unwedged'
     | 'landed'
@@ -150,6 +151,11 @@ type TaskEvent = {
   // 'scheduled' only: the date/time the task is set to launch, shown beside the
   // verb (the event's own createdAt is when it was scheduled).
   scheduledFor?: string
+  // 'awaiting' only: the tasks this one is resting on (id + title as of the
+  // event) so the UI can render them as links. A task awaiting tasks may also
+  // carry a --date/--time fallback, but we don't surface that here — the
+  // condition is the point.
+  awaiting?: { session: string; title: string }[]
   createdAt: string
 }
 
@@ -192,19 +198,32 @@ type Task = {
   // driveTask when the current run finishes. Absent on tasks saved before this
   // field existed — treat undefined as empty.
   queued?: string[]
-  // Messages addressed to this task with a future delivery time, sent by another
-  // task via `lander send --date/--wait`. The scheduler delivers each when due —
-  // appending it as a user message, queueing it, and driving the task, exactly
-  // as an immediate send would — then drops it. The text already carries its
-  // sender backlink. Absent when none are pending.
-  scheduledMessages?: { text: string; deliverAt: string }[]
+  // Messages addressed to this task with a deferred delivery, sent by another
+  // task via `lander send --date/--time/--await`. Each fires when its trigger is
+  // met — a time (`deliverAt`) and/or a condition (`waitFor`, ids that must all
+  // land), whichever comes first when both are set. The scheduler then appends
+  // it as a user message, queues it, and drives the task, exactly as an immediate
+  // send would, then drops it. The text already carries its sender backlink.
+  // Absent when none are pending.
+  scheduledMessages?: {
+    text: string
+    deliverAt?: string
+    waitFor?: string[]
+  }[]
   // ISO timestamp a scheduled task is set to launch. Set at creation via
-  // `--date`/`--wait`, or later via `lander rest` to re-sleep a running task;
+  // `--date`/`--time`, or later via `lander rest` to re-sleep a running task;
   // the task rests until the scheduler reaches this time, which clears the
   // field, records a "launched" event, and drives the queue (a deferred new
   // task's opening message, or a generated "Resumed at …" prompt for a rested
-  // one). Absent on un-scheduled tasks.
+  // one). May coexist with `waitingFor`, in which case whichever fires first
+  // launches the task. Absent on un-scheduled tasks.
   scheduledFor?: string
+  // Task ids this task is resting on (`lander new/rest --await`). The scheduler
+  // launches the task once every one has reached terminal "landed" — a missing
+  // id (archived/deleted) counts as satisfied so a vanished dependency can't
+  // strand the waiter. Coexists with `scheduledFor` as an OR fallback. Cleared
+  // on launch, alongside scheduledFor. Absent when not awaiting.
+  waitingFor?: string[]
   // Transient flag set when a task is read from the project's archive dir, so
   // the UI can mark archived rows and offer "Restore" instead of "Archive". Not
   // persisted: a task's location on disk (archived/ vs tasks/) is the source of
@@ -686,16 +705,19 @@ function buildClaudeArgs(
       'name the spawned task yourself instead of having one generated — use a ' +
       'concise 2-5 word title in sentence case, with no quotes and no trailing ' +
       'punctuation. Pass `--date <when>` (any date/time the server can parse, ' +
-      'e.g. an ISO timestamp) or `--wait <minutes>` (a number of minutes from ' +
+      'e.g. an ISO timestamp) or `--time <minutes>` (a number of minutes from ' +
       'now) to defer its launch: it rests until then and the server runs it at ' +
-      'that time; the two are mutually exclusive. `lander rest` takes the same ' +
-      '`--date`/`--wait` flags to put the current task to rest with a scheduled ' +
-      'wakeup — it resumes then with a generated "Resumed at …" message. ' +
+      'that time; the two are mutually exclusive. Pass `--await <ids>` (a ' +
+      'comma-separated list of task ids) to instead defer the launch until those ' +
+      'tasks have all landed; combine it with `--date`/`--time` to launch on ' +
+      'whichever comes first. `lander rest` takes the same `--date`/`--time`/' +
+      '`--await` flags (at least one required) to put the current task to rest ' +
+      'with a wakeup — it resumes then with a generated "Resumed at …" message. ' +
       '`lander list` lists this project\'s tasks (`--status` filters, `--json` ' +
       'for raw); `lander view <id>` shows one task (id or unambiguous short-id ' +
       'prefix); `lander send <id> <message>` messages another task in this ' +
       'project — immediately (queued behind any turn it is mid-way through), or ' +
-      'deferred with the same `--date`/`--wait` flags. When ' +
+      'deferred with the same `--date`/`--time`/`--await` flags. When ' +
       'the user asks you to land a task, do so with `lander land`. Say ' +
       'everything you mean to say first — ' +
       'your summary, your sign-off, every last word — because running ' +
@@ -1002,9 +1024,13 @@ async function launchTask(project: Project, id: string): Promise<boolean> {
   let go = false
   let everRan = false
   await mutateTask(file, (t) => {
-    if (!t.scheduledFor || running.has(id)) return
+    // Launch on either pending trigger (a scheduled time or an await condition);
+    // the scheduler only calls us once one has fired. Clear both so the OR
+    // fallback doesn't re-fire the task after it's running.
+    if ((!t.scheduledFor && !t.waitingFor) || running.has(id)) return
     everRan = t.messages.some((m) => m.role === 'assistant')
     delete t.scheduledFor
+    delete t.waitingFor
     const at = new Date().toISOString()
     ;(t.events ??= []).push({ kind: 'launched', title: t.title, createdAt: at })
     t.status = 'riding'
@@ -1035,14 +1061,33 @@ async function deliverScheduledMessages(
   now: number,
 ): Promise<void> {
   const file = path.join(project.dataDir, `${id}.json`)
+  // A message fires on its time and/or its await condition, whichever comes
+  // first. Reading the awaited tasks' statuses is async, so resolve them up
+  // front into a map and let the in-mutation due-check stay synchronous; a
+  // missing awaited task counts as landed (it can no longer land).
+  const seed = await readTask(project.dataDir, id)
+  const landed = new Map<string, boolean>()
+  for (const m of seed?.scheduledMessages ?? [])
+    for (const w of m.waitFor ?? [])
+      if (!landed.has(w)) {
+        const t = await readTask(project.dataDir, w)
+        landed.set(w, !t || t.status === 'landed')
+      }
+  const isDue = (m: { deliverAt?: string; waitFor?: string[] }) =>
+    (m.deliverAt != null && Date.parse(m.deliverAt) <= now) ||
+    ((m.waitFor?.length ?? 0) > 0 && m.waitFor!.every((w) => landed.get(w)))
+
   let drive = false
   let everRan = false
   await mutateTask(file, (t) => {
+    // Hold delivery while the recipient hasn't launched yet — it's itself
+    // awaiting a future time or an await condition; the message waits for it.
     if (t.scheduledFor && Date.parse(t.scheduledFor) > now) return
+    if (t.waitingFor?.length) return
     const pending = t.scheduledMessages ?? []
-    const due = pending.filter((m) => Date.parse(m.deliverAt) <= now)
+    const due = pending.filter(isDue)
     if (!due.length) return
-    const rest = pending.filter((m) => Date.parse(m.deliverAt) > now)
+    const rest = pending.filter((m) => !isDue(m))
     if (rest.length) t.scheduledMessages = rest
     else delete t.scheduledMessages
     everRan = t.messages.some((m) => m.role === 'assistant')
@@ -1091,13 +1136,19 @@ async function launchScheduled(): Promise<void> {
       }
       // Deliver due scheduled messages first — independent of the task's own
       // scheduled launch, and even while it's running (delivery just enqueues).
-      if (task.scheduledMessages?.some((m) => Date.parse(m.deliverAt) <= now))
+      // Let deliverScheduledMessages decide due-ness (it weighs time and await
+      // triggers); just gate on there being anything pending.
+      if (task.scheduledMessages?.length)
         await deliverScheduledMessages(project, id, now)
-      // Then launch a deferred task whose time has come.
+      // Then launch a deferred task whose trigger has fired: its scheduled time
+      // has come, or every task it awaits has landed (whichever first).
       if (running.has(id)) continue
-      if (!task.scheduledFor) continue
-      if (Date.parse(task.scheduledFor) > now) continue
-      await launchTask(project, id)
+      const timeDue =
+        task.scheduledFor != null && Date.parse(task.scheduledFor) <= now
+      const awaitDue =
+        (task.waitingFor?.length ?? 0) > 0 &&
+        (await awaitSatisfied(project, task.waitingFor!))
+      if (timeDue || awaitDue) await launchTask(project, id)
     }
   }
 }
@@ -1299,28 +1350,78 @@ app.get('/api/:project/tasks/:id', async (c) => {
 // silently creating something that never wakes.
 function resolveSchedule(body: {
   date?: unknown
-  wait?: unknown
+  time?: unknown
 }): { scheduledFor: string | null } | { error: string } {
   const hasDate = typeof body.date === 'string' && body.date.trim() !== ''
-  const hasWait = body.wait !== undefined && body.wait !== null
-  if (hasDate && hasWait)
-    return { error: '--date and --wait are mutually exclusive' }
+  const hasTime = body.time !== undefined && body.time !== null
+  if (hasDate && hasTime)
+    return { error: '--date and --time are mutually exclusive' }
   if (hasDate) {
     const when = new Date((body.date as string).trim())
     if (Number.isNaN(when.getTime()))
       return { error: 'invalid schedule date/time' }
     return { scheduledFor: when.toISOString() }
   }
-  if (hasWait) {
+  if (hasTime) {
     const minutes =
-      typeof body.wait === 'number' ? body.wait : Number(body.wait)
+      typeof body.time === 'number' ? body.time : Number(body.time)
     if (!Number.isFinite(minutes) || minutes <= 0)
-      return { error: 'invalid wait minutes' }
+      return { error: 'invalid time minutes' }
     return {
       scheduledFor: new Date(Date.now() + minutes * 60_000).toISOString(),
     }
   }
   return { scheduledFor: null }
+}
+
+// Validate a `--await` body field — the ids a task (or a scheduled message) is
+// to wait on. Each must be a real task in this project, so a typo can't either
+// strand the waiter or (since a missing id reads as satisfied) wake it at once.
+// `selfId` rejects a task awaiting itself. Returns the ids (empty when absent).
+async function resolveAwait(
+  project: Project,
+  value: unknown,
+  selfId?: string,
+): Promise<{ waitFor: string[] } | { error: string }> {
+  if (value === undefined || value === null) return { waitFor: [] }
+  if (!Array.isArray(value) || !value.every((x) => typeof x === 'string'))
+    return { error: '--await expects a list of task ids' }
+  const ids = value as string[]
+  for (const id of ids) {
+    if (!UUID.test(id)) return { error: `invalid await task id: ${id}` }
+    if (selfId && id === selfId) return { error: 'a task cannot await itself' }
+    if (!(await readTask(project.dataDir, id)))
+      return { error: `await task not found: ${id}` }
+  }
+  return { waitFor: ids }
+}
+
+// Snapshot the awaited tasks (id + current title) for an `awaiting` event, so
+// the UI can render them as links without a second lookup. A vanished task falls
+// back to its short id. Ids are assumed pre-validated by resolveAwait.
+async function describeAwaited(
+  project: Project,
+  ids: string[],
+): Promise<{ session: string; title: string }[]> {
+  const out: { session: string; title: string }[] = []
+  for (const id of ids) {
+    const t = await readTask(project.dataDir, id)
+    out.push({ session: id, title: t?.title ?? id.slice(0, 8) })
+  }
+  return out
+}
+
+// True once every awaited task has landed. A missing one (archived/deleted)
+// counts as satisfied so a vanished dependency can't strand the waiter forever.
+async function awaitSatisfied(
+  project: Project,
+  ids: string[],
+): Promise<boolean> {
+  for (const id of ids) {
+    const t = await readTask(project.dataDir, id)
+    if (t && t.status !== 'landed') return false
+  }
+  return true
 }
 
 app.post('/api/:project/tasks', async (c) => {
@@ -1331,7 +1432,8 @@ app.post('/api/:project/tasks', async (c) => {
       title?: unknown
       message?: unknown
       date?: unknown
-      wait?: unknown
+      time?: unknown
+      await?: unknown
       allowEdits?: unknown
       allowCommits?: unknown
     }>()
@@ -1342,15 +1444,21 @@ app.post('/api/:project/tasks', async (c) => {
     if (!title && !rawMessage.trim())
       return c.json({ error: 'title or message is required' }, 400)
 
-    // A scheduled task is created at rest and launched later by the scheduler.
-    // Resolve the requested launch time up front so a bad value fails loudly
-    // rather than silently creating a task that never runs.
+    // A scheduled/awaiting task is created at rest and launched later by the
+    // scheduler. Resolve the launch triggers up front so a bad value fails loudly
+    // rather than silently creating a task that never runs. The two combine: the
+    // task launches on whichever fires first.
     const sched = resolveSchedule(body)
     if ('error' in sched) return c.json({ error: sched.error }, 400)
     const scheduledFor = sched.scheduledFor ?? undefined
-    // Only defer when there's actually a message to run later; a scheduled
-    // task with nothing to do would just sit resting forever.
-    const deferred = scheduledFor !== undefined && rawMessage.trim() !== ''
+    const awaited = await resolveAwait(project, body.await)
+    if ('error' in awaited) return c.json({ error: awaited.error }, 400)
+    const waitingFor = awaited.waitFor.length ? awaited.waitFor : undefined
+    // Only defer when there's actually a message to run later; a deferred task
+    // with nothing to do would just sit resting forever.
+    const deferred =
+      (scheduledFor !== undefined || waitingFor !== undefined) &&
+      rawMessage.trim() !== ''
 
     // Identify the caller once: it gates edit/commit grants below and, when a
     // task spawned this one, supplies the backlink we prepend to the message.
@@ -1392,6 +1500,22 @@ app.post('/api/:project/tasks', async (c) => {
     // name the task in the background so creation never blocks on it.
     const id = randomUUID()
     const now = new Date().toISOString()
+    // The creation event, timestamped a hair before the opening message so the
+    // timeline shows it ahead of that message. A task awaiting other tasks gets
+    // an "awaiting" event (carrying them, for links) even if it also has a time
+    // fallback — the condition is what's shown; a purely time-deferred task gets
+    // "scheduled"; an immediate task gets "launched". The matching "launched"
+    // event is recorded later, when it actually runs.
+    const createdEvent: TaskEvent = {
+      kind: !deferred ? 'launched' : waitingFor ? 'awaiting' : 'scheduled',
+      title: title || undefined,
+      ...(deferred && waitingFor
+        ? { awaiting: await describeAwaited(project, waitingFor) }
+        : deferred && scheduledFor
+          ? { scheduledFor }
+          : {}),
+      createdAt: new Date(Date.parse(now) - 1).toISOString(),
+    }
     const task: Task = {
       session: id,
       title: title || '…',
@@ -1412,25 +1536,17 @@ app.post('/api/:project/tasks', async (c) => {
       // Authenticates this task's own callbacks (see Task.token).
       token: randomUUID(),
       messages: [{ role: 'user', text: message, createdAt: now }],
-      // A creation event, timestamped a hair before the opening message so the
-      // timeline shows it ahead of that message. A deferred task gets a
-      // "scheduled" event (carrying the launch time) instead of "launched"; the
-      // matching "launched" event is recorded later when it actually runs.
       // Untitled until the first generated name amends it (setTitle), unless one
       // was supplied up front.
-      events: [
-        {
-          kind: deferred ? 'scheduled' : 'launched',
-          title: title || undefined,
-          ...(deferred ? { scheduledFor } : {}),
-          createdAt: new Date(Date.parse(now) - 1).toISOString(),
-        },
-      ],
+      events: [createdEvent],
       // The opening message rides the same queue as follow-ups; driveTask
       // drains it (immediately, or when the scheduler launches a deferred task).
       // It stays in `messages` above for display.
       queued: message.trim() ? [message] : [],
-      ...(deferred ? { scheduledFor } : {}),
+      // Both triggers persist when deferred; the scheduler fires on whichever
+      // comes first. Omitted entirely on an immediate task.
+      ...(deferred && scheduledFor ? { scheduledFor } : {}),
+      ...(deferred && waitingFor ? { waitingFor } : {}),
     }
 
     await mkdir(project.dataDir, { recursive: true })
@@ -1544,13 +1660,13 @@ app.post('/api/:project/tasks/:id/launch', async (c) => {
   }
 })
 
-// Put a task to rest with a scheduled wakeup (`lander rest`). Mirrors a deferred
-// `new`: it records a `scheduled` event carrying the wakeup time and sets
-// scheduledFor, so the scheduler relaunches it then. Unlike `new --date`, the
-// task has already run, so launchTask wakes the agent with a generated "Resumed
-// at …" message rather than a queued opening one. Called by the in-task CLI
-// while the agent's turn is in flight, so it goes through mutateTask to avoid
-// clobbering the concurrent streaming writes.
+// Put a task to rest until a wakeup trigger fires (`lander rest`). Mirrors a
+// deferred `new`: it sets scheduledFor and/or waitingFor and records a
+// `scheduled` or `awaiting` event, so the scheduler relaunches it on whichever
+// trigger fires first. Unlike `new`, the task has already run, so launchTask
+// wakes the agent with a generated "Resumed at …" message rather than a queued
+// opening one. Called by the in-task CLI while the agent's turn is in flight, so
+// it goes through mutateTask to avoid clobbering the concurrent streaming writes.
 app.post('/api/:project/tasks/:id/rest', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
@@ -1561,25 +1677,45 @@ app.post('/api/:project/tasks/:id/rest', async (c) => {
     if (!(await readTask(project.dataDir, id)))
       return c.json({ error: 'task not found' }, 404)
 
-    const body = await c.req.json<{ date?: unknown; wait?: unknown }>()
+    const body = await c.req.json<{
+      date?: unknown
+      time?: unknown
+      await?: unknown
+    }>()
     const sched = resolveSchedule(body)
     if ('error' in sched) return c.json({ error: sched.error }, 400)
-    if (!sched.scheduledFor)
-      return c.json({ error: 'a date/time (--date) or wait (--wait) is required' }, 400)
-    const scheduledFor = sched.scheduledFor
+    const awaited = await resolveAwait(project, body.await, id)
+    if ('error' in awaited) return c.json({ error: awaited.error }, 400)
+    const scheduledFor = sched.scheduledFor ?? undefined
+    const waitingFor = awaited.waitFor.length ? awaited.waitFor : undefined
+    if (!scheduledFor && !waitingFor)
+      return c.json(
+        { error: 'a time (--date/--time) or condition (--await) is required' },
+        400,
+      )
+    // Snapshot the awaited tasks for the event's links before entering the
+    // mutation (the readTask calls are async).
+    const awaiting = waitingFor
+      ? await describeAwaited(project, waitingFor)
+      : undefined
 
     const at = new Date().toISOString()
     await mutateTask(file, (t) => {
       // Record leaving any notable status (wedged/landed); resting itself is a
       // quiet status, so this is usually a no-op for the riding agent.
       recordStatusTransition(t, 'resting', at)
-      t.scheduledFor = scheduledFor
-      ;(t.events ??= []).push({
-        kind: 'scheduled',
-        title: t.title,
-        scheduledFor,
-        createdAt: at,
-      })
+      // Replace any prior triggers so re-resting doesn't leave a stale one armed.
+      if (scheduledFor) t.scheduledFor = scheduledFor
+      else delete t.scheduledFor
+      if (waitingFor) t.waitingFor = waitingFor
+      else delete t.waitingFor
+      // An await condition is what's shown (with its links) even alongside a time
+      // fallback; a pure time rest keeps the scheduled event.
+      ;(t.events ??= []).push(
+        waitingFor
+          ? { kind: 'awaiting', title: t.title, awaiting, createdAt: at }
+          : { kind: 'scheduled', title: t.title, scheduledFor, createdAt: at },
+      )
       t.status = 'resting'
       t.updatedAt = at
     })
@@ -1683,7 +1819,8 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
     const body = await c.req.json<{
       message?: unknown
       date?: unknown
-      wait?: unknown
+      time?: unknown
+      await?: unknown
     }>()
     const rawMessage = typeof body.message === 'string' ? body.message : ''
     if (!rawMessage.trim()) return c.json({ error: 'message is required' }, 400)
@@ -1706,17 +1843,23 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
         ? `✉ From [${principal.task.title}](/${principal.slug}/${principal.task.session})\n\n${rawMessage}`
         : rawMessage
 
-    // A `--date`/`--wait` send defers delivery; absent both, deliver now.
+    // A `--date`/`--time` and/or `--await` send defers delivery; absent all,
+    // deliver now.
     const sched = resolveSchedule(body)
     if ('error' in sched) return c.json({ error: sched.error }, 400)
+    const awaited = await resolveAwait(project, body.await)
+    if ('error' in awaited) return c.json({ error: awaited.error }, 400)
+    const deliverAt = sched.scheduledFor ?? undefined
+    const waitFor = awaited.waitFor.length ? awaited.waitFor : undefined
 
-    if (sched.scheduledFor) {
-      // Stash on the recipient; the scheduler delivers and drives it when due.
-      // Don't touch status or queue now — the task may be resting (or even
-      // landed) until then. mutateTask avoids clobbering a concurrent run.
-      const deliverAt = sched.scheduledFor
+    if (deliverAt || waitFor) {
+      // Stash on the recipient; the scheduler delivers and drives it when the
+      // trigger fires (the due time or all awaited tasks landing, whichever
+      // first). Don't touch status or queue now — the recipient may be resting
+      // (or even landed) until then. mutateTask avoids clobbering a concurrent
+      // run.
       await mutateTask(file, (t) => {
-        ;(t.scheduledMessages ??= []).push({ text: message, deliverAt })
+        ;(t.scheduledMessages ??= []).push({ text: message, deliverAt, waitFor })
       })
       const updated = await readTask(project.dataDir, id)
       return c.json(publicTask(updated ?? task))

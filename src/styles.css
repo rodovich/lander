@@ -939,7 +939,30 @@ body {
 }
 
 /* Same muted tone as the "resting" status pill — a scheduled task rests. */
-.status-transition-label.scheduled {
+.status-transition-label.scheduled,
+.status-transition-label.awaiting {
+  color: var(--muted);
+}
+
+/* An "awaiting" event stacks its row above the list of awaited tasks (when
+   there's more than one); a single awaited task sits inline on the row. */
+.status-transition-awaiting {
+  display: flex;
+  flex-direction: column;
+}
+
+.status-transition-await-link {
+  color: #0969da;
+  text-decoration: none;
+}
+
+.status-transition-await-link:hover {
+  text-decoration: underline;
+}
+
+.status-transition-await-list {
+  margin: 0 0 4px;
+  padding-left: 22px;
   color: var(--muted);
 }
 

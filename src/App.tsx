@@ -53,6 +53,7 @@ type TaskEvent = {
   kind:
     | 'launched'
     | 'scheduled'
+    | 'awaiting'
     | 'wedged'
     | 'unwedged'
     | 'landed'
@@ -61,6 +62,8 @@ type TaskEvent = {
   title?: string
   // 'scheduled' only: when the task is set to launch, shown beside the verb.
   scheduledFor?: string
+  // 'awaiting' only: the tasks this one is resting on, rendered as links.
+  awaiting?: { session: string; title: string }[]
   createdAt: string
 }
 
@@ -84,6 +87,9 @@ type Task = {
   // ISO timestamp a scheduled task is set to launch; present only while the
   // task is resting and waiting for the server's scheduler (or a manual launch).
   scheduledFor?: string
+  // Task ids this task is resting on (`--await`); the scheduler launches it once
+  // all have landed. Present only while awaiting; may coexist with scheduledFor.
+  waitingFor?: string[]
   messages: Message[]
   events?: TaskEvent[]
   // Follow-ups sent while the agent is busy wait here until a drainer picks
@@ -563,6 +569,7 @@ function Step({
 const EVENT_VERB: Record<TaskEvent['kind'], string> = {
   launched: 'launched',
   scheduled: 'scheduled',
+  awaiting: 'awaiting',
   wedged: 'wedged',
   unwedged: 'un-wedged',
   landed: 'landed',
@@ -577,7 +584,45 @@ const EVENT_VERB: Record<TaskEvent['kind'], string> = {
 // Presented like the
 // working-spinner row (unbubbled, muted) but without the spinner, since the
 // event is complete.
-function StatusTransition({ event }: { event: TaskEvent }) {
+function StatusTransition({ event, slug }: { event: TaskEvent; slug: string }) {
+  // An "awaiting" event reads "<name> awaiting <task>" with the awaited task
+  // linked; with several, it reads "<name> awaiting tasks" and lists them as
+  // links below. Any time fallback the task also has isn't shown — the condition
+  // is the point.
+  if (event.kind === 'awaiting') {
+    const tasks = event.awaiting ?? []
+    const single = tasks.length === 1
+    const link = (t: { session: string; title: string }) => (
+      <a className="status-transition-await-link" href={`/${slug}/${t.session}`}>
+        {t.title}
+      </a>
+    )
+    return (
+      <div className="status-transition-awaiting">
+        <div className="status-transition">
+          <span className="status-transition-event">
+            {event.title && (
+              <span className="status-transition-name">{event.title}</span>
+            )}
+            <span className="status-transition-label awaiting">
+              awaiting{single ? '' : ' tasks'}
+            </span>
+            {single && link(tasks[0])}
+          </span>
+          <span className="status-transition-time">
+            {formatTimestamp(event.createdAt)}
+          </span>
+        </div>
+        {!single && (
+          <ul className="status-transition-await-list">
+            {tasks.map((t) => (
+              <li key={t.session}>{link(t)}</li>
+            ))}
+          </ul>
+        )}
+      </div>
+    )
+  }
   return (
     <div className="status-transition">
       <span className="status-transition-event">
@@ -1991,6 +2036,7 @@ export function App() {
                     <StatusTransition
                       key={`e-${item.event.kind}-${item.at}`}
                       event={item.event}
+                      slug={current.projectSlug}
                     />
                   )
                 }

@@ -58,14 +58,35 @@ async function readStdin() {
   return Buffer.concat(chunks).toString('utf8')
 }
 
-// --date (a date/time the server parses) and --wait (minutes from now) both set
-// a wakeup time; they're mutually exclusive, and --wait must be a positive
-// number. Shared by `new` (where a wakeup is optional) and `rest`.
+// --date (a date/time the server parses) and --time (minutes from now) both set
+// a wakeup time; they're mutually exclusive, and --time must be a positive
+// number. Shared by `new` (where a wakeup is optional), `rest`, and `send`.
+// --await (a wakeup *condition* — other tasks landing) is orthogonal and may
+// combine with either, so it isn't checked here; see resolveAwait.
 function validateSchedule(o) {
-  if (o.date != null && o.wait != null)
-    die('--date and --wait are mutually exclusive')
-  if (o.wait != null && !(Number.isFinite(o.wait) && o.wait > 0))
-    die('--wait expects a positive number of minutes')
+  if (o.date != null && o.time != null)
+    die('--date and --time are mutually exclusive')
+  if (o.time != null && !(Number.isFinite(o.time) && o.time > 0))
+    die('--time expects a positive number of minutes')
+}
+
+// Resolve a comma-separated --await value (task ids or unambiguous prefixes) to
+// full ids, so the server stores canonical ids. `self` rejects a task awaiting
+// itself (a deadlock). Returns the resolved ids, or undefined when no --await.
+async function resolveAwait(value, { self } = {}) {
+  if (value == null) return undefined
+  const parts = value
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  if (!parts.length) die('--await expects one or more task ids')
+  const ids = []
+  for (const p of parts) {
+    const id = await resolveId(p)
+    if (self && id === self) die('a task cannot await itself')
+    ids.push(id)
+  }
+  return ids
 }
 
 async function newTask(rest) {
@@ -77,7 +98,8 @@ async function newTask(rest) {
     else if (a === '--message') o.message = rest[++i]
     else if (a === '--title') o.title = rest[++i]
     else if (a === '--date') o.date = rest[++i]
-    else if (a === '--wait') o.wait = Number(rest[++i])
+    else if (a === '--time') o.time = Number(rest[++i])
+    else if (a === '--await') o.await = rest[++i]
     else if (a === '--edits') o.allowEdits = true
     else if (a === '--commits') o.allowCommits = true
     else pos.push(a)
@@ -89,6 +111,10 @@ async function newTask(rest) {
   if (o.message === '-') o.message = await readStdin()
   if (!o.message?.trim()) die('usage: lander new <message>')
   validateSchedule(o)
+  // --await defers the launch until the named tasks land (resolved to full ids
+  // here); combinable with --date/--time, in which case launch fires on
+  // whichever trigger comes first.
+  o.await = await resolveAwait(o.await)
   // --title sets the name directly; without it the server asks haiku. --date or
   // --wait defers the launch (a date/time the server parses, or N minutes from
   // now) and the server runs the task then.
@@ -109,12 +135,14 @@ async function restTask(args) {
   for (let i = 0; i < args.length; i++) {
     const a = args[i]
     if (a === '--date') o.date = args[++i]
-    else if (a === '--wait') o.wait = Number(args[++i])
+    else if (a === '--time') o.time = Number(args[++i])
+    else if (a === '--await') o.await = args[++i]
     else die(`rest: unexpected argument ${a}`)
   }
-  if (o.date == null && o.wait == null)
-    die('usage: lander rest (--date <when> | --wait <minutes>)')
+  if (o.date == null && o.time == null && o.await == null)
+    die('usage: lander rest (--date <when> | --time <minutes> | --await <ids>)')
   validateSchedule(o)
+  o.await = await resolveAwait(o.await, { self: TASK })
   await call(PROJECT, `/tasks/${TASK}/rest`, {
     method: 'POST',
     body: JSON.stringify(o),
@@ -191,7 +219,8 @@ async function sendTask(args) {
   for (let i = 0; i < args.length; i++) {
     const a = args[i]
     if (a === '--date') o.date = args[++i]
-    else if (a === '--wait') o.wait = Number(args[++i])
+    else if (a === '--time') o.time = Number(args[++i])
+    else if (a === '--await') o.await = args[++i]
     else pos.push(a)
   }
   const target = pos.shift()
@@ -200,12 +229,14 @@ async function sendTask(args) {
   if (message === '-') message = await readStdin()
   if (!message?.trim()) die('usage: lander send <id> <message|->')
   validateSchedule(o)
+  const awaitIds = await resolveAwait(o.await)
   const id = await resolveId(target)
   await call(PROJECT, `/tasks/${id}/messages`, {
     method: 'POST',
-    body: JSON.stringify({ message, date: o.date, wait: o.wait }),
+    body: JSON.stringify({ message, date: o.date, time: o.time, await: awaitIds }),
   })
-  const verb = o.date != null || o.wait != null ? 'scheduled' : 'sent'
+  const verb =
+    o.date != null || o.time != null || o.await != null ? 'scheduled' : 'sent'
   console.log(`${verb} → ${id.slice(0, 8)}`)
 }
 
@@ -338,7 +369,8 @@ const run = {
 if (!run)
   die(
     `unknown command: ${cmd ?? '(none)'} — try ` +
-      'land | wedge | rest (--date|--wait) | status <status> | new <message> | ' +
-      'list | view <id> | send <id> <message> | archive <id...> [--restore]',
+      'land | wedge | rest (--date|--time|--await) | status <status> | ' +
+      'new <message> | list | view <id> | send <id> <message> | ' +
+      'archive <id...> [--restore]',
   )
 run().catch((e) => die(e.message))
