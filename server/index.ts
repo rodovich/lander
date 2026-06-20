@@ -51,6 +51,10 @@ type Project = {
   // list (and out of the scheduler's and recovery's view, which only scan
   // dataDir); the UI's "Show archived" toggle reads it back in.
   archiveDir: string
+  // Sibling of dataDir: ./data/<normalized-project-path>/flows, holding
+  // <name>.js flow scripts. The server only resolves and hands back their path
+  // (GET /api/:project/flows/:name); the `lander flow` CLI imports and runs them.
+  flowsDir: string
 }
 
 // Projects come in newline-separated via PROJECT_DIRS (set by dev.mjs from the
@@ -81,6 +85,7 @@ function parseProjects(): Project[] {
         normalizeProjectPath(resolved),
         'archived',
       ),
+      flowsDir: path.join(ROOT, 'data', normalizeProjectPath(resolved), 'flows'),
     })
   }
   return projects
@@ -717,7 +722,10 @@ function buildClaudeArgs(
       'for raw); `lander view <id>` shows one task (id or unambiguous short-id ' +
       'prefix); `lander send <id> <message>` messages another task in this ' +
       'project — immediately (queued behind any turn it is mid-way through), or ' +
-      'deferred with the same `--date`/`--time`/`--await` flags. When ' +
+      'deferred with the same `--date`/`--time`/`--await` flags. ' +
+      '`lander flow <name> [--key value …]` runs a predefined flow — a ' +
+      'JavaScript script stored for this project that drives these same ' +
+      'commands. When ' +
       'the user asks you to land a task, do so with `lander land`. Say ' +
       'everything you mean to say first — ' +
       'your summary, your sign-off, every last word — because running ' +
@@ -1340,6 +1348,27 @@ app.get('/api/:project/tasks/:id', async (c) => {
   const task = await readTask(project.dataDir, id)
   if (!task) return c.json({ error: 'task not found' }, 404)
   return c.json(publicTask(task))
+})
+
+// Flow names are bare filenames (<name>.js under the project's flows dir), so
+// reject anything with path separators or dots that could traverse out of it.
+const FLOW_NAME = /^[\w-]+$/
+
+// Resolve a flow script's path for the `lander flow` CLI to import and run. The
+// server only locates the file (keeping it the source of truth for where flows
+// live); execution happens in the CLI, which shares this filesystem.
+app.get('/api/:project/flows/:name', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  const name = c.req.param('name')
+  if (!FLOW_NAME.test(name)) return c.json({ error: 'invalid flow name' }, 400)
+  const file = path.join(project.flowsDir, `${name}.js`)
+  try {
+    await stat(file)
+    return c.json({ path: file })
+  } catch {
+    return c.json({ error: `unknown flow: ${name}` }, 404)
+  }
 })
 
 // Resolve a requested wakeup time from either `date` (any date/time the server

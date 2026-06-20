@@ -7,6 +7,7 @@
 // callbacks).
 import { spawn, spawnSync } from 'node:child_process'
 import { createWriteStream, readFileSync, writeFileSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
 
 const {
   LANDER_API: API,
@@ -375,6 +376,119 @@ async function assist(args) {
   process.stdout.write(runClaude(prompt, rest))
 }
 
+// --- flows -----------------------------------------------------------------
+// A flow is a JS script at data/<project>/flows/<name>.js exporting a default
+// async function. `lander flow <name> [--key value …]` resolves the script's
+// path from the server, imports it in this process, and calls it with a `lander`
+// object — the same self-management surface as the CLI, but as awaitable methods
+// (so `view` hands back a parsed task, not text to re-parse). The --key value
+// pairs become the flow's `lander.inputs`.
+
+// Run `command` under `sh` with the args as its positional params ($1, $2, …;
+// "$@" for all) and return its stdout. A non-zero exit aborts the flow.
+function runShell(command, args) {
+  const r = spawnSync('sh', ['-c', command, 'sh', ...args], { encoding: 'utf8' })
+  if (r.error) die(`shell: ${r.error.message}`)
+  if (r.status !== 0)
+    die(`shell: ${(r.stderr || '').trim() || `exited ${r.status}`}`)
+  return r.stdout ?? ''
+}
+
+// The `lander` object handed to a flow script. Server-backed methods (launch,
+// send, view, list, status, land, wedge, rest) call the same API the CLI does;
+// assist/shell run a local child; flow nests. Methods naming another task
+// resolve a full id or unambiguous prefix, like the CLI.
+function makeLander(inputs) {
+  return {
+    inputs,
+    async launch(message, opts = {}) {
+      if (!message?.trim()) die('lander.launch: a message is required')
+      const o = {
+        project: opts.project ?? PROJECT,
+        message,
+        title: opts.title,
+        date: opts.date,
+        time: opts.time,
+        allowEdits: !!opts.edits,
+        allowCommits: !!opts.commits,
+      }
+      validateSchedule(o)
+      o.await = await resolveAwait(opts.await)
+      const task = await call(o.project, '/tasks', {
+        method: 'POST',
+        body: JSON.stringify(o),
+      })
+      return task.session // the new task's id
+    },
+    async send(target, message, opts = {}) {
+      if (!message?.trim()) die('lander.send: a message is required')
+      validateSchedule(opts)
+      const awaitIds = await resolveAwait(opts.await)
+      const id = await resolveId(target)
+      await call(PROJECT, `/tasks/${id}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({
+          message,
+          date: opts.date,
+          time: opts.time,
+          await: awaitIds,
+        }),
+      })
+      return id
+    },
+    async view(target) {
+      const id = await resolveId(target)
+      return call(PROJECT, `/tasks/${id}`, { method: 'GET' })
+    },
+    async list(opts = {}) {
+      const tasks = await call(PROJECT, '/tasks', { method: 'GET' })
+      return opts.status ? tasks.filter((t) => t.status === opts.status) : tasks
+    },
+    status: (s) => setStatus(s),
+    land: () => setStatus('landed', { quiet: true }),
+    wedge: () => setStatus('wedged'),
+    async rest(opts = {}) {
+      const o = { date: opts.date, time: opts.time }
+      validateSchedule(o)
+      o.await = await resolveAwait(opts.await, { self: TASK })
+      if (o.date == null && o.time == null && o.await == null)
+        die('lander.rest: pass date, time, or await')
+      await call(PROJECT, `/tasks/${TASK}/rest`, {
+        method: 'POST',
+        body: JSON.stringify(o),
+      })
+    },
+    assist: (prompt, ...args) => runClaude(prompt, args).trim(),
+    shell: (command, ...args) => runShell(command, args).trim(),
+    flow: (name, inputs = {}) => runFlowByName(name, inputs),
+  }
+}
+
+// Resolve a flow's path from the server, import it, and run its default export.
+async function runFlowByName(name, inputs) {
+  const { path: file } = await call(
+    PROJECT,
+    `/flows/${encodeURIComponent(name)}`,
+  )
+  const mod = await import(pathToFileURL(file).href)
+  if (typeof mod.default !== 'function')
+    die(`flow "${name}" must export a default async function`)
+  return mod.default(makeLander(inputs))
+}
+
+// `lander flow <name> [--key value …]` — the --key value pairs become inputs.
+async function runFlow(args) {
+  const name = args[0]
+  if (!name) die('usage: lander flow <name> [--key value …]')
+  const inputs = {}
+  for (let i = 1; i < args.length; i++) {
+    const a = args[i]
+    if (!a.startsWith('--')) die(`flow: unexpected argument "${a}"`)
+    inputs[a.slice(2)] = args[++i] ?? ''
+  }
+  await runFlowByName(name, inputs)
+}
+
 const [cmd, ...rest] = process.argv.slice(2)
 const run = {
   land: () => setStatus('landed', { quiet: true }),
@@ -387,6 +501,7 @@ const run = {
   send: () => sendTask(rest),
   archive: () => archiveTask(rest),
   assist: () => assist(rest),
+  flow: () => runFlow(rest),
   run: () => runJob(rest),
 }[cmd]
 if (!run)
@@ -394,6 +509,6 @@ if (!run)
     `unknown command: ${cmd ?? '(none)'} — try ` +
       'land | wedge | rest (--date|--time|--await) | status <status> | ' +
       'launch <message> | list | view <id> | send <id> <message> | ' +
-      'archive <id...> [--restore] | assist <prompt>',
+      'archive <id...> [--restore] | assist <prompt> | flow <name>',
   )
 run().catch((e) => die(e.message))

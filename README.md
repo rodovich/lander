@@ -99,6 +99,38 @@ gh pr list --search "review-requested:@me" --json number -q '.[].number' |
 
 So that an agent-set status survives, `driveTask` only resets `riding → resting` on exit — it won't clobber a status like `wedged` or the terminal `landed` the agent set mid-run.
 
+### Flows (`lander flow`)
+
+A **flow** is a reusable script stored as `data/<normalized-project-path>/flows/<name>.js` (a sibling of the project's `tasks/` dir) that exports a default async function. A task runs one with `lander flow <name> [--key value …]`; the `--key value` pairs arrive as the flow's `lander.inputs`.
+
+The server only **resolves** the script's path (`GET /api/:project/flows/:name`, guarded against path traversal); the CLI **imports it in-process** and calls its default export with a `lander` object — keeping the server the source of truth for where flows live without taking on execution. Because the flow runs inside the CLI's own Node process, control flow (conditionals, loops, retries, waiting) is just JavaScript, and the same `lander` object exposes the self-management surface as awaitable methods:
+
+| Method | Backed by |
+|--------|-----------|
+| `lander.inputs` | the `--key value` flags, as an object |
+| `await lander.launch(message, { project, title, date, time, await, edits, commits })` | `POST /tasks`; returns the new task's id |
+| `await lander.send(target, message, { date, time, await })` | message another task (id or unambiguous prefix) |
+| `await lander.view(target)` | returns the **parsed task object** (`.status`, `.title`, `.messages`, …) — not text to re-parse |
+| `await lander.list({ status })` | the project's tasks as an array |
+| `lander.status(s)` / `lander.land()` / `lander.wedge()` / `await lander.rest({ date, time, await })` | act on the current task |
+| `lander.assist(prompt, …text)` | a one-shot `claude -p`, returning its trimmed reply |
+| `lander.shell(command, …args)` | run `command` under `sh` with args as `$1`, `$2`, …; returns trimmed stdout |
+| `await lander.flow(name, inputs)` | run another flow (flows nest) |
+
+`assist` and `shell` run a local child process; everything else calls the same HTTP API the CLI commands do. A non-zero exit from `assist`/`shell` aborts the flow. Since flows are ordinary `.js` under the repo root (which is `"type": "module"`), they're loaded as ESM with no per-file config. For example:
+
+```js
+// data/<project>/flows/triage.js — fan a sibling out per review-requested PR
+export default async function (lander) {
+  const prs = lander.shell(
+    'gh pr list --search "review-requested:@me" --json number -q ".[].number"',
+  )
+  for (const pr of prs.split('\n').filter(Boolean)) {
+    await lander.launch(`Review PR #${pr} using \`gh pr diff ${pr}\`.`)
+  }
+}
+```
+
 ### Frontend (`src/App.tsx`)
 
 Single component: sidebar (task list + new-task form) and a detail pane (message thread + reply composer). Enter submits, Shift/Option+Enter for newlines; shows a "claude is working…" indicator when the last message is from the user.
