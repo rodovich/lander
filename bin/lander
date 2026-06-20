@@ -5,7 +5,7 @@
 // Identity is injected when the server runs a turn: LANDER_API, LANDER_PROJECT,
 // LANDER_TASK, and LANDER_TOKEN (the per-task secret that authenticates these
 // callbacks).
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { createWriteStream, readFileSync, writeFileSync } from 'node:fs'
 
 const {
@@ -353,6 +353,28 @@ async function runJob(args) {
   child.on('close', (code) => finish(code == null ? 1 : code))
 }
 
+// --- assist ----------------------------------------------------------------
+// Run a one-shot `claude -p` session and return its reply. The prompt comes
+// first; any further args are appended on their own line as the material to act
+// on, so `lander assist "summarize:" "$(cat notes)"` sends the prompt then the
+// notes. A non-zero exit from claude aborts. Shared by the `lander assist` CLI
+// command and the `lander.assist()` flow API.
+function runClaude(prompt, args) {
+  const text = args.length ? `${prompt}\n${args.join('')}` : prompt
+  const r = spawnSync('claude', ['-p', text], { encoding: 'utf8' })
+  if (r.error) die(`assist: ${r.error.message}`)
+  if (r.status !== 0)
+    die(`assist: ${(r.stderr || '').trim() || `claude exited ${r.status}`}`)
+  return r.stdout ?? ''
+}
+
+// `lander assist <prompt> [text …]` — print the assistant's reply to stdout.
+async function assist(args) {
+  const [prompt, ...rest] = args
+  if (!prompt) die('usage: lander assist <prompt> [text …]')
+  process.stdout.write(runClaude(prompt, rest))
+}
+
 const [cmd, ...rest] = process.argv.slice(2)
 const run = {
   land: () => setStatus('landed', { quiet: true }),
@@ -364,6 +386,7 @@ const run = {
   view: () => viewTask(rest),
   send: () => sendTask(rest),
   archive: () => archiveTask(rest),
+  assist: () => assist(rest),
   run: () => runJob(rest),
 }[cmd]
 if (!run)
@@ -371,6 +394,6 @@ if (!run)
     `unknown command: ${cmd ?? '(none)'} — try ` +
       'land | wedge | rest (--date|--time|--await) | status <status> | ' +
       'launch <message> | list | view <id> | send <id> <message> | ' +
-      'archive <id...> [--restore]',
+      'archive <id...> [--restore] | assist <prompt>',
   )
 run().catch((e) => die(e.message))
