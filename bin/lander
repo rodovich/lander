@@ -48,8 +48,8 @@ async function setStatus(status, { quiet = false } = {}) {
   // `land` stays silent on success. It's terminal, so a "status → landed"
   // confirmation does nothing but invite the agent to echo it back — the
   // trailing "Landed." we're trying to kill. Nothing to react to, nothing to
-  // say. Failures still surface via die(); wedge/status keep their line since
-  // the agent works on past them.
+  // say. Failures still surface via die(); wedge keeps its line since the
+  // agent works on past it.
   if (!quiet) console.log(`status → ${status}`)
 }
 
@@ -444,7 +444,6 @@ function makeLander(inputs) {
       const tasks = await call(PROJECT, '/tasks', { method: 'GET' })
       return opts.status ? tasks.filter((t) => t.status === opts.status) : tasks
     },
-    status: (s) => setStatus(s),
     land: () => setStatus('landed', { quiet: true }),
     wedge: () => setStatus('wedged'),
     async rest(opts = {}) {
@@ -537,7 +536,6 @@ const run = {
   land: () => setStatus('landed', { quiet: true }),
   wedge: () => setStatus('wedged'),
   rest: () => restTask(rest),
-  status: () => setStatus(rest[0] || die('usage: lander status <status>')),
   launch: () => launchTask(rest),
   list: () => listTasks(rest),
   view: () => viewTask(rest),
@@ -551,7 +549,7 @@ const run = {
 if (!run)
   die(
     `unknown command: ${cmd ?? '(none)'} — try ` +
-      'land | wedge | rest (--date|--time|--await) | status <status> | ' +
+      'land | wedge | rest (--date|--time|--await) | ' +
       'launch <message> | list | view <id> | send <id> <message> | ' +
       'archive <id...> [--restore] | assist <prompt> | flow <name>',
   )

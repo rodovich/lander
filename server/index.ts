@@ -733,8 +733,8 @@ function buildClaudeArgs(
     hookSettings,
     '--append-system-prompt',
     'You are running inside a lander task. Manage yourself with the `lander` ' +
-      'CLI: `lander status <state>` sets any status; `lander wedge` marks it ' +
-      'wedged; `lander land` marks it landed; `lander new <message>` ' +
+      'CLI: `lander land` marks it landed; `lander wedge` marks it ' +
+      'wedged; `lander new <message>` ' +
       'spawns a sibling task that runs independently. Pass `--title <title>` to ' +
       'name the spawned task yourself instead of having one generated — use a ' +
       'concise 2-5 word title in sentence case, with no quotes and no trailing ' +
@@ -1670,7 +1670,7 @@ app.patch('/api/:project/tasks/:id', async (c) => {
     // Changing a task's own edit/commit grant is a privilege escalation, so
     // only the human (UI token) may do it — otherwise a task could PATCH itself
     // to gain access it was never given. Title and status stay open: the CLI's
-    // `lander status`/`land` set status, and renames are harmless.
+    // `lander land`/`wedge`/`rest` set status, and renames are harmless.
     if (
       typeof body.allowEdits === 'boolean' ||
       typeof body.allowCommits === 'boolean'
