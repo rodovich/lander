@@ -489,6 +489,49 @@ async function runFlow(args) {
   await runFlowByName(name, inputs)
 }
 
+// --- bash-guard (PreToolUse hook) ------------------------------------------
+// Wired in by the server as a PreToolUse hook on the Bash tool (see
+// buildClaudeArgs). claude pipes the tool call as JSON on stdin; when the agent
+// runs a Bash command with run_in_background set, we attach an advisory note
+// explaining that the job won't outlive the turn — it's a child of this turn's
+// claude, reaped when the turn ends, and lander never consumes its completion,
+// so it can't wake the task ("you'll be notified when it completes" only holds
+// in interactive mode, not lander's turn-based one). The note steers toward the
+// mechanisms that do persist: `lander rest` to wait, `lander launch` for parallel
+// agentic work.
+//
+// Crucially this is advisory only: we emit `additionalContext` and set NO
+// permissionDecision, so the normal permission flow is untouched — run_in_background
+// never grants access the same command wouldn't have in the foreground. Anything
+// else passes straight through. A malformed payload never interferes.
+async function bashGuard() {
+  let input
+  try {
+    input = JSON.parse((await readStdin()) || '{}')
+  } catch {
+    return // malformed payload — don't interfere with the tool call
+  }
+  if (input.tool_name !== 'Bash' || input.tool_input?.run_in_background !== true)
+    return
+  const context =
+    'Heads-up: this background job will not survive the turn. A backgrounded ' +
+    "process is a child of this turn's claude; when the turn ends it is reaped, " +
+    'and lander never consumes its completion, so it cannot wake the task — the ' +
+    'job just leaks. Background it only for work you will consume within THIS ' +
+    'turn. If you need to wait for something, end the turn and resume later with ' +
+    '`lander rest --time <minutes>` / `--date <when>` / `--await <ids>`. For ' +
+    'parallel agentic work, spawn a sibling task with `lander launch <message>`. ' +
+    '(A turn-scoped co-process verb is planned for jobs that must outlive a turn.)'
+  process.stdout.write(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        additionalContext: context,
+      },
+    }),
+  )
+}
+
 const [cmd, ...rest] = process.argv.slice(2)
 const run = {
   land: () => setStatus('landed', { quiet: true }),
@@ -503,6 +546,7 @@ const run = {
   assist: () => assist(rest),
   flow: () => runFlow(rest),
   run: () => runJob(rest),
+  'bash-guard': () => bashGuard(),
 }[cmd]
 if (!run)
   die(

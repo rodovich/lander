@@ -699,9 +699,38 @@ function buildClaudeArgs(
     : 'You currently have no edit or commit permissions, so a spawned task ' +
       'cannot be granted them either'
 
+  // A PreToolUse hook on Bash that, when the agent runs a command with
+  // run_in_background set, attaches an advisory: a backgrounded job is a child of
+  // this turn's claude, reaped at turn end, and lander never consumes its
+  // completion — so it can't wake the task and just leaks. The note points at
+  // `lander rest`/`lander launch` for work that must persist. It's advisory only
+  // (additionalContext, no permissionDecision), so it never changes whether the
+  // command is allowed — run_in_background grants nothing the foreground wouldn't.
+  // Passed per-turn via --settings rather than the project settings file, so it
+  // scopes to lander-driven runs; the hook command (`lander bash-guard`) is run by
+  // claude's hook runner, not the agent's Bash tool, so it doesn't touch the
+  // Bash(lander:*) pre-approval.
+  const hookSettings = JSON.stringify({
+    hooks: {
+      PreToolUse: [
+        {
+          matcher: 'Bash',
+          hooks: [
+            {
+              type: 'command',
+              command: `${path.join(ROOT, 'bin', 'lander')} bash-guard`,
+            },
+          ],
+        },
+      ],
+    },
+  })
+
   return [
     ...sessionArgs,
     ...editArgs,
+    '--settings',
+    hookSettings,
     '--append-system-prompt',
     'You are running inside a lander task. Manage yourself with the `lander` ' +
       'CLI: `lander status <state>` sets any status; `lander wedge` marks it ' +
