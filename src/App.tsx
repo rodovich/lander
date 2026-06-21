@@ -117,6 +117,10 @@ type Usage = { session: UsageWindow | null; weekly: UsageWindow | null }
 // every store access tolerates an unavailable or corrupt store (private mode,
 // quota) by falling back to `initial`. Drives only deliberately-kept *draft*
 // state — ephemeral UI (open menus, popups, focus) is left to reset.
+// The list's time window: tasks updated today, this week (from Sunday), or with
+// no bound. 'today'/'week' also surface in the dropdown title.
+type TimeFilter = 'today' | 'week' | 'any'
+
 function usePersistentState<T>(
   key: string,
   initial: T,
@@ -896,6 +900,12 @@ export function App() {
     'lander:showArchived',
     false,
   )
+  // Restrict the list to tasks updated today or this week (user's local time);
+  // 'any' imposes no time bound. Toggled from the project dropdown, persisted.
+  const [timeFilter, setTimeFilter] = usePersistentState<TimeFilter>(
+    'lander:timeFilter',
+    'any',
+  )
   // The user's explicit task pick. The effective selection (`selected`, below)
   // falls back to the first visible task when this one is filtered away.
   const [selectedSession, setSelectedSession] = useState<string | null>(
@@ -1018,11 +1028,30 @@ export function App() {
   // tasks can be intermixed; with a single project shown it's just noise.
   const showProjectLabels = shown.length > 1
 
-  // Filter by title (case-insensitive) before grouping.
+  // Earliest update time (ms) a task may have to stay in the list, per the
+  // time filter: start of today or start of this week (Sunday) in local time;
+  // null for 'any'. Recomputed each render so it tracks the wall clock.
+  const timeCutoff = (() => {
+    if (timeFilter === 'any') return null
+    const now = new Date()
+    const startOfToday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    )
+    if (timeFilter === 'week') startOfToday.setDate(now.getDate() - now.getDay())
+    return startOfToday.getTime()
+  })()
+
+  // Filter by time window, then by title (case-insensitive), before grouping.
   const query = filter.trim().toLowerCase()
-  const matchedTasks = query
-    ? tasks.filter((t) => t.title.toLowerCase().includes(query))
-    : tasks
+  const matchedTasks = tasks.filter((t) => {
+    if (timeCutoff != null) {
+      const ts = Date.parse(t.updatedAt ?? t.createdAt)
+      if (!Number.isNaN(ts) && ts < timeCutoff) return false
+    }
+    return query ? t.title.toLowerCase().includes(query) : true
+  })
 
   // Group tasks by status — wedged (needs the user) first, then riding,
   // resting, and landed last — preserving each group's recency order within it
@@ -1704,8 +1733,9 @@ export function App() {
   }
 
   // Dropdown summary: "All projects" when every project is shown, otherwise the
-  // single shown project's path. When the archived view is on, a "• Archived"
-  // suffix is appended (e.g. "All projects • Archived").
+  // single shown project's path. The active time filter ("Today"/"This week",
+  // not "Any time") and the archived view each append a "• …" suffix, in that
+  // order (e.g. "All projects • Today • Archived").
   const filterBase =
     projects.length === 0
       ? ''
@@ -1714,8 +1744,13 @@ export function App() {
         : shown.length === 1
           ? pathBySlug.get(shown[0]) ?? shown[0]
           : `${shown.length} of ${projects.length}`
-  const filterSummary =
-    filterBase && showArchived ? `${filterBase} • Archived` : filterBase
+  const timeLabel =
+    timeFilter === 'today' ? 'Today' : timeFilter === 'week' ? 'This week' : ''
+  const filterSummary = filterBase
+    ? filterBase +
+      (timeLabel ? ` • ${timeLabel}` : '') +
+      (showArchived ? ' • Archived' : '')
+    : filterBase
 
   return (
     <div className="layout">
@@ -1757,8 +1792,32 @@ export function App() {
                   <span className="project-menu-check">
                     {allShown ? '✓' : ''}
                   </span>
-                  <span className="project-menu-path">Show all</span>
+                  <span className="project-menu-path">All projects</span>
                 </button>
+                {(
+                  [
+                    ['today', 'Today'],
+                    ['week', 'This week'],
+                    ['any', 'Any time'],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className="project-menu-item project-menu-time"
+                    role="menuitemradio"
+                    aria-checked={timeFilter === value}
+                    onClick={() => {
+                      setTimeFilter(value)
+                      setMenuOpen(false)
+                    }}
+                  >
+                    <span className="project-menu-check">
+                      {timeFilter === value ? '✓' : ''}
+                    </span>
+                    <span className="project-menu-path">{label}</span>
+                  </button>
+                ))}
                 <button
                   type="button"
                   className="project-menu-item project-menu-toggle"
