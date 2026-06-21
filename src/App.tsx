@@ -1708,8 +1708,9 @@ export function App() {
   }
 
   // Dropdown summary: "All projects" when every project is shown, otherwise the
-  // single shown project's path.
-  const filterSummary =
+  // single shown project's path. When the archived view is on, a "• Show
+  // archived" suffix is appended (e.g. "All projects • Show archived").
+  const filterBase =
     projects.length === 0
       ? ''
       : allShown && projects.length > 1
@@ -1717,6 +1718,8 @@ export function App() {
         : shown.length === 1
           ? pathBySlug.get(shown[0]) ?? shown[0]
           : `${shown.length} of ${projects.length}`
+  const filterSummary =
+    filterBase && showArchived ? `${filterBase} • Show archived` : filterBase
 
   return (
     <div className="layout">
