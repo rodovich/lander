@@ -1997,11 +1997,19 @@ app.post('/api/:project/tasks/:id/seen', async (c) => {
   try {
     const id = c.req.param('id')
     if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
-    const file = path.join(project.dataDir, `${id}.json`)
 
     const body = await c.req.json<{ at?: unknown }>()
     const at = typeof body.at === 'string' ? body.at : ''
     if (!at) return c.json({ error: 'at is required' }, 400)
+
+    // The task lives in tasks/ while active and in archived/ once archived; an
+    // archived row can still show an unseen dot, so look in both. Without the
+    // fallback the mark silently 404s for archived tasks: the dot clears
+    // optimistically in the UI, then the next poll restores the stale marker and
+    // it flickers back.
+    const file = (await readTask(project.dataDir, id))
+      ? path.join(project.dataDir, `${id}.json`)
+      : path.join(project.archiveDir, `${id}.json`)
 
     // Read-modify-write under mutateTask so a concurrent streaming update (which
     // rewrites the same file) can't clobber, or be clobbered by, this marker.

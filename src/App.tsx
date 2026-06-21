@@ -1487,7 +1487,7 @@ export function App() {
 
   // Move the open task's seen marker per the viewing rules. When the viewer
   // starts actively viewing a task (switches to it, focuses the tab, or scrolls
-  // to the bottom), treat whatever's already there as a baseline and arm a 3s
+  // to the bottom), treat whatever's already there as a baseline and arm a 2s
   // dwell that marks it seen — so a glance that doesn't last doesn't clear the
   // dot. An update that arrives *while* actively viewing is past that baseline,
   // so it's marked seen at once.
@@ -1506,14 +1506,14 @@ export function App() {
     const session = current.session
     if (viewSessionRef.current !== session) {
       // Just began actively viewing this task: snapshot the baseline and arm the
-      // dwell. Anything already present clears only once the 3s elapses.
+      // dwell. Anything already present clears only once the 2s elapses.
       viewSessionRef.current = session
       viewBaselineRef.current = currentLatest
       if (dwellTimerRef.current) clearTimeout(dwellTimerRef.current)
       dwellTimerRef.current = setTimeout(() => {
         dwellTimerRef.current = null
         void markSeen(session)
-      }, 3000)
+      }, 2000)
     } else if (currentLatest > viewBaselineRef.current) {
       // A new update landed while actively viewing — seen immediately.
       viewBaselineRef.current = currentLatest
