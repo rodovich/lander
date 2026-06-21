@@ -302,6 +302,7 @@ async function runJob(args) {
   const log = createWriteStream(job.logPath, { flags: 'a' })
   let stderr = ''
   let settled = false
+  let interrupted = false
   const finish = (exitCode) => {
     if (settled) return
     settled = true
@@ -309,12 +310,15 @@ async function runJob(args) {
     clearInterval(heartbeat)
     // Flush the log, then record completion so the server's reducer finalizes
     // the turn (and surfaces a non-zero exit, with stderr, as an error reply).
+    // `interrupted` marks a deliberate stop (the server wedged a riding task);
+    // the reducer treats it as a clean finish rather than a crash.
     log.end(() => {
       try {
         writeFileSync(
           job.donePath,
           JSON.stringify({
             exitCode,
+            interrupted,
             stderr: stderr.trim(),
             endedAt: new Date().toISOString(),
           }),
@@ -352,6 +356,18 @@ async function runJob(args) {
     finish(1)
   })
   child.on('close', (code) => finish(code == null ? 1 : code))
+
+  // The server sends SIGTERM to interrupt a riding turn — the human wedged the
+  // task out from under the agent. Stop claude and finish cleanly, recording the
+  // partial reply already streamed to the log. We're our own process-group
+  // leader, so this signal is meant for us and us alone.
+  process.on('SIGTERM', () => {
+    interrupted = true
+    try {
+      child.kill('SIGKILL')
+    } catch {}
+    finish(0)
+  })
 }
 
 // --- assist ----------------------------------------------------------------

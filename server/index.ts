@@ -665,6 +665,21 @@ function pidAlive(pid: number): boolean {
   }
 }
 
+// Stop a turn's runner so a riding task can be wedged out from under the agent.
+// The runner (its own process-group leader) handles SIGTERM by killing claude
+// and writing a clean done.json, which the in-flight reducer folds in —
+// finalizing whatever partial reply streamed without surfacing a crash. Best
+// effort: a run that already finished (no lease, or a dead pid) is a no-op.
+async function interruptRun(project: Project, runId: string): Promise<void> {
+  const leasePath = path.join(project.runsDir, runId, 'lease.json')
+  const lease = safeParse<{ pid: number }>(await readFileMaybe(leasePath))
+  if (lease?.pid != null && pidAlive(lease.pid)) {
+    try {
+      process.kill(lease.pid, 'SIGTERM')
+    } catch {}
+  }
+}
+
 // Build the argv for one claude turn from the task's permissions and the prompt.
 // The first turn establishes the session with `--session-id`; later turns
 // continue it with `--resume`. Output is stream-json so the runner can stream
@@ -890,7 +905,11 @@ async function reduceRun(
 
   while (true) {
     const doneRaw = await readFileMaybe(donePath)
-    const done = safeParse<{ exitCode: number; stderr?: string }>(doneRaw)
+    const done = safeParse<{
+      exitCode: number
+      interrupted?: boolean
+      stderr?: string
+    }>(doneRaw)
 
     // Fold in any new bytes. Read only the slice past the cursor so a long run's
     // log isn't re-read each poll. Stop at the last newline (a partial trailing
@@ -945,8 +964,11 @@ async function reduceRun(
       await mutateTask(file, (t) => {
         const msg = ensurePending(t)
         // A non-zero exit with no reply text is an error to surface; otherwise
-        // the reduced text stands as the reply.
-        if (!msg.text && done.exitCode !== 0)
+        // the reduced text stands as the reply. A deliberate interrupt (the task
+        // was wedged mid-run) is not an error — keep the partial reply, and note
+        // the stop if nothing had streamed yet.
+        if (!msg.text && done.interrupted) msg.text = '_(interrupted)_'
+        else if (!msg.text && done.exitCode !== 0)
           msg.text =
             `error running claude: exited ${done.exitCode}` +
             (done.stderr?.trim() ? `\n${done.stderr.trim()}` : '')
@@ -1652,47 +1674,74 @@ app.patch('/api/:project/tasks/:id', async (c) => {
       allowCommits?: unknown
       status?: unknown
     }>()
-    if (typeof body.title === 'string' && body.title.trim()) {
-      const next = body.title.trim()
-      // A user rename; record it (snapshotting the new name) when it actually
-      // changes the title. The initial generated name goes through setTitle,
-      // which amends the launch event instead — so it never lands here.
-      if (next !== task.title) {
-        (task.events ??= []).push({
-          kind: 'renamed',
-          title: next,
-          createdAt: new Date().toISOString(),
-        })
-        task.updatedAt = new Date().toISOString()
-      }
-      task.title = next
-    }
+
+    // Resolve the caller once: to gate the privileged allow* change, and to
+    // decide whether a wedge should interrupt a live run.
+    const principal = await resolvePrincipal(c.req)
+
     // Changing a task's own edit/commit grant is a privilege escalation, so
     // only the human (UI token) may do it — otherwise a task could PATCH itself
     // to gain access it was never given. Title and status stay open: the CLI's
     // `lander land`/`wedge`/`rest` set status, and renames are harmless.
     if (
-      typeof body.allowEdits === 'boolean' ||
-      typeof body.allowCommits === 'boolean'
-    ) {
-      const principal = await resolvePrincipal(c.req)
-      if (principal.kind !== 'ui')
-        return c.json(
-          { error: 'only the UI may change a task’s edit/commit permissions' },
-          403,
-        )
-      if (typeof body.allowEdits === 'boolean') task.allowEdits = body.allowEdits
+      (typeof body.allowEdits === 'boolean' ||
+        typeof body.allowCommits === 'boolean') &&
+      principal.kind !== 'ui'
+    )
+      return c.json(
+        { error: 'only the UI may change a task’s edit/commit permissions' },
+        403,
+      )
+
+    // Wedging a riding task interrupts the agent — unless the agent wedged
+    // itself (to ask the user something), which is finishing its own turn and
+    // should run on. So a wedge from anyone but this task's own CLI stops the
+    // in-flight run; the human is pulling the task back to redirect it. The
+    // interrupt fires after the status write below, and the run's reducer folds
+    // in the partial reply.
+    const selfWedge = principal.kind === 'task' && principal.task.session === id
+    const runId = task.runId
+    const interrupt =
+      body.status === 'wedged' &&
+      !selfWedge &&
+      task.status === 'riding' &&
+      !!runId
+
+    // Route the write through mutateTask — a fresh read immediately before the
+    // atomic rename — so it can't clobber the streaming reducer's concurrent
+    // writes. The same reason `rest` does, and load-bearing now that a wedge
+    // can arrive mid-run.
+    await mutateTask(file, (t) => {
+      if (typeof body.title === 'string' && body.title.trim()) {
+        const next = body.title.trim()
+        // A user rename; record it (snapshotting the new name) when it actually
+        // changes the title. The initial generated name goes through setTitle,
+        // which amends the launch event instead — so it never lands here.
+        if (next !== t.title) {
+          (t.events ??= []).push({
+            kind: 'renamed',
+            title: next,
+            createdAt: new Date().toISOString(),
+          })
+          t.updatedAt = new Date().toISOString()
+        }
+        t.title = next
+      }
+      if (typeof body.allowEdits === 'boolean') t.allowEdits = body.allowEdits
       if (typeof body.allowCommits === 'boolean')
-        task.allowCommits = body.allowCommits
-    }
-    if (typeof body.status === 'string') {
-      const at = new Date().toISOString()
-      recordStatusTransition(task, body.status, at)
-      if (body.status !== task.status) task.updatedAt = at
-      task.status = body.status
-    }
-    await writeFile(file, JSON.stringify(task, null, 2))
-    return c.json(publicTask(task))
+        t.allowCommits = body.allowCommits
+      if (typeof body.status === 'string') {
+        const at = new Date().toISOString()
+        recordStatusTransition(t, body.status, at)
+        if (body.status !== t.status) t.updatedAt = at
+        t.status = body.status
+      }
+    })
+
+    if (interrupt && runId) await interruptRun(project, runId)
+
+    const updated = await readTask(project.dataDir, id)
+    return c.json(publicTask(updated ?? task))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
