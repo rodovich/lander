@@ -1473,7 +1473,36 @@ async function resolveAwait(
     if (!(await readTask(project.dataDir, id)))
       return { error: `await task not found: ${id}` }
   }
+  // Guard against a deadlock cycle: if any awaited task already waits (directly
+  // or transitively) on the awaiter, these edges would close a loop in which
+  // each task rests on the next and none can ever land. Only reachable when the
+  // awaiter already exists (`rest`, which passes selfId) — a freshly minted
+  // `new` id is unreferenced, so its await edges can never close a cycle.
+  if (selfId && (await awaitReaches(project, ids, selfId)))
+    return { error: 'await would create a cycle' }
   return { waitFor: ids }
+}
+
+// Whether `target` is reachable from `ids` along the waitingFor graph — i.e.
+// some awaited task already (transitively) rests on it. Used by resolveAwait to
+// reject an await edge that would close a deadlock cycle. The visited set bounds
+// the walk and keeps it terminating even over already-cyclic data.
+async function awaitReaches(
+  project: Project,
+  ids: string[],
+  target: string,
+): Promise<boolean> {
+  const seen = new Set<string>()
+  const stack = [...ids]
+  while (stack.length) {
+    const id = stack.pop()!
+    if (id === target) return true
+    if (seen.has(id)) continue
+    seen.add(id)
+    const t = await readTask(project.dataDir, id)
+    if (t?.waitingFor?.length) stack.push(...t.waitingFor)
+  }
+  return false
 }
 
 // Snapshot the awaited tasks (id + current title) for an `awaiting` event, so
