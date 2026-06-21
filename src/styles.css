@@ -413,6 +413,44 @@ body {
   color: #1a7f37;
 }
 
+/* The per-status count row under the filter dropdown. Each entry wears its
+   status color (same palette as the status pills); the number is emphasized. */
+.task-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-tinted);
+  font-size: 11px;
+}
+
+.task-count {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.task-count-num {
+  font-weight: 600;
+}
+
+.task-count.wedged {
+  color: #bf8700;
+}
+
+.task-count.riding {
+  color: #0969da;
+}
+
+.task-count.resting {
+  color: var(--muted);
+}
+
+.task-count.landed {
+  color: #1a7f37;
+}
+
 .task-time {
   color: var(--muted);
   font-size: 12px;

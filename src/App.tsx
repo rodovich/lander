@@ -1083,6 +1083,19 @@ export function App() {
     (a, b) => (STATUS_RANK[a.status] ?? 3) - (STATUS_RANK[b.status] ?? 3),
   )
 
+  // Per-status counts for the summary row below the filter dropdown, ordered
+  // left-to-right as the reverse of the list (landed, resting, riding, wedged
+  // — STATUS_RANK descending). Only statuses present after filtering appear.
+  const statusCounts = (() => {
+    const counts = new Map<string, number>()
+    for (const t of matchedTasks) {
+      counts.set(t.status, (counts.get(t.status) ?? 0) + 1)
+    }
+    return [...counts.entries()].sort(
+      (a, b) => (STATUS_RANK[b[0]] ?? 3) - (STATUS_RANK[a[0]] ?? 3),
+    )
+  })()
+
   // The effective selection: the user's pick if it's still visible, otherwise
   // the first task in the list (e.g. after filtering hides the prior pick).
   const selected =
@@ -1851,6 +1864,15 @@ export function App() {
                 </button>
               </div>
             )}
+          </div>
+        )}
+        {projects.length > 0 && statusCounts.length > 0 && (
+          <div className="task-counts">
+            {statusCounts.map(([status, count]) => (
+              <span key={status} className={'task-count ' + status}>
+                <span className="task-count-num">{count}</span> {status}
+              </span>
+            ))}
           </div>
         )}
         <input
