@@ -426,33 +426,43 @@ function DiffView({ edits }: { edits: { old: string; new: string }[] }) {
 }
 
 // A tool call in the activity trace: a clickable chip (red when the call was
-// blocked) that toggles a grant popup. For the file-writing tools the chip also
-// gets a disclosure triangle to its left that reveals the edit's diff (default
-// closed); option/shift-clicking it toggles every diff in the message at once.
-// The chip + popup share one ref so an outside click — anywhere but here —
-// dismisses the popup.
+// blocked) that toggles a grant popup. When the chip has revealable detail — a
+// file-writing tool's diff, or any other tool's captured output — it also gets
+// a disclosure triangle to its left that expands it (default closed);
+// option/shift-clicking toggles every such chip in the message at once. The chip
+// + popup share one ref so an outside click — anywhere but here — dismisses the
+// popup.
 function ToolStep({
   step,
   status,
+  result,
   open,
   onToggle,
   onClose,
   onAllow,
-  diffOpen,
-  onToggleDiff,
+  detailOpen,
+  onToggleDetail,
 }: {
   step: Step
   status: ToolStatus
+  // The matching tool_result's text/error, folded in so the chip can reveal it.
+  result?: { text?: string; isError?: boolean }
   open: boolean
   onToggle: () => void
   onClose: () => void
   onAllow: (rule: string, scope: 'task' | 'project') => void
-  diffOpen: boolean
+  detailOpen: boolean
   // `all` is set when the user option/shift-clicked, asking to toggle every
-  // diff in the message rather than just this one.
-  onToggleDiff: (all: boolean) => void
+  // detail in the message rather than just this one.
+  onToggleDetail: (all: boolean) => void
 }) {
   const hasDiff = !!step.edits && step.edits.length > 0
+  // Edits reveal their diff; everything else reveals its captured output (if any
+  // — a still-running call has none yet). The diff wins so an Edit doesn't also
+  // dump its noisy confirmation text.
+  const hasResult = !hasDiff && !!result?.text
+  const hasDetail = hasDiff || hasResult
+  const noun = hasDiff ? 'diff' : 'output'
   const ref = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
   // The popup is fixed-positioned (so the scrolling timeline can't clip it), so
@@ -491,18 +501,16 @@ function ToolStep({
   return (
     <div className="step-tool" ref={ref}>
       <div className="step-tool-row">
-        {hasDiff && (
+        {hasDetail && (
           <button
             type="button"
             className="step-diff-toggle"
-            aria-expanded={diffOpen}
-            aria-label={diffOpen ? 'Hide diff' : 'Show diff'}
-            title={
-              diffOpen ? 'Hide diff (⌥/⇧ for all)' : 'Show diff (⌥/⇧ for all)'
-            }
-            onClick={(e) => onToggleDiff(e.altKey || e.shiftKey)}
+            aria-expanded={detailOpen}
+            aria-label={`${detailOpen ? 'Hide' : 'Show'} ${noun}`}
+            title={`${detailOpen ? 'Hide' : 'Show'} ${noun} (⌥/⇧ for all)`}
+            onClick={(e) => onToggleDetail(e.altKey || e.shiftKey)}
           >
-            <span className={'step-diff-caret' + (diffOpen ? ' open' : '')}>▶</span>
+            <span className={'step-diff-caret' + (detailOpen ? ' open' : '')}>▶</span>
           </button>
         )}
         <button
@@ -516,7 +524,12 @@ function ToolStep({
         </button>
         {step.input && <span className="step-tool-input">{step.input}</span>}
       </div>
-      {hasDiff && diffOpen && <DiffView edits={step.edits!} />}
+      {detailOpen && hasDiff && <DiffView edits={step.edits!} />}
+      {detailOpen && hasResult && (
+        <div className={'step-result' + (result!.isError ? ' error' : '')}>
+          {result!.text}
+        </div>
+      )}
       {open && anchor && (
         <ToolPopup step={step} status={status} anchor={anchor} onAllow={onAllow} />
       )}
@@ -529,33 +542,36 @@ function ToolStep({
 function Step({
   step,
   status,
+  result,
   open,
   onToggle,
   onClose,
   onAllow,
-  diffOpen,
-  onToggleDiff,
+  detailOpen,
+  onToggleDetail,
 }: {
   step: Step
   status: ToolStatus
+  result?: { text?: string; isError?: boolean }
   open: boolean
   onToggle: () => void
   onClose: () => void
   onAllow: (rule: string, scope: 'task' | 'project') => void
-  diffOpen: boolean
-  onToggleDiff: (all: boolean) => void
+  detailOpen: boolean
+  onToggleDetail: (all: boolean) => void
 }) {
   if (step.kind === 'tool_use') {
     return (
       <ToolStep
         step={step}
         status={status}
+        result={result}
         open={open}
         onToggle={onToggle}
         onClose={onClose}
         onAllow={onAllow}
-        diffOpen={diffOpen}
-        onToggleDiff={onToggleDiff}
+        detailOpen={detailOpen}
+        onToggleDetail={onToggleDetail}
       />
     )
   }
@@ -948,15 +964,15 @@ export function App() {
   // Only one is open at a time; null means none.
   const [openTool, setOpenTool] = useState<string | null>(null)
 
-  // The set of file-writing tool chips whose diff is revealed, keyed the same
-  // "<messageIndex>:<stepIndex>". Diffs start closed and several can be open at
-  // once (option/shift-click toggles a whole message's worth).
-  const [openDiffs, setOpenDiffs] = useState<Set<string>>(new Set())
+  // The set of tool chips whose detail (a diff or captured output) is revealed,
+  // keyed the same "<messageIndex>:<stepIndex>". Details start closed and several
+  // can be open at once (option/shift-click toggles a whole message's worth).
+  const [openDetails, setOpenDetails] = useState<Set<string>>(new Set())
 
-  // Toggle one chip's diff, or — when option/shift was held — every diff in its
-  // message together, driving them all to this chip's new (opposite) state.
-  function toggleDiff(key: string, messageKeys: string[]) {
-    setOpenDiffs((prev) => {
+  // Toggle one chip's detail, or — when option/shift was held — every detail in
+  // its message together, driving them all to this chip's new (opposite) state.
+  function toggleDetail(key: string, messageKeys: string[]) {
+    setOpenDetails((prev) => {
       const next = new Set(prev)
       const willOpen = !prev.has(key)
       for (const k of messageKeys) {
@@ -1392,7 +1408,7 @@ export function App() {
   useEffect(() => {
     setEditingTitle(false)
     setOpenTool(null)
-    setOpenDiffs(new Set())
+    setOpenDetails(new Set())
   }, [selected])
 
   // Focus and select the title when entering edit mode.
@@ -2119,21 +2135,34 @@ export function App() {
                       {(() => {
                         // Map each tool call's id to its result outcome so a
                         // tool_use chip can show whether it was allowed/blocked,
-                        // and to the tool that produced it so we can suppress a
-                        // successful Edit's (noisy) result peek.
+                        // and fold the result's text/error in so the chip can
+                        // reveal it as collapsible detail.
                         const outcomes = new Map<string, boolean>()
-                        const toolById = new Map<string, string>()
+                        const resultById = new Map<
+                          string,
+                          { text?: string; isError?: boolean }
+                        >()
+                        const hasToolUse = new Set<string>()
                         for (const s of m.steps) {
-                          if (s.kind === 'tool_result' && s.toolUseId)
+                          if (s.kind === 'tool_result' && s.toolUseId) {
                             outcomes.set(s.toolUseId, !!s.blocked)
-                          if (s.kind === 'tool_use' && s.toolUseId && s.tool)
-                            toolById.set(s.toolUseId, s.tool)
+                            resultById.set(s.toolUseId, {
+                              text: s.text,
+                              isError: s.isError,
+                            })
+                          }
+                          if (s.kind === 'tool_use' && s.toolUseId)
+                            hasToolUse.add(s.toolUseId)
                         }
-                        // Keys of every diff-bearing chip in this message, so an
-                        // option/shift-click on one can toggle them all together.
-                        const diffKeys = m.steps!
+                        // Keys of every chip with revealable detail (a diff, or a
+                        // result with text) in this message, so an option/shift-
+                        // click on one can toggle them all together.
+                        const detailKeys = m.steps!
                           .map((s, j) =>
-                            s.kind === 'tool_use' && s.edits?.length
+                            s.kind === 'tool_use' &&
+                            (s.edits?.length ||
+                              (s.toolUseId &&
+                                resultById.get(s.toolUseId)?.text))
                               ? `${i}:${j}`
                               : null,
                           )
@@ -2151,13 +2180,13 @@ export function App() {
                                 : blocked
                                   ? 'blocked'
                                   : 'allowed'
-                          // A successful Edit's result is just a confirmation/
-                          // diff dump — skip it to keep the trace readable.
+                          // A result owned by a tool_use chip is now revealed from
+                          // that chip — skip the standalone peek. Orphan/legacy
+                          // results (no matching chip) still render inline.
                           if (
                             s.kind === 'tool_result' &&
-                            !s.isError &&
                             s.toolUseId &&
-                            toolById.get(s.toolUseId) === 'Edit'
+                            hasToolUse.has(s.toolUseId)
                           )
                             return null
                           return (
@@ -2165,15 +2194,20 @@ export function App() {
                               key={j}
                               step={s}
                               status={status}
+                              result={
+                                s.kind === 'tool_use' && s.toolUseId
+                                  ? resultById.get(s.toolUseId)
+                                  : undefined
+                              }
                               open={openTool === key}
                               onToggle={() =>
                                 setOpenTool(openTool === key ? null : key)
                               }
                               onClose={() => setOpenTool(null)}
                               onAllow={allowTool}
-                              diffOpen={openDiffs.has(key)}
-                              onToggleDiff={(all) =>
-                                toggleDiff(key, all ? diffKeys : [key])
+                              detailOpen={openDetails.has(key)}
+                              onToggleDetail={(all) =>
+                                toggleDetail(key, all ? detailKeys : [key])
                               }
                             />
                           )

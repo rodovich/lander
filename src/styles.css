@@ -1000,8 +1000,9 @@ body {
   gap: 8px;
 }
 
-/* The disclosure triangle left of a file-writing chip. A bare caret that rotates
-   when its diff is open; kept narrow so it reads as a hinge on the chip. */
+/* The disclosure triangle left of a tool chip with revealable detail (a diff or
+   captured output). A bare caret that rotates when open; kept narrow so it reads
+   as a hinge on the chip. */
 .step-diff-toggle {
   flex-shrink: 0;
   padding: 0;
@@ -1192,6 +1193,18 @@ body {
   border-left: 2px solid var(--border);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* An error result reads red, matching its blocked chip. */
+.step-result.error {
+  color: var(--error);
+  border-left-color: var(--error);
+}
+
+/* Revealed under its chip, the output aligns with a diff's indentation so the
+   caret hinge lines up. */
+.step-tool .step-result {
+  margin-left: 16px;
 }
 
 .composer-bar {
