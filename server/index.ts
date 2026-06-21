@@ -1350,19 +1350,19 @@ app.get('/api/:project/tasks', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
   try {
-    const active = await readTasks(project.dataDir)
-    // By default archived tasks are hidden; `?archived=1` merges them in, each
-    // tagged so the UI can mark the row and offer Restore.
+    // By default only active tasks are listed; `?archived=1` lists only the
+    // archived ones instead, each tagged so the UI can mark the row and offer
+    // Restore.
     if (c.req.query('archived') !== '1')
-      return c.json(active.map(publicTask))
+      return c.json((await readTasks(project.dataDir)).map(publicTask))
     const archived = (await readTasks(project.archiveDir)).map((t) => ({
       ...t,
       archived: true,
     }))
-    const merged = [...active, ...archived].sort((a, b) =>
+    archived.sort((a, b) =>
       (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt),
     )
-    return c.json(merged.map(publicTask))
+    return c.json(archived.map(publicTask))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }

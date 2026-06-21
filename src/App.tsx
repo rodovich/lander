@@ -890,8 +890,8 @@ export function App() {
   const [shown, setShown] = useState<string[]>([])
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
-  // Whether archived tasks are merged into the list (toggled from the project
-  // dropdown). Persisted so the choice survives a reload.
+  // Whether the list shows archived tasks instead of active ones (toggled from
+  // the project dropdown). Persisted so the choice survives a reload.
   const [showArchived, setShowArchived] = usePersistentState(
     'lander:showArchived',
     false,
@@ -1641,18 +1641,14 @@ export function App() {
   }
 
   // Archive (or restore) a task by moving it between the project's tasks/ and
-  // archived/ dirs. Optimistic: when archiving drops it from the list (unless
-  // archived rows are being shown, where it just gets tagged); when restoring
-  // clears the tag. A reload reconciles in either case.
+  // archived/ dirs. The list shows only active tasks or only archived ones, so
+  // either action moves the row out of the current view: optimistically drop it
+  // from the list. A reload reconciles.
   async function archiveTask(task: TaskWithProject, archived: boolean) {
     const id = task.session
     const proj = task.projectSlug
     setError(null)
-    setTasks((prev) =>
-      archived && !showArchived
-        ? prev.filter((t) => t.session !== id)
-        : prev.map((t) => (t.session === id ? { ...t, archived } : t)),
-    )
+    setTasks((prev) => prev.filter((t) => t.session !== id))
     try {
       const r = await fetch(`/api/${proj}/tasks/${id}/archive`, {
         method: 'POST',
@@ -1708,8 +1704,8 @@ export function App() {
   }
 
   // Dropdown summary: "All projects" when every project is shown, otherwise the
-  // single shown project's path. When the archived view is on, a "• Show
-  // archived" suffix is appended (e.g. "All projects • Show archived").
+  // single shown project's path. When the archived view is on, a "• Archived"
+  // suffix is appended (e.g. "All projects • Archived").
   const filterBase =
     projects.length === 0
       ? ''
@@ -1719,7 +1715,7 @@ export function App() {
           ? pathBySlug.get(shown[0]) ?? shown[0]
           : `${shown.length} of ${projects.length}`
   const filterSummary =
-    filterBase && showArchived ? `${filterBase} • Show archived` : filterBase
+    filterBase && showArchived ? `${filterBase} • Archived` : filterBase
 
   return (
     <div className="layout">
