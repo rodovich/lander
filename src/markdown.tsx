@@ -7,7 +7,7 @@ import { Fragment, useState, type ReactNode } from 'react'
 // blocks, horizontal rules, and inline bold/italic/code/links.
 
 // Only allow link schemes that can't execute script.
-function safeHref(url: string): string | undefined {
+export function safeHref(url: string): string | undefined {
   const trimmed = url.trim()
   if (/^(https?:|mailto:)/i.test(trimmed)) return trimmed
   if (trimmed.startsWith('/') || trimmed.startsWith('#')) return trimmed
@@ -162,13 +162,13 @@ type Align = 'left' | 'center' | 'right' | null
 
 // Count leading spaces, used to decide whether a line is nested under a list
 // item's marker.
-function leadingSpaces(line: string): number {
+export function leadingSpaces(line: string): number {
   return line.match(/^ */)![0].length
 }
 
 // Split a "| a | b |" row into trimmed cells, tolerating optional leading and
 // trailing pipes. Escaped \| stays literal within a cell.
-function splitRow(line: string): string[] {
+export function splitRow(line: string): string[] {
   const cells: string[] = []
   let cur = ''
   for (let j = 0; j < line.length; j++) {
@@ -191,7 +191,7 @@ function splitRow(line: string): string[] {
 }
 
 // A delimiter row looks like |---|:--:|---:| — dashes with optional colons.
-function parseDelimiter(line: string): Align[] | null {
+export function parseDelimiter(line: string): Align[] | null {
   if (!line.includes('|') && !/^[\s:-]+$/.test(line)) return null
   const cells = splitRow(line)
   if (cells.length === 0) return null
@@ -206,7 +206,7 @@ function parseDelimiter(line: string): Align[] | null {
 }
 
 // Group raw lines into block-level structures.
-function parseBlocks(src: string): Block[] {
+export function parseBlocks(src: string): Block[] {
   const lines = src.replace(/\r\n?/g, '\n').split('\n')
   const blocks: Block[] = []
   let i = 0
