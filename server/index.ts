@@ -1501,10 +1501,14 @@ app.post('/api/:project/tasks/:id/retitle', async (c) => {
       return c.json({ error: 'task not found' }, 404)
     }
 
-    const transcript = task.messages
-      .map((m) => `${m.role}: ${m.text}`)
+    // Title from the user's own messages only. The goal lives in what the user
+    // asked for; the assistant's replies are execution detail that dominates the
+    // transcript by volume and pulls titles off-goal and over-length.
+    const goal = task.messages
+      .filter((m) => m.role === 'user')
+      .map((m) => m.text)
       .join('\n\n')
-    const next = await generateTitle(project.path, transcript)
+    const next = await generateTitle(project.path, goal)
     // A deliberate re-title (the "suggest a title" button), so record it as a
     // rename — unlike the automatic first naming, which amends the launch event.
     if (next !== task.title) {
