@@ -137,16 +137,18 @@ async function setTitle(
   title: string,
 ): Promise<void> {
   const file = path.join(dataDir, `${id}.json`)
-  const task = JSON.parse(await readFile(file, 'utf8')) as Task
-  task.title = title
-  // This is the first generated name for a task created untitled: fill it into
-  // the creation event (a launch, or a "scheduled" event for a deferred task)
-  // rather than recording it as a rename.
-  const created = task.events?.find(
-    (e) => e.kind === 'launched' || e.kind === 'scheduled',
-  )
-  if (created && !created.title) created.title = title
-  await writeFile(file, JSON.stringify(task, null, 2))
+  // Through mutateTask so the title write serializes with (and can't clobber)
+  // the streaming reducer running on the opening turn.
+  await mutateTask(file, (task) => {
+    task.title = title
+    // This is the first generated name for a task created untitled: fill it into
+    // the creation event (a launch, or a "scheduled" event for a deferred task)
+    // rather than recording it as a rename.
+    const created = task.events?.find(
+      (e) => e.kind === 'launched' || e.kind === 'scheduled',
+    )
+    if (created && !created.title) created.title = title
+  })
 }
 
 // Ask haiku for a short 2-5 word title naming a task. The task text is passed
@@ -1513,19 +1515,24 @@ app.post('/api/:project/tasks/:id/retitle', async (c) => {
       .map((m) => m.text)
       .join('\n\n')
     const next = await generateTitle(project.path, goal)
-    // A deliberate re-title (the "suggest a title" button), so record it as a
-    // rename — unlike the automatic first naming, which amends the launch event.
-    if (next !== task.title) {
-      (task.events ??= []).push({
-        kind: 'renamed',
-        title: next,
-        createdAt: new Date().toISOString(),
-      })
-      task.updatedAt = new Date().toISOString()
-    }
-    task.title = next
-    await writeFile(file, JSON.stringify(task, null, 2))
-    return c.json(publicTask(task))
+    // Apply through mutateTask (a fresh read under the per-file lock) so the
+    // slow generateTitle above didn't read a task that a concurrent run has
+    // since written — the rename would otherwise clobber that streamed update.
+    await mutateTask(file, (t) => {
+      // A deliberate re-title (the "suggest a title" button), so record it as a
+      // rename — unlike the automatic first naming, which amends the launch event.
+      if (next !== t.title) {
+        (t.events ??= []).push({
+          kind: 'renamed',
+          title: next,
+          createdAt: new Date().toISOString(),
+        })
+        t.updatedAt = new Date().toISOString()
+      }
+      t.title = next
+    })
+    const updated = await readTask(project.dataDir, id)
+    return c.json(publicTask(updated ?? task))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
@@ -1596,17 +1603,21 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
     }
 
     const now = new Date().toISOString()
-    // Sending revives a wedged or landed (terminal) task — record the
-    // "un-wedged"/"un-landed" transition a hair before the message's own
-    // timestamp so the timeline shows it ahead of the message that caused it.
-    recordStatusTransition(task, 'riding', new Date(Date.parse(now) - 1).toISOString())
-    task.messages.push({ role: 'user', text: message, createdAt: now })
-    task.updatedAt = now
-    // Queue the prompt for the session and go "riding". driveTask clears it to
-    // "resting" once the queue drains.
-    task.queued = [...(task.queued ?? []), message]
-    task.status = 'riding'
-    await writeFile(file, JSON.stringify(task, null, 2))
+    // Through mutateTask (fresh read under the per-file lock) so queueing the
+    // message can't clobber a run that's streaming into the same task — the
+    // comment below notes a run may already be in flight.
+    await mutateTask(file, (t) => {
+      // Sending revives a wedged or landed (terminal) task — record the
+      // "un-wedged"/"un-landed" transition a hair before the message's own
+      // timestamp so the timeline shows it ahead of the message that caused it.
+      recordStatusTransition(t, 'riding', new Date(Date.parse(now) - 1).toISOString())
+      t.messages.push({ role: 'user', text: message, createdAt: now })
+      t.updatedAt = now
+      // Queue the prompt for the session and go "riding". driveTask clears it to
+      // "resting" once the queue drains.
+      t.queued = [...(t.queued ?? []), message]
+      t.status = 'riding'
+    })
 
     // If a run is already in flight it will drain this message when it
     // finishes; otherwise start a drainer to resume the session now.

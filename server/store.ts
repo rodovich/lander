@@ -65,12 +65,46 @@ export async function writeTask<T>(file: string, task: T): Promise<void> {
   await rename(tmp, file)
 }
 
+// Per-file queue of in-flight mutations, keyed by file path. All task-JSON
+// writes happen in this single server process, so chaining each file's
+// read-modify-writes onto one promise makes the whole read→modify→write atomic
+// with respect to every other writer to the same file.
+const chains = new Map<string, Promise<unknown>>()
+
 // Read-modify-write a record under a single fresh read, so a streaming update
 // never clobbers a concurrent edit to another field made via the HTTP endpoints
 // while a turn is running. Throws if the file is missing/invalid (callers that
-// tolerate that wrap the call). Correctness of the read-modify-write assumes a
-// single writer per file — the server enforces this with its per-task run guard.
-export async function mutateTask<T>(
+// tolerate that wrap the call). The read and the write each await I/O (the read
+// a file, the write a rename), so two overlapping calls would otherwise both
+// read before either writes and the second would lose the first writer's
+// update. We serialize them per file: each call runs only after the prior
+// mutation of the same file has fully committed, then reads fresh.
+export function mutateTask<T>(
+  file: string,
+  fn: (task: T) => void,
+): Promise<void> {
+  const prior = chains.get(file) ?? Promise.resolve()
+  // Sequence after the prior op whether it resolved or rejected, so one failed
+  // mutation doesn't wedge the file's queue.
+  const run = prior.then(
+    () => applyMutation<T>(file, fn),
+    () => applyMutation<T>(file, fn),
+  )
+  // The tail swallows outcomes so the next waiter only sequences on it; the
+  // caller still observes this op's real result/error via `run`. Drop the map
+  // entry once this op is the queue's tail, so it doesn't grow without bound.
+  const tail = run.then(
+    () => {},
+    () => {},
+  )
+  chains.set(file, tail)
+  void tail.then(() => {
+    if (chains.get(file) === tail) chains.delete(file)
+  })
+  return run
+}
+
+async function applyMutation<T>(
   file: string,
   fn: (task: T) => void,
 ): Promise<void> {

@@ -158,6 +158,45 @@ describe('mutateTask', () => {
     expect(after).toMatchObject({ title: 'edited', n: 99 })
   })
 
+  it('serializes overlapping mutations so neither update is lost', async () => {
+    await writeTask(file('m'), rec({ session: 'm', n: 0 }))
+    // Two concurrent read-modify-writes to the same file, each touching a
+    // different field. mutateTask's read and write are not adjacent (the write
+    // awaits a rename), so without per-file serialization the second reads the
+    // pre-first state and its write clobbers the first's field. With it, the
+    // second reads fresh and both survive.
+    await Promise.all([
+      mutateTask<Rec>(file('m'), (t) => { t.title = 'first' }),
+      mutateTask<Rec>(file('m'), (t) => { t.n = 1 }),
+    ])
+    const after = await readTask<Rec>(dir, 'm')
+    expect(after).toMatchObject({ title: 'first', n: 1 })
+  })
+
+  it('runs queued mutations in call order', async () => {
+    await writeTask(file('m'), rec({ session: 'm', title: '' }))
+    // Each reads the title and appends a marker. Only a serialized
+    // read-append-write yields 'abc'; overlapping reads would each start from ''
+    // and the last writer would leave a single character.
+    await Promise.all([
+      mutateTask<Rec>(file('m'), (t) => { t.title += 'a' }),
+      mutateTask<Rec>(file('m'), (t) => { t.title += 'b' }),
+      mutateTask<Rec>(file('m'), (t) => { t.title += 'c' }),
+    ])
+    expect((await readTask<Rec>(dir, 'm'))?.title).toBe('abc')
+  })
+
+  it('one failed mutation does not wedge the file’s queue', async () => {
+    await writeTask(file('m'), rec({ session: 'm', n: 0 }))
+    const boom = mutateTask<Rec>(file('m'), () => {
+      throw new Error('boom')
+    })
+    await expect(boom).rejects.toThrow('boom')
+    // A subsequent mutation on the same file still runs and persists.
+    await mutateTask<Rec>(file('m'), (t) => { t.n = 7 })
+    expect((await readTask<Rec>(dir, 'm'))?.n).toBe(7)
+  })
+
   it('rejects when the file is missing', async () => {
     await expect(mutateTask<Rec>(file('absent'), () => {})).rejects.toThrow()
   })
