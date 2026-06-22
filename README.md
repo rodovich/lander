@@ -17,7 +17,7 @@ npm install
 npm run dev /path/to/project [/path/to/another ...]
 ```
 
-Type-check with `npm run typecheck`.
+Type-check with `npm run typecheck`. Run the unit tests with `npm test` (or `npm run test:watch` to re-run on change); they cover the pure server-side logic — the stream-json reducer, the task store, and the project-path/status helpers — plus the markdown renderer.
 
 Each path is resolved and the list is exported as `PROJECT_DIRS` (newline-separated); these are the working directories where `claude` runs. Then open the web UI on port 41414.
 
