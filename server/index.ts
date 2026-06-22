@@ -648,8 +648,12 @@ async function driveTask(
     }
   } finally {
     running.delete(id)
+    // Only come to rest if no run is tracked. Our own turn cleared its runId when
+    // it finished (the reducer deletes it on done/crash), so a runId here belongs
+    // to a *newer* drainer that re-rode this task after we left the running set —
+    // demoting it would strand that live run at "resting" for its whole duration.
     await mutateTask(file, (t) => {
-      if (t.status === 'riding') t.status = 'resting'
+      if (t.status === 'riding' && !t.runId) t.status = 'resting'
     }).catch(() => {})
   }
 
