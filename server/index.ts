@@ -15,6 +15,7 @@ import { promisify } from 'node:util'
 import path from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
+import { reduceStreamLine, type Step } from './stream'
 
 const execFileAsync = promisify(execFile)
 
@@ -100,29 +101,6 @@ const PROJECT_BY_SLUG = new Map<string, Project>(
 // prose; `tool_use` records a tool call (name + a compact input summary);
 // `tool_result` keeps a truncated peek at what came back. Steps accumulate on
 // the in-flight assistant message as claude's stream-json output arrives.
-type Step = {
-  kind: 'text' | 'tool_use' | 'tool_result'
-  text?: string
-  tool?: string
-  input?: string
-  // The tool call's id, carried on both the tool_use step and its matching
-  // tool_result step so the UI can pair a call with its outcome.
-  toolUseId?: string
-  // tool_use only: the call rendered as a settings.json permission string
-  // (e.g. `Bash(npm run build)`), used to seed the "allow" popup.
-  rule?: string
-  // tool_use only, for the file-writing tools (Edit/Write/MultiEdit): the change
-  // as before/after hunks, so the UI can reveal a diff under the chip. One hunk
-  // per edit (MultiEdit has several); Write has a single hunk with empty `old`.
-  // Absent for every other tool.
-  edits?: { old: string; new: string }[]
-  // tool_result only: whether the call errored, and whether that error was a
-  // permission refusal (vs. the tool running and failing for some other reason).
-  isError?: boolean
-  blocked?: boolean
-  createdAt: string
-}
-
 type Message = {
   role: 'user' | 'assistant'
   text: string
@@ -390,120 +368,6 @@ function recordStatusTransition(task: Task, next: string, at: string): void {
     })
 }
 
-// Boil a tool call's input down to one line for the activity trace: prefer the
-// field that best identifies what it's doing (a path, command, pattern…), and
-// fall back to compact JSON. Truncated so a giant input can't bloat the file.
-function summarizeToolInput(input: unknown): string {
-  if (!input || typeof input !== 'object') return ''
-  const i = input as Record<string, unknown>
-  const str = (k: string) => (typeof i[k] === 'string' ? (i[k] as string) : '')
-  const v =
-    str('file_path') ||
-    str('path') ||
-    str('command') ||
-    str('pattern') ||
-    str('query') ||
-    str('url') ||
-    str('description') ||
-    JSON.stringify(i)
-  const flat = v.replace(/\s+/g, ' ').trim()
-  return flat.length > 200 ? flat.slice(0, 200) + '…' : flat
-}
-
-// Render a tool call as a settings.json-style permission rule, e.g.
-// `Bash(npm run build)` or `Read(/path/to/file)`. Keys off the same identifying
-// field as summarizeToolInput but leaves it untruncated, so the popup can show —
-// and let the user grant — the exact invocation. A tool with no obvious
-// specifier becomes a bare tool name.
-function toolRule(name: string, input: unknown): string {
-  if (!input || typeof input !== 'object') return name
-  const i = input as Record<string, unknown>
-  const str = (k: string) => (typeof i[k] === 'string' ? (i[k] as string) : '')
-  const spec =
-    str('command') ||
-    str('file_path') ||
-    str('path') ||
-    str('pattern') ||
-    str('query') ||
-    str('url')
-  return spec ? `${name}(${spec})` : name
-}
-
-// Pull the before/after hunks out of a file-writing tool's input so the UI can
-// show its diff: Edit is one hunk (old_string → new_string), MultiEdit is one
-// per entry, and Write is a single hunk against an empty original. Returns
-// undefined for any other tool. Each side is capped so a giant edit can't bloat
-// the task file; the UI only needs a readable peek.
-function diffEdits(
-  name: string,
-  input: unknown,
-): { old: string; new: string }[] | undefined {
-  if (!input || typeof input !== 'object') return undefined
-  const i = input as Record<string, unknown>
-  const cap = (v: unknown) => {
-    const s = typeof v === 'string' ? v : ''
-    return s.length > 4000 ? s.slice(0, 4000) + '\n…' : s
-  }
-  if (name === 'Edit') {
-    if (typeof i.old_string === 'string' && typeof i.new_string === 'string')
-      return [{ old: cap(i.old_string), new: cap(i.new_string) }]
-  } else if (name === 'Write') {
-    if (typeof i.content === 'string') return [{ old: '', new: cap(i.content) }]
-  } else if (name === 'MultiEdit') {
-    if (Array.isArray(i.edits))
-      return i.edits
-        .filter((e) => e && typeof e === 'object')
-        .map((e) => ({
-          old: cap((e as Record<string, unknown>).old_string),
-          new: cap((e as Record<string, unknown>).new_string),
-        }))
-  }
-  return undefined
-}
-
-// Whether a tool_result's text reads like a permission refusal — the agent
-// asked to use a tool it wasn't granted — rather than the tool running and
-// failing for some other reason. Claude Code phrases non-interactive denials a
-// few ways; match the common ones. Only consulted when is_error is set.
-function isPermissionDenial(text: string): boolean {
-  return /requested permissions|permission to use|haven't granted|hasn't been granted|requires approval|permission denied|not allowed to use|isn't allowed|user (has )?(denied|rejected)/i.test(
-    text,
-  )
-}
-
-// Concatenate a tool_result block's content (a plain string or an array of
-// content blocks) into its raw text, preserving newlines.
-function rawToolResultText(content: unknown): string {
-  if (typeof content === 'string') return content
-  if (Array.isArray(content))
-    return content
-      .map((b) => (b && typeof b === 'object' ? String((b as any).text ?? '') : ''))
-      .join('')
-  return ''
-}
-
-// Flatten a tool_result's content to a single whitespace-collapsed line — for
-// substring matching (e.g. permission-denial detection), not for display.
-function flattenToolResult(content: unknown): string {
-  return rawToolResultText(content).replace(/\s+/g, ' ').trim()
-}
-
-// A short text peek at a tool_result for the activity trace. Keeps line breaks
-// so multi-line output stays readable, but caps the peek at 200 characters or 3
-// lines, whichever comes first. A character cap appends an inline ellipsis; a
-// line cap puts the ellipsis on its own line.
-function summarizeToolResult(content: unknown): string {
-  let text = rawToolResultText(content).trim()
-  let charCapped = false
-  if (text.length > 200) {
-    text = text.slice(0, 200)
-    charCapped = true
-  }
-  const lines = text.split('\n')
-  if (lines.length > 3) return lines.slice(0, 3).join('\n') + '\n…'
-  return charCapped ? text + '…' : text
-}
-
 // Append a permission rule to a project's .claude/settings.local.json — the
 // gitignored per-user overrides file the CLI already reads — creating the file
 // and directory as needed. Deduped so repeated grants don't pile up.
@@ -553,60 +417,6 @@ function ensurePending(task: Task): Message {
     task.messages.push(msg)
   }
   return msg
-}
-
-// Parse one line of claude's stream-json output into the activity steps it
-// contributes and any final reply text it carries. Pure — given a line, it
-// returns what to append — so the same reduction serves both a live child
-// process and a run read back from its on-disk log.
-function reduceStreamLine(
-  line: string,
-  at: string,
-): { steps: Step[]; finalText?: string } {
-  let ev: any
-  try {
-    ev = JSON.parse(line)
-  } catch {
-    return { steps: [] }
-  }
-  const steps: Step[] = []
-  let finalText: string | undefined
-  if (ev.type === 'assistant' && Array.isArray(ev.message?.content)) {
-    for (const block of ev.message.content) {
-      if (block.type === 'text' && block.text) {
-        steps.push({ kind: 'text', text: block.text, createdAt: at })
-        finalText = block.text
-      } else if (block.type === 'tool_use') {
-        steps.push({
-          kind: 'tool_use',
-          tool: block.name,
-          input: summarizeToolInput(block.input),
-          toolUseId: block.id,
-          rule: toolRule(block.name, block.input),
-          edits: diffEdits(block.name, block.input),
-          createdAt: at,
-        })
-      }
-    }
-  } else if (ev.type === 'user' && Array.isArray(ev.message?.content)) {
-    for (const block of ev.message.content) {
-      if (block.type === 'tool_result') {
-        const flat = flattenToolResult(block.content)
-        const isError = block.is_error === true
-        steps.push({
-          kind: 'tool_result',
-          text: summarizeToolResult(block.content),
-          toolUseId: block.tool_use_id,
-          isError,
-          blocked: isError && isPermissionDenial(flat),
-          createdAt: at,
-        })
-      }
-    }
-  } else if (ev.type === 'result' && typeof ev.result === 'string') {
-    finalText = ev.result
-  }
-  return { steps, finalText }
 }
 
 // The shape a turn's runner reads from its run dir's job.json. The server writes
