@@ -16,6 +16,12 @@ import path from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { reduceStreamLine, type Step } from './stream'
+import {
+  readTasks as readTasksStore,
+  readTask as readTaskStore,
+  writeTask as writeTaskStore,
+  mutateTask as mutateTaskStore,
+} from './store'
 
 const execFileAsync = promisify(execFile)
 
@@ -223,38 +229,13 @@ type Task = {
   runCursor?: number
 }
 
-async function readTasks(dataDir: string): Promise<Task[]> {
-  let names: string[]
-  try {
-    names = await readdir(dataDir)
-  } catch {
-    return []
-  }
-  const tasks: Task[] = []
-  for (const name of names) {
-    if (!name.endsWith('.json')) continue
-    try {
-      const raw = await readFile(path.join(dataDir, name), 'utf8')
-      tasks.push(JSON.parse(raw) as Task)
-    } catch {
-      // skip unreadable/invalid files
-    }
-  }
-  tasks.sort((a, b) =>
-    (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt),
-  )
-  return tasks
-}
-
-// Read a single task by id, or null if it's missing/unreadable.
-async function readTask(dataDir: string, id: string): Promise<Task | null> {
-  try {
-    const raw = await readFile(path.join(dataDir, `${id}.json`), 'utf8')
-    return JSON.parse(raw) as Task
-  } catch {
-    return null
-  }
-}
+// Bind the generic task store (server/store.ts) to the concrete Task type, so
+// the rest of the server keeps the same typed call sites.
+const readTasks = (dataDir: string) => readTasksStore<Task>(dataDir)
+const readTask = (dataDir: string, id: string) => readTaskStore<Task>(dataDir, id)
+const writeTask = (file: string, task: Task) => writeTaskStore(file, task)
+const mutateTask = (file: string, fn: (task: Task) => void) =>
+  mutateTaskStore(file, fn)
 
 // Strip the secret `token` before sending a task over HTTP, so the UI (and any
 // task scraping the API) can't read another task's token and impersonate it.
@@ -322,28 +303,6 @@ async function generateTitle(
   } catch {
     return 'Untitled task'
   }
-}
-
-// Atomically replace a task file: write a temp file then rename over the target
-// (rename is atomic on the same filesystem). The streaming path rewrites the
-// file on every event, so this keeps the 2s poll from ever reading a half-
-// written file mid-update.
-async function writeTask(file: string, task: Task): Promise<void> {
-  const tmp = `${file}.${randomUUID()}.tmp`
-  await writeFile(tmp, JSON.stringify(task, null, 2))
-  await rename(tmp, file)
-}
-
-// Read-modify-write a task under a single fresh read, so a streaming update
-// never clobbers a concurrent edit to another field (title, status, allow
-// flags) made via the HTTP endpoints while claude is running.
-async function mutateTask(
-  file: string,
-  fn: (task: Task) => void,
-): Promise<void> {
-  const task = JSON.parse(await readFile(file, 'utf8')) as Task
-  fn(task)
-  await writeTask(file, task)
 }
 
 // Record a crossing into or out of a "notable" status — "wedged" (the task
