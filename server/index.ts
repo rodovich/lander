@@ -22,131 +22,25 @@ import {
   writeTask as writeTaskStore,
   mutateTask as mutateTaskStore,
 } from './store'
+import { parseProjects, type Project } from './projects'
+import {
+  publicTask,
+  latestUpdateAt,
+  recordStatusTransition,
+  pendingMessage,
+  ensurePending,
+  type Message,
+  type TaskEvent,
+} from './tasks'
 
 const execFileAsync = promisify(execFile)
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-// Namespace each project's tasks under ./data/<normalized-project-path>/tasks.
-// e.g. /Users/me/code/myapp -> ./data/Users-me-code-myapp/tasks
-function normalizeProjectPath(p: string): string {
-  const slug = path
-    .resolve(p)
-    .replace(/[/\\]+/g, '-')
-    .replace(/[^A-Za-z0-9._-]/g, '-')
-    .replace(/^-+|-+$/g, '')
-  return slug || 'default'
-}
-
-// URL-facing identifier for a project, e.g. /Users/me/code/myapp ->
-// "users-me-code-myapp". Lowercased so it reads cleanly in the address bar; the
-// on-disk data dir keeps the cased form from normalizeProjectPath above.
-function projectSlug(p: string): string {
-  return normalizeProjectPath(p).toLowerCase()
-}
-
-type Project = {
-  path: string
-  slug: string
-  dataDir: string
-  // Sibling of dataDir: ./data/<normalized-project-path>/runs, holding one
-  // <runId>/ directory per turn (job spec, append-only output log, lease, done
-  // marker). The runner writes these; the server only reads them.
-  runsDir: string
-  // Sibling of dataDir: ./data/<normalized-project-path>/archived, holding the
-  // <uuid>.json files of archived tasks. Moving a task here takes it out of the
-  // list (and out of the scheduler's and recovery's view, which only scan
-  // dataDir); the UI's "Show archived" toggle reads it back in.
-  archiveDir: string
-  // Sibling of dataDir: ./data/<normalized-project-path>/flows, holding
-  // <name>.js flow scripts. The server only resolves and hands back their path
-  // (GET /api/:project/flows/:name); the `lander flow` CLI imports and runs them.
-  flowsDir: string
-}
-
-// Projects come in newline-separated via PROJECT_DIRS (set by dev.mjs from the
-// command-line args), falling back to the legacy single PROJECT_DIR, then cwd.
-// Duplicate paths are dropped; the first survivor is the default.
-function parseProjects(): Project[] {
-  const raw =
-    process.env.PROJECT_DIRS ?? process.env.PROJECT_DIR ?? process.cwd()
-  const paths = raw
-    .split('\n')
-    .map((s) => s.trim())
-    .filter(Boolean)
-  const seen = new Set<string>()
-  const projects: Project[] = []
-  for (const p of paths.length ? paths : [process.cwd()]) {
-    const resolved = path.resolve(p)
-    const slug = projectSlug(resolved)
-    if (seen.has(slug)) continue
-    seen.add(slug)
-    projects.push({
-      path: resolved,
-      slug,
-      dataDir: path.join(ROOT, 'data', normalizeProjectPath(resolved), 'tasks'),
-      runsDir: path.join(ROOT, 'data', normalizeProjectPath(resolved), 'runs'),
-      archiveDir: path.join(
-        ROOT,
-        'data',
-        normalizeProjectPath(resolved),
-        'archived',
-      ),
-      flowsDir: path.join(ROOT, 'data', normalizeProjectPath(resolved), 'flows'),
-    })
-  }
-  return projects
-}
-
-const PROJECTS = parseProjects()
+const PROJECTS = parseProjects(ROOT, process.env, process.cwd())
 const PROJECT_BY_SLUG = new Map<string, Project>(
   PROJECTS.map((p) => [p.slug, p]),
 )
-
-// One unit of streamed assistant activity. `text` blocks carry the model's
-// prose; `tool_use` records a tool call (name + a compact input summary);
-// `tool_result` keeps a truncated peek at what came back. Steps accumulate on
-// the in-flight assistant message as claude's stream-json output arrives.
-type Message = {
-  role: 'user' | 'assistant'
-  text: string
-  createdAt: string
-  // Present on assistant turns that were streamed: the live activity trace.
-  steps?: Step[]
-  // True while claude is still producing this message; cleared when it lands.
-  pending?: boolean
-}
-
-// A noteworthy point in a task's life, shown inline in the conversation
-// timeline: its creation ("launched"), a rename, or a crossing into/out of the
-// "wedged" (needs the user) or terminal "landed" status. The quiet riding↔
-// resting churn during and after a run isn't interesting, so it isn't recorded.
-// Each event captures the task's title as of that moment so a later rename
-// doesn't change how earlier events read.
-type TaskEvent = {
-  kind:
-    | 'launched'
-    | 'scheduled'
-    | 'awaiting'
-    | 'wedged'
-    | 'unwedged'
-    | 'landed'
-    | 'unlanded'
-    | 'renamed'
-  // The task's title at the time of the event. Absent on a launch/schedule event
-  // until the first generated name amends it, and on events saved before titles
-  // were captured.
-  title?: string
-  // 'scheduled' only: the date/time the task is set to launch, shown beside the
-  // verb (the event's own createdAt is when it was scheduled).
-  scheduledFor?: string
-  // 'awaiting' only: the tasks this one is resting on (id + title as of the
-  // event) so the UI can render them as links. A task awaiting tasks may also
-  // carry a --date/--time fallback, but we don't surface that here — the
-  // condition is the point.
-  awaiting?: { session: string; title: string }[]
-  createdAt: string
-}
 
 type Task = {
   session: string
@@ -237,32 +131,6 @@ const writeTask = (file: string, task: Task) => writeTaskStore(file, task)
 const mutateTask = (file: string, fn: (task: Task) => void) =>
   mutateTaskStore(file, fn)
 
-// Strip the secret `token` before sending a task over HTTP, so the UI (and any
-// task scraping the API) can't read another task's token and impersonate it.
-function publicTask(
-  task: Task,
-): Omit<Task, 'token' | 'runId' | 'runCursor'> {
-  const { token: _token, runId: _runId, runCursor: _runCursor, ...rest } = task
-  return rest
-}
-
-// The timestamp of a task's most recent *completed* update: the newest of its
-// finished messages (the in-flight, still-streaming one is skipped) and its
-// lifecycle events. Mirrors the client's helper of the same name; used to seed
-// `seenAt` for tasks that predate the field. ISO timestamps compare
-// lexicographically, so the string max is a chronological max.
-function latestUpdateAt(task: Task): string {
-  let latest = ''
-  for (const m of task.messages) {
-    if (m.pending) continue
-    if (m.createdAt > latest) latest = m.createdAt
-  }
-  for (const e of task.events ?? []) {
-    if (e.createdAt > latest) latest = e.createdAt
-  }
-  return latest
-}
-
 async function setTitle(
   dataDir: string,
   id: string,
@@ -305,28 +173,6 @@ async function generateTitle(
   }
 }
 
-// Record a crossing into or out of a "notable" status — "wedged" (the task
-// needs the user) or the terminal "landed" — as a timeline event, so the UI can
-// show it inline among the messages. Entering a notable status records it
-// ("wedged"/"landed"); leaving one for an un-notable status (riding/resting)
-// records the inverse ("unwedged"/"unlanded"). A no-op for moves between two
-// quiet statuses (e.g. riding↔resting) or that don't change status. Moving
-// straight between two notable statuses (wedged↔landed) records the arrival
-// only. Call before assigning the new status, while task.status holds the old.
-function recordStatusTransition(task: Task, next: string, at: string): void {
-  const prev = task.status
-  if (prev === next) return
-  const events = (task.events ??= [])
-  if (next === 'wedged' || next === 'landed')
-    events.push({ kind: next, title: task.title, createdAt: at })
-  else if (prev === 'wedged' || prev === 'landed')
-    events.push({
-      kind: prev === 'wedged' ? 'unwedged' : 'unlanded',
-      title: task.title,
-      createdAt: at,
-    })
-}
-
 // Append a permission rule to a project's .claude/settings.local.json — the
 // gitignored per-user overrides file the CLI already reads — creating the file
 // and directory as needed. Deduped so repeated grants don't pile up.
@@ -347,35 +193,6 @@ async function addProjectAllow(projectPath: string, rule: string): Promise<void>
   if (!allow.includes(rule)) allow.push(rule)
   await mkdir(dir, { recursive: true })
   await writeFile(file, JSON.stringify(settings, null, 2) + '\n')
-}
-
-// Locate the in-flight assistant message (the one runClaude is streaming into).
-function pendingMessage(task: Task): Message | undefined {
-  for (let i = task.messages.length - 1; i >= 0; i--) {
-    const m = task.messages[i]
-    if (m.role === 'assistant' && m.pending) return m
-  }
-  return undefined
-}
-
-// Get the in-flight assistant message, creating it on first use. We hold off on
-// adding it until claude actually starts responding so its `createdAt` reflects
-// when the agent began — not when the turn was queued — and so the UI can show a
-// spinner under the user's message during the wait. Until then a riding task has
-// no trailing assistant message.
-function ensurePending(task: Task): Message {
-  let msg = pendingMessage(task)
-  if (!msg) {
-    msg = {
-      role: 'assistant',
-      text: '',
-      createdAt: new Date().toISOString(),
-      steps: [],
-      pending: true,
-    }
-    task.messages.push(msg)
-  }
-  return msg
 }
 
 // The shape a turn's runner reads from its run dir's job.json. The server writes
