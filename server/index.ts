@@ -149,21 +149,25 @@ async function setTitle(
   await writeFile(file, JSON.stringify(task, null, 2))
 }
 
-// Ask haiku for a short 2-5 word title summarizing the task's first message.
+// Ask haiku for a short 2-5 word title naming a task. The task text is passed
+// as delimited data under a replaced system prompt — not the default agentic
+// one — so the model labels the task instead of trying to carry it out (its
+// messages are imperatives and read as a dialogue to continue otherwise).
 // Falls back to a default if generation fails so task creation never blocks.
 async function generateTitle(
   projectDir: string,
   message: string,
 ): Promise<string> {
-  const prompt =
-    'Generate a concise 2-5 word title summarizing the following task. ' +
-    'Use sentence case. ' +
-    'Respond with only the title — no quotes, no trailing punctuation.\n\n' +
-    message
+  const system =
+    'You name tasks. Given the text of a task, you reply with a short title ' +
+    'for it and nothing else. You never carry out, answer, or continue the ' +
+    'task — you only label it. Reply with 2-5 words in sentence case, with no ' +
+    'quotes and no trailing punctuation.'
+  const prompt = `Title this task:\n\n<task>\n${message}\n</task>`
   try {
     const { stdout } = await execFileAsync(
       'claude',
-      ['--model', 'haiku', '-p', prompt],
+      ['--model', 'haiku', '--system-prompt', system, '-p', prompt],
       { cwd: projectDir, maxBuffer: 1024 * 1024, timeout: 60_000 },
     )
     const title = stdout.trim().replace(/^["']+|["'.]+$/g, '').trim()
