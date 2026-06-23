@@ -598,22 +598,34 @@ async function reduceRun(
         const text = b.subarray(0, take).toString('utf8')
         const steps: Step[] = []
         let finalText: string | undefined
+        const blockedIds: string[] = []
         for (const raw of text.split('\n')) {
           const line = raw.trim()
           if (!line) continue
           const reduced = reduceStreamLine(line, new Date().toISOString())
           steps.push(...reduced.steps)
           if (reduced.finalText !== undefined) finalText = reduced.finalText
+          if (reduced.blockedIds) blockedIds.push(...reduced.blockedIds)
         }
         cursor += take
         await mutateTask(file, (t) => {
-          if (steps.length || finalText !== undefined) {
+          if (steps.length || finalText !== undefined || blockedIds.length) {
             // Bump updatedAt only on the batch that begins the assistant message
             // (creates the pending one), not on every streamed batch: streaming
             // churn shouldn't keep reordering the sidebar.
             const begun = !pendingMessage(t)
             const msg = ensurePending(t)
             if (steps.length) msg.steps = [...(msg.steps ?? []), ...steps]
+            // The turn's terminal result event names the tool calls that were
+            // refused; flag their tool_result steps blocked. The result lands
+            // after those steps streamed (often in an earlier batch), so reconcile
+            // across the whole message, not just this batch.
+            if (blockedIds.length && msg.steps) {
+              const denied = new Set(blockedIds)
+              for (const s of msg.steps)
+                if (s.kind === 'tool_result' && s.toolUseId && denied.has(s.toolUseId))
+                  s.blocked = true
+            }
             // Carry the running reply text onto the message as it lands so it
             // survives a restart (the cursor won't replay it).
             if (finalText !== undefined) msg.text = finalText

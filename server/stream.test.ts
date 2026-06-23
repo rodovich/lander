@@ -3,9 +3,7 @@ import {
   summarizeToolInput,
   toolRule,
   diffEdits,
-  isPermissionDenial,
   rawToolResultText,
-  flattenToolResult,
   summarizeToolResult,
   reduceStreamLine,
 } from './stream'
@@ -146,32 +144,6 @@ describe('diffEdits', () => {
   })
 })
 
-describe('isPermissionDenial', () => {
-  it('matches each denial phrasing, case-insensitively', () => {
-    for (const text of [
-      'Claude requested permissions to use Bash',
-      'needs permission to use Edit',
-      "I haven't granted that tool",
-      "that hasn't been granted",
-      'This action requires approval',
-      'permission denied',
-      'not allowed to use Write',
-      "that isn't allowed",
-      'the user denied this request',
-      'User has rejected the tool call',
-      'PERMISSION DENIED',
-    ]) {
-      expect(isPermissionDenial(text)).toBe(true)
-    }
-  })
-
-  it('returns false for ordinary errors', () => {
-    expect(isPermissionDenial('file not found')).toBe(false)
-    expect(isPermissionDenial('command exited with code 1')).toBe(false)
-    expect(isPermissionDenial('')).toBe(false)
-  })
-})
-
 describe('rawToolResultText', () => {
   it('returns a plain string verbatim, preserving newlines', () => {
     expect(rawToolResultText('a\nb')).toBe('a\nb')
@@ -200,15 +172,6 @@ describe('rawToolResultText', () => {
     expect(rawToolResultText(null)).toBe('')
     expect(rawToolResultText(42)).toBe('')
     expect(rawToolResultText({ text: 'x' })).toBe('')
-  })
-})
-
-describe('flattenToolResult', () => {
-  it('collapses all whitespace including newlines, trimmed', () => {
-    expect(flattenToolResult('  a\n\n  b\tc  ')).toBe('a b c')
-    expect(
-      flattenToolResult([{ type: 'text', text: 'a\nb' }]),
-    ).toBe('a b')
   })
 })
 
@@ -347,7 +310,7 @@ describe('reduceStreamLine', () => {
     expect(r.steps.map((s) => s.kind)).toEqual(['text', 'tool_use'])
   })
 
-  it('builds a tool_result step, flagging a permission denial', () => {
+  it('builds a tool_result step without inferring blocked from its text', () => {
     const r = reduceStreamLine(
       JSON.stringify({
         type: 'user',
@@ -364,46 +327,42 @@ describe('reduceStreamLine', () => {
       }),
       AT,
     )
+    // blocked is set later, from the terminal result event's permission_denials
+    // list — never guessed from the result text here.
     expect(r.steps).toEqual([
       {
         kind: 'tool_result',
         text: 'permission denied',
         toolUseId: 'tu_1',
         isError: true,
-        blocked: true,
         createdAt: AT,
       },
     ])
+    expect(r.steps[0].blocked).toBeUndefined()
   })
 
-  it('does not flag a non-denial error as blocked', () => {
+  it('surfaces blockedIds from the result event permission_denials', () => {
     const r = reduceStreamLine(
       JSON.stringify({
-        type: 'user',
-        message: {
-          content: [
-            { type: 'tool_result', tool_use_id: 't', content: 'boom', is_error: true },
-          ],
-        },
+        type: 'result',
+        result: 'done',
+        permission_denials: [
+          { tool_name: 'Bash', tool_use_id: 'tu_1', tool_input: { command: 'x' } },
+          { tool_name: 'Read', tool_use_id: 'tu_2', tool_input: {} },
+        ],
       }),
       AT,
     )
-    expect(r.steps[0]).toMatchObject({ isError: true, blocked: false })
+    expect(r.blockedIds).toEqual(['tu_1', 'tu_2'])
+    expect(r.finalText).toBe('done')
   })
 
-  it('never flags blocked when is_error is falsy, even with denial text', () => {
+  it('omits blockedIds when the result event has no permission_denials', () => {
     const r = reduceStreamLine(
-      JSON.stringify({
-        type: 'user',
-        message: {
-          content: [
-            { type: 'tool_result', tool_use_id: 't', content: 'permission denied' },
-          ],
-        },
-      }),
+      JSON.stringify({ type: 'result', result: 'done' }),
       AT,
     )
-    expect(r.steps[0]).toMatchObject({ isError: false, blocked: false })
+    expect(r.blockedIds).toBeUndefined()
   })
 
   it('treats is_error strictly: only === true counts as an error', () => {

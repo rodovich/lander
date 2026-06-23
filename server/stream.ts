@@ -19,8 +19,11 @@ export type Step = {
   // per edit (MultiEdit has several); Write has a single hunk with empty `old`.
   // Absent for every other tool.
   edits?: { old: string; new: string }[]
-  // tool_result only: whether the call errored, and whether that error was a
-  // permission refusal (vs. the tool running and failing for some other reason).
+  // tool_result only: whether the call errored. `blocked` means the call was
+  // refused before it ran (permission gate, Bash safety check, or sandbox file
+  // block) — set during a turn's terminal result event from its authoritative
+  // permission_denials list, not inferred from the result text. Absent means the
+  // call ran; the UI reads that as allowed.
   isError?: boolean
   blocked?: boolean
   createdAt: string
@@ -96,16 +99,6 @@ export function diffEdits(
   return undefined
 }
 
-// Whether a tool_result's text reads like a permission refusal — the agent
-// asked to use a tool it wasn't granted — rather than the tool running and
-// failing for some other reason. Claude Code phrases non-interactive denials a
-// few ways; match the common ones. Only consulted when is_error is set.
-export function isPermissionDenial(text: string): boolean {
-  return /requested permissions|permission to use|haven't granted|hasn't been granted|requires approval|permission denied|not allowed to use|isn't allowed|user (has )?(denied|rejected)/i.test(
-    text,
-  )
-}
-
 // Concatenate a tool_result block's content (a plain string or an array of
 // content blocks) into its raw text, preserving newlines.
 export function rawToolResultText(content: unknown): string {
@@ -115,12 +108,6 @@ export function rawToolResultText(content: unknown): string {
       .map((b) => (b && typeof b === 'object' ? String((b as any).text ?? '') : ''))
       .join('')
   return ''
-}
-
-// Flatten a tool_result's content to a single whitespace-collapsed line — for
-// substring matching (e.g. permission-denial detection), not for display.
-export function flattenToolResult(content: unknown): string {
-  return rawToolResultText(content).replace(/\s+/g, ' ').trim()
 }
 
 // A short text peek at a tool_result for the activity trace. Keeps line breaks
@@ -146,7 +133,7 @@ export function summarizeToolResult(content: unknown): string {
 export function reduceStreamLine(
   line: string,
   at: string,
-): { steps: Step[]; finalText?: string } {
+): { steps: Step[]; finalText?: string; blockedIds?: string[] } {
   let ev: any
   try {
     ev = JSON.parse(line)
@@ -155,6 +142,7 @@ export function reduceStreamLine(
   }
   const steps: Step[] = []
   let finalText: string | undefined
+  let blockedIds: string[] | undefined
   if (ev.type === 'assistant' && Array.isArray(ev.message?.content)) {
     for (const block of ev.message.content) {
       if (block.type === 'text' && block.text) {
@@ -175,20 +163,21 @@ export function reduceStreamLine(
   } else if (ev.type === 'user' && Array.isArray(ev.message?.content)) {
     for (const block of ev.message.content) {
       if (block.type === 'tool_result') {
-        const flat = flattenToolResult(block.content)
-        const isError = block.is_error === true
         steps.push({
           kind: 'tool_result',
           text: summarizeToolResult(block.content),
           toolUseId: block.tool_use_id,
-          isError,
-          blocked: isError && isPermissionDenial(flat),
+          isError: block.is_error === true,
           createdAt: at,
         })
       }
     }
-  } else if (ev.type === 'result' && typeof ev.result === 'string') {
-    finalText = ev.result
+  } else if (ev.type === 'result') {
+    if (typeof ev.result === 'string') finalText = ev.result
+    if (Array.isArray(ev.permission_denials))
+      blockedIds = ev.permission_denials
+        .map((d: any) => d?.tool_use_id)
+        .filter((id: unknown): id is string => typeof id === 'string')
   }
-  return { steps, finalText }
+  return { steps, finalText, blockedIds }
 }
