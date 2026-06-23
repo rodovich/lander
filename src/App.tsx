@@ -725,6 +725,61 @@ function CopyButton({ text }: { text: string }) {
   )
 }
 
+// A clipboard button for copying a task's UUID, styled to sit beside the
+// title's sparkle and fade in with it on hover. Flips to a checkmark after a
+// successful copy so the click registers.
+function CopyIdButton({ id }: { id: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(id)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // Clipboard access can be denied (e.g. insecure context); ignore.
+    }
+  }
+  return (
+    <button
+      type="button"
+      className="edit-title-button"
+      onClick={copy}
+      title="Copy task ID"
+      aria-label={copied ? 'Copied' : 'Copy task ID'}
+    >
+      {copied ? (
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path
+            d="M20 6 9 17l-5-5"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      ) : (
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <rect
+            x="9"
+            y="9"
+            width="11"
+            height="11"
+            rx="2"
+            stroke="currentColor"
+            strokeWidth="2"
+          />
+          <path
+            d="M5 15V5a2 2 0 0 1 2-2h10"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
+        </svg>
+      )}
+    </button>
+  )
+}
+
 // The status actions a task's kebab menu can fire, mirroring the buttons the
 // detail header used to carry, plus archive/restore.
 type TaskAction = 'launch' | 'wedge' | 'rest' | 'land' | 'archive' | 'restore'
@@ -2093,6 +2148,7 @@ export function App() {
                         <path d="M13 10.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z" />
                       </svg>
                     </button>
+                    <CopyIdButton id={current.session} />
                   </div>
                   )}
                 </div>
