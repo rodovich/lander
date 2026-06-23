@@ -637,6 +637,7 @@ async function reduceRun(
     }
 
     if (done) {
+      const at = new Date().toISOString()
       await mutateTask(file, (t) => {
         const msg = ensurePending(t)
         // A non-zero exit with no reply text is an error to surface; otherwise
@@ -649,7 +650,18 @@ async function reduceRun(
             `error running claude: exited ${done.exitCode}` +
             (done.stderr?.trim() ? `\n${done.stderr.trim()}` : '')
         msg.pending = false
-        t.updatedAt = new Date().toISOString()
+        // A claude error — a non-zero exit that isn't a deliberate interrupt,
+        // most often an error HTTP response from the assistant — needs the
+        // user's attention, so wedge the task rather than letting driveTask
+        // quietly bring it to rest. We only override a still-riding task: if the
+        // agent already moved itself (its own `lander wedge`, or `lander land`),
+        // that stands. driveTask's finally only demotes riding→resting, so a
+        // wedge set here survives it.
+        if (done.exitCode !== 0 && !done.interrupted && t.status === 'riding') {
+          recordStatusTransition(t, 'wedged', at)
+          t.status = 'wedged'
+        }
+        t.updatedAt = at
         delete t.runId
         delete t.runCursor
       }).catch(() => {})
