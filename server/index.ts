@@ -10,6 +10,7 @@ import {
   open,
   stat,
 } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import path from 'node:path'
@@ -36,6 +37,12 @@ import {
 const execFileAsync = promisify(execFile)
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+
+// `{{forwardable}}` is substituted per-task with the agent's edit/commit grant.
+const TASK_PROMPT_TEMPLATE = readFileSync(
+  path.join(path.dirname(fileURLToPath(import.meta.url)), 'task-prompt.md'),
+  'utf8',
+).trim()
 
 const PROJECTS = parseProjects(ROOT, process.env, process.cwd())
 const PROJECT_BY_SLUG = new Map<string, Project>(
@@ -403,41 +410,7 @@ function buildClaudeArgs(
     '--settings',
     hookSettings,
     '--append-system-prompt',
-    'You are running inside a lander task. Manage yourself with the `lander` ' +
-      'CLI: `lander land` marks it landed; `lander wedge` marks it ' +
-      'wedged; `lander new <message>` ' +
-      'spawns a sibling task that runs independently. Pass `--title <title>` to ' +
-      'name the spawned task yourself instead of having one generated — use a ' +
-      'concise 2-5 word title in sentence case, with no quotes and no trailing ' +
-      'punctuation. Pass `--date <when>` (any date/time the server can parse, ' +
-      'e.g. an ISO timestamp) or `--time <minutes>` (a number of minutes from ' +
-      'now) to defer its launch: it rests until then and the server runs it at ' +
-      'that time; the two are mutually exclusive. Pass `--await <ids>` (a ' +
-      'comma-separated list of task ids) to instead defer the launch until those ' +
-      'tasks have all landed; combine it with `--date`/`--time` to launch on ' +
-      'whichever comes first. `lander rest` takes the same `--date`/`--time`/' +
-      '`--await` flags (at least one required) to put the current task to rest ' +
-      'with a wakeup — it resumes then with a generated "Resumed at …" message. ' +
-      '`lander list` lists this project\'s tasks (`--status` filters, `--json` ' +
-      'for raw); `lander view <id>` shows one task (id or unambiguous short-id ' +
-      'prefix); `lander send <id> <message>` messages another task in this ' +
-      'project — immediately (queued behind any turn it is mid-way through), or ' +
-      'deferred with the same `--date`/`--time`/`--await` flags. ' +
-      '`lander flow <name> [--key value …]` runs a predefined flow — a ' +
-      'JavaScript script stored for this project that drives these same ' +
-      'commands. When ' +
-      'the user asks you to land a task, do so with `lander land`. Say ' +
-      'everything you mean to say first — ' +
-      'your summary, your sign-off, every last word — because running ' +
-      '`lander land` ends the task: the user can see it land, so once you have ' +
-      'run it there is nothing left to confirm or say. Mark it wedged ' +
-      '(`lander wedge`) only when you cannot make progress without the user: ' +
-      'you need tool permissions granted, a manual step performed, or a ' +
-      'blocking question answered. A spawned task starts with no edit or ' +
-      'commit access; ' +
-      'decide deliberately whether it needs them and, if so, pass `--edits` ' +
-      '(file edits) and/or `--commits` (git) to `lander new` to grant them. ' +
-      `${forwardable}.`,
+    TASK_PROMPT_TEMPLATE.replace('{{forwardable}}', forwardable),
     '--output-format',
     'stream-json',
     '--verbose',
