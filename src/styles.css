@@ -631,6 +631,17 @@ body {
   white-space: nowrap;
 }
 
+.title-row h1.editable-title {
+  cursor: text;
+  border-radius: 4px;
+  padding: 0 4px;
+  margin: 0 -4px;
+}
+
+.editable-title:hover {
+  background: var(--bg-tinted);
+}
+
 .edit-title-button {
   display: inline-flex;
   align-items: center;
