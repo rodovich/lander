@@ -218,12 +218,28 @@ type RunJob = {
   idleTimeoutMs: number
 }
 
-// The runner refreshes its lease while alive; the server treats a lease whose
-// heartbeat is older than this (and whose pid is gone) as a dead run.
-const HEARTBEAT_STALE_MS = 20_000
-// How long to wait for a freshly-launched runner to write its first lease before
+// How long to wait for a freshly-launched runner to write its lease before
 // concluding it failed to start. Generous: a cold `node` start can take a beat.
 const RUN_START_GRACE_MS = 20_000
+// A streaming run is self-evidently alive, so only probe liveness once its log
+// has been silent this long — which also keeps the (process-spawning) probe
+// rare. Set above claude's normal between-output gaps so a thinking pause or a
+// slow tool doesn't trigger needless probing.
+const LIVENESS_QUIET_MS = 15_000
+// Don't spawn the `ps` probe more than once per this interval while a run stays
+// quiet.
+const LIVENESS_PROBE_INTERVAL_MS = 2_000
+// Backstop for a runner that's alive but wedged (so it neither streams nor
+// writes done.json): once its log has been silent this long, treat it as dead
+// regardless. The runner idle-kills claude after 10m of silence and then writes
+// done.json, so a healthy run can't stay quiet past this.
+const RUN_STALL_LIMIT_MS = 12 * 60_000
+// Slack allowed between the start time the runner recorded and the one the OS
+// reports for its pid, when deciding whether a still-present pid is the same
+// process. Comfortably above cold-start skew and `ps`'s 1s resolution, yet far
+// below any window in which a host could cycle its whole pid space and recycle
+// this exact pid.
+const START_MATCH_TOLERANCE_MS = 60_000
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -257,6 +273,46 @@ function pidAlive(pid: number): boolean {
   }
 }
 
+// Parse ps(1)'s elapsed-time field "[[dd-]hh:]mm:ss" into seconds; null if it
+// doesn't match (so callers treat a surprise format as "unknown", not "dead").
+function parseEtime(s: string): number | null {
+  const m = s.trim().match(/^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/)
+  if (!m) return null
+  const [, dd, hh, mm, ss] = m
+  return (dd ? +dd : 0) * 86400 + (hh ? +hh : 0) * 3600 + +mm * 60 + +ss
+}
+
+// Whether the process holding a run's lease is still the original runner. A pid
+// is a recyclable number: a dead runner's pid can be handed to an unrelated
+// process, which `kill(pid, 0)` would report as alive. So we corroborate with
+// the process's start time — a reused pid belongs to a process that started
+// later, so the OS's elapsed time reconstructs a start that won't match the one
+// the runner recorded. Returns 'dead' (pid gone, or recycled), 'alive' (present
+// and the start matches), or 'unknown' (the pid is present but the `ps` probe
+// failed — a flaky probe must not be read as death).
+type Liveness = 'alive' | 'dead' | 'unknown'
+async function runnerLiveness(
+  pid: number,
+  startedAt: string,
+): Promise<Liveness> {
+  if (!pidAlive(pid)) return 'dead'
+  let out: string
+  try {
+    const r = await execFileAsync('ps', ['-o', 'etime=', '-p', String(pid)])
+    out = r.stdout.trim()
+  } catch {
+    // `ps` exits non-zero when the pid is gone, but kill(pid,0) just said it's
+    // there — so this is a transient failure (or a death racing us), not proof.
+    return 'unknown'
+  }
+  const elapsed = parseEtime(out)
+  if (elapsed == null) return 'unknown'
+  const osStart = Date.now() - elapsed * 1000
+  return Math.abs(osStart - Date.parse(startedAt)) < START_MATCH_TOLERANCE_MS
+    ? 'alive'
+    : 'dead'
+}
+
 // Stop a turn's runner so a riding task can be wedged out from under the agent.
 // The runner (its own process-group leader) handles SIGTERM by killing claude
 // and writing a clean done.json, which the in-flight reducer folds in —
@@ -264,8 +320,16 @@ function pidAlive(pid: number): boolean {
 // effort: a run that already finished (no lease, or a dead pid) is a no-op.
 async function interruptRun(project: Project, runId: string): Promise<void> {
   const leasePath = path.join(project.runsDir, runId, 'lease.json')
-  const lease = safeParse<{ pid: number }>(await readFileMaybe(leasePath))
-  if (lease?.pid != null && pidAlive(lease.pid)) {
+  const lease = safeParse<{ pid: number; startedAt: string }>(
+    await readFileMaybe(leasePath),
+  )
+  // Only signal a pid we've confirmed is still this run's runner — never a pid
+  // the OS may have recycled to an unrelated process.
+  if (
+    lease?.pid != null &&
+    lease.startedAt != null &&
+    (await runnerLiveness(lease.pid, lease.startedAt)) === 'alive'
+  ) {
     try {
       process.kill(lease.pid, 'SIGTERM')
     } catch {}
@@ -494,6 +558,11 @@ async function reduceRun(
   let cursor = seed?.runCursor ?? 0
   let sawLease = false
   const startedAt = Date.now()
+  // When the log last grew, and when we last probed liveness: a run that keeps
+  // streaming never gets probed (it's plainly alive); we only check once it's
+  // gone quiet, and then no more than once per probe interval.
+  let lastProgressAt = Date.now()
+  let lastProbeAt = 0
 
   while (true) {
     const doneRaw = await readFileMaybe(donePath)
@@ -509,6 +578,9 @@ async function reduceRun(
     // the final line too.
     const st = await stat(logPath).catch(() => null)
     if (st && st.size > cursor) {
+      // Bytes are arriving — the runner is plainly alive, so reset the quiet
+      // clock even if this batch ends mid-line and we fold nothing yet.
+      lastProgressAt = Date.now()
       const len = st.size - cursor
       const b = Buffer.alloc(len)
       const fh = await open(logPath, 'r')
@@ -572,30 +644,48 @@ async function reduceRun(
       return 'done'
     }
 
-    // No done marker yet: is the runner still alive? It refreshes its lease while
-    // running, so a stale heartbeat with a gone pid means it died mid-stream.
-    const lease = safeParse<{ pid: number; heartbeatAt: string }>(
-      await readFileMaybe(leasePath),
-    )
-    if (lease) sawLease = true
-    const fresh =
-      lease?.heartbeatAt &&
-      Date.now() - Date.parse(lease.heartbeatAt) < HEARTBEAT_STALE_MS
-    const alive = lease?.pid != null && pidAlive(lease.pid)
-    const startupExpired =
-      !sawLease && Date.now() - startedAt > RUN_START_GRACE_MS
-    if ((sawLease && !fresh && !alive) || startupExpired) {
-      await mutateTask(file, (t) => {
-        const msg = pendingMessage(t)
-        if (msg) {
-          if (!msg.text) msg.text = 'error running claude: run interrupted'
-          msg.pending = false
-          t.updatedAt = new Date().toISOString()
-        }
-        delete t.runId
-        delete t.runCursor
-      }).catch(() => {})
-      return 'crashed'
+    // No done marker yet. A run that's still streaming is self-evidently alive,
+    // so only assess liveness once the log has gone quiet — which also keeps the
+    // probe (it spawns `ps`) rare. Throttle it so a long quiet stretch doesn't
+    // spawn one every poll.
+    const quietMs = Date.now() - lastProgressAt
+    if (
+      quietMs > LIVENESS_QUIET_MS &&
+      Date.now() - lastProbeAt > LIVENESS_PROBE_INTERVAL_MS
+    ) {
+      lastProbeAt = Date.now()
+      const lease = safeParse<{ pid: number; startedAt: string }>(
+        await readFileMaybe(leasePath),
+      )
+      if (lease?.pid != null) sawLease = true
+      const liveness =
+        lease?.pid != null && lease.startedAt != null
+          ? await runnerLiveness(lease.pid, lease.startedAt)
+          : 'unknown'
+      // Dead = the runner's pid is gone or was recycled to another process
+      // (start mismatch), or it never wrote a lease before the startup grace
+      // elapsed, or it's been silently wedged past the stall backstop. A merely
+      // 'unknown' probe (the pid's there but `ps` hiccuped) is not death — we
+      // keep waiting; the backstop bounds a genuinely stuck-but-alive runner.
+      const startupExpired =
+        !sawLease && Date.now() - startedAt > RUN_START_GRACE_MS
+      const dead =
+        (sawLease && liveness === 'dead') ||
+        startupExpired ||
+        quietMs > RUN_STALL_LIMIT_MS
+      if (dead) {
+        await mutateTask(file, (t) => {
+          const msg = pendingMessage(t)
+          if (msg) {
+            if (!msg.text) msg.text = 'error running claude: run interrupted'
+            msg.pending = false
+            t.updatedAt = new Date().toISOString()
+          }
+          delete t.runId
+          delete t.runCursor
+        }).catch(() => {})
+        return 'crashed'
+      }
     }
 
     await sleep(200)
@@ -1766,14 +1856,18 @@ async function recoverQueues(): Promise<void> {
       if (task.runId) {
         const runDir = path.join(project.runsDir, task.runId)
         const done = (await readFileMaybe(path.join(runDir, 'done.json'))) != null
-        const lease = safeParse<{ pid: number; heartbeatAt: string }>(
+        const lease = safeParse<{ pid: number; startedAt: string }>(
           await readFileMaybe(path.join(runDir, 'lease.json')),
         )
-        const fresh =
-          lease?.heartbeatAt &&
-          Date.now() - Date.parse(lease.heartbeatAt) < HEARTBEAT_STALE_MS
-        const alive = lease?.pid != null && pidAlive(lease.pid)
-        if (done || fresh || alive) {
+        // No lease here means the runner never recorded itself — and since
+        // nothing is writing it at boot, that's a real absence, not a torn read,
+        // so the run is gone. Otherwise judge by pid + start time; an 'unknown'
+        // probe keeps us reattached rather than abandoning a possibly-live run.
+        const liveness: Liveness =
+          lease?.pid != null && lease.startedAt != null
+            ? await runnerLiveness(lease.pid, lease.startedAt)
+            : 'dead'
+        if (done || liveness !== 'dead') {
           void driveTask(project, id, 'resume')
           continue
         }

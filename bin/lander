@@ -266,7 +266,7 @@ async function archiveTask(args) {
 
 // `lander run <jobfile>` — the detached turn runner the server launches (not for
 // agents). It owns the claude child, appends its raw stream-json stdout to the
-// run's log, and records liveness (lease.json, refreshed while running) and
+// run's log, and records its identity once (lease.json: pid + start time) and
 // completion (done.json). The server only ever reads these files, so the agent
 // keeps working even if the server restarts mid-turn. Everything it needs comes
 // from the job file; it ignores the LANDER_* identity env above — that identity
@@ -281,23 +281,16 @@ async function runJob(args) {
     die(`run: cannot read job ${jobPath}: ${e.message}`)
   }
 
+  // Record our identity once, before spawning, so a reattaching server finds the
+  // pid immediately. The server tells a live runner from a recycled pid by
+  // matching this start time against the one the OS reports for the pid.
   const startedAt = new Date().toISOString()
-  const writeLease = () => {
-    try {
-      writeFileSync(
-        job.leasePath,
-        JSON.stringify({
-          pid: process.pid,
-          startedAt,
-          heartbeatAt: new Date().toISOString(),
-        }),
-      )
-    } catch {}
-  }
-  // Write the lease before spawning so a reattaching server finds a live pid
-  // immediately, then refresh it while we run so a stale heartbeat marks a death.
-  writeLease()
-  const heartbeat = setInterval(writeLease, 5000)
+  try {
+    writeFileSync(
+      job.leasePath,
+      JSON.stringify({ pid: process.pid, startedAt }),
+    )
+  } catch {}
 
   const log = createWriteStream(job.logPath, { flags: 'a' })
   let stderr = ''
@@ -307,7 +300,6 @@ async function runJob(args) {
     if (settled) return
     settled = true
     clearTimeout(timer)
-    clearInterval(heartbeat)
     // Flush the log, then record completion so the server's reducer finalizes
     // the turn (and surfaces a non-zero exit, with stderr, as an error reply).
     // `interrupted` marks a deliberate stop (the server wedged a riding task);
