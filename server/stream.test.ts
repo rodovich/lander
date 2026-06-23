@@ -294,6 +294,54 @@ describe('reduceStreamLine', () => {
     ])
   })
 
+  it('stamps text and tool_use steps with the inference (message) id', () => {
+    // One inference emitting a parallel batch: a text block plus two tool calls,
+    // all sharing the assistant message id. A change in this id — not adjacency —
+    // is what marks a turn boundary downstream.
+    const r = reduceStreamLine(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          id: 'msg_xyz',
+          content: [
+            { type: 'text', text: 'on it' },
+            { type: 'tool_use', name: 'Read', id: 'tu_1', input: { file_path: '/a' } },
+            { type: 'tool_use', name: 'Read', id: 'tu_2', input: { file_path: '/b' } },
+          ],
+        },
+      }),
+      AT,
+    )
+    expect(r.steps.map((s) => s.inferenceId)).toEqual(['msg_xyz', 'msg_xyz', 'msg_xyz'])
+  })
+
+  it('leaves inferenceId undefined when the message carries no id', () => {
+    const r = reduceStreamLine(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          content: [{ type: 'text', text: 'hi' }],
+        },
+      }),
+      AT,
+    )
+    expect(r.steps[0].inferenceId).toBeUndefined()
+  })
+
+  it('does not put an inferenceId on tool_result steps', () => {
+    const r = reduceStreamLine(
+      JSON.stringify({
+        type: 'user',
+        message: {
+          id: 'msg_user',
+          content: [{ type: 'tool_result', tool_use_id: 'tu_1', content: 'ok' }],
+        },
+      }),
+      AT,
+    )
+    expect(r.steps[0].inferenceId).toBeUndefined()
+  })
+
   it('preserves block order across mixed content', () => {
     const r = reduceStreamLine(
       JSON.stringify({

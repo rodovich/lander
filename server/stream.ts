@@ -11,6 +11,19 @@ export type Step = {
   // The tool call's id, carried on both the tool_use step and its matching
   // tool_result step so the UI can pair a call with its outcome.
   toolUseId?: string
+  // text/tool_use only: the id of the model inference (assistant message) that
+  // produced this block. Every text and tool_use block from one inference shares
+  // it — including a parallel batch of tool calls, which is exactly one inference
+  // emitting several tool_use blocks at once. So a change in inferenceId between
+  // consecutive steps marks a turn boundary (the model saw the prior results and
+  // ran again); the UI rules a line there. It is NOT a parallel-batch marker:
+  // within one inference the model interleaves text and tool calls freely, and
+  // the stream interleaves each call's result right after it, so adjacency tells
+  // you nothing — only the inference id (corroborated by a flat per-message
+  // usage/cache_read) distinguishes one turn from the next. Absent on tool_result
+  // steps (harness output, attributed to the preceding inference by position) and
+  // on steps recorded before this field existed.
+  inferenceId?: string
   // tool_use only: the call rendered as a settings.json permission string
   // (e.g. `Bash(npm run build)`), used to seed the "allow" popup.
   rule?: string
@@ -144,9 +157,11 @@ export function reduceStreamLine(
   let finalText: string | undefined
   let blockedIds: string[] | undefined
   if (ev.type === 'assistant' && Array.isArray(ev.message?.content)) {
+    const inferenceId =
+      typeof ev.message.id === 'string' ? ev.message.id : undefined
     for (const block of ev.message.content) {
       if (block.type === 'text' && block.text) {
-        steps.push({ kind: 'text', text: block.text, createdAt: at })
+        steps.push({ kind: 'text', text: block.text, inferenceId, createdAt: at })
         finalText = block.text
       } else if (block.type === 'tool_use') {
         steps.push({
@@ -154,6 +169,7 @@ export function reduceStreamLine(
           tool: block.name,
           input: summarizeToolInput(block.input),
           toolUseId: block.id,
+          inferenceId,
           rule: toolRule(block.name, block.input),
           edits: diffEdits(block.name, block.input),
           createdAt: at,

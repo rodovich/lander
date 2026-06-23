@@ -23,6 +23,11 @@ type Step = {
   input?: string
   // Pairs a tool_use step with its tool_result step.
   toolUseId?: string
+  // text/tool_use: the id of the model inference that produced this block. A
+  // change between consecutive steps marks a turn boundary — the model saw the
+  // prior results and ran again — which we rule a line at. Absent on tool_result
+  // steps and on steps recorded before the server emitted it.
+  inferenceId?: string
   // tool_use: the call as a settings.json permission rule, e.g. `Bash(ls)`.
   rule?: string
   // tool_use, for the file-writing tools (Edit/Write/MultiEdit): the change as
@@ -2189,6 +2194,20 @@ export function App() {
                               : null,
                           )
                           .filter((k): k is string => k !== null)
+                        // Mark the indices that open a new model inference: a
+                        // step whose inferenceId differs from the last one seen.
+                        // Only text/tool_use steps carry an id, so a turn's
+                        // interleaved tool_results don't reset it — the boundary
+                        // lands on the first block of the next turn, where we rule
+                        // a line. The first turn gets no rule (nothing precedes it).
+                        const turnStarts = new Set<number>()
+                        let lastInf: string | undefined
+                        m.steps.forEach((s, j) => {
+                          if (!s.inferenceId) return
+                          if (lastInf !== undefined && s.inferenceId !== lastInf)
+                            turnStarts.add(j)
+                          lastInf = s.inferenceId
+                        })
                         return m.steps.map((s, j) => {
                           const key = `${i}:${j}`
                           const blocked = s.toolUseId
@@ -2211,9 +2230,8 @@ export function App() {
                             hasToolUse.has(s.toolUseId)
                           )
                             return null
-                          return (
+                          const step = (
                             <Step
-                              key={j}
                               step={s}
                               status={status}
                               result={
@@ -2232,6 +2250,14 @@ export function App() {
                                 toggleDetail(key, all ? detailKeys : [key])
                               }
                             />
+                          )
+                          return turnStarts.has(j) ? (
+                            <Fragment key={j}>
+                              <hr className="turn-sep" />
+                              {step}
+                            </Fragment>
+                          ) : (
+                            <Fragment key={j}>{step}</Fragment>
                           )
                         })
                       })()}

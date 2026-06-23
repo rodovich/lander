@@ -1023,6 +1023,15 @@ body {
   gap: 8px;
 }
 
+/* Rules a faint line between consecutive model inferences in the activity trace,
+   so a turn's worth of interleaved text and tool calls reads as one unit. */
+.turn-sep {
+  width: 100%;
+  margin: 2px 0;
+  border: none;
+  border-top: 1px solid var(--border);
+}
+
 .step-tool {
   position: relative;
   display: flex;
