@@ -6,6 +6,7 @@ import {
   rawToolResultText,
   summarizeToolResult,
   reduceStreamLine,
+  addUsage,
 } from './stream'
 
 // A fixed timestamp the reducer must thread through verbatim — it never reads a
@@ -468,6 +469,75 @@ describe('reduceStreamLine', () => {
       cacheCreation: 21296,
       model: 'claude-opus-4-8',
     })
+    // A result event's total is authoritative — it replaces the running estimate.
+    expect(r.usageFinal).toBe(true)
+    expect(r.usageInferenceId).toBeUndefined()
+  })
+
+  it('pulls per-inference usage and id from an assistant event', () => {
+    const r = reduceStreamLine(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          id: 'msg_abc',
+          model: 'claude-opus-4-8',
+          content: [{ type: 'text', text: 'hi' }],
+          usage: {
+            input_tokens: 12,
+            output_tokens: 3,
+            cache_read_input_tokens: 8000,
+            cache_creation_input_tokens: 200,
+          },
+        },
+      }),
+      AT,
+    )
+    expect(r.usage).toEqual({
+      input: 12,
+      output: 3,
+      cacheRead: 8000,
+      cacheCreation: 200,
+      model: 'claude-opus-4-8',
+    })
+    // Tagged with the inference id so the reducer counts it once, and not final.
+    expect(r.usageInferenceId).toBe('msg_abc')
+    expect(r.usageFinal).toBeUndefined()
+  })
+
+  it('leaves usage undefined when an assistant event carries none', () => {
+    const r = reduceStreamLine(
+      JSON.stringify({
+        type: 'assistant',
+        message: { id: 'msg_abc', content: [{ type: 'text', text: 'hi' }] },
+      }),
+      AT,
+    )
+    expect(r.usage).toBeUndefined()
+    expect(r.usageInferenceId).toBeUndefined()
+  })
+})
+
+describe('addUsage', () => {
+  const u = (input: number, output: number, cacheRead = 0, cacheCreation = 0, model?: string) => ({
+    input,
+    output,
+    cacheRead,
+    cacheCreation,
+    model,
+  })
+
+  it('returns the first snapshot unchanged when there is no accumulator', () => {
+    expect(addUsage(undefined, u(10, 2, 5, 1, 'opus'))).toEqual(u(10, 2, 5, 1, 'opus'))
+  })
+
+  it('sums token counts and takes the latest model', () => {
+    expect(addUsage(u(10, 2, 5, 1, 'opus'), u(3, 4, 6, 2, 'haiku'))).toEqual(
+      u(13, 6, 11, 3, 'haiku'),
+    )
+  })
+
+  it('keeps the prior model when the new snapshot has none', () => {
+    expect(addUsage(u(10, 2, 5, 1, 'opus'), u(3, 4, 6, 2)).model).toBe('opus')
   })
 
   it('defaults missing usage fields to zero and leaves model undefined', () => {

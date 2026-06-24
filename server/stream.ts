@@ -42,14 +42,16 @@ export type Step = {
   createdAt: string
 }
 
-// The token usage a turn consumed, taken from the run's terminal `result` event
-// (which reports the cumulative totals across every inference in the turn, not
-// just the last one). `input` is the fresh, uncached input and `cacheCreation`
-// the fresh input that was also written to cache — both processed at full price
-// this turn; `cacheRead` is the discounted re-read of cached context. The full
-// prompt size across the turn's inferences is the three summed. `model` is the
-// turn's dominant model (most output tokens). The UI shows the most recent
-// turn's counts in the corner, and can sum them across the task.
+// The token usage a turn consumed. Accumulated live as the turn streams — each
+// `assistant` event carries its inference's usage, which the reducer sums across
+// the turn's inferences — then finalized by the run's terminal `result` event,
+// which reports the authoritative cumulative totals (and the turn's dominant
+// model). `input` is the fresh, uncached input and `cacheCreation` the fresh
+// input that was also written to cache — both processed at full price this turn;
+// `cacheRead` is the discounted re-read of cached context. The full prompt size
+// across the turn's inferences is the three summed. `model` is the turn's
+// dominant model (most output tokens). The UI shows the most recent turn's
+// counts in the corner, updating as they stream, and can sum them across the task.
 export type Usage = {
   input: number
   output: number
@@ -176,6 +178,36 @@ function dominantModel(modelUsage: unknown): string | undefined {
   return best
 }
 
+// Pull the four token counts out of a raw `usage` object (an `assistant` event's
+// per-inference usage or a `result` event's cumulative totals — same field
+// names), defaulting any missing field to zero. `model` is supplied by the
+// caller: the inference's model for an assistant event, the dominant model for a
+// result event.
+function parseUsage(u: Record<string, unknown>, model?: string): Usage {
+  const n = (k: string) => (typeof u[k] === 'number' ? (u[k] as number) : 0)
+  return {
+    input: n('input_tokens'),
+    output: n('output_tokens'),
+    cacheRead: n('cache_read_input_tokens'),
+    cacheCreation: n('cache_creation_input_tokens'),
+    model,
+  }
+}
+
+// Add one inference's usage onto the turn's running total. Token counts sum; the
+// model is the latest inference's (turns are effectively single-model, and the
+// result event finalizes the true dominant model at turn end regardless).
+export function addUsage(acc: Usage | undefined, next: Usage): Usage {
+  if (!acc) return next
+  return {
+    input: acc.input + next.input,
+    output: acc.output + next.output,
+    cacheRead: acc.cacheRead + next.cacheRead,
+    cacheCreation: acc.cacheCreation + next.cacheCreation,
+    model: next.model ?? acc.model,
+  }
+}
+
 // Parse one line of claude's stream-json output into the activity steps it
 // contributes and any final reply text it carries. Pure — given a line, it
 // returns what to append — so the same reduction serves both a live child
@@ -183,7 +215,20 @@ function dominantModel(modelUsage: unknown): string | undefined {
 export function reduceStreamLine(
   line: string,
   at: string,
-): { steps: Step[]; finalText?: string; blockedIds?: string[]; usage?: Usage } {
+): {
+  steps: Step[]
+  finalText?: string
+  blockedIds?: string[]
+  usage?: Usage
+  // The id of the inference `usage` belongs to, when it's an assistant event's
+  // per-inference snapshot. An inference's usage repeats across its content-block
+  // events, so the reducer counts it once per distinct id. Absent on a result
+  // event's total (which is authoritative — see `usageFinal`).
+  usageInferenceId?: string
+  // True when `usage` is the result event's authoritative turn total, which
+  // replaces the streamed running estimate rather than adding to it.
+  usageFinal?: boolean
+} {
   let ev: any
   try {
     ev = JSON.parse(line)
@@ -194,6 +239,8 @@ export function reduceStreamLine(
   let finalText: string | undefined
   let blockedIds: string[] | undefined
   let usage: Usage | undefined
+  let usageInferenceId: string | undefined
+  let usageFinal: boolean | undefined
   if (ev.type === 'assistant' && Array.isArray(ev.message?.content)) {
     const inferenceId =
       typeof ev.message.id === 'string' ? ev.message.id : undefined
@@ -214,6 +261,14 @@ export function reduceStreamLine(
         })
       }
     }
+    // The event carries this inference's running usage; report it (tagged with
+    // the inference id) so the reducer can sum it across the turn as it streams.
+    if (ev.message.usage && typeof ev.message.usage === 'object') {
+      const model =
+        typeof ev.message.model === 'string' ? ev.message.model : undefined
+      usage = parseUsage(ev.message.usage as Record<string, unknown>, model)
+      usageInferenceId = inferenceId
+    }
   } else if (ev.type === 'user' && Array.isArray(ev.message?.content)) {
     for (const block of ev.message.content) {
       if (block.type === 'tool_result') {
@@ -233,18 +288,12 @@ export function reduceStreamLine(
         .map((d: any) => d?.tool_use_id)
         .filter((id: unknown): id is string => typeof id === 'string')
     if (ev.usage && typeof ev.usage === 'object') {
-      const u = ev.usage as Record<string, unknown>
-      const n = (k: string) => (typeof u[k] === 'number' ? (u[k] as number) : 0)
-      usage = {
-        input: n('input_tokens'),
-        output: n('output_tokens'),
-        cacheRead: n('cache_read_input_tokens'),
-        cacheCreation: n('cache_creation_input_tokens'),
-        // The turn can touch more than one model (e.g. a haiku side-call); the
-        // dominant one — most output tokens — is the turn's headline model.
-        model: dominantModel(ev.modelUsage),
-      }
+      // The turn can touch more than one model (e.g. a haiku side-call); the
+      // dominant one — most output tokens — is the turn's headline model. This
+      // total is authoritative: it replaces the running estimate at turn end.
+      usage = parseUsage(ev.usage as Record<string, unknown>, dominantModel(ev.modelUsage))
+      usageFinal = true
     }
   }
-  return { steps, finalText, blockedIds, usage }
+  return { steps, finalText, blockedIds, usage, usageInferenceId, usageFinal }
 }

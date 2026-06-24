@@ -42,10 +42,11 @@ type Step = {
 // Whether a tool call was permitted, refused, or has no result yet.
 type ToolStatus = 'allowed' | 'blocked' | 'pending'
 
-// Token counts a turn consumed, from its terminal result event. `input` and
-// `cacheCreation` are fresh input processed this turn (uncached); `cacheRead` is
-// the discounted re-read of cached context. `model` is the turn's dominant
-// model. Shown in the composer's corner — latest turn, or summed across the task.
+// Token counts a turn consumed, accumulated as it streams and finalized by its
+// result event. `input` and `cacheCreation` are fresh input processed this turn
+// (uncached); `cacheRead` is the discounted re-read of cached context. `model`
+// is the turn's dominant model. Shown in the composer's corner — latest turn, or
+// summed across the task — updating live as the turn runs.
 type TokenUsage = {
   input: number
   output: number
@@ -200,8 +201,9 @@ function formatTokens(n: number): string {
 }
 
 // The token usage of the task's most recent turn that reported any — the last
-// assistant message carrying a `usage` (a still-streaming turn hasn't seen its
-// result event yet, so its counts are the previous turn's until it lands).
+// assistant message carrying a `usage`. A streaming turn reports its usage live
+// (summed across inferences so far), so this tracks the in-flight turn as it
+// grows rather than lagging a turn behind.
 function latestUsage(task: Task): TokenUsage | undefined {
   for (let i = task.messages.length - 1; i >= 0; i--) {
     const u = task.messages[i].usage

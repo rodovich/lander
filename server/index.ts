@@ -16,7 +16,7 @@ import { promisify } from 'node:util'
 import path from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
-import { reduceStreamLine, type Step, type Usage } from './stream'
+import { reduceStreamLine, addUsage, type Step, type Usage } from './stream'
 import {
   readTasks as readTasksStore,
   readTask as readTaskStore,
@@ -534,6 +534,13 @@ async function reduceRun(
   // copy is authoritative once seeded from disk.
   const seed = await readTask(project.dataDir, id)
   let cursor = seed?.runCursor ?? 0
+  // The turn's running token usage, summed across its inferences as they stream
+  // and replaced by the authoritative total when the result event lands. Seeded
+  // from the pending message so a reattach after a restart keeps the prefix it
+  // already folded in. `usageInf` is the last inference id counted, so an
+  // inference's repeated content-block events are summed only once.
+  let liveUsage: Usage | undefined = (seed ? pendingMessage(seed) : undefined)?.usage
+  let usageInf: string | undefined
   let sawLease = false
   const startedAt = Date.now()
   // When the log last grew, and when we last probed liveness: a run that keeps
@@ -577,7 +584,7 @@ async function reduceRun(
         const steps: Step[] = []
         let finalText: string | undefined
         const blockedIds: string[] = []
-        let usage: Usage | undefined
+        let usageChanged = false
         for (const raw of text.split('\n')) {
           const line = raw.trim()
           if (!line) continue
@@ -585,11 +592,23 @@ async function reduceRun(
           steps.push(...reduced.steps)
           if (reduced.finalText !== undefined) finalText = reduced.finalText
           if (reduced.blockedIds) blockedIds.push(...reduced.blockedIds)
-          if (reduced.usage) usage = reduced.usage
+          if (reduced.usage) {
+            if (reduced.usageFinal) {
+              // The result event's authoritative total supersedes the estimate.
+              liveUsage = reduced.usage
+              usageChanged = true
+            } else if (reduced.usageInferenceId !== usageInf) {
+              // A new inference's usage — add it once (its content-block events
+              // repeat the same numbers under the same id).
+              usageInf = reduced.usageInferenceId
+              liveUsage = addUsage(liveUsage, reduced.usage)
+              usageChanged = true
+            }
+          }
         }
         cursor += take
         await mutateTask(file, (t) => {
-          if (steps.length || finalText !== undefined || blockedIds.length || usage) {
+          if (steps.length || finalText !== undefined || blockedIds.length || usageChanged) {
             // Bump updatedAt only on the batch that begins the assistant message
             // (creates the pending one), not on every streamed batch: streaming
             // churn shouldn't keep reordering the sidebar.
@@ -609,9 +628,10 @@ async function reduceRun(
             // Carry the running reply text onto the message as it lands so it
             // survives a restart (the cursor won't replay it).
             if (finalText !== undefined) msg.text = finalText
-            // The terminal result event reports the turn's token totals; record
-            // them so the UI can show the latest turn's counts.
-            if (usage) msg.usage = usage
+            // Record the turn's running token usage as it streams (summed across
+            // inferences, finalized by the result event) so the UI's corner
+            // readout updates live, not just at turn end.
+            if (usageChanged && liveUsage) msg.usage = liveUsage
             if (begun) t.updatedAt = msg.createdAt
           }
           t.runCursor = cursor
