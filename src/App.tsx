@@ -2515,19 +2515,24 @@ export function App() {
                           `uncached input ${u.input.toLocaleString()} ` +
                           `(+ ${u.cacheCreation.toLocaleString()} written to cache)\n` +
                           `cache read ${u.cacheRead.toLocaleString()}\n` +
-                          `output ${u.output.toLocaleString()}` +
-                          (u.costUsd !== undefined
-                            ? `\ncost $${u.costUsd.toFixed(4)}`
-                            : '')
+                          `output ${u.output.toLocaleString()}\n` +
+                          `cost ${
+                            u.costUsd !== undefined
+                              ? `$${u.costUsd.toFixed(4)}`
+                              : '… (available when the turn lands)'
+                          }`
                         }
                       >
                         <span className="token-scope">{scope}</span>
                         <span>in {formatTokens(uncached)}</span>
                         <span>cache {formatTokens(u.cacheRead)}</span>
                         <span>out {formatTokens(u.output)}</span>
-                        {u.costUsd !== undefined && (
-                          <span className="token-cost">{formatCost(u.costUsd)}</span>
-                        )}
+                        {/* Cost only arrives with the turn's result event, so an
+                            active turn has none yet — show a placeholder that
+                            fills in when the turn lands, rather than nothing. */}
+                        <span className="token-cost">
+                          {u.costUsd !== undefined ? formatCost(u.costUsd) : '$…'}
+                        </span>
                       </button>
                     </div>
                   )
