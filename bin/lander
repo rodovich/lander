@@ -130,6 +130,11 @@ async function launchTask(rest) {
 // --date/--time flags as `launch`, but one is required (a wakeup needs a time).
 // The server flips the task to resting, records a `scheduled` event, and wakes
 // it at that time with a generated "Resumed at …" message.
+//
+// --clear is the inverse: it drops a pending wakeup the task no longer needs —
+// e.g. when the user woke it early (a reply leaves the trigger armed, so it would
+// otherwise fire a spurious resume later). It takes no trigger of its own, leaves
+// the task running, and is idempotent (nothing armed → "nothing to clear").
 async function restTask(args) {
   if (!TASK) die('no current task (LANDER_TASK unset)')
   const o = {}
@@ -138,10 +143,23 @@ async function restTask(args) {
     if (a === '--date') o.date = args[++i]
     else if (a === '--time') o.time = Number(args[++i])
     else if (a === '--await') o.await = args[++i]
+    else if (a === '--clear') o.clear = true
     else die(`rest: unexpected argument ${a}`)
   }
+  if (o.clear) {
+    if (o.date != null || o.time != null || o.await != null)
+      die('rest --clear takes no trigger (--date/--time/--await)')
+    const res = await call(PROJECT, `/tasks/${TASK}/rest`, {
+      method: 'POST',
+      body: JSON.stringify({ clear: true }),
+    })
+    console.log(res.cleared ? 'wakeup cleared' : 'nothing to clear')
+    return
+  }
   if (o.date == null && o.time == null && o.await == null)
-    die('usage: lander rest (--date <when> | --time <minutes> | --await <ids>)')
+    die(
+      'usage: lander rest (--date <when> | --time <minutes> | --await <ids> | --clear)',
+    )
   validateSchedule(o)
   o.await = await resolveAwait(o.await, { self: TASK })
   await call(PROJECT, `/tasks/${TASK}/rest`, {
@@ -457,11 +475,20 @@ function makeLander(inputs) {
     land: () => setStatus('landed', { quiet: true }),
     wedge: () => setStatus('wedged'),
     async rest(opts = {}) {
+      // { clear: true } drops a pending wakeup instead of arming one; returns
+      // whether any trigger was actually disarmed.
+      if (opts.clear) {
+        const res = await call(PROJECT, `/tasks/${TASK}/rest`, {
+          method: 'POST',
+          body: JSON.stringify({ clear: true }),
+        })
+        return res.cleared
+      }
       const o = { date: opts.date, time: opts.time }
       validateSchedule(o)
       o.await = await resolveAwait(opts.await, { self: TASK })
       if (o.date == null && o.time == null && o.await == null)
-        die('lander.rest: pass date, time, or await')
+        die('lander.rest: pass date, time, await, or clear')
       await call(PROJECT, `/tasks/${TASK}/rest`, {
         method: 'POST',
         body: JSON.stringify(o),
@@ -559,7 +586,7 @@ const run = {
 if (!run)
   die(
     `unknown command: ${cmd ?? '(none)'} — try ` +
-      'land | wedge | rest (--date|--time|--await) | ' +
+      'land | wedge | rest (--date|--time|--await|--clear) | ' +
       'launch <message> | list | view <id> | send <id> <message> | ' +
       'archive <id...> [--restore] | assist <prompt> | flow <name>',
   )

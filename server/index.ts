@@ -1528,6 +1528,15 @@ app.post('/api/:project/tasks/:id/launch', async (c) => {
 // wakes the agent with a generated "Resumed at …" message rather than a queued
 // opening one. Called by the in-task CLI while the agent's turn is in flight, so
 // it goes through mutateTask to avoid clobbering the concurrent streaming writes.
+//
+// `{ clear: true }` (`lander rest --clear`) is the inverse: it disarms whatever
+// triggers a prior rest (or deferred `new`) armed, taking no trigger of its own.
+// The case: the user woke a resting task early (a reply revives it to riding
+// without touching the triggers), so the original wakeup is now stale and would
+// later fire a spurious "Resumed at …". We only drop the triggers — never touch
+// status, and record no event (the past `scheduled`/`awaiting` event stands as
+// history of the rest that did happen). Idempotent: clearing nothing succeeds and
+// reports `cleared: false`.
 app.post('/api/:project/tasks/:id/rest', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
@@ -1542,7 +1551,28 @@ app.post('/api/:project/tasks/:id/rest', async (c) => {
       date?: unknown
       time?: unknown
       await?: unknown
+      clear?: unknown
     }>()
+
+    if (body.clear) {
+      if (body.date != null || body.time != null || body.await != null)
+        return c.json(
+          { error: 'clear takes no trigger (--date/--time/--await)' },
+          400,
+        )
+      let cleared = false
+      await mutateTask(file, (t) => {
+        cleared = t.scheduledFor != null || (t.waitingFor?.length ?? 0) > 0
+        if (!cleared) return
+        delete t.scheduledFor
+        delete t.waitingFor
+        t.updatedAt = new Date().toISOString()
+      })
+      const task = await readTask(project.dataDir, id)
+      if (!task) return c.json({ error: 'task not found' }, 404)
+      return c.json({ ...publicTask(task), cleared })
+    }
+
     const sched = resolveSchedule(body)
     if ('error' in sched) return c.json({ error: sched.error }, 400)
     const awaited = await resolveAwait(project, body.await, id)
