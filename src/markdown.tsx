@@ -6,6 +6,15 @@ import { Fragment, useState, type ReactNode } from 'react'
 // Supported: headers, ordered/unordered lists, blockquotes, fenced code
 // blocks, horizontal rules, and inline bold/italic/code/links.
 
+// Resolves a bare task id (a full UUID) or short id (an 8-char prefix) found in
+// message text to an internal link to that task. Returns the link target and
+// the task's title (used as the link text), or undefined when nothing matches —
+// in which case the id renders as literal text. Purely presentational: it
+// doesn't touch the stored message or what's sent to the model.
+export type TaskLinkResolver = (
+  id: string,
+) => { href: string; title: string } | undefined
+
 // Only allow link schemes that can't execute script.
 export function safeHref(url: string): string | undefined {
   const trimmed = url.trim()
@@ -16,7 +25,11 @@ export function safeHref(url: string): string | undefined {
 
 // Parse inline spans (bold, italic, code, links) into React nodes. Operates on
 // plain text, so anything it doesn't recognize stays literal.
-function renderInline(text: string, keyPrefix: string): ReactNode[] {
+function renderInline(
+  text: string,
+  keyPrefix: string,
+  linkTask?: TaskLinkResolver,
+): ReactNode[] {
   const nodes: ReactNode[] = []
   let remaining = text
   let key = 0
@@ -47,11 +60,15 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
       // intraword underscores (e.g. patch_based_saving) don't become emphasis,
       // matching CommonMark/GFM. Asterisks still allow intraword emphasis.
       re: /\*\*([^*]+)\*\*|(?<![\p{L}\p{N}])__([^_]+)__(?![\p{L}\p{N}])/u,
-      render: (m, k) => <strong key={k}>{renderInline(m[1] ?? m[2], k)}</strong>,
+      render: (m, k) => (
+        <strong key={k}>{renderInline(m[1] ?? m[2], k, linkTask)}</strong>
+      ),
     },
     {
       re: /\*([^*]+)\*|(?<![\p{L}\p{N}])_([^_]+)_(?![\p{L}\p{N}])/u,
-      render: (m, k) => <em key={k}>{renderInline(m[1] ?? m[2], k)}</em>,
+      render: (m, k) => (
+        <em key={k}>{renderInline(m[1] ?? m[2], k, linkTask)}</em>
+      ),
     },
     {
       // Bare URLs. The greedy body plus a non-punctuation final char keeps
@@ -70,6 +87,27 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
       },
     },
   ]
+
+  // A bare task reference: a full UUID, or a standalone 8-hex-char short id (not
+  // embedded in a longer hex run or hyphenated id). Only added when a resolver
+  // is supplied; the resolver decides whether the candidate names a real task,
+  // so a coincidental hex token that matches nothing falls back to literal text.
+  // The internal link uses a plain anchor (no target) like the lifecycle-event
+  // task links, so it navigates within the app.
+  if (linkTask) {
+    patterns.push({
+      re: /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?<![0-9a-f-])[0-9a-f]{8}(?![0-9a-f-])/i,
+      render: (m, k) => {
+        const link = linkTask(m[0])
+        if (!link) return <Fragment key={k}>{m[0]}</Fragment>
+        return (
+          <a key={k} className="task-mention" href={link.href} title={m[0]}>
+            {link.title}
+          </a>
+        )
+      },
+    })
+  }
 
   while (remaining) {
     let best: { index: number; match: RegExpMatchArray; render: (m: RegExpMatchArray, k: string) => ReactNode } | null =
@@ -339,39 +377,49 @@ export function parseBlocks(src: string): Block[] {
 // Render a list item's content. A lone paragraph renders inline (a tight item,
 // the common case); richer content — e.g. a paragraph followed by a code block —
 // renders as nested block elements.
-function renderListItem(content: string, key: string): ReactNode {
+function renderListItem(
+  content: string,
+  key: string,
+  linkTask?: TaskLinkResolver,
+): ReactNode {
   const inner = parseBlocks(content)
   if (inner.length === 1 && inner[0].type === 'paragraph') {
-    return renderInline(inner[0].text, key)
+    return renderInline(inner[0].text, key, linkTask)
   }
-  return renderBlocks(inner, key)
+  return renderBlocks(inner, key, linkTask)
 }
 
-function renderBlocks(blocks: Block[], keyPrefix: string): ReactNode[] {
+function renderBlocks(
+  blocks: Block[],
+  keyPrefix: string,
+  linkTask?: TaskLinkResolver,
+): ReactNode[] {
   return blocks.map((b, idx) => {
     const key = `${keyPrefix}-${idx}`
     switch (b.type) {
           case 'heading': {
             const Tag = `h${b.level}` as keyof JSX.IntrinsicElements
-            return <Tag key={key}>{renderInline(b.text, key)}</Tag>
+            return <Tag key={key}>{renderInline(b.text, key, linkTask)}</Tag>
           }
           case 'list':
             return b.ordered ? (
               <ol key={key}>
                 {b.items.map((it, j) => (
-                  <li key={j}>{renderListItem(it, `${key}-${j}`)}</li>
+                  <li key={j}>{renderListItem(it, `${key}-${j}`, linkTask)}</li>
                 ))}
               </ol>
             ) : (
               <ul key={key}>
                 {b.items.map((it, j) => (
-                  <li key={j}>{renderListItem(it, `${key}-${j}`)}</li>
+                  <li key={j}>{renderListItem(it, `${key}-${j}`, linkTask)}</li>
                 ))}
               </ul>
             )
           case 'quote':
             return (
-              <blockquote key={key}>{renderInline(b.lines.join('\n'), key)}</blockquote>
+              <blockquote key={key}>
+                {renderInline(b.lines.join('\n'), key, linkTask)}
+              </blockquote>
             )
           case 'code':
             return <CodeBlock key={key} text={b.text} />
@@ -387,7 +435,7 @@ function renderBlocks(blocks: Block[], keyPrefix: string): ReactNode[] {
                         key={j}
                         style={b.align[j] ? { textAlign: b.align[j]! } : undefined}
                       >
-                        {renderInline(cell, `${key}-h${j}`)}
+                        {renderInline(cell, `${key}-h${j}`, linkTask)}
                       </th>
                     ))}
                   </tr>
@@ -400,7 +448,7 @@ function renderBlocks(blocks: Block[], keyPrefix: string): ReactNode[] {
                           key={c}
                           style={b.align[c] ? { textAlign: b.align[c]! } : undefined}
                         >
-                          {renderInline(row[c] ?? '', `${key}-${r}-${c}`)}
+                          {renderInline(row[c] ?? '', `${key}-${r}-${c}`, linkTask)}
                         </td>
                       ))}
                     </tr>
@@ -409,11 +457,17 @@ function renderBlocks(blocks: Block[], keyPrefix: string): ReactNode[] {
               </table>
             )
           case 'paragraph':
-            return <p key={key}>{renderInline(b.text, key)}</p>
+            return <p key={key}>{renderInline(b.text, key, linkTask)}</p>
     }
   })
 }
 
-export function Markdown({ text }: { text: string }): JSX.Element {
-  return <>{renderBlocks(parseBlocks(text), 'b')}</>
+export function Markdown({
+  text,
+  linkTask,
+}: {
+  text: string
+  linkTask?: TaskLinkResolver
+}): JSX.Element {
+  return <>{renderBlocks(parseBlocks(text), 'b', linkTask)}</>
 }

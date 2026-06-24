@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { Markdown } from './markdown'
+import type { TaskLinkResolver } from './markdown'
 
 // Request headers that mark a call as coming from the human's browser. The
 // server gates permission-granting endpoints (creating a task with edit/commit
@@ -607,6 +608,7 @@ function Step({
   onAllow,
   detailOpen,
   onToggleDetail,
+  linkTask,
 }: {
   step: Step
   status: ToolStatus
@@ -617,6 +619,7 @@ function Step({
   onAllow: (rule: string, scope: 'task' | 'project') => void
   detailOpen: boolean
   onToggleDetail: (all: boolean) => void
+  linkTask: TaskLinkResolver
 }) {
   if (step.kind === 'tool_use') {
     return (
@@ -638,7 +641,7 @@ function Step({
   }
   return (
     <div className="message-text">
-      <Markdown text={step.text ?? ''} />
+      <Markdown text={step.text ?? ''} linkTask={linkTask} />
     </div>
   )
 }
@@ -1492,6 +1495,24 @@ export function App() {
     newProject && projects.some((p) => p.slug === newProject)
       ? newProject
       : defaultTargetSlug
+
+  // Resolve a bare task id or short (8-char) prefix found in a message to an
+  // internal link to that task, used to turn such references into clickable
+  // links with the task's title as the text. Matches a full id exactly or a
+  // prefix that uniquely identifies one loaded task (mirroring the CLI's
+  // unambiguous-prefix rule); returns undefined otherwise so the id renders as
+  // plain text. This is purely presentational — the stored message and what's
+  // sent to the model are untouched.
+  const resolveTaskLink: TaskLinkResolver = (id) => {
+    const needle = id.toLowerCase()
+    const matches =
+      needle.length >= 36
+        ? tasks.filter((t) => t.session.toLowerCase() === needle)
+        : tasks.filter((t) => t.session.toLowerCase().startsWith(needle))
+    if (matches.length !== 1) return undefined
+    const t = matches[0]
+    return { href: `/${t.projectSlug}/${t.session}`, title: t.title }
+  }
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -2351,6 +2372,7 @@ export function App() {
                               onToggleDetail={(all) =>
                                 toggleDetail(key, all ? detailKeys : [key])
                               }
+                              linkTask={resolveTaskLink}
                             />
                           )
                           return turnStarts.has(j) ? (
@@ -2367,7 +2389,7 @@ export function App() {
                   ) : (
                     m.text && (
                       <div className="message-text">
-                        <Markdown text={m.text} />
+                        <Markdown text={m.text} linkTask={resolveTaskLink} />
                       </div>
                     )
                   )}

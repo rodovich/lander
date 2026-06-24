@@ -231,3 +231,56 @@ describe('Markdown rendering', () => {
     expect(render('')).toBe('')
   })
 })
+
+describe('task-mention linking', () => {
+  const FULL = 'abcd1234-5678-90ab-cdef-1234567890ab'
+  // A resolver standing in for the app's: links the one known task, by full id
+  // or by an 8-char prefix.
+  const linkTask = (id: string) => {
+    const needle = id.toLowerCase()
+    if (FULL === needle || (needle.length === 8 && FULL.startsWith(needle)))
+      return { href: `/proj/${FULL}`, title: 'Fix the parser' }
+    return undefined
+  }
+  const render = (text: string) =>
+    renderToStaticMarkup(<Markdown text={text} linkTask={linkTask} />)
+
+  it('links a full task id, using the title as the link text', () => {
+    const html = render(`status of ${FULL}?`)
+    expect(html).toContain(`href="/proj/${FULL}"`)
+    expect(html).toContain('Fix the parser')
+    expect(html).toContain('task-mention')
+    // The raw id is not shown as the visible text (only as the title attr).
+    expect(html).toContain('>Fix the parser</a>')
+  })
+
+  it('links a standalone 8-char short id', () => {
+    const html = render('abcd1234 is wedged')
+    expect(html).toContain(`href="/proj/${FULL}"`)
+    expect(html).toContain('>Fix the parser</a>')
+  })
+
+  it('leaves an id that matches no task as literal text', () => {
+    const html = render('deadbeef is unknown')
+    expect(html).not.toContain('<a')
+    expect(html).toContain('deadbeef')
+  })
+
+  it('does not link a hex run longer than a short id', () => {
+    const html = render('abcd1234ef is not a short id')
+    expect(html).not.toContain('<a')
+    expect(html).toContain('abcd1234ef')
+  })
+
+  it('does not link ids when no resolver is supplied', () => {
+    const html = renderToStaticMarkup(<Markdown text={`see ${FULL}`} />)
+    expect(html).not.toContain('<a')
+    expect(html).toContain(FULL)
+  })
+
+  it('links an id inside emphasis', () => {
+    const html = render('*abcd1234*')
+    expect(html).toContain('<em>')
+    expect(html).toContain(`href="/proj/${FULL}"`)
+  })
+})
