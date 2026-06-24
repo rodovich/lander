@@ -767,12 +767,22 @@ async function driveTask(
         : 'start'
     }
     while (true) {
-      let prompt: string | undefined
+      // Drain the whole queue at once, not one prompt per turn: several
+      // follow-ups that piled up while the previous turn ran are sent together
+      // as a single turn (joined into one prompt) rather than one turn each.
+      // They stay distinct user messages on the task — only the turn count
+      // collapses — so the UI still shows them as separate messages under one
+      // reply. The loop repeats because more can arrive while this batch runs;
+      // those become the next batched turn.
+      let batch: string[] = []
       await mutateTask(file, (t) => {
-        if (t.queued && t.queued.length) prompt = t.queued.shift()
+        if (t.queued && t.queued.length) {
+          batch = t.queued
+          delete t.queued
+        }
       }).catch(() => {})
-      if (prompt === undefined) break
-      await runTurn(project, id, prompt, mode)
+      if (!batch.length) break
+      await runTurn(project, id, batch.join('\n\n'), mode)
       mode = 'resume'
     }
   } finally {

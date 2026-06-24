@@ -1287,9 +1287,11 @@ export function App() {
   // timestamp is stamped lazily when claude's first token arrives (see the
   // server's ensurePending). Sorting by time would then float the follow-up
   // above the response it follows. Instead we pair turns positionally: every turn
-  // is one user prompt answered by one assistant message, so the k-th assistant
-  // belongs after the k-th user. Still-queued prompts have no assistant yet and
-  // simply trail at the end, which is where they belong.
+  // groups a run of consecutive user prompts with the single assistant message
+  // that answers them — follow-ups that queued up while the agent ran are sent
+  // as one batched turn, so a turn can hold several prompts under one reply.
+  // Still-queued prompts have no assistant yet and simply trail at the end,
+  // which is where they belong.
   // The message indices of follow-ups still waiting in the queue. `queued` is
   // drained in order, so it always corresponds to the last N user messages —
   // dim those in the timeline, and sink them below everything else, to signal
@@ -1310,40 +1312,52 @@ export function App() {
     | { kind: 'event'; at: string; event: TaskEvent }
   const timeline: TimelineItem[] = []
   if (current) {
-    const userIdx: number[] = []
-    const asstIdx: number[] = []
-    current.messages.forEach((m, i) =>
-      (m.role === 'user' ? userIdx : asstIdx).push(i),
-    )
-    // Interleave user[k], assistant[k] in turn order; tolerate either list
-    // running long (e.g. a stray legacy message) by emitting whatever remains.
+    // Group messages into turns: a run of consecutive user prompts plus the one
+    // assistant reply that answers them. A turn closes when its reply arrives, so
+    // the next user message opens a fresh turn; a leading or doubled assistant
+    // (e.g. a stray legacy message) just gets its own turn. Batched queued
+    // follow-ups mean a turn can carry several prompts before its single reply.
+    type Turn = { users: number[]; asst?: number }
+    const turnList: Turn[] = []
+    let cur: Turn | undefined
+    current.messages.forEach((m, i) => {
+      if (!cur || cur.asst !== undefined) {
+        cur = { users: [] }
+        turnList.push(cur)
+      }
+      if (m.role === 'user') cur.users.push(i)
+      else cur.asst = i
+    })
     // Queued follow-ups are held aside: claude hasn't read them yet, so they
     // belong below the whole conversation rather than at their enqueue time.
     const ordered: TimelineItem[] = []
     const queued: TimelineItem[] = []
-    const turns = Math.max(userIdx.length, asstIdx.length)
     const nowIso = new Date().toISOString()
-    for (let k = 0; k < turns; k++) {
-      const ui = userIdx[k]
-      const ai = asstIdx[k]
-      const queuedTurn = ui !== undefined && queuedIndices.has(ui)
+    for (const turn of turnList) {
+      const ai = turn.asst
+      // A turn whose prompts are all still queued (no reply yet) is one claude
+      // hasn't read; it sinks to the bottom below.
+      const queuedTurn =
+        ai === undefined &&
+        turn.users.length > 0 &&
+        turn.users.every((u) => queuedIndices.has(u))
       // A turn enters the conversation when claude reads it — i.e. when its reply
       // begins streaming (the assistant's lazily-stamped createdAt) — not when the
       // prompt was typed. For a follow-up that sat queued those differ wildly, so
-      // anchoring both halves of the turn to the read time keeps an event that
-      // fired while it waited above the turn it eventually got, not below its stale
-      // enqueue time. Before the reply is stamped the turn is either still queued
-      // (sunk to the bottom below, so `at` is moot) or in flight right now — anchor
-      // the live turn to "now" so it likewise sits below already-past events,
-      // rather than briefly floating up to its enqueue time as the queue drains.
+      // anchoring the whole turn to the read time keeps an event that fired while
+      // it waited above the turn it eventually got, not below its stale enqueue
+      // time. Before the reply is stamped the turn is either still queued (sunk to
+      // the bottom below, so `at` is moot) or in flight right now — anchor the
+      // live turn to "now" so it likewise sits below already-past events, rather
+      // than briefly floating up to its enqueue time as the queue drains.
       const at =
         ai !== undefined
           ? current.messages[ai].createdAt
           : queuedTurn
-            ? current.messages[ui!].createdAt
+            ? current.messages[turn.users[0]].createdAt
             : nowIso
-      for (const i of [ui, ai]) {
-        if (i === undefined) continue
+      const idxs = ai !== undefined ? [...turn.users, ai] : turn.users
+      for (const i of idxs) {
         const message = current.messages[i]
         const item: TimelineItem = { kind: 'message', at, message, index: i }
         ;(queuedIndices.has(i) ? queued : ordered).push(item)
