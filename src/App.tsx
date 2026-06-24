@@ -1127,6 +1127,7 @@ export function App() {
     {},
   )
   const [sendingBy, setSendingBy] = useState<Record<string, boolean>>({})
+  const composerRef = useRef<HTMLTextAreaElement>(null)
 
   // The tool chip whose grant popup is open, keyed "<messageIndex>:<stepIndex>".
   // Only one is open at a time; null means none.
@@ -1828,6 +1829,9 @@ export function App() {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setSendingBy((prev) => ({ ...prev, [id]: false }))
+      // Disabling the textarea while sending drops its focus; restore it once
+      // the element re-enables so you can keep typing the next reply.
+      requestAnimationFrame(() => composerRef.current?.focus())
     }
   }
 
@@ -2547,6 +2551,7 @@ export function App() {
             </div>
             <div className="composer-bar">
               <textarea
+                ref={composerRef}
                 className="composer"
                 placeholder={
                   current.archived ? 'Restore this task to reply' : 'Reply…'
