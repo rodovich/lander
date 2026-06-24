@@ -415,6 +415,11 @@ function buildClaudeArgs(
     'stream-json',
     '--verbose',
     '-p',
+    // `--` terminates option parsing so a prompt beginning with a hyphen is
+    // taken as the positional prompt, not mis-read by claude's CLI as a flag
+    // ("error: unknown option"). The prompt is the last argument, so nothing
+    // after it needs option parsing anyway.
+    '--',
     prompt,
   ]
 }

@@ -370,7 +370,9 @@ async function runJob(args) {
 // command and the `lander.assist()` flow API.
 function runClaude(prompt, args) {
   const text = args.length ? `${prompt}\n${args.join('')}` : prompt
-  const r = spawnSync('claude', ['-p', text], { encoding: 'utf8' })
+  // `--` so a prompt starting with a hyphen is taken as the positional prompt
+  // rather than parsed as an option by claude's CLI.
+  const r = spawnSync('claude', ['-p', '--', text], { encoding: 'utf8' })
   if (r.error) die(`assist: ${r.error.message}`)
   if (r.status !== 0)
     die(`assist: ${(r.stderr || '').trim() || `claude exited ${r.status}`}`)
