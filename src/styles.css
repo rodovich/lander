@@ -1051,6 +1051,44 @@ body {
   border-top: 1px solid var(--border);
 }
 
+/* One model inference's steps. Anchors its copy button and keeps the same gap
+   between its steps that .steps gives between inferences. */
+.inference {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Copy button in an inference's top-right corner, matching .message-copy but
+   anchored over the steps rather than living in a head row. */
+.inference-copy {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: none;
+  background: var(--bg);
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+
+.inference:hover .inference-copy,
+.inference-copy:focus-visible {
+  opacity: 1;
+}
+
+.inference-copy:hover {
+  color: var(--accent);
+  background: var(--bg-tinted);
+}
+
 .step-tool {
   position: relative;
   display: flex;

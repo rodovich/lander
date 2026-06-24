@@ -742,7 +742,13 @@ function StatusTransition({ event, slug }: { event: TaskEvent; slug: string }) {
 
 // A clipboard button shown in a message's top-right corner. Briefly flips to a
 // checkmark after a successful copy so the click registers.
-function CopyButton({ text }: { text: string }) {
+function CopyButton({
+  text,
+  className = 'message-copy',
+}: {
+  text: string
+  className?: string
+}) {
   const [copied, setCopied] = useState(false)
   const copy = async () => {
     try {
@@ -756,7 +762,7 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button
       type="button"
-      className="message-copy"
+      className={className}
       onClick={copy}
       title="Copy message"
       aria-label={copied ? 'Copied' : 'Copy message'}
@@ -2315,7 +2321,11 @@ export function App() {
                     <span className="message-time">
                       {formatTimestamp(m.createdAt)}
                     </span>
-                    {m.text && <CopyButton text={m.text} />}
+                    {/* A turn's steps carry per-inference copy buttons, so the
+                        head button is only for plain text messages. */}
+                    {m.text && !(m.steps && m.steps.length > 0) && (
+                      <CopyButton text={m.text} />
+                    )}
                   </div>
                   {/* Streamed assistant turns render their live activity trace;
                       user and legacy messages just render their text. */}
@@ -2356,21 +2366,29 @@ export function App() {
                               : null,
                           )
                           .filter((k): k is string => k !== null)
-                        // Mark the indices that open a new model inference: a
-                        // step whose inferenceId differs from the last one seen.
-                        // Only text/tool_use steps carry an id, so a turn's
-                        // interleaved tool_results don't reset it — the boundary
-                        // lands on the first block of the next turn, where we rule
-                        // a line. The first turn gets no rule (nothing precedes it).
-                        const turnStarts = new Set<number>()
+                        // Group consecutive steps by the model inference that
+                        // produced them: a text/tool_use step whose inferenceId
+                        // differs from the last one seen opens a new group. Only
+                        // those steps carry an id, so a turn's interleaved
+                        // tool_results stay with the current group. Each group is
+                        // one inference — ruled apart from the next and given its
+                        // own copy button for that inference's text, since a turn
+                        // can hold several and each is worth copying on its own.
+                        const groups: number[][] = []
                         let lastInf: string | undefined
                         m.steps.forEach((s, j) => {
-                          if (!s.inferenceId) return
-                          if (lastInf !== undefined && s.inferenceId !== lastInf)
-                            turnStarts.add(j)
-                          lastInf = s.inferenceId
+                          if (
+                            groups.length === 0 ||
+                            (s.inferenceId &&
+                              lastInf !== undefined &&
+                              s.inferenceId !== lastInf)
+                          )
+                            groups.push([])
+                          groups[groups.length - 1].push(j)
+                          if (s.inferenceId) lastInf = s.inferenceId
                         })
-                        return m.steps.map((s, j) => {
+                        const renderStep = (j: number) => {
+                          const s = m.steps![j]
                           const key = `${i}:${j}`
                           const blocked = s.toolUseId
                             ? outcomes.get(s.toolUseId)
@@ -2392,8 +2410,9 @@ export function App() {
                             hasToolUse.has(s.toolUseId)
                           )
                             return null
-                          const step = (
+                          return (
                             <Step
+                              key={j}
                               step={s}
                               status={status}
                               result={
@@ -2414,13 +2433,28 @@ export function App() {
                               linkTask={resolveTaskLink}
                             />
                           )
-                          return turnStarts.has(j) ? (
-                            <Fragment key={j}>
-                              <hr className="turn-sep" />
-                              {step}
+                        }
+                        return groups.map((idxs, g) => {
+                          // This inference's copyable text: its text blocks, in
+                          // order, joined as they read.
+                          const text = idxs
+                            .map((j) => m.steps![j])
+                            .filter((s) => s.kind === 'text' && s.text)
+                            .map((s) => s.text)
+                            .join('\n\n')
+                          return (
+                            <Fragment key={g}>
+                              {g > 0 && <hr className="turn-sep" />}
+                              <div className="inference">
+                                {text && (
+                                  <CopyButton
+                                    text={text}
+                                    className="inference-copy"
+                                  />
+                                )}
+                                {idxs.map(renderStep)}
+                              </div>
                             </Fragment>
-                          ) : (
-                            <Fragment key={j}>{step}</Fragment>
                           )
                         })
                       })()}
