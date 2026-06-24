@@ -1257,6 +1257,21 @@ export function App() {
   // is one user prompt answered by one assistant message, so the k-th assistant
   // belongs after the k-th user. Still-queued prompts have no assistant yet and
   // simply trail at the end, which is where they belong.
+  // The message indices of follow-ups still waiting in the queue. `queued` is
+  // drained in order, so it always corresponds to the last N user messages —
+  // dim those in the timeline, and sink them below everything else, to signal
+  // claude hasn't read them yet.
+  const queuedIndices = new Set<number>()
+  if (current) {
+    let remaining = current.queued?.length ?? 0
+    for (let i = current.messages.length - 1; i >= 0 && remaining > 0; i--) {
+      if (current.messages[i].role === 'user') {
+        queuedIndices.add(i)
+        remaining--
+      }
+    }
+  }
+
   type TimelineItem =
     | { kind: 'message'; at: string; message: Message; index: number }
     | { kind: 'event'; at: string; event: TaskEvent }
@@ -1269,20 +1284,41 @@ export function App() {
     )
     // Interleave user[k], assistant[k] in turn order; tolerate either list
     // running long (e.g. a stray legacy message) by emitting whatever remains.
+    // Queued follow-ups are held aside: claude hasn't read them yet, so they
+    // belong below the whole conversation rather than at their enqueue time.
     const ordered: TimelineItem[] = []
+    const queued: TimelineItem[] = []
     const turns = Math.max(userIdx.length, asstIdx.length)
+    const nowIso = new Date().toISOString()
     for (let k = 0; k < turns; k++) {
-      for (const i of [userIdx[k], asstIdx[k]]) {
+      const ui = userIdx[k]
+      const ai = asstIdx[k]
+      const queuedTurn = ui !== undefined && queuedIndices.has(ui)
+      // A turn enters the conversation when claude reads it — i.e. when its reply
+      // begins streaming (the assistant's lazily-stamped createdAt) — not when the
+      // prompt was typed. For a follow-up that sat queued those differ wildly, so
+      // anchoring both halves of the turn to the read time keeps an event that
+      // fired while it waited above the turn it eventually got, not below its stale
+      // enqueue time. Before the reply is stamped the turn is either still queued
+      // (sunk to the bottom below, so `at` is moot) or in flight right now — anchor
+      // the live turn to "now" so it likewise sits below already-past events,
+      // rather than briefly floating up to its enqueue time as the queue drains.
+      const at =
+        ai !== undefined
+          ? current.messages[ai].createdAt
+          : queuedTurn
+            ? current.messages[ui!].createdAt
+            : nowIso
+      for (const i of [ui, ai]) {
         if (i === undefined) continue
         const message = current.messages[i]
-        ordered.push({ kind: 'message', at: message.createdAt, message, index: i })
+        const item: TimelineItem = { kind: 'message', at, message, index: i }
+        ;(queuedIndices.has(i) ? queued : ordered).push(item)
       }
     }
     // Splice lifecycle events into the turn-ordered stream by timestamp: each
     // event surfaces just before the first message it predates. Events are sparse
-    // and mark deliberate status crossings (wedged/landed and their inverses), so
-    // this reads naturally even where a trailing queued prompt sits out of strict
-    // time order.
+    // and mark deliberate status crossings (wedged/landed and their inverses).
     const events = [...(current.events ?? [])].sort((a, b) =>
       a.createdAt.localeCompare(b.createdAt),
     )
@@ -1292,22 +1328,12 @@ export function App() {
         timeline.push({ kind: 'event', at: events[e].createdAt, event: events[e++] })
       timeline.push(item)
     }
+    // Trailing events — including any that arrived while a follow-up sat queued —
+    // surface before the queued prompts: a queued message's place in the
+    // conversation is fixed by when claude actually reads it, not when it was sent.
     while (e < events.length)
       timeline.push({ kind: 'event', at: events[e].createdAt, event: events[e++] })
-  }
-
-  // The message indices of follow-ups still waiting in the queue. `queued` is
-  // drained in order, so it always corresponds to the last N user messages —
-  // dim those in the timeline to signal claude hasn't read them yet.
-  const queuedIndices = new Set<number>()
-  if (current) {
-    let remaining = current.queued?.length ?? 0
-    for (let i = current.messages.length - 1; i >= 0 && remaining > 0; i--) {
-      if (current.messages[i].role === 'user') {
-        queuedIndices.add(i)
-        remaining--
-      }
-    }
+    for (const item of queued) timeline.push(item)
   }
 
   // A monotonically rising count of finished assistant turns across all tasks.
