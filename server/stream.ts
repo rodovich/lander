@@ -32,11 +32,14 @@ export type Step = {
   // per edit (MultiEdit has several); Write has a single hunk with empty `old`.
   // Absent for every other tool.
   edits?: { old: string; new: string }[]
-  // tool_result only: whether the call errored. `blocked` means the call was
-  // refused before it ran (permission gate, Bash safety check, or sandbox file
-  // block) — set during a turn's terminal result event from its authoritative
-  // permission_denials list, not inferred from the result text. Absent means the
-  // call ran; the UI reads that as allowed.
+  // tool_result fields. `isError` is the result's own error flag — set whenever
+  // the call errored, whether it was refused before running or ran and failed.
+  // `blocked` narrows that to a permission-gate refusal: set during a turn's
+  // terminal result event from its authoritative permission_denials list, not
+  // inferred from the result text. (That list covers only the interactive
+  // permission gate — a Bash static-analysis or sandbox block surfaces as
+  // `isError` without `blocked`.) The UI reads a `blocked` call as "blocked" and
+  // offers a grant; an `isError`-only call as "failed"; neither as a clean run.
   isError?: boolean
   blocked?: boolean
   createdAt: string

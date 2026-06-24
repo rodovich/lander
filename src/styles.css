@@ -1190,13 +1190,14 @@ body {
   box-shadow: 0 0 0 2px var(--accent);
 }
 
-/* A blocked (permission-refused) tool call reads red. */
-.step-tool-name.blocked {
+/* A blocked (permission-refused) or failed (errored) tool call reads red;
+   a clean call keeps the default accent. */
+.step-tool-name.errored {
   background: color-mix(in srgb, var(--error) 14%, transparent);
   color: var(--error);
 }
 
-.step-tool-name.blocked:hover {
+.step-tool-name.errored:hover {
   background: color-mix(in srgb, var(--error) 22%, transparent);
 }
 
@@ -1233,14 +1234,12 @@ body {
   color: var(--accent);
 }
 
+/* Only an errored call shows a status word ("blocked"/"failed"), so it always
+   reads red — a clean call shows no word at all. */
 .tool-popup-status {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #1a7f37;
-}
-
-.tool-popup-status.blocked {
   color: var(--error);
 }
 
@@ -1299,8 +1298,10 @@ body {
   word-break: break-word;
 }
 
-/* An error result reads red, matching its blocked chip. */
-.step-result.error {
+/* An error result reads red, matching its blocked chip. (Scoped class name, not
+   a bare `error` — the global `.error` block sets a large padding that would
+   otherwise bloat the chip and this peek.) */
+.step-result.errored {
   color: var(--error);
   border-left-color: var(--error);
 }

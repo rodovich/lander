@@ -40,8 +40,12 @@ type Step = {
   createdAt: string
 }
 
-// Whether a tool call was permitted, refused, or has no result yet.
-type ToolStatus = 'allowed' | 'blocked' | 'pending'
+// A tool call's outcome, read off its result: `blocked` was refused at the
+// permission gate (it's in the turn's permission_denials), `failed` ran-or-tried
+// and errored without being a denial, `ok` ran cleanly, `running` has no result
+// yet. Only the two error states (blocked/failed) get a red badge and a status
+// word; a clean call shows just its command, no "approved"/"success" affirmation.
+type ToolStatus = 'ok' | 'blocked' | 'failed' | 'running'
 
 // Token counts a turn consumed, accumulated as it streams and finalized by its
 // result event. `input` and `cacheCreation` are fresh input processed this turn
@@ -417,11 +421,18 @@ function UsageSummary({ refreshSignal }: { refreshSignal: number }) {
 function ToolPopup({
   step,
   status,
+  allowable,
   anchor,
   onAllow,
 }: {
   step: Step
   status: ToolStatus
+  // Whether to offer the allow buttons. True when the call was refused at the
+  // permission gate, or it errored before the turn's permission_denials list
+  // arrived (so we can't yet tell a refusal from a plain failure — offer the
+  // grant rather than hide it prematurely). False once the list confirms the
+  // error was not a denial, and for clean or still-running calls.
+  allowable: boolean
   // Viewport coords of the chip's bottom-left, so the fixed-position popup can
   // anchor under the chip while escaping the scrolling timeline's clipping.
   anchor: { top: number; left: number }
@@ -431,6 +442,10 @@ function ToolPopup({
   // existed fall back to the bare tool name; they predate blocked/isError too, so
   // they never offer the allow buttons anyway — the textarea is just a view.
   const [rule, setRule] = useState(step.rule ?? step.tool ?? '')
+  // Only an error carries a status word: a refusal reads "blocked", any other
+  // error "failed". A clean or still-running call shows just its rule.
+  const label =
+    status === 'blocked' ? 'blocked' : status === 'failed' ? 'failed' : ''
   return (
     <div
       className="tool-popup"
@@ -439,9 +454,7 @@ function ToolPopup({
     >
       <div className="tool-popup-head">
         <span className="tool-popup-tool">{step.tool}</span>
-        <span className={'tool-popup-status' + (status === 'blocked' ? ' blocked' : '')}>
-          {status}
-        </span>
+        {label && <span className="tool-popup-status">{label}</span>}
       </div>
       <textarea
         className="tool-popup-input"
@@ -449,7 +462,7 @@ function ToolPopup({
         value={rule}
         onChange={(e) => setRule(e.target.value)}
       />
-      {status === 'blocked' && (
+      {allowable && (
         <div className="tool-popup-actions">
           <button type="button" onClick={() => onAllow(rule, 'task')}>
             allow in task
@@ -498,7 +511,7 @@ function DiffView({ edits }: { edits: { old: string; new: string }[] }) {
 }
 
 // A tool call in the activity trace: a clickable chip (red when the call was
-// blocked) that toggles a grant popup. When the chip has revealable detail — a
+// blocked or failed) that toggles a grant popup. When the chip has revealable detail — a
 // file-writing tool's diff, or any other tool's captured output — it also gets
 // a disclosure triangle to its left that expands it (default closed);
 // option/shift-clicking toggles every such chip in the message at once. The chip
@@ -507,6 +520,7 @@ function DiffView({ edits }: { edits: { old: string; new: string }[] }) {
 function ToolStep({
   step,
   status,
+  allowable,
   result,
   open,
   onToggle,
@@ -517,6 +531,7 @@ function ToolStep({
 }: {
   step: Step
   status: ToolStatus
+  allowable: boolean
   // The matching tool_result's text/error, folded in so the chip can reveal it.
   result?: { text?: string; isError?: boolean }
   open: boolean
@@ -588,7 +603,10 @@ function ToolStep({
         <button
           ref={buttonRef}
           type="button"
-          className={'step-tool-name' + (status === 'blocked' ? ' blocked' : '')}
+          className={
+            'step-tool-name' +
+            (status === 'blocked' || status === 'failed' ? ' errored' : '')
+          }
           aria-expanded={open}
           onClick={onToggle}
         >
@@ -598,12 +616,18 @@ function ToolStep({
       </div>
       {detailOpen && hasDiff && <DiffView edits={step.edits!} />}
       {detailOpen && hasResult && (
-        <div className={'step-result' + (result!.isError ? ' error' : '')}>
+        <div className={'step-result' + (result!.isError ? ' errored' : '')}>
           {result!.text}
         </div>
       )}
       {open && anchor && (
-        <ToolPopup step={step} status={status} anchor={anchor} onAllow={onAllow} />
+        <ToolPopup
+          step={step}
+          status={status}
+          allowable={allowable}
+          anchor={anchor}
+          onAllow={onAllow}
+        />
       )}
     </div>
   )
@@ -614,6 +638,7 @@ function ToolStep({
 function Step({
   step,
   status,
+  allowable,
   result,
   open,
   onToggle,
@@ -625,6 +650,7 @@ function Step({
 }: {
   step: Step
   status: ToolStatus
+  allowable: boolean
   result?: { text?: string; isError?: boolean }
   open: boolean
   onToggle: () => void
@@ -639,6 +665,7 @@ function Step({
       <ToolStep
         step={step}
         status={status}
+        allowable={allowable}
         result={result}
         open={open}
         onToggle={onToggle}
@@ -2390,17 +2417,38 @@ export function App() {
                         const renderStep = (j: number) => {
                           const s = m.steps![j]
                           const key = `${i}:${j}`
-                          const blocked = s.toolUseId
-                            ? outcomes.get(s.toolUseId)
-                            : undefined
+                          // The chip's result (if it has landed) and whether the
+                          // call is in the turn's permission_denials.
+                          const res =
+                            s.kind === 'tool_use' && s.toolUseId
+                              ? resultById.get(s.toolUseId)
+                              : undefined
+                          const inDenials =
+                            s.kind === 'tool_use' && s.toolUseId
+                              ? outcomes.get(s.toolUseId) === true
+                              : false
+                          // permission_denials lands with the turn's terminal
+                          // result event, after which the message stops being
+                          // pending. Until then we can't tell a refusal from a
+                          // plain error, so treat the denials as not-yet-known.
+                          const denialsKnown = !m.pending
                           const status: ToolStatus =
                             s.kind !== 'tool_use'
-                              ? 'pending'
-                              : blocked === undefined
-                                ? 'pending'
-                                : blocked
-                                  ? 'blocked'
-                                  : 'allowed'
+                              ? 'running'
+                              : inDenials
+                                ? 'blocked'
+                                : res?.isError
+                                  ? 'failed'
+                                  : res
+                                    ? 'ok'
+                                    : 'running'
+                          // Offer the grant when the call was refused, or it
+                          // errored before the denials list arrived (it might yet
+                          // prove a refusal). Once the list is known and this call
+                          // isn't in it, the error was a genuine failure — no grant.
+                          const allowable =
+                            s.kind === 'tool_use' &&
+                            (inDenials || (!!res?.isError && !denialsKnown))
                           // A result owned by a tool_use chip is now revealed from
                           // that chip — skip the standalone peek. Orphan/legacy
                           // results (no matching chip) still render inline.
@@ -2415,11 +2463,8 @@ export function App() {
                               key={j}
                               step={s}
                               status={status}
-                              result={
-                                s.kind === 'tool_use' && s.toolUseId
-                                  ? resultById.get(s.toolUseId)
-                                  : undefined
-                              }
+                              allowable={allowable}
+                              result={res}
                               open={openTool === key}
                               onToggle={() =>
                                 setOpenTool(openTool === key ? null : key)
