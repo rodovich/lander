@@ -16,7 +16,7 @@ import { promisify } from 'node:util'
 import path from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
-import { reduceStreamLine, type Step } from './stream'
+import { reduceStreamLine, type Step, type Usage } from './stream'
 import {
   readTasks as readTasksStore,
   readTask as readTaskStore,
@@ -572,6 +572,7 @@ async function reduceRun(
         const steps: Step[] = []
         let finalText: string | undefined
         const blockedIds: string[] = []
+        let usage: Usage | undefined
         for (const raw of text.split('\n')) {
           const line = raw.trim()
           if (!line) continue
@@ -579,10 +580,11 @@ async function reduceRun(
           steps.push(...reduced.steps)
           if (reduced.finalText !== undefined) finalText = reduced.finalText
           if (reduced.blockedIds) blockedIds.push(...reduced.blockedIds)
+          if (reduced.usage) usage = reduced.usage
         }
         cursor += take
         await mutateTask(file, (t) => {
-          if (steps.length || finalText !== undefined || blockedIds.length) {
+          if (steps.length || finalText !== undefined || blockedIds.length || usage) {
             // Bump updatedAt only on the batch that begins the assistant message
             // (creates the pending one), not on every streamed batch: streaming
             // churn shouldn't keep reordering the sidebar.
@@ -602,6 +604,9 @@ async function reduceRun(
             // Carry the running reply text onto the message as it lands so it
             // survives a restart (the cursor won't replay it).
             if (finalText !== undefined) msg.text = finalText
+            // The terminal result event reports the turn's token totals; record
+            // them so the UI can show the latest turn's counts.
+            if (usage) msg.usage = usage
             if (begun) t.updatedAt = msg.createdAt
           }
           t.runCursor = cursor

@@ -42,11 +42,24 @@ type Step = {
 // Whether a tool call was permitted, refused, or has no result yet.
 type ToolStatus = 'allowed' | 'blocked' | 'pending'
 
+// Token counts a turn consumed, from its terminal result event. `input` and
+// `cacheCreation` are fresh input processed this turn (uncached); `cacheRead` is
+// the discounted re-read of cached context. `model` is the turn's dominant
+// model. Shown in the composer's corner — latest turn, or summed across the task.
+type TokenUsage = {
+  input: number
+  output: number
+  cacheRead: number
+  cacheCreation: number
+  model?: string
+}
+
 type Message = {
   role: 'user' | 'assistant'
   text: string
   createdAt: string
   steps?: Step[]
+  usage?: TokenUsage
   pending?: boolean
 }
 
@@ -176,6 +189,44 @@ function latestUpdateAt(task: Task): string {
     if (e.createdAt > latest) latest = e.createdAt
   }
   return latest
+}
+
+// Abbreviate a token count for the compact corner readout: exact below 1,000,
+// then whole "k" up to a million ("35k"), then whole "M" beyond ("4M").
+function formatTokens(n: number): string {
+  if (n < 1000) return String(n)
+  if (n < 1_000_000) return `${Math.round(n / 1000)}k`
+  return `${Math.round(n / 1_000_000)}M`
+}
+
+// The token usage of the task's most recent turn that reported any — the last
+// assistant message carrying a `usage` (a still-streaming turn hasn't seen its
+// result event yet, so its counts are the previous turn's until it lands).
+function latestUsage(task: Task): TokenUsage | undefined {
+  for (let i = task.messages.length - 1; i >= 0; i--) {
+    const u = task.messages[i].usage
+    if (u) return u
+  }
+  return undefined
+}
+
+// Token usage summed across every turn of the task. The token counts add up;
+// the model is taken from the latest turn (the task's current model), matching
+// what the per-turn view shows. Undefined when no turn has reported usage.
+function totalUsage(task: Task): TokenUsage | undefined {
+  const total = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 }
+  let any = false
+  for (const m of task.messages) {
+    const u = m.usage
+    if (!u) continue
+    any = true
+    total.input += u.input
+    total.output += u.output
+    total.cacheRead += u.cacheRead
+    total.cacheCreation += u.cacheCreation
+  }
+  if (!any) return undefined
+  return { ...total, model: latestUsage(task)?.model }
 }
 
 // The selected task's project is the first path segment, e.g.
@@ -1008,6 +1059,12 @@ export function App() {
   const [newProject, setNewProject] = usePersistentState(
     'lander:draft:newProject',
     '',
+  )
+  // Whether the corner usage readout sums across the whole task or shows just
+  // the latest turn. Clicking it toggles; persisted so the choice sticks.
+  const [usageTotal, setUsageTotal] = usePersistentState(
+    'lander:usageTotal',
+    false,
   )
   const [submitting, setSubmitting] = useState(false)
 
@@ -2370,6 +2427,42 @@ export function App() {
                   />
                   allow commits
                 </label>
+                {(() => {
+                  const u = usageTotal
+                    ? totalUsage(current)
+                    : latestUsage(current)
+                  if (!u) return null
+                  // Uncached = fresh input processed this turn (regular input +
+                  // the part written to cache); cache read is the discounted
+                  // re-read of cached context — reported separately.
+                  const uncached = u.input + u.cacheCreation
+                  const scope = usageTotal ? 'total' : 'turn'
+                  return (
+                    <div className="token-usage">
+                      {u.model && (
+                        <span className="token-model">{u.model}</span>
+                      )}
+                      <button
+                        type="button"
+                        className="token-stats"
+                        onClick={() => setUsageTotal((v) => !v)}
+                        title={
+                          `${scope} — click to show ` +
+                          `${usageTotal ? 'turn' : 'total'}\n` +
+                          `uncached input ${u.input.toLocaleString()} ` +
+                          `(+ ${u.cacheCreation.toLocaleString()} written to cache)\n` +
+                          `cache read ${u.cacheRead.toLocaleString()}\n` +
+                          `output ${u.output.toLocaleString()}`
+                        }
+                      >
+                        <span className="token-scope">{scope}</span>
+                        <span>in {formatTokens(uncached)}</span>
+                        <span>cache {formatTokens(u.cacheRead)}</span>
+                        <span>out {formatTokens(u.output)}</span>
+                      </button>
+                    </div>
+                  )
+                })()}
               </div>
             </div>
           </>

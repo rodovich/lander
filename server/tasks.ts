@@ -4,7 +4,7 @@
 // accessors. Typed structurally so they can be unit-tested without the full
 // server Task type (index.ts passes its Task, which satisfies these shapes).
 
-import type { Step } from './stream'
+import type { Step, Usage } from './stream'
 
 export type Message = {
   role: 'user' | 'assistant'
@@ -12,6 +12,9 @@ export type Message = {
   createdAt: string
   // Present on assistant turns that were streamed: the live activity trace.
   steps?: Step[]
+  // Present on assistant turns once the run's terminal result event lands: the
+  // token counts the turn consumed. The UI shows the latest in the corner.
+  usage?: Usage
   // True while claude is still producing this message; cleared when it lands.
   pending?: boolean
 }

@@ -442,4 +442,50 @@ describe('reduceStreamLine', () => {
     expect(r.finalText).toBeUndefined()
     expect(r.steps).toEqual([])
   })
+
+  it('pulls token usage and the dominant model from a result event', () => {
+    const r = reduceStreamLine(
+      JSON.stringify({
+        type: 'result',
+        result: 'done',
+        usage: {
+          input_tokens: 913,
+          output_tokens: 15376,
+          cache_read_input_tokens: 181274,
+          cache_creation_input_tokens: 21296,
+        },
+        modelUsage: {
+          'claude-haiku-4-5': { outputTokens: 40 },
+          'claude-opus-4-8': { outputTokens: 15336 },
+        },
+      }),
+      AT,
+    )
+    expect(r.usage).toEqual({
+      input: 913,
+      output: 15376,
+      cacheRead: 181274,
+      cacheCreation: 21296,
+      model: 'claude-opus-4-8',
+    })
+  })
+
+  it('defaults missing usage fields to zero and leaves model undefined', () => {
+    const r = reduceStreamLine(
+      JSON.stringify({ type: 'result', result: 'done', usage: { output_tokens: 5 } }),
+      AT,
+    )
+    expect(r.usage).toEqual({
+      input: 0,
+      output: 5,
+      cacheRead: 0,
+      cacheCreation: 0,
+      model: undefined,
+    })
+  })
+
+  it('leaves usage undefined when a result event carries none', () => {
+    const r = reduceStreamLine(JSON.stringify({ type: 'result', result: 'done' }), AT)
+    expect(r.usage).toBeUndefined()
+  })
 })

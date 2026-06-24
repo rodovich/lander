@@ -42,6 +42,22 @@ export type Step = {
   createdAt: string
 }
 
+// The token usage a turn consumed, taken from the run's terminal `result` event
+// (which reports the cumulative totals across every inference in the turn, not
+// just the last one). `input` is the fresh, uncached input and `cacheCreation`
+// the fresh input that was also written to cache — both processed at full price
+// this turn; `cacheRead` is the discounted re-read of cached context. The full
+// prompt size across the turn's inferences is the three summed. `model` is the
+// turn's dominant model (most output tokens). The UI shows the most recent
+// turn's counts in the corner, and can sum them across the task.
+export type Usage = {
+  input: number
+  output: number
+  cacheRead: number
+  cacheCreation: number
+  model?: string
+}
+
 // Reduce a tool call's input to a one-line summary for the activity chip. Picks
 // the most identifying string field, collapses whitespace, and caps the length.
 export function summarizeToolInput(input: unknown): string {
@@ -139,6 +155,27 @@ export function summarizeToolResult(content: unknown): string {
   return charCapped ? text + '…' : text
 }
 
+// Pick the busiest model out of a result event's `modelUsage` map (keyed by
+// model id, each value carrying that model's `outputTokens`): the one that
+// generated the most output is the turn's headline model. Undefined when the
+// map is absent or empty.
+function dominantModel(modelUsage: unknown): string | undefined {
+  if (!modelUsage || typeof modelUsage !== 'object') return undefined
+  let best: string | undefined
+  let bestOut = -1
+  for (const [name, mu] of Object.entries(modelUsage as Record<string, unknown>)) {
+    const out =
+      mu && typeof mu === 'object' && typeof (mu as any).outputTokens === 'number'
+        ? ((mu as any).outputTokens as number)
+        : 0
+    if (out > bestOut) {
+      bestOut = out
+      best = name
+    }
+  }
+  return best
+}
+
 // Parse one line of claude's stream-json output into the activity steps it
 // contributes and any final reply text it carries. Pure — given a line, it
 // returns what to append — so the same reduction serves both a live child
@@ -146,7 +183,7 @@ export function summarizeToolResult(content: unknown): string {
 export function reduceStreamLine(
   line: string,
   at: string,
-): { steps: Step[]; finalText?: string; blockedIds?: string[] } {
+): { steps: Step[]; finalText?: string; blockedIds?: string[]; usage?: Usage } {
   let ev: any
   try {
     ev = JSON.parse(line)
@@ -156,6 +193,7 @@ export function reduceStreamLine(
   const steps: Step[] = []
   let finalText: string | undefined
   let blockedIds: string[] | undefined
+  let usage: Usage | undefined
   if (ev.type === 'assistant' && Array.isArray(ev.message?.content)) {
     const inferenceId =
       typeof ev.message.id === 'string' ? ev.message.id : undefined
@@ -194,6 +232,19 @@ export function reduceStreamLine(
       blockedIds = ev.permission_denials
         .map((d: any) => d?.tool_use_id)
         .filter((id: unknown): id is string => typeof id === 'string')
+    if (ev.usage && typeof ev.usage === 'object') {
+      const u = ev.usage as Record<string, unknown>
+      const n = (k: string) => (typeof u[k] === 'number' ? (u[k] as number) : 0)
+      usage = {
+        input: n('input_tokens'),
+        output: n('output_tokens'),
+        cacheRead: n('cache_read_input_tokens'),
+        cacheCreation: n('cache_creation_input_tokens'),
+        // The turn can touch more than one model (e.g. a haiku side-call); the
+        // dominant one — most output tokens — is the turn's headline model.
+        model: dominantModel(ev.modelUsage),
+      }
+    }
   }
-  return { steps, finalText, blockedIds }
+  return { steps, finalText, blockedIds, usage }
 }
