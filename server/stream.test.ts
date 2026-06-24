@@ -474,6 +474,27 @@ describe('reduceStreamLine', () => {
     expect(r.usageInferenceId).toBeUndefined()
   })
 
+  it('pulls the turn dollar cost from a result event total_cost_usd', () => {
+    const r = reduceStreamLine(
+      JSON.stringify({
+        type: 'result',
+        result: 'done',
+        usage: { output_tokens: 5 },
+        total_cost_usd: 0.4728,
+      }),
+      AT,
+    )
+    expect(r.usage?.costUsd).toBe(0.4728)
+  })
+
+  it('leaves costUsd undefined when a result event omits total_cost_usd', () => {
+    const r = reduceStreamLine(
+      JSON.stringify({ type: 'result', result: 'done', usage: { output_tokens: 5 } }),
+      AT,
+    )
+    expect(r.usage?.costUsd).toBeUndefined()
+  })
+
   it('pulls per-inference usage and id from an assistant event', () => {
     const r = reduceStreamLine(
       JSON.stringify({
@@ -557,6 +578,16 @@ describe('addUsage', () => {
 
   it('keeps the prior model when the new snapshot has none', () => {
     expect(addUsage(u(10, 2, 5, 1, 'opus'), u(3, 4, 6, 2)).model).toBe('opus')
+  })
+
+  it('leaves cost undefined while no snapshot carries one, then sums it', () => {
+    // Per-inference snapshots have no cost (only the result event does), so a
+    // turn mid-stream reports no cost rather than a misleading zero.
+    expect(addUsage(u(10, 2), u(3, 4)).costUsd).toBeUndefined()
+    expect(addUsage({ ...u(10, 2), costUsd: 0.1 }, { ...u(3, 4), costUsd: 0.4 }).costUsd).toBe(
+      0.5,
+    )
+    expect(addUsage(u(10, 2), { ...u(3, 4), costUsd: 0.4 }).costUsd).toBe(0.4)
   })
 
   it('defaults missing usage fields to zero and leaves model undefined', () => {

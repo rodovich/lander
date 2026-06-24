@@ -50,14 +50,18 @@ export type Step = {
 // cache — both processed at full price this turn; `cacheRead` is the discounted
 // re-read of cached context. The full prompt size across the turn's inferences is
 // the three summed. `model` is the session's driving (main-agent) model — see
-// reduceStreamLine's `drivingModel`. The UI shows the most recent turn's counts
-// in the corner, updating as they stream, and can sum them across the task.
+// reduceStreamLine's `drivingModel`. `costUsd` is the turn's dollar cost (the
+// result event's `total_cost_usd`, summing every model the turn touched); it
+// arrives only with that final event, so it's absent until the turn lands. The
+// UI shows the most recent turn's counts in the corner, updating as they stream,
+// and can sum them across the task.
 export type Usage = {
   input: number
   output: number
   cacheRead: number
   cacheCreation: number
   model?: string
+  costUsd?: number
 }
 
 // Reduce a tool call's input to a one-line summary for the activity chip. Picks
@@ -199,7 +203,9 @@ function parseUsage(u: Record<string, unknown>, model?: string): Usage {
 
 // Add one inference's usage onto the turn's running total. Token counts sum; the
 // model is the latest inference's (turns are effectively single-model, and the
-// result event finalizes the true dominant model at turn end regardless).
+// result event finalizes the true dominant model at turn end regardless). Cost
+// sums too, staying undefined until a snapshot carries one (only the result event
+// does), so a still-streaming turn reports no cost rather than a misleading zero.
 export function addUsage(acc: Usage | undefined, next: Usage): Usage {
   if (!acc) return next
   return {
@@ -208,6 +214,10 @@ export function addUsage(acc: Usage | undefined, next: Usage): Usage {
     cacheRead: acc.cacheRead + next.cacheRead,
     cacheCreation: acc.cacheCreation + next.cacheCreation,
     model: next.model ?? acc.model,
+    costUsd:
+      acc.costUsd === undefined && next.costUsd === undefined
+        ? undefined
+        : (acc.costUsd ?? 0) + (next.costUsd ?? 0),
   }
 }
 
@@ -305,6 +315,9 @@ export function reduceStreamLine(
       // end. The model here is only a fallback — the caller stamps the session's
       // driving model over it (dominantModel matters solely when no init was seen).
       usage = parseUsage(ev.usage as Record<string, unknown>, dominantModel(ev.modelUsage))
+      // The turn's dollar cost across every model it touched; only the result
+      // event reports it.
+      if (typeof ev.total_cost_usd === 'number') usage.costUsd = ev.total_cost_usd
       usageFinal = true
     }
   }

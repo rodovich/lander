@@ -46,14 +46,16 @@ type ToolStatus = 'allowed' | 'blocked' | 'pending'
 // Token counts a turn consumed, accumulated as it streams and finalized by its
 // result event. `input` and `cacheCreation` are fresh input processed this turn
 // (uncached); `cacheRead` is the discounted re-read of cached context. `model`
-// is the turn's dominant model. Shown in the composer's corner — latest turn, or
-// summed across the task — updating live as the turn runs.
+// is the session's driving (main-agent) model. `costUsd` is the turn's dollar
+// cost, present only once the turn lands. Shown in the composer's corner — latest
+// turn, or summed across the task — updating live as the turn runs.
 type TokenUsage = {
   input: number
   output: number
   cacheRead: number
   cacheCreation: number
   model?: string
+  costUsd?: number
 }
 
 type Message = {
@@ -201,6 +203,13 @@ function formatTokens(n: number): string {
   return `${Math.round(n / 1_000_000)}M`
 }
 
+// A dollar cost for the corner readout: two decimals up to $100 ("$0.07",
+// "$1.23"), then whole dollars beyond ("$1,204") where the cents are noise.
+function formatCost(n: number): string {
+  if (n < 100) return `$${n.toFixed(2)}`
+  return `$${Math.round(n).toLocaleString()}`
+}
+
 // The token usage of the task's most recent turn that reported any — the last
 // assistant message carrying a `usage`. A streaming turn reports its usage live
 // (summed across inferences so far), so this tracks the in-flight turn as it
@@ -213,11 +222,14 @@ function latestUsage(task: Task): TokenUsage | undefined {
   return undefined
 }
 
-// Token usage summed across every turn of the task. The token counts add up;
-// the model is taken from the latest turn (the task's current model), matching
-// what the per-turn view shows. Undefined when no turn has reported usage.
+// Token usage summed across every turn of the task. The token counts and dollar
+// cost add up; the model is taken from the latest turn (the task's current
+// model), matching what the per-turn view shows. Cost stays undefined until some
+// turn reports one (a turn still streaming hasn't). Undefined when no turn has
+// reported usage at all.
 function totalUsage(task: Task): TokenUsage | undefined {
   const total = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 }
+  let cost: number | undefined
   let any = false
   for (const m of task.messages) {
     const u = m.usage
@@ -227,9 +239,10 @@ function totalUsage(task: Task): TokenUsage | undefined {
     total.output += u.output
     total.cacheRead += u.cacheRead
     total.cacheCreation += u.cacheCreation
+    if (u.costUsd !== undefined) cost = (cost ?? 0) + u.costUsd
   }
   if (!any) return undefined
-  return { ...total, model: latestUsage(task)?.model }
+  return { ...total, model: latestUsage(task)?.model, costUsd: cost }
 }
 
 // The selected task's project is the first path segment, e.g.
@@ -2476,13 +2489,19 @@ export function App() {
                           `uncached input ${u.input.toLocaleString()} ` +
                           `(+ ${u.cacheCreation.toLocaleString()} written to cache)\n` +
                           `cache read ${u.cacheRead.toLocaleString()}\n` +
-                          `output ${u.output.toLocaleString()}`
+                          `output ${u.output.toLocaleString()}` +
+                          (u.costUsd !== undefined
+                            ? `\ncost $${u.costUsd.toFixed(4)}`
+                            : '')
                         }
                       >
                         <span className="token-scope">{scope}</span>
                         <span>in {formatTokens(uncached)}</span>
                         <span>cache {formatTokens(u.cacheRead)}</span>
                         <span>out {formatTokens(u.output)}</span>
+                        {u.costUsd !== undefined && (
+                          <span className="token-cost">{formatCost(u.costUsd)}</span>
+                        )}
                       </button>
                     </div>
                   )
