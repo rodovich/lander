@@ -541,6 +541,12 @@ async function reduceRun(
   // inference's repeated content-block events are summed only once.
   let liveUsage: Usage | undefined = (seed ? pendingMessage(seed) : undefined)?.usage
   let usageInf: string | undefined
+  // The session's driving (main-agent) model, from the run's `system`/`init`
+  // event — what we attribute every turn's usage to, regardless of which model
+  // logged the most output (a subagent on a cheaper model would otherwise skew
+  // it). Seeded from the persisted usage's model so a reattach past the init
+  // event keeps it.
+  let drivingModel: string | undefined = liveUsage?.model
   let sawLease = false
   const startedAt = Date.now()
   // When the log last grew, and when we last probed liveness: a run that keeps
@@ -589,6 +595,7 @@ async function reduceRun(
           const line = raw.trim()
           if (!line) continue
           const reduced = reduceStreamLine(line, new Date().toISOString())
+          if (reduced.drivingModel) drivingModel = reduced.drivingModel
           steps.push(...reduced.steps)
           if (reduced.finalText !== undefined) finalText = reduced.finalText
           if (reduced.blockedIds) blockedIds.push(...reduced.blockedIds)
@@ -630,8 +637,13 @@ async function reduceRun(
             if (finalText !== undefined) msg.text = finalText
             // Record the turn's running token usage as it streams (summed across
             // inferences, finalized by the result event) so the UI's corner
-            // readout updates live, not just at turn end.
-            if (usageChanged && liveUsage) msg.usage = liveUsage
+            // readout updates live, not just at turn end. Always attribute it to
+            // the session's driving model — not the per-inference or dominant
+            // model, which a tool-heavy subagent on a cheaper model would skew.
+            if (usageChanged && liveUsage)
+              msg.usage = drivingModel
+                ? { ...liveUsage, model: drivingModel }
+                : liveUsage
             if (begun) t.updatedAt = msg.createdAt
           }
           t.runCursor = cursor

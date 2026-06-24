@@ -504,6 +504,25 @@ describe('reduceStreamLine', () => {
     expect(r.usageFinal).toBeUndefined()
   })
 
+  it('reports the driving model from a system/init event', () => {
+    const r = reduceStreamLine(
+      JSON.stringify({ type: 'system', subtype: 'init', model: 'claude-opus-4-8' }),
+      AT,
+    )
+    expect(r.drivingModel).toBe('claude-opus-4-8')
+    expect(r.steps).toEqual([])
+  })
+
+  it('omits drivingModel for a non-init system event or a missing model', () => {
+    expect(
+      reduceStreamLine(JSON.stringify({ type: 'system', subtype: 'task_progress' }), AT)
+        .drivingModel,
+    ).toBeUndefined()
+    expect(
+      reduceStreamLine(JSON.stringify({ type: 'system', subtype: 'init' }), AT).drivingModel,
+    ).toBeUndefined()
+  })
+
   it('leaves usage undefined when an assistant event carries none', () => {
     const r = reduceStreamLine(
       JSON.stringify({

@@ -45,13 +45,13 @@ export type Step = {
 // The token usage a turn consumed. Accumulated live as the turn streams — each
 // `assistant` event carries its inference's usage, which the reducer sums across
 // the turn's inferences — then finalized by the run's terminal `result` event,
-// which reports the authoritative cumulative totals (and the turn's dominant
-// model). `input` is the fresh, uncached input and `cacheCreation` the fresh
-// input that was also written to cache — both processed at full price this turn;
-// `cacheRead` is the discounted re-read of cached context. The full prompt size
-// across the turn's inferences is the three summed. `model` is the turn's
-// dominant model (most output tokens). The UI shows the most recent turn's
-// counts in the corner, updating as they stream, and can sum them across the task.
+// which reports the authoritative cumulative totals. `input` is the fresh,
+// uncached input and `cacheCreation` the fresh input that was also written to
+// cache — both processed at full price this turn; `cacheRead` is the discounted
+// re-read of cached context. The full prompt size across the turn's inferences is
+// the three summed. `model` is the session's driving (main-agent) model — see
+// reduceStreamLine's `drivingModel`. The UI shows the most recent turn's counts
+// in the corner, updating as they stream, and can sum them across the task.
 export type Usage = {
   input: number
   output: number
@@ -159,8 +159,11 @@ export function summarizeToolResult(content: unknown): string {
 
 // Pick the busiest model out of a result event's `modelUsage` map (keyed by
 // model id, each value carrying that model's `outputTokens`): the one that
-// generated the most output is the turn's headline model. Undefined when the
-// map is absent or empty.
+// generated the most output. Only a fallback for the turn's headline model now —
+// the caller prefers the session's driving model from the init event, because a
+// tool-heavy subagent on a cheaper model can out-emit the main agent and would
+// otherwise hijack the attribution. Used when no init event was seen (e.g. a run
+// reattached past it). Undefined when the map is absent or empty.
 function dominantModel(modelUsage: unknown): string | undefined {
   if (!modelUsage || typeof modelUsage !== 'object') return undefined
   let best: string | undefined
@@ -228,6 +231,12 @@ export function reduceStreamLine(
   // True when `usage` is the result event's authoritative turn total, which
   // replaces the streamed running estimate rather than adding to it.
   usageFinal?: boolean
+  // The session's driving (main-agent) model, announced by the `system`/`init`
+  // event at the top of the run. The caller holds onto it and stamps it as every
+  // turn's usage model, so the headline model is always the one that ran the
+  // session — not whichever model logged the most output tokens, which a
+  // tool-heavy subagent on a cheaper model can skew (see dominantModel).
+  drivingModel?: string
 } {
   let ev: any
   try {
@@ -241,7 +250,11 @@ export function reduceStreamLine(
   let usage: Usage | undefined
   let usageInferenceId: string | undefined
   let usageFinal: boolean | undefined
-  if (ev.type === 'assistant' && Array.isArray(ev.message?.content)) {
+  let drivingModel: string | undefined
+  if (ev.type === 'system' && ev.subtype === 'init') {
+    // The init event names the session's configured (main-agent) model.
+    if (typeof ev.model === 'string') drivingModel = ev.model
+  } else if (ev.type === 'assistant' && Array.isArray(ev.message?.content)) {
     const inferenceId =
       typeof ev.message.id === 'string' ? ev.message.id : undefined
     for (const block of ev.message.content) {
@@ -288,12 +301,12 @@ export function reduceStreamLine(
         .map((d: any) => d?.tool_use_id)
         .filter((id: unknown): id is string => typeof id === 'string')
     if (ev.usage && typeof ev.usage === 'object') {
-      // The turn can touch more than one model (e.g. a haiku side-call); the
-      // dominant one — most output tokens — is the turn's headline model. This
-      // total is authoritative: it replaces the running estimate at turn end.
+      // This total is authoritative: it replaces the running estimate at turn
+      // end. The model here is only a fallback — the caller stamps the session's
+      // driving model over it (dominantModel matters solely when no init was seen).
       usage = parseUsage(ev.usage as Record<string, unknown>, dominantModel(ev.modelUsage))
       usageFinal = true
     }
   }
-  return { steps, finalText, blockedIds, usage, usageInferenceId, usageFinal }
+  return { steps, finalText, blockedIds, usage, usageInferenceId, usageFinal, drivingModel }
 }
