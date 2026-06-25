@@ -1884,6 +1884,41 @@ app.post('/api/:project/tasks/:id/seen', async (c) => {
   }
 })
 
+// Mark a task unread, re-showing its unseen-update dot in the UI. Resets
+// `seenAt` to "" — "caught up to nothing" — so the task's latest update reads as
+// unviewed again; the next /seen call advances the marker forward as the viewer
+// reads. Unlike /seen this deliberately moves the marker backwards, so it sets
+// unconditionally. Harmless view-state, so it isn't principal-gated.
+app.post('/api/:project/tasks/:id/unread', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  try {
+    const id = c.req.param('id')
+    if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+
+    // Look in both tasks/ and archived/, mirroring /seen: an archived row can
+    // carry an unseen dot too, and either should be markable unread.
+    const file = (await readTask(project.dataDir, id))
+      ? path.join(project.dataDir, `${id}.json`)
+      : path.join(project.archiveDir, `${id}.json`)
+
+    // Read-modify-write under mutateTask so a concurrent streaming update can't
+    // clobber, or be clobbered by, this marker.
+    let updated: Task | null = null
+    try {
+      await mutateTask(file, (t) => {
+        t.seenAt = ''
+        updated = t
+      })
+    } catch {
+      return c.json({ error: 'task not found' }, 404)
+    }
+    return c.json(publicTask(updated!))
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
+  }
+})
+
 // On boot, recover tasks the previous process left mid-flight so they aren't
 // stranded. Nothing in this fresh process is driving them yet (the in-memory
 // `running` set is empty), so a task can be left in one of these states:

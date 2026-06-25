@@ -340,6 +340,11 @@ body {
   color: #1a7f37;
 }
 
+/* Mark-unread isn't a status either — muted, alongside archive/restore. */
+.task-menu-item-markUnread {
+  color: var(--muted);
+}
+
 .task-menu-item-archive {
   color: var(--muted);
 }
@@ -368,9 +373,8 @@ body {
   color: var(--muted);
 }
 
-.project-menu-toggle {
+.project-menu-view-first {
   border-top: 1px solid var(--border);
-  color: var(--muted);
 }
 
 .new-task-head {

@@ -146,6 +146,10 @@ type Usage = { session: UsageWindow | null; weekly: UsageWindow | null }
 // The list's time window: tasks updated today, this week (from Sunday), or with
 // no bound. 'today'/'week' also surface in the dropdown title.
 type TimeFilter = 'today' | 'week' | 'any'
+// Which slice of tasks the list shows: 'inbox' (everything not archived, the
+// default), 'unread' (just the inbox tasks with unviewed updates), or
+// 'archived'. Mutually exclusive, chosen from the project filter dropdown.
+type TaskView = 'inbox' | 'unread' | 'archived'
 
 function usePersistentState<T>(
   key: string,
@@ -197,6 +201,14 @@ function latestUpdateAt(task: Task): string {
     if (e.createdAt > latest) latest = e.createdAt
   }
   return latest
+}
+
+// Whether a task has unviewed updates: it carries a seen marker (set on
+// creation or backfilled) and its latest completed update is newer than it.
+// Drives the unseen dot, the kebab's "Mark unread" item, and the "Unread"
+// filter view. A task with no marker yet reads as caught up.
+function isUnread(task: Task): boolean {
+  return task.seenAt != null && latestUpdateAt(task) > task.seenAt
 }
 
 // Abbreviate a token count for the compact corner readout: exact below 1,000,
@@ -884,7 +896,14 @@ function CopyIdButton({ id }: { id: string }) {
 
 // The status actions a task's kebab menu can fire, mirroring the buttons the
 // detail header used to carry, plus archive/restore.
-type TaskAction = 'launch' | 'wedge' | 'rest' | 'land' | 'archive' | 'restore'
+type TaskAction =
+  | 'launch'
+  | 'wedge'
+  | 'rest'
+  | 'land'
+  | 'markUnread'
+  | 'archive'
+  | 'restore'
 
 // The kebab (⋮) menu on a task list row. It carries the status actions that
 // used to live as buttons in the detail header, plus Archive/Restore — but only
@@ -913,8 +932,9 @@ function TaskActionsMenu({
   //  - launch:  a scheduled (resting + scheduledFor) task, to run it early
   //  - wedge:   any task not already wedged
   //  - rest:    a wedged or landed task, to return it to rest
-  //  - land:    any task not already landed
-  //  - archive: any non-riding task (a riding one has a live run)
+  //  - land:       any task not already landed
+  //  - markUnread: any task that isn't already showing unviewed updates
+  //  - archive:    any non-riding task (a riding one has a live run)
   const items: { action: TaskAction; label: string }[] = []
   if (task.archived) {
     items.push({ action: 'restore', label: 'Restore' })
@@ -925,6 +945,8 @@ function TaskActionsMenu({
     if (task.status === 'wedged' || task.status === 'landed')
       items.push({ action: 'rest', label: 'Rest' })
     if (task.status !== 'landed') items.push({ action: 'land', label: 'Land' })
+    if (!isUnread(task))
+      items.push({ action: 'markUnread', label: 'Mark unread' })
     if (task.status !== 'riding')
       items.push({ action: 'archive', label: 'Archive' })
   }
@@ -1035,10 +1057,14 @@ function TaskActionsMenu({
         >
           {items.map((it, i) => (
             <Fragment key={it.action}>
-              {/* Set the archive action apart from the status actions. */}
-              {it.action === 'archive' && (
-                <div className="task-menu-sep" role="separator" />
-              )}
+              {/* Set the footer actions (Mark unread, Archive) apart from the
+                  status actions above with a single separator before the first
+                  of them. */}
+              {i > 0 &&
+                (it.action === 'markUnread' || it.action === 'archive') &&
+                items[i - 1].action !== 'markUnread' && (
+                  <div className="task-menu-sep" role="separator" />
+                )}
               <button
                 ref={(el) => {
                   itemRefs.current[i] = el
@@ -1072,12 +1098,10 @@ export function App() {
   const [shown, setShown] = useState<string[]>([])
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
-  // Whether the list shows archived tasks instead of active ones (toggled from
-  // the project dropdown). Persisted so the choice survives a reload.
-  const [showArchived, setShowArchived] = usePersistentState(
-    'lander:showArchived',
-    false,
-  )
+  // Which slice of tasks the list shows — 'inbox' (active tasks, default),
+  // 'unread' (active tasks with unviewed updates), or 'archived' — chosen from
+  // the project dropdown. Persisted so the choice survives a reload.
+  const [view, setView] = usePersistentState<TaskView>('lander:view', 'inbox')
   // Restrict the list to tasks updated today or this week (user's local time);
   // 'any' imposes no time bound. Toggled from the project dropdown, persisted.
   const [timeFilter, setTimeFilter] = usePersistentState<TimeFilter>(
@@ -1202,6 +1226,26 @@ export function App() {
     }
   }
 
+  // Mark a task unread: reset its server-side `seenAt` so the task's latest
+  // update reads as unviewed again, re-showing its dot. Optimistically clears
+  // the local marker so the dot appears at once; the 2s poll reconciles. The
+  // next time the viewer reads the task, markSeen advances the marker forward
+  // again.
+  async function markUnread(session: string) {
+    const task = tasksRef.current.find((t) => t.session === session)
+    if (!task) return
+    setTasks((prev) =>
+      prev.map((t) => (t.session === session ? { ...t, seenAt: '' } : t)),
+    )
+    try {
+      await fetch(`/api/${task.projectSlug}/tasks/${session}/unread`, {
+        method: 'POST',
+      })
+    } catch {
+      // best-effort; the next poll restores the true marker
+    }
+  }
+
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const [retitling, setRetitling] = useState(false)
@@ -1235,6 +1279,7 @@ export function App() {
       const ts = Date.parse(t.updatedAt ?? t.createdAt)
       if (!Number.isNaN(ts) && ts < timeCutoff) return false
     }
+    if (view === 'unread' && !isUnread(t)) return false
     return query ? t.title.toLowerCase().includes(query) : true
   })
 
@@ -1460,7 +1505,7 @@ export function App() {
   // project slug and sorting the combined list by recency.
   async function loadShownTasks(
     slugs: string[],
-    includeArchived: boolean = showArchived,
+    includeArchived: boolean = view === 'archived',
   ): Promise<TaskWithProject[]> {
     const lists = await Promise.all(
       slugs.map(async (slug) => {
@@ -1551,7 +1596,7 @@ export function App() {
     if (shown.length === 0) return
     let cancelled = false
     const refresh = () =>
-      loadShownTasks(shown, showArchived)
+      loadShownTasks(shown, view === 'archived')
         .then((t) => {
           if (!cancelled) {
             setTasks(t)
@@ -1569,7 +1614,7 @@ export function App() {
       clearInterval(timer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shownKey, showArchived])
+  }, [shownKey, view])
 
   // The project a new task is created in: an explicit pick from the form's
   // dropdown if made, else the single shown project, else the project of the
@@ -1993,8 +2038,9 @@ export function App() {
 
   // Dropdown summary: "All projects" when every project is shown, otherwise the
   // single shown project's path. The active time filter ("Today"/"This week",
-  // not "Any time") and the archived view each append a "• …" suffix, in that
-  // order (e.g. "All projects • Today • Archived").
+  // not "Any time") and the non-default views ("Unread"/"Archived", not the
+  // "Inbox" default) each append a "• …" suffix, in that order (e.g. "All
+  // projects • Today • Unread").
   const filterBase =
     projects.length === 0
       ? ''
@@ -2005,10 +2051,12 @@ export function App() {
           : `${shown.length} of ${projects.length}`
   const timeLabel =
     timeFilter === 'today' ? 'Today' : timeFilter === 'week' ? 'This week' : ''
+  const viewLabel =
+    view === 'unread' ? 'Unread' : view === 'archived' ? 'Archived' : ''
   const filterSummary = filterBase
     ? filterBase +
       (timeLabel ? ` • ${timeLabel}` : '') +
-      (showArchived ? ' • Archived' : '')
+      (viewLabel ? ` • ${viewLabel}` : '')
     : filterBase
 
   return (
@@ -2077,21 +2125,33 @@ export function App() {
                     <span className="project-menu-path">{label}</span>
                   </button>
                 ))}
-                <button
-                  type="button"
-                  className="project-menu-item project-menu-toggle"
-                  role="menuitemcheckbox"
-                  aria-checked={showArchived}
-                  onClick={() => {
-                    setShowArchived((v) => !v)
-                    setMenuOpen(false)
-                  }}
-                >
-                  <span className="project-menu-check">
-                    {showArchived ? '✓' : ''}
-                  </span>
-                  <span className="project-menu-path">Show archived</span>
-                </button>
+                {(
+                  [
+                    ['inbox', 'Inbox'],
+                    ['unread', 'Unread'],
+                    ['archived', 'Archived'],
+                  ] as const
+                ).map(([value, label], i) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={
+                      'project-menu-item project-menu-view' +
+                      (i === 0 ? ' project-menu-view-first' : '')
+                    }
+                    role="menuitemradio"
+                    aria-checked={view === value}
+                    onClick={() => {
+                      setView(value)
+                      setMenuOpen(false)
+                    }}
+                  >
+                    <span className="project-menu-check">
+                      {view === value ? '✓' : ''}
+                    </span>
+                    <span className="project-menu-path">{label}</span>
+                  </button>
+                ))}
               </div>
             )}
           </div>
@@ -2123,8 +2183,7 @@ export function App() {
           {orderedTasks.map((task, index) => {
             // The dot shows once the task has a seen marker (set on creation or
             // backfilled) and its latest completed update is newer than it.
-            const unseen =
-              task.seenAt != null && latestUpdateAt(task) > task.seenAt
+            const unseen = isUnread(task)
             return (
             <li
               key={task.session}
@@ -2166,6 +2225,7 @@ export function App() {
                     else if (action === 'wedge') void setStatus(task, 'wedged')
                     else if (action === 'rest') void setStatus(task, 'resting')
                     else if (action === 'land') void setStatus(task, 'landed')
+                    else if (action === 'markUnread') void markUnread(task.session)
                     else if (action === 'archive') void archiveTask(task, true)
                     else if (action === 'restore') void archiveTask(task, false)
                   }}
