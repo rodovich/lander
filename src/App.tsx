@@ -143,9 +143,10 @@ type Usage = { session: UsageWindow | null; weekly: UsageWindow | null }
 // every store access tolerates an unavailable or corrupt store (private mode,
 // quota) by falling back to `initial`. Drives only deliberately-kept *draft*
 // state — ephemeral UI (open menus, popups, focus) is left to reset.
-// The list's time window: tasks updated today, this week (from Sunday), or with
-// no bound. 'today'/'week' also surface in the dropdown title.
-type TimeFilter = 'today' | 'week' | 'any'
+// The list's time window: tasks updated today, this week (from Sunday), before
+// this week ('older', same Sunday cutoff), or with no bound. 'today'/'week'/
+// 'older' also surface in the dropdown title.
+type TimeFilter = 'today' | 'week' | 'older' | 'any'
 // Which slice of tasks the list shows: 'inbox' (everything not archived, the
 // default), 'unread' (just the inbox tasks with unviewed updates), or
 // 'archived'. Mutually exclusive, chosen from the project filter dropdown.
@@ -1257,19 +1258,17 @@ export function App() {
   // tasks can be intermixed; with a single project shown it's just noise.
   const showProjectLabels = shown.length > 1
 
-  // Earliest update time (ms) a task may have to stay in the list, per the
-  // time filter: start of today or start of this week (Sunday) in local time;
-  // null for 'any'. Recomputed each render so it tracks the wall clock.
+  // The update-time bound the time filter imposes, in ms (local time), or null
+  // for 'any'. 'today'/'week' keep tasks at or after the start of today / this
+  // week (Sunday); 'older' keeps tasks strictly before the start of this week.
+  // Recomputed each render so it tracks the wall clock.
   const timeCutoff = (() => {
     if (timeFilter === 'any') return null
     const now = new Date()
-    const startOfToday = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-    )
-    if (timeFilter === 'week') startOfToday.setDate(now.getDate() - now.getDay())
-    return startOfToday.getTime()
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    if (timeFilter === 'week' || timeFilter === 'older')
+      start.setDate(now.getDate() - now.getDay())
+    return { ms: start.getTime(), before: timeFilter === 'older' }
   })()
 
   // Filter by time window, then by title (case-insensitive), before grouping.
@@ -1277,7 +1276,10 @@ export function App() {
   const matchedTasks = tasks.filter((t) => {
     if (timeCutoff != null) {
       const ts = Date.parse(t.updatedAt ?? t.createdAt)
-      if (!Number.isNaN(ts) && ts < timeCutoff) return false
+      if (!Number.isNaN(ts)) {
+        if (timeCutoff.before ? ts >= timeCutoff.ms : ts < timeCutoff.ms)
+          return false
+      }
     }
     if (view === 'unread' && !isUnread(t)) return false
     return query ? t.title.toLowerCase().includes(query) : true
@@ -2050,7 +2052,13 @@ export function App() {
           ? pathBySlug.get(shown[0]) ?? shown[0]
           : `${shown.length} of ${projects.length}`
   const timeLabel =
-    timeFilter === 'today' ? 'Today' : timeFilter === 'week' ? 'This week' : ''
+    timeFilter === 'today'
+      ? 'Today'
+      : timeFilter === 'week'
+        ? 'This week'
+        : timeFilter === 'older'
+          ? 'Older'
+          : ''
   const viewLabel =
     view === 'unread' ? 'Unread' : view === 'archived' ? 'Archived' : ''
   const filterSummary = filterBase
@@ -2105,6 +2113,7 @@ export function App() {
                   [
                     ['today', 'Today'],
                     ['week', 'This week'],
+                    ['older', 'Older'],
                     ['any', 'Any time'],
                   ] as const
                 ).map(([value, label]) => (
