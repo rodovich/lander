@@ -126,8 +126,10 @@ type Task = {
   // wedge): drives the retry button below the conversation. `committed` is
   // whether the failed turn's prompt reached the session — true means a retry
   // nudges the session ("Try again"), false means it re-sends the un-received
-  // prompt ("Resend"). See the server's Task.retry for the full rationale.
-  retry?: { committed: boolean; prompts: string[] }
+  // prompt ("Resend"). `resetsAt` is set when the wedge was a session-limit
+  // rejection: while it's still in the future the button instead schedules the
+  // retry for then. See the server's Task.retry for the full rationale.
+  retry?: { committed: boolean; prompts: string[]; resetsAt?: string }
 }
 
 // A task tagged with the slug of the project it came from, so the merged
@@ -285,6 +287,16 @@ function formatResetTime(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
   return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+}
+
+// A wedged task's session-limit reset time, formatted as a clock time, but only
+// while it's still in the future — the moment a retry should wait for rather than
+// firing into the same limit. Undefined once the limit has lifted (so the retry
+// button reverts to retrying immediately) or when the wedge wasn't rate-limited.
+function retryResetTime(retry?: { resetsAt?: string }): string | undefined {
+  const at = retry?.resetsAt
+  if (!at || Date.parse(at) <= Date.now()) return undefined
+  return formatResetTime(at)
 }
 
 // How a reset moment reads: the clock time if it lands today, otherwise the
@@ -2657,12 +2669,18 @@ export function App() {
                     disabled={retryingBy[current.session] ?? false}
                     onClick={() => void retryTask()}
                     title={
-                      current.retry.committed
-                        ? 'Nudge the session to pick the turn back up (re-sending would duplicate it)'
-                        : 'Re-send your message — it never reached the session'
+                      retryResetTime(current.retry)
+                        ? `You've hit the session limit — schedule the retry for when it resets (${retryResetTime(current.retry)})`
+                        : current.retry.committed
+                          ? 'Nudge the session to pick the turn back up (re-sending would duplicate it)'
+                          : 'Re-send your message — it never reached the session'
                     }
                   >
-                    {current.retry.committed ? 'Try again' : 'Resend'}
+                    {retryResetTime(current.retry)
+                      ? `Retry at ${retryResetTime(current.retry)}`
+                      : current.retry.committed
+                        ? 'Try again'
+                        : 'Resend'}
                   </button>
                 </div>
               )}

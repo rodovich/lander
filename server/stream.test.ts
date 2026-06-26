@@ -555,6 +555,45 @@ describe('reduceStreamLine', () => {
     expect(r.usage).toBeUndefined()
     expect(r.usageInferenceId).toBeUndefined()
   })
+
+  it('reports a rejecting rate_limit_event reset time as ISO', () => {
+    const r = reduceStreamLine(
+      JSON.stringify({
+        type: 'rate_limit_event',
+        rate_limit_info: {
+          status: 'rejected',
+          resetsAt: 1782336600,
+          rateLimitType: 'five_hour',
+        },
+      }),
+      AT,
+    )
+    // resetsAt is epoch *seconds*; 1782336600 → 2026-06-24T21:30:00Z.
+    expect(r.rateLimitResetsAt).toBe('2026-06-24T21:30:00.000Z')
+    expect(r.steps).toEqual([])
+  })
+
+  it('omits the reset time for a non-rejecting rate_limit_event', () => {
+    const r = reduceStreamLine(
+      JSON.stringify({
+        type: 'rate_limit_event',
+        rate_limit_info: { status: 'allowed', resetsAt: 1782336600 },
+      }),
+      AT,
+    )
+    expect(r.rateLimitResetsAt).toBeUndefined()
+  })
+
+  it('omits the reset time when a rejection carries no resetsAt', () => {
+    const r = reduceStreamLine(
+      JSON.stringify({
+        type: 'rate_limit_event',
+        rate_limit_info: { status: 'rejected' },
+      }),
+      AT,
+    )
+    expect(r.rateLimitResetsAt).toBeUndefined()
+  })
 })
 
 describe('addUsage', () => {

@@ -137,10 +137,13 @@ type Task = {
   // begun streaming a reply (so claude had accepted and recorded the user turn
   // in its transcript), false if it errored before any output. A retry nudges
   // the session to continue when committed (re-sending would duplicate the user
-  // turn) and re-sends the un-received `prompts` when not. Absent on a task
-  // wedged any other way (e.g. the agent's own `lander wedge`), so no button
-  // shows there.
-  retry?: { committed: boolean; prompts: string[] }
+  // turn) and re-sends the un-received `prompts` when not. `resetsAt` is set only
+  // when the wedge was a session-limit rejection (from the run's
+  // `rate_limit_event`): the ISO time the limit lifts, at which point a retry
+  // schedules a wakeup for then instead of firing immediately into the same wall.
+  // Absent on a task wedged any other way (e.g. the agent's own `lander wedge`),
+  // so no button shows there.
+  retry?: { committed: boolean; prompts: string[]; resetsAt?: string }
 }
 
 // Bind the generic task store (server/store.ts) to the concrete Task type, so
@@ -562,6 +565,13 @@ async function reduceRun(
   // it). Seeded from the persisted usage's model so a reattach past the init
   // event keeps it.
   let drivingModel: string | undefined = liveUsage?.model
+  // The reset time from a rejecting `rate_limit_event`, captured if this run hits
+  // the session limit. Carried onto the wedge's `retry` below, so a retry can wait
+  // for the limit to lift instead of firing into the same wall. In-memory for the
+  // run: the event lands microseconds before the failing turn's done marker, so a
+  // live reducer always sees both in one pass (a restart in that sub-second window
+  // would lose it — the retry then just falls back to an immediate one).
+  let rateLimitResetsAt: string | undefined
   let sawLease = false
   const startedAt = Date.now()
   // When the log last grew, and when we last probed liveness: a run that keeps
@@ -611,6 +621,7 @@ async function reduceRun(
           if (!line) continue
           const reduced = reduceStreamLine(line, new Date().toISOString())
           if (reduced.drivingModel) drivingModel = reduced.drivingModel
+          if (reduced.rateLimitResetsAt) rateLimitResetsAt = reduced.rateLimitResetsAt
           steps.push(...reduced.steps)
           if (reduced.finalText !== undefined) finalText = reduced.finalText
           if (reduced.blockedIds) blockedIds.push(...reduced.blockedIds)
@@ -699,8 +710,14 @@ async function reduceRun(
           t.status = 'wedged'
           // Stash what a retry needs: whether the failed turn was committed, and
           // its prompt(s) for the re-send path. The error reply is now the
-          // trailing message, so the prompt(s) sit just before it.
-          t.retry = { committed: hadOutput, prompts: lastTurnPrompts(t.messages) }
+          // trailing message, so the prompt(s) sit just before it. A session-limit
+          // rejection also carries its reset time, so the retry can be scheduled
+          // for then rather than fired into the same wall.
+          t.retry = {
+            committed: hadOutput,
+            prompts: lastTurnPrompts(t.messages),
+            ...(rateLimitResetsAt ? { resetsAt: rateLimitResetsAt } : {}),
+          }
         }
         t.updatedAt = at
         delete t.runId
@@ -1840,6 +1857,13 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
 // prompt(s) never landed — re-send them. They're already in messages[] from the
 // original send, so the re-send only re-queues (no duplicate visible message);
 // the nudge does append a "try again" user message so the conversation reads.
+//
+// When the wedge was a session-limit rejection whose reset time is still in the
+// future (`retry.resetsAt`), retrying now would just hit the same wall — so
+// instead of driving immediately we queue the recovery turn and rest the task
+// with `scheduledFor` at the reset time. The scheduler then relaunches it via
+// launchTask, draining the queued prompt(s), exactly as a `lander rest --date`
+// wakeup does.
 app.post('/api/:project/tasks/:id/retry', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
@@ -1863,12 +1887,17 @@ app.post('/api/:project/tasks/:id/retry', async (c) => {
     if (!task.retry) return c.json({ error: 'nothing to retry' }, 400)
 
     const now = new Date().toISOString()
+    // A session-limit wedge whose limit hasn't lifted yet schedules the retry for
+    // its reset time rather than driving now; a past (or absent) reset retries
+    // immediately, as before.
+    const resetsAt = task.retry.resetsAt
+    const defer = !!resetsAt && Date.parse(resetsAt) > Date.now()
+    // Record the un-wedge a hair before the action's own timestamp so the timeline
+    // shows it ahead of what follows, exactly as a follow-up message does.
+    const before = new Date(Date.parse(now) - 1).toISOString()
     await mutateTask(file, (t) => {
       if (!t.retry) return
-      // Revive the wedged task — record the un-wedge a hair before the action's
-      // own timestamp so the timeline shows it ahead of what follows, exactly as
-      // a follow-up message does.
-      recordStatusTransition(t, 'riding', new Date(Date.parse(now) - 1).toISOString())
+      // Queue the recovery turn either way — the only difference is when it runs.
       const resend = t.retry.prompts.filter((p) => p.trim())
       if (t.retry.committed || !resend.length) {
         // Committed (or nothing concrete to re-send): nudge the session forward.
@@ -1880,13 +1909,33 @@ app.post('/api/:project/tasks/:id/retry', async (c) => {
         // from the original send, so only re-queue them for the session.
         t.queued = [...(t.queued ?? []), ...resend]
       }
+      if (defer && resetsAt) {
+        // Rest until the limit lifts. recoverQueues skips scheduledFor tasks, so
+        // the queued prompt(s) sit untouched until launchScheduled fires
+        // launchTask at resetsAt and drives them. Record a 'scheduled' event so
+        // the wait shows in the timeline, exactly as `lander rest --date` does.
+        recordStatusTransition(t, 'resting', before)
+        t.scheduledFor = resetsAt
+        ;(t.events ??= []).push({
+          kind: 'scheduled',
+          title: t.title,
+          scheduledFor: resetsAt,
+          createdAt: now,
+        })
+        t.status = 'resting'
+      } else {
+        // Revive and drive now.
+        recordStatusTransition(t, 'riding', before)
+        t.status = 'riding'
+      }
       t.updatedAt = now
-      t.status = 'riding'
       delete t.retry
     })
 
-    // Resume the session now if no run is already in flight (mirrors /messages).
-    if (!running.has(id)) void driveTask(project, id, 'resume')
+    // Drive now only for an immediate retry; a deferred one waits for the
+    // scheduler. Resume the session if no run is already in flight (mirrors
+    // /messages).
+    if (!defer && !running.has(id)) void driveTask(project, id, 'resume')
 
     const updated = await readTask(project.dataDir, id)
     return c.json(publicTask(updated ?? task))

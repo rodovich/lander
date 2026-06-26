@@ -250,6 +250,13 @@ export function reduceStreamLine(
   // session — not whichever model logged the most output tokens, which a
   // tool-heavy subagent on a cheaper model can skew (see dominantModel).
   drivingModel?: string
+  // When a `rate_limit_event` reports the session limit was *rejected* (the turn
+  // was refused outright, not just warned), the ISO time the limit resets —
+  // claude sends it as `rate_limit_info.resetsAt`, a Unix epoch in seconds. The
+  // run reducer carries it onto a rate-limit wedge's `retry`, so the UI can offer
+  // to retry when the limit lifts rather than firing into the same wall. Absent on
+  // any other line, and on non-rejecting rate events (warnings still allow the turn).
+  rateLimitResetsAt?: string
 } {
   let ev: any
   try {
@@ -264,6 +271,7 @@ export function reduceStreamLine(
   let usageInferenceId: string | undefined
   let usageFinal: boolean | undefined
   let drivingModel: string | undefined
+  let rateLimitResetsAt: string | undefined
   if (ev.type === 'system' && ev.subtype === 'init') {
     // The init event names the session's configured (main-agent) model.
     if (typeof ev.model === 'string') drivingModel = ev.model
@@ -323,6 +331,25 @@ export function reduceStreamLine(
       if (typeof ev.total_cost_usd === 'number') usage.costUsd = ev.total_cost_usd
       usageFinal = true
     }
+  } else if (ev.type === 'rate_limit_event') {
+    // Only a *rejection* actually stopped the turn — a warning (status
+    // 'allowed'/…) lets it through and shouldn't arm a scheduled retry. resetsAt
+    // is a Unix epoch in seconds; convert to ISO for the rest of the system.
+    const info = ev.rate_limit_info
+    if (info && typeof info === 'object' && info.status === 'rejected') {
+      const secs = info.resetsAt
+      if (typeof secs === 'number' && Number.isFinite(secs))
+        rateLimitResetsAt = new Date(secs * 1000).toISOString()
+    }
   }
-  return { steps, finalText, blockedIds, usage, usageInferenceId, usageFinal, drivingModel }
+  return {
+    steps,
+    finalText,
+    blockedIds,
+    usage,
+    usageInferenceId,
+    usageFinal,
+    drivingModel,
+    rateLimitResetsAt,
+  }
 }
