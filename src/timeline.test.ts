@@ -145,6 +145,58 @@ describe('buildTimeline queued follow-ups', () => {
   })
 })
 
+describe('buildTimeline event vs. a turn-opening prompt', () => {
+  it('places an event after the prompt that opened the turn, not above it', () => {
+    // The reported bug: a user prompt (9:58:41), the task is wedged before its
+    // reply streams (9:58:53), and the interrupted reply is stamped last
+    // (9:58:54). The wedge must read *after* the prompt, even though the turn is
+    // anchored to the later reply timestamp.
+    const messages = [
+      u('p1', T('09:27:10')),
+      a('r1', T('09:27:22')),
+      u('p2', T('09:58:41')),
+      a('r2', T('09:58:54')), // interrupted reply, lazily stamped after the wedge
+    ]
+    const events = [
+      ev('launched', T('09:27:10')),
+      ev('wedged', T('09:58:53')),
+      ev('unwedged', T('09:59:26')),
+    ]
+    const { items } = build({ messages, events })
+    expect(seq(items)).toEqual([
+      'event:launched',
+      'user:p1',
+      'asst:r1',
+      'user:p2',
+      'event:wedged',
+      'asst:r2',
+      'event:unwedged',
+    ])
+  })
+
+  it('keeps an event ahead of a prompt that was queued during an earlier turn', () => {
+    // p2 was queued during turn 1 (enqueue time 10:00:02, before turn 1's reply
+    // at 10:00:30) and answered in turn 2. An event at 10:00:20 fired mid-turn-1,
+    // so it belongs above p2 — the running floor prevents p2's stale createdAt
+    // from dragging the event below it.
+    const messages = [
+      u('p1', T('10:00:00')),
+      a('r1', T('10:00:30')),
+      u('p2', T('10:00:02')),
+      a('r2', T('10:01:00')),
+    ]
+    const events = [ev('wedged', T('10:00:20'))]
+    const { items } = build({ messages, events })
+    expect(seq(items)).toEqual([
+      'user:p1',
+      'event:wedged',
+      'asst:r1',
+      'user:p2',
+      'asst:r2',
+    ])
+  })
+})
+
 describe('buildTimeline in-flight turn anchoring', () => {
   it('anchors a live, unanswered turn to `now` so it stays below already-past events', () => {
     // p2 has been read and is in flight (no reply yet, not queued). A landed

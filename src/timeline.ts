@@ -74,8 +74,10 @@ export function buildTimeline<M extends Msg, E extends Evt>(
   })
 
   // Queued follow-ups are held aside: claude hasn't read them yet, so they
-  // belong below the whole conversation rather than at their enqueue time.
-  const ordered: TimelineItem<M, E>[] = []
+  // belong below the whole conversation rather than at their enqueue time. Each
+  // ordered item carries a `spliceAt` — the timestamp events are compared
+  // against to place them relative to this item (see the splice loop).
+  const ordered: { item: TimelineItem<M, E>; spliceAt: string }[] = []
   const queued: TimelineItem<M, E>[] = []
   for (const turn of turnList) {
     const ai = turn.asst
@@ -104,19 +106,38 @@ export function buildTimeline<M extends Msg, E extends Evt>(
     for (const i of idxs) {
       const message = task.messages[i]
       const item: TimelineItem<M, E> = { kind: 'message', at, message, index: i }
-      ;(queuedIndices.has(i) ? queued : ordered).push(item)
+      if (queuedIndices.has(i)) {
+        queued.push(item)
+        continue
+      }
+      // A leading user prompt in a turn that already has its reply splices
+      // against its *own* send time, not the turn's reply-anchored `at`. An
+      // event that fired after the prompt was sent but before that reply was
+      // lazily stamped (e.g. you wedge the task between sending and the first
+      // token) must land *after* the prompt, not above it. The reply itself,
+      // and any in-flight/queued turn (no reply yet), keep `at` so they still
+      // sit below already-past events.
+      const spliceAt =
+        message.role === 'user' && ai !== undefined ? message.createdAt : at
+      ordered.push({ item, spliceAt })
     }
   }
 
   // Splice lifecycle events into the turn-ordered stream by timestamp: each
-  // event surfaces just before the first message it predates. Events are sparse
-  // and mark deliberate status crossings (wedged/landed and their inverses).
+  // event surfaces just before the first item whose `spliceAt` it predates.
+  // Events are sparse and mark deliberate status crossings (wedged/landed and
+  // their inverses). The running `floor` keeps the comparison thresholds
+  // non-decreasing: a prompt that was queued during an earlier turn has a
+  // createdAt predating that turn's reply, so without the floor the greedy walk
+  // could pull an event ahead of a message it should follow.
   const events = [...(task.events ?? [])].sort((a, b) =>
     a.createdAt.localeCompare(b.createdAt),
   )
   let e = 0
-  for (const item of ordered) {
-    while (e < events.length && events[e].createdAt <= item.at)
+  let floor = ''
+  for (const { item, spliceAt } of ordered) {
+    if (spliceAt > floor) floor = spliceAt
+    while (e < events.length && events[e].createdAt <= floor)
       items.push({ kind: 'event', at: events[e].createdAt, event: events[e++] })
     items.push(item)
   }
