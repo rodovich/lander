@@ -899,7 +899,7 @@ function TaskActionsMenu({
   )
 
   // Build the items from the same per-status rules the header buttons encoded:
-  //  - launch:  a scheduled (resting + scheduledFor) task, to run it early
+  //  - launch:  a scheduled task (scheduledFor set, resting or wedged), to run it early
   //  - wedge:   any task not already wedged
   //  - rest:    a wedged or landed task, to return it to rest
   //  - land:       any task not already landed
@@ -909,8 +909,7 @@ function TaskActionsMenu({
   if (task.archived) {
     items.push({ action: 'restore', label: 'Restore' })
   } else {
-    if (task.status === 'resting' && task.scheduledFor)
-      items.push({ action: 'launch', label: 'Launch' })
+    if (task.scheduledFor) items.push({ action: 'launch', label: 'Launch' })
     if (task.status !== 'wedged') items.push({ action: 'wedge', label: 'Wedge' })
     if (task.status === 'wedged' || task.status === 'landed')
       items.push({ action: 'rest', label: 'Rest' })
@@ -2154,7 +2153,7 @@ export function App() {
                   }
                 >
                   {task.status}
-                  {task.status === 'resting' && task.scheduledFor && (
+                  {task.scheduledFor && (
                     <svg
                       className="scheduled-moon"
                       width="11"

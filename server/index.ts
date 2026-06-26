@@ -924,6 +924,11 @@ async function launchTask(project: Project, id: string): Promise<boolean> {
     delete t.scheduledFor
     delete t.waitingFor
     const at = new Date().toISOString()
+    // A task that scheduled a session-limit retry stayed wedged until now (see
+    // the /retry handler), so record the un-wedge a hair ahead of the launch —
+    // it surfaces in the timeline before the queued recovery prompt that the
+    // wakeup is about to drive. A no-op for a merely-resting scheduled task.
+    recordStatusTransition(t, 'riding', new Date(Date.parse(at) - 1).toISOString())
     ;(t.events ??= []).push({ kind: 'launched', title: t.title, createdAt: at })
     t.status = 'riding'
     t.updatedAt = at
@@ -1707,8 +1712,9 @@ app.patch('/api/:project/tasks/:id', async (c) => {
 })
 
 // Launch a scheduled task immediately, ahead of its scheduled time (the UI's
-// "launch" button on a resting, scheduled task). Clears the schedule, records
-// the "launched" event, and drives the queued opening message.
+// "launch" button on a scheduled task — resting, or wedged on a deferred
+// session-limit retry). Clears the schedule, records the "launched" event (and
+// the un-wedge, if it was wedged), and drives the queued opening message.
 app.post('/api/:project/tasks/:id/launch', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
@@ -2086,8 +2092,10 @@ app.post('/api/:project/tasks/:id/retry', async (c) => {
     // immediately, as before.
     const resetsAt = task.retry.resetsAt
     const defer = !!resetsAt && Date.parse(resetsAt) > Date.now()
-    // Record the un-wedge a hair before the action's own timestamp so the timeline
-    // shows it ahead of what follows, exactly as a follow-up message does.
+    // For an immediate retry, record the un-wedge a hair before the action's own
+    // timestamp so the timeline shows it ahead of what follows, exactly as a
+    // follow-up message does. A deferred retry stays wedged (see below), so this
+    // is unused there.
     const before = new Date(Date.parse(now) - 1).toISOString()
     await mutateTask(file, (t) => {
       if (!t.retry) return
@@ -2104,11 +2112,15 @@ app.post('/api/:project/tasks/:id/retry', async (c) => {
         t.queued = [...(t.queued ?? []), ...resend]
       }
       if (defer && resetsAt) {
-        // Rest until the limit lifts. recoverQueues skips scheduledFor tasks, so
-        // the queued prompt(s) sit untouched until launchScheduled fires
-        // launchTask at resetsAt and drives them. Record a 'scheduled' event so
-        // the wait shows in the timeline, exactly as `lander rest --date` does.
-        recordStatusTransition(t, 'resting', before)
+        // Scheduling a retry is not an un-wedge: the task stays wedged until the
+        // limit actually lifts, so the user keeps seeing it as needing them (and
+        // the sidebar shows the moon, driven by scheduledFor below). We record
+        // only a 'scheduled' event to mark the wait in the timeline; the un-wedge
+        // is deferred to launchTask, which records it when the wakeup fires —
+        // just before it drains the queued prompt(s), exactly as if the user had
+        // waited until the reset time and sent "try again" themselves.
+        // recoverQueues skips scheduledFor tasks, so the queued prompt(s) sit
+        // untouched until launchScheduled fires launchTask at resetsAt.
         t.scheduledFor = resetsAt
         ;(t.events ??= []).push({
           kind: 'scheduled',
@@ -2116,7 +2128,7 @@ app.post('/api/:project/tasks/:id/retry', async (c) => {
           scheduledFor: resetsAt,
           createdAt: now,
         })
-        t.status = 'resting'
+        // status stays 'wedged' — deliberately left unchanged.
       } else {
         // Revive and drive now.
         recordStatusTransition(t, 'riding', before)

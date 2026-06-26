@@ -141,6 +141,36 @@ describe('buildTimeline queued follow-ups', () => {
     expect([...queuedIndices]).toEqual([2])
   })
 
+  it('surfaces a deferred retry as scheduled-then-woken, with the un-wedge above the still-queued recovery prompt', () => {
+    // A session-limit wedge whose retry was scheduled: the task stays wedged, a
+    // 'scheduled' event marks the wait, and the recovery prompt is queued *now*
+    // (createdAt at schedule time, 10:05) but sinks to the bottom. The un-wedge
+    // and launch only fire at the wakeup (13:00). Even though the queued prompt's
+    // createdAt predates them, it must render last — below the un-wedge that
+    // releases it — so it reads as "un-wedged, then the prompt is sent".
+    const messages = [
+      u('p1', T('10:00:00')),
+      a('r1', T('10:00:05')), // the failed turn's partial reply
+      q('try-again', T('10:05:00')), // queued when the retry was scheduled
+    ]
+    const events = [
+      ev('wedged', T('10:00:06')),
+      ev('scheduled', T('10:05:00')),
+      ev('unwedged', T('12:59:59.999')), // recorded a hair before the launch
+      ev('launched', T('13:00:00')),
+    ]
+    const { items } = build({ messages, events })
+    expect(seq(items)).toEqual([
+      'user:p1',
+      'asst:r1',
+      'event:wedged',
+      'event:scheduled',
+      'event:unwedged',
+      'event:launched',
+      'user:try-again',
+    ])
+  })
+
   it('reports the flagged messages as queued', () => {
     const messages = [
       u('p1', T('10:00:00')),
