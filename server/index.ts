@@ -1029,10 +1029,11 @@ async function readOAuthToken(): Promise<string | null> {
 
 type UsageWindow = { utilization: number; resetsAt: string | null }
 
-// Coerce a reset moment to an ISO string. The rate-limit data carries it as a
-// Unix epoch (seconds) — the statusline feeds it straight to `date -r` — so a
-// bare number (or all-digit string) is seconds-since-epoch; anything else is
-// assumed already ISO.
+// Coerce a reset moment to an ISO string. The OAuth usage endpoint returns it
+// as an ISO 8601 string (e.g. "2026-06-26T03:00:00.694553+00:00"), which we
+// pass through unchanged. Older/alternate shapes may carry a Unix epoch
+// (seconds) instead — the statusline feeds that straight to `date -r` — so a
+// bare number (or all-digit string) is treated as seconds-since-epoch.
 function toIso(v: unknown): string | null {
   if (typeof v === 'number' && Number.isFinite(v))
     return new Date(v * 1000).toISOString()

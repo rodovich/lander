@@ -282,10 +282,16 @@ function sessionFromPath(): string {
   return window.location.pathname.split('/').filter(Boolean)[1] ?? ''
 }
 
-// A clock time like "3:45 PM" for when a window resets.
+// A clock time like "3:45 PM" for when a window resets. The upstream reset
+// moment carries sub-second jitter around its true boundary (e.g. the 03:00:00
+// reset arrives as anything from 02:59:59.98 to 03:00:00.8), so round to the
+// nearest minute rather than truncating — otherwise the readout flickers
+// between adjacent minutes (2:59 ↔ 3:00) as the value straddles the boundary.
 function formatResetTime(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
+  d.setSeconds(d.getSeconds() + 30)
+  d.setSeconds(0, 0)
   return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 }
 
