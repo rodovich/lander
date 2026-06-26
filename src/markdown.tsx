@@ -59,7 +59,11 @@ function renderInline(
       // Underscore variants require a non-word boundary on each side, so
       // intraword underscores (e.g. patch_based_saving) don't become emphasis,
       // matching CommonMark/GFM. Asterisks still allow intraword emphasis.
-      re: /\*\*([^*]+)\*\*|(?<![\p{L}\p{N}])__([^_]+)__(?![\p{L}\p{N}])/u,
+      // The bold body is lazy and allows nested "*" so that an inner italic span
+      // (e.g. **bold *italic* bold**) is kept inside the bold and reparsed by the
+      // recursive renderInline below, rather than splitting the "**" off as
+      // literal text.
+      re: /\*\*([\s\S]+?)\*\*|(?<![\p{L}\p{N}])__([^_]+)__(?![\p{L}\p{N}])/u,
       render: (m, k) => (
         <strong key={k}>{renderInline(m[1] ?? m[2], k, linkTask)}</strong>
       ),

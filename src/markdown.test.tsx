@@ -177,6 +177,10 @@ describe('Markdown rendering', () => {
 
   it('nests emphasis inside bold', () => {
     expect(render('**b _i_**')).toContain('<strong>b <em>i</em></strong>')
+    // Asterisk italic nested in bold: the "*" inside must stay within the bold
+    // rather than splitting the "**" off as literal text.
+    expect(render('**a *b* c**')).toContain('<strong>a <em>b</em> c</strong>')
+    expect(render('**a *b* c**')).not.toContain('**')
   })
 
   it('does not emphasize intraword underscores, but does intraword asterisks', () => {
