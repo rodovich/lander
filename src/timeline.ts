@@ -44,92 +44,45 @@ export function buildTimeline<M extends Msg, E extends Evt>(
   const queuedIndices = queuedMessageIndices(task)
   const items: TimelineItem<M, E>[] = []
 
-  // We can't just sort messages by `createdAt`: a follow-up sent while the agent
-  // is spinning up (queued, and so appended to the array) gets an earlier
-  // timestamp than the assistant reply it's waiting on, because that reply's
-  // timestamp is stamped lazily when claude's first token arrives (see the
-  // server's ensurePending). Sorting by time would then float the follow-up
-  // above the response it follows. Instead we pair turns positionally: every turn
-  // groups a run of consecutive user prompts with the single assistant message
-  // that answers them — follow-ups that queued up while the agent ran are sent
-  // as one batched turn, so a turn can hold several prompts under one reply.
-  // Still-queued prompts have no assistant yet and simply trail at the end,
-  // which is where they belong.
+  // Messages are rendered in array order — the server only ever appends (every
+  // write is a tail push stamped with the current clock), so array position is
+  // already the true chronological order and we trust it rather than re-sorting.
+  // The one reordering is the queued sink: a follow-up claude hasn't read yet
+  // (the trailing run of still-queued user prompts) belongs below the whole
+  // conversation rather than at its enqueue time, so it's held aside here and
+  // appended last.
   //
-  // Group messages into turns: a run of consecutive user prompts plus the one
-  // assistant reply that answers them. A turn closes when its reply arrives, so
-  // the next user message opens a fresh turn; a leading or doubled assistant
-  // (e.g. a stray legacy message) just gets its own turn. Batched queued
-  // follow-ups mean a turn can carry several prompts before its single reply.
-  type Turn = { users: number[]; asst?: number }
-  const turnList: Turn[] = []
-  let cur: Turn | undefined
-  task.messages.forEach((m, i) => {
-    if (!cur || cur.asst !== undefined) {
-      cur = { users: [] }
-      turnList.push(cur)
-    }
-    if (m.role === 'user') cur.users.push(i)
-    else cur.asst = i
-  })
-
-  // Queued follow-ups are held aside: claude hasn't read them yet, so they
-  // belong below the whole conversation rather than at their enqueue time. Each
-  // ordered item carries a `spliceAt` — the timestamp events are compared
-  // against to place them relative to this item (see the splice loop).
-  const ordered: { item: TimelineItem<M, E>; spliceAt: string }[] = []
-  const queued: TimelineItem<M, E>[] = []
-  for (const turn of turnList) {
-    const ai = turn.asst
-    // A turn whose prompts are all still queued (no reply yet) is one claude
-    // hasn't read; it sinks to the bottom below.
-    const queuedTurn =
-      ai === undefined &&
-      turn.users.length > 0 &&
-      turn.users.every((u) => queuedIndices.has(u))
-    // A turn enters the conversation when claude reads it — i.e. when its reply
-    // begins streaming (the assistant's lazily-stamped createdAt) — not when the
-    // prompt was typed. For a follow-up that sat queued those differ wildly, so
-    // anchoring the whole turn to the read time keeps an event that fired while
-    // it waited above the turn it eventually got, not below its stale enqueue
-    // time. Before the reply is stamped the turn is either still queued (sunk to
-    // the bottom below, so `at` is moot) or in flight right now — anchor the
-    // live turn to "now" so it likewise sits below already-past events, rather
-    // than briefly floating up to its enqueue time as the queue drains.
-    const at =
-      ai !== undefined
-        ? task.messages[ai].createdAt
-        : queuedTurn
-          ? task.messages[turn.users[0]].createdAt
-          : now
-    const idxs = ai !== undefined ? [...turn.users, ai] : turn.users
-    for (const i of idxs) {
-      const message = task.messages[i]
-      const item: TimelineItem<M, E> = { kind: 'message', at, message, index: i }
-      if (queuedIndices.has(i)) {
-        queued.push(item)
-        continue
-      }
-      // A leading user prompt in a turn that already has its reply splices
-      // against its *own* send time, not the turn's reply-anchored `at`. An
-      // event that fired after the prompt was sent but before that reply was
-      // lazily stamped (e.g. you wedge the task between sending and the first
-      // token) must land *after* the prompt, not above it. The reply itself,
-      // and any in-flight/queued turn (no reply yet), keep `at` so they still
-      // sit below already-past events.
-      const spliceAt =
-        message.role === 'user' && ai !== undefined ? message.createdAt : at
-      ordered.push({ item, spliceAt })
+  // Each ordered item carries a `spliceAt` — the timestamp events compare
+  // against to place them relative to this item. For a settled message that's
+  // its own createdAt. The exception is a trailing prompt with no reply yet: it
+  // sits past the last assistant message and is in flight *right now*, so it
+  // anchors to `now`, keeping it below already-past events instead of floating
+  // up to its enqueue time (which would, e.g., briefly jump it above a `landed`
+  // event as the queue drains).
+  let lastAsst = -1
+  for (let i = task.messages.length - 1; i >= 0; i--) {
+    if (task.messages[i].role === 'assistant') {
+      lastAsst = i
+      break
     }
   }
+  const ordered: { item: TimelineItem<M, E>; spliceAt: string }[] = []
+  const queued: TimelineItem<M, E>[] = []
+  task.messages.forEach((message, i) => {
+    const inFlight = i > lastAsst
+    const spliceAt = inFlight ? now : message.createdAt
+    const item: TimelineItem<M, E> = { kind: 'message', at: spliceAt, message, index: i }
+    if (queuedIndices.has(i)) queued.push(item)
+    else ordered.push({ item, spliceAt })
+  })
 
-  // Splice lifecycle events into the turn-ordered stream by timestamp: each
-  // event surfaces just before the first item whose `spliceAt` it predates.
-  // Events are sparse and mark deliberate status crossings (wedged/landed and
-  // their inverses). The running `floor` keeps the comparison thresholds
-  // non-decreasing: a prompt that was queued during an earlier turn has a
-  // createdAt predating that turn's reply, so without the floor the greedy walk
-  // could pull an event ahead of a message it should follow.
+  // Splice lifecycle events into the stream by timestamp: each event surfaces
+  // just before the first item whose `spliceAt` it predates. Events are sparse
+  // and mark deliberate status crossings (wedged/landed and their inverses). The
+  // running `floor` keeps the comparison thresholds non-decreasing: a prompt
+  // that was queued during an earlier turn has a createdAt predating that turn's
+  // reply, so without the floor the greedy walk could pull an event ahead of a
+  // message it should follow.
   const events = [...(task.events ?? [])].sort((a, b) =>
     a.createdAt.localeCompare(b.createdAt),
   )
