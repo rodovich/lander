@@ -174,9 +174,12 @@ async function restTask(args) {
 // `archived` resolves among archived tasks instead of active ones (for restore).
 async function resolveId(idOrPrefix, { archived = false } = {}) {
   if (!idOrPrefix) die('a task id is required')
-  const tasks = await call(PROJECT, `/tasks${archived ? '?archived=1' : ''}`, {
+  const res = await call(PROJECT, `/tasks${archived ? '?archived=1' : ''}`, {
     method: 'GET',
   })
+  // The list endpoint wraps the array as `{ tasks, usage }` (account usage rides
+  // along with every poll); tolerate a bare array too in case the shape reverts.
+  const tasks = Array.isArray(res) ? res : (res.tasks ?? [])
   const pool = archived ? tasks.filter((t) => t.archived) : tasks
   const matches = pool.filter((t) => t.session.startsWith(idOrPrefix))
   if (matches.length === 0) die(`no task matching ${idOrPrefix}`)
@@ -195,7 +198,8 @@ async function listTasks(args) {
     else if (a === '--json') json = true
     else die(`list: unexpected argument ${a}`)
   }
-  let tasks = await call(PROJECT, '/tasks', { method: 'GET' })
+  const res = await call(PROJECT, '/tasks', { method: 'GET' })
+  let tasks = Array.isArray(res) ? res : (res.tasks ?? [])
   if (status) tasks = tasks.filter((t) => t.status === status)
   if (json) return void console.log(JSON.stringify(tasks, null, 2))
   if (!tasks.length) return void console.log('(no tasks)')
