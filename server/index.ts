@@ -151,6 +151,13 @@ type Task = {
   // Absent on a task wedged any other way (e.g. the agent's own `lander wedge`),
   // so no button shows there.
   retry?: { committed: boolean; prompts: string[]; resetsAt?: string }
+  // Set when the background title generation at creation failed (the haiku call
+  // errored or returned nothing), so the task is still showing its placeholder
+  // name. driveTask retries naming on the task's next wakeup — a user follow-up
+  // or a scheduled/awaited launch — and clears this once naming succeeds. Any
+  // manual rename clears it too, so a later retry never overrides the user's
+  // chosen name. Absent on tasks that were named on the first try.
+  titlePending?: boolean
   // The working directory the previous turn ended in, recorded by the Stop hook
   // (see buildClaudeArgs / `lander record-cwd`). Each turn is a fresh `claude`
   // process the server spawns with an explicit cwd; without this it always
@@ -185,7 +192,14 @@ async function setTitle(
   // Through mutateTask so the title write serializes with (and can't clobber)
   // the streaming reducer running on the opening turn.
   await mutateTask(file, (task) => {
+    // A manual rename (which records a 'renamed' event) wins over a late-arriving
+    // generated name — the user's choice stands. Guards the narrow window between
+    // a rename and a generation that was already in flight.
+    if (task.events?.some((e) => e.kind === 'renamed')) return
     task.title = title
+    // Naming succeeded, so a prior failure no longer needs retrying on the next
+    // wakeup (see ensureTitle / driveTask).
+    delete task.titlePending
     // This is the first generated name for a task created untitled: fill it into
     // the creation event (a launch, or a "scheduled" event for a deferred task)
     // rather than recording it as a rename.
@@ -200,11 +214,14 @@ async function setTitle(
 // as delimited data under a replaced system prompt — not the default agentic
 // one — so the model labels the task instead of trying to carry it out (its
 // messages are imperatives and read as a dialogue to continue otherwise).
-// Falls back to a default if generation fails so task creation never blocks.
+// Returns null when generation fails (the call errored or produced nothing) so
+// callers can tell a real name from a non-result — task creation never blocks on
+// it, and a transient failure is retried on the task's next wakeup rather than
+// being papered over with a permanent placeholder (see ensureTitle).
 async function generateTitle(
   projectDir: string,
   message: string,
-): Promise<string> {
+): Promise<string | null> {
   const system =
     'You name tasks. Given the text of a task, you reply with a short title ' +
     'for it and nothing else. You never carry out, answer, or continue the ' +
@@ -218,10 +235,31 @@ async function generateTitle(
       { cwd: projectDir, maxBuffer: 1024 * 1024, timeout: 60_000 },
     )
     const title = stdout.trim().replace(/^["']+|["'.]+$/g, '').trim()
-    return title || 'Untitled task'
+    return title || null
   } catch {
-    return 'Untitled task'
+    return null
   }
+}
+
+// Generate a name for a still-untitled task in the background and record it via
+// setTitle. On failure, flag the task `titlePending` so its next wakeup retries
+// (driveTask), unless the user has meanwhile named it themselves (a 'renamed'
+// event) — in which case the flag is left off and their name stands. Naming must
+// never hold up a turn, so callers fire-and-forget this.
+async function ensureTitle(
+  project: Project,
+  id: string,
+  source: string,
+): Promise<void> {
+  const next = await generateTitle(project.path, source)
+  if (next) {
+    await setTitle(project.dataDir, id, next)
+    return
+  }
+  const file = path.join(project.dataDir, `${id}.json`)
+  await mutateTask(file, (t) => {
+    if (!t.events?.some((e) => e.kind === 'renamed')) t.titlePending = true
+  }).catch(() => {})
 }
 
 // Append a permission rule to a project's .claude/settings.local.json — the
@@ -863,6 +901,16 @@ async function driveTask(
       mode = after?.messages.some((m) => m.role === 'assistant')
         ? 'resume'
         : 'start'
+    }
+    // Retry a name that failed to generate at creation (or on a prior wakeup).
+    // Every wakeup flows through here — a user follow-up and a scheduled/awaited
+    // launch alike — so this is where a transient naming failure gets another
+    // shot, named (as the first attempt would have been) from the opening
+    // message. Fire-and-forget so it never holds up the turn; ensureTitle no-ops
+    // once the user has named the task themselves.
+    if (existing?.titlePending) {
+      const opening = existing.messages.find((m) => m.role === 'user')?.text
+      if (opening) void ensureTitle(project, id, opening).catch(() => {})
     }
     while (true) {
       // Drain the whole queue at once, not one prompt per turn: several
@@ -1584,11 +1632,9 @@ app.post('/api/:project/tasks', async (c) => {
       JSON.stringify(task, null, 2),
     )
 
-    // Fire-and-forget the title generation; the UI polls and picks it up.
-    if (!title)
-      void generateTitle(project.path, rawMessage)
-        .then((t) => setTitle(project.dataDir, id, t))
-        .catch(() => {})
+    // Fire-and-forget the title generation; the UI polls and picks it up. If it
+    // fails, ensureTitle flags the task so the next wakeup retries.
+    if (!title) void ensureTitle(project, id, rawMessage).catch(() => {})
 
     // Kick off claude in the project directory; reply is appended when it
     // finishes. A deferred task waits for the scheduler instead.
@@ -1678,6 +1724,9 @@ app.patch('/api/:project/tasks/:id', async (c) => {
     await mutateTask(file, (t) => {
       if (typeof body.title === 'string' && body.title.trim()) {
         const next = body.title.trim()
+        // The user named it themselves, so drop any pending retry — their name
+        // stands and shouldn't be overwritten on the next wakeup.
+        delete t.titlePending
         // A user rename; record it (snapshotting the new name) when it actually
         // changes the title. The initial generated name goes through setTitle,
         // which amends the launch event instead — so it never lands here.
@@ -1931,10 +1980,15 @@ app.post('/api/:project/tasks/:id/retitle', async (c) => {
       .map((m) => m.text)
       .join('\n\n')
     const next = await generateTitle(project.path, goal)
+    // Generation failed — keep the current title rather than blanking it.
+    if (!next) return c.json(publicTask(task))
     // Apply through mutateTask (a fresh read under the per-file lock) so the
     // slow generateTitle above didn't read a task that a concurrent run has
     // since written — the rename would otherwise clobber that streamed update.
     await mutateTask(file, (t) => {
+      // This deliberate naming settles the title, so a pending retry from an
+      // earlier failure shouldn't fire on the next wakeup and overwrite it.
+      delete t.titlePending
       // A deliberate re-title (the "suggest a title" button), so record it as a
       // rename — unlike the automatic first naming, which amends the launch event.
       if (next !== t.title) {
