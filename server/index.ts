@@ -68,6 +68,13 @@ type Task = {
   seenAt?: string
   allowEdits: boolean
   allowCommits: boolean
+  // The session id of the task that spawned this one (`lander launch`), or absent
+  // for tasks a human started from the UI. Records provenance — the same
+  // relationship the opening message's "↩ Spawned from" backlink shows in prose —
+  // in a form the server can check: it gates `lander land <id>`, which lets a task
+  // wind down only the tasks it launched, not arbitrary ones. Absent on tasks
+  // saved before this field existed (treated as "no known spawner").
+  spawnedBy?: string
   // Per-task secret minted at creation and injected into the agent's process as
   // LANDER_TOKEN. The `lander` CLI sends it back as the X-Lander-Token header so
   // the server can authenticate which task made a request — used to cap the
@@ -1420,6 +1427,12 @@ app.post('/api/:project/tasks', async (c) => {
       seenAt: now,
       allowEdits,
       allowCommits,
+      // Provenance: when another task spawned this one, remember which, so it can
+      // later land what it launched (see the PATCH land gate). A UI-started task
+      // has no spawner.
+      ...(principal.kind === 'task'
+        ? { spawnedBy: principal.task.session }
+        : {}),
       // Authenticates this task's own callbacks (see Task.token).
       token: randomUUID(),
       messages: [{ role: 'user', text: message, createdAt: now }],
@@ -1500,17 +1513,32 @@ app.patch('/api/:project/tasks/:id', async (c) => {
         403,
       )
 
-    // Wedging a riding task interrupts the agent — unless the agent wedged
-    // itself (to ask the user something), which is finishing its own turn and
-    // should run on. So a wedge from anyone but this task's own CLI stops the
-    // in-flight run; the human is pulling the task back to redirect it. The
-    // interrupt fires after the status write below, and the run's reducer folds
-    // in the partial reply.
-    const selfWedge = principal.kind === 'task' && principal.task.session === id
+    // A task may land another task only if it spawned it: `lander land <child>`
+    // winds down work a task launched, but a task can't reach over and land an
+    // unrelated one. Self-land (a task landing itself, the no-id `lander land`)
+    // and any UI-initiated land stay unrestricted. Other status changes keep
+    // their existing openness — this gate is specifically the land-by-id path.
+    if (
+      body.status === 'landed' &&
+      principal.kind === 'task' &&
+      principal.task.session !== id &&
+      task.spawnedBy !== principal.task.session
+    )
+      return c.json({ error: 'a task may only land tasks it launched' }, 403)
+
+    // Wedging or landing a riding task from anyone but the task's own CLI stops
+    // its in-flight run: the run is being pulled out from under the agent — the
+    // human redirecting a wedge, or a spawner winding down a child it launched.
+    // A task wedging or landing *itself* is finishing its own turn and runs on.
+    // The interrupt fires after the status write below; the run's reducer folds
+    // in the partial reply and (reduceRun only wedges a still-riding task on a
+    // non-deliberate exit) leaves the new non-riding status as-is.
+    const selfInitiated =
+      principal.kind === 'task' && principal.task.session === id
     const runId = task.runId
     const interrupt =
-      body.status === 'wedged' &&
-      !selfWedge &&
+      (body.status === 'wedged' || body.status === 'landed') &&
+      !selfInitiated &&
       task.status === 'riding' &&
       !!runId
 

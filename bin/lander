@@ -282,6 +282,26 @@ async function archiveTask(args) {
   }
 }
 
+// `lander land [id...]` — with no id, land the current task: the terminal "I'm
+// done" an agent calls when its work is finished. With ids, land those tasks
+// instead, resolving a full id or an unambiguous prefix among active tasks. The
+// server only lets a task land another it spawned (`lander launch`), so this
+// winds down a task's own children, not arbitrary ones; landing yourself, or by
+// id from the UI, stays unrestricted. A self-land stays silent (it's terminal —
+// nothing to react to, see setStatus); landing other tasks prints a line per
+// task, since the caller runs on and the outcome is worth confirming.
+async function landTask(args) {
+  if (!args.length) return setStatus('landed', { quiet: true })
+  for (const arg of args) {
+    const id = await resolveId(arg)
+    await call(PROJECT, `/tasks/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'landed' }),
+    })
+    console.log(`landed → ${id.slice(0, 8)}`)
+  }
+}
+
 // `lander run <jobfile>` — the detached turn runner the server launches (not for
 // agents). It owns the claude child, appends its raw stream-json stdout to the
 // run's log, and records its identity once (lease.json: pid + start time) and
@@ -570,7 +590,7 @@ async function bashGuard() {
 
 const [cmd, ...rest] = process.argv.slice(2)
 const run = {
-  land: () => setStatus('landed', { quiet: true }),
+  land: () => landTask(rest),
   wedge: () => setStatus('wedged'),
   rest: () => restTask(rest),
   launch: () => launchTask(rest),
@@ -586,7 +606,7 @@ const run = {
 if (!run)
   die(
     `unknown command: ${cmd ?? '(none)'} — try ` +
-      'land | wedge | rest (--date|--time|--await|--clear) | ' +
+      'land [id...] | wedge | rest (--date|--time|--await|--clear) | ' +
       'launch <message> | list | view <id> | send <id> <message> | ' +
       'archive <id...> [--restore] | assist <prompt> | flow <name>',
   )
