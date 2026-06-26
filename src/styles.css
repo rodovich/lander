@@ -1316,6 +1316,29 @@ body {
   margin-left: 16px;
 }
 
+/* Retry affordance for a conversation wedged on a claude error. Scrolls with the
+   message list as its last item, left-aligned; carries launch blue, since
+   retrying sends the task riding again. */
+.retry-bar {
+  display: flex;
+}
+
+.retry-button {
+  font: inherit;
+  font-weight: 600;
+  padding: 6px 12px;
+  border: 1px solid color-mix(in srgb, #0969da 40%, var(--border));
+  border-radius: 6px;
+  background: var(--bg-tinted);
+  color: #0969da;
+  cursor: pointer;
+}
+
+.retry-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .composer-bar {
   display: flex;
   flex-direction: column;

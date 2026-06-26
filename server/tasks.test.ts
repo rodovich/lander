@@ -5,6 +5,7 @@ import {
   recordStatusTransition,
   pendingMessage,
   ensurePending,
+  lastTurnPrompts,
   type Message,
   type TaskEvent,
 } from './tasks'
@@ -114,6 +115,34 @@ describe('pendingMessage', () => {
     expect(
       pendingMessage({ messages: [msg({ role: 'user', pending: true })] }),
     ).toBeUndefined()
+  })
+})
+
+describe('lastTurnPrompts', () => {
+  it('returns the trailing user messages before the final reply', () => {
+    expect(
+      lastTurnPrompts([
+        msg({ role: 'user', text: 'first' }),
+        msg({ text: 'reply 1' }),
+        msg({ role: 'user', text: 'a' }),
+        msg({ role: 'user', text: 'b' }),
+        msg({ text: 'error running claude: exited 1' }),
+      ]),
+    ).toEqual(['a', 'b'])
+  })
+
+  it('skips multiple trailing assistant messages', () => {
+    expect(
+      lastTurnPrompts([
+        msg({ role: 'user', text: 'q' }),
+        msg({ text: 'partial' }),
+        msg({ text: 'error' }),
+      ]),
+    ).toEqual(['q'])
+  })
+
+  it('returns empty when the turn has no user prompt', () => {
+    expect(lastTurnPrompts([msg({ text: 'reply' })])).toEqual([])
   })
 })
 

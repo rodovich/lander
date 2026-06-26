@@ -112,6 +112,22 @@ export function recordStatusTransition(
     })
 }
 
+// The user messages that made up a task's most recent turn: the consecutive run
+// of user messages immediately before the trailing assistant message(s). After a
+// turn ends (or errors) the assistant's reply is the last message, with that
+// turn's prompt(s) just before it — a batched turn carries several. Used by the
+// retry path to re-send a turn whose prompt never reached the session.
+export function lastTurnPrompts(messages: Message[]): string[] {
+  let i = messages.length - 1
+  while (i >= 0 && messages[i].role === 'assistant') i--
+  const prompts: string[] = []
+  while (i >= 0 && messages[i].role === 'user') {
+    prompts.unshift(messages[i].text)
+    i--
+  }
+  return prompts
+}
+
 // Locate the in-flight assistant message (the one a run is streaming into).
 export function pendingMessage(task: {
   messages: Message[]

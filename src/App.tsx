@@ -122,6 +122,12 @@ type Task = {
   // them up. They're also appended to `messages` for display; this array holds
   // the trailing user messages, in order, that claude hasn't read yet.
   queued?: string[]
+  // Present only when the task wedged on a claude error (not the agent's own
+  // wedge): drives the retry button below the conversation. `committed` is
+  // whether the failed turn's prompt reached the session — true means a retry
+  // nudges the session ("Try again"), false means it re-sends the un-received
+  // prompt ("Resend"). See the server's Task.retry for the full rationale.
+  retry?: { committed: boolean; prompts: string[] }
 }
 
 // A task tagged with the slug of the project it came from, so the merged
@@ -1152,6 +1158,7 @@ export function App() {
     {},
   )
   const [sendingBy, setSendingBy] = useState<Record<string, boolean>>({})
+  const [retryingBy, setRetryingBy] = useState<Record<string, boolean>>({})
   const composerRef = useRef<HTMLTextAreaElement>(null)
 
   // The tool chip whose grant popup is open, keyed "<messageIndex>:<stepIndex>".
@@ -1879,6 +1886,31 @@ export function App() {
       // Disabling the textarea while sending drops its focus; restore it once
       // the element re-enables so you can keep typing the next reply.
       requestAnimationFrame(() => composerRef.current?.focus())
+    }
+  }
+
+  // Retry a turn that wedged on a claude error. The server decides between
+  // nudging the session and re-sending the un-received prompt(s) from the
+  // task's `retry` info; here we just fire it and refresh.
+  async function retryTask() {
+    if (!current) return
+    const id = current.session
+    const proj = current.projectSlug
+    if (retryingBy[id]) return
+    setRetryingBy((prev) => ({ ...prev, [id]: true }))
+    setError(null)
+    try {
+      const r = await fetch(`/api/${proj}/tasks/${id}/retry`, {
+        method: 'POST',
+        headers: uiHeaders(),
+      })
+      const body = await r.json()
+      if (!r.ok) throw new Error(body.error ?? r.statusText)
+      setTasks(await loadShownTasks(shown))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setRetryingBy((prev) => ({ ...prev, [id]: false }))
     }
   }
 
@@ -2617,6 +2649,23 @@ export function App() {
                     claude is working…
                   </div>
                 )}
+              {current.status === 'wedged' && current.retry && (
+                <div className="retry-bar">
+                  <button
+                    type="button"
+                    className="retry-button"
+                    disabled={retryingBy[current.session] ?? false}
+                    onClick={() => void retryTask()}
+                    title={
+                      current.retry.committed
+                        ? 'Nudge the session to pick the turn back up (re-sending would duplicate it)'
+                        : 'Re-send your message — it never reached the session'
+                    }
+                  >
+                    {current.retry.committed ? 'Try again' : 'Resend'}
+                  </button>
+                </div>
+              )}
             </div>
             <div className="composer-bar">
               <textarea

@@ -30,6 +30,7 @@ import {
   recordStatusTransition,
   pendingMessage,
   ensurePending,
+  lastTurnPrompts,
   type Message,
   type TaskEvent,
 } from './tasks'
@@ -128,6 +129,18 @@ type Task = {
   // public task (see publicTask). Absent when no run is in flight.
   runId?: string
   runCursor?: number
+  // Set when a run wedged on a claude error (a non-zero exit that wasn't a
+  // deliberate interrupt — see reduceRun), cleared when the task next starts a
+  // turn. Drives the UI's retry affordance below a wedged conversation, and
+  // tells a retry how to recover. `committed` is our proxy for whether the
+  // failed turn's prompt(s) actually reached the session: true if the run had
+  // begun streaming a reply (so claude had accepted and recorded the user turn
+  // in its transcript), false if it errored before any output. A retry nudges
+  // the session to continue when committed (re-sending would duplicate the user
+  // turn) and re-sends the un-received `prompts` when not. Absent on a task
+  // wedged any other way (e.g. the agent's own `lander wedge`), so no button
+  // shows there.
+  retry?: { committed: boolean; prompts: string[] }
 }
 
 // Bind the generic task store (server/store.ts) to the concrete Task type, so
@@ -497,6 +510,8 @@ async function runTurn(
     if (!t.token) t.token = token
     t.runId = runId
     t.runCursor = 0
+    // A new turn supersedes any pending retry from the last failed one.
+    delete t.retry
   })
 
   // Detached and unref'd, in its own process group: a signal to this server's
@@ -655,6 +670,13 @@ async function reduceRun(
       const at = new Date().toISOString()
       await mutateTask(file, (t) => {
         const msg = ensurePending(t)
+        // Whether claude had begun replying before the run ended: real streamed
+        // content (steps or text) on the pending message, captured before we
+        // overwrite an empty one with the error below. On a claude error this is
+        // our proxy for "the user's turn reached the session and was committed" —
+        // if a reply had started, claude had accepted and recorded the prompt.
+        const hadOutput =
+          (msg.steps?.length ?? 0) > 0 || msg.text.trim().length > 0
         // A non-zero exit with no reply text is an error to surface; otherwise
         // the reduced text stands as the reply. A deliberate interrupt (the task
         // was wedged mid-run) is not an error — keep the partial reply, and note
@@ -675,6 +697,10 @@ async function reduceRun(
         if (done.exitCode !== 0 && !done.interrupted && t.status === 'riding') {
           recordStatusTransition(t, 'wedged', at)
           t.status = 'wedged'
+          // Stash what a retry needs: whether the failed turn was committed, and
+          // its prompt(s) for the re-send path. The error reply is now the
+          // trailing message, so the prompt(s) sit just before it.
+          t.retry = { committed: hadOutput, prompts: lastTurnPrompts(t.messages) }
         }
         t.updatedAt = at
         delete t.runId
@@ -1790,6 +1816,9 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
       // "resting" once the queue drains.
       t.queued = [...(t.queued ?? []), message]
       t.status = 'riding'
+      // A fresh message is the user's new intent; drop any pending retry so its
+      // button doesn't linger over the revived conversation.
+      delete t.retry
     })
 
     // If a run is already in flight it will drain this message when it
@@ -1797,6 +1826,70 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
     if (!running.has(id)) void driveTask(project, id, 'resume')
 
     return c.json(publicTask(task))
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
+  }
+})
+
+// Retry a turn that wedged on a claude error (500/429/etc). The recovery depends
+// on whether the failed turn's prompt reached the session (recorded as
+// `retry.committed` when the run wedged): if it did, re-sending it would
+// duplicate the user turn in claude's transcript, so we nudge the session to
+// pick the orphaned turn back up with a minimal "try again" (claude's -p mode
+// needs a prompt, so a truly empty resume can't drive a turn). If it didn't, the
+// prompt(s) never landed — re-send them. They're already in messages[] from the
+// original send, so the re-send only re-queues (no duplicate visible message);
+// the nudge does append a "try again" user message so the conversation reads.
+app.post('/api/:project/tasks/:id/retry', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  try {
+    const id = c.req.param('id')
+    if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    const file = path.join(project.dataDir, `${id}.json`)
+
+    let task: Task
+    try {
+      task = JSON.parse(await readFile(file, 'utf8')) as Task
+    } catch {
+      return c.json({ error: 'task not found' }, 404)
+    }
+
+    // Retrying re-drives the session, so it's the human's call: only the UI may
+    // do it, mirroring the other status-changing actions.
+    if ((await resolvePrincipal(c.req)).kind !== 'ui')
+      return c.json({ error: 'not authorized to retry' }, 403)
+
+    if (!task.retry) return c.json({ error: 'nothing to retry' }, 400)
+
+    const now = new Date().toISOString()
+    await mutateTask(file, (t) => {
+      if (!t.retry) return
+      // Revive the wedged task — record the un-wedge a hair before the action's
+      // own timestamp so the timeline shows it ahead of what follows, exactly as
+      // a follow-up message does.
+      recordStatusTransition(t, 'riding', new Date(Date.parse(now) - 1).toISOString())
+      const resend = t.retry.prompts.filter((p) => p.trim())
+      if (t.retry.committed || !resend.length) {
+        // Committed (or nothing concrete to re-send): nudge the session forward.
+        const text = 'try again'
+        t.messages.push({ role: 'user', text, createdAt: now })
+        t.queued = [...(t.queued ?? []), text]
+      } else {
+        // Not committed: re-send the un-received prompt(s). Already in messages[]
+        // from the original send, so only re-queue them for the session.
+        t.queued = [...(t.queued ?? []), ...resend]
+      }
+      t.updatedAt = now
+      t.status = 'riding'
+      delete t.retry
+    })
+
+    // Resume the session now if no run is already in flight (mirrors /messages).
+    if (!running.has(id)) void driveTask(project, id, 'resume')
+
+    const updated = await readTask(project.dataDir, id)
+    return c.json(publicTask(updated ?? task))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
