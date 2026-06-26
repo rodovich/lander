@@ -71,6 +71,9 @@ type Message = {
   steps?: Step[]
   usage?: TokenUsage
   pending?: boolean
+  // Set by the server (publicTask) on a follow-up claude hasn't read yet; the
+  // timeline dims it and sinks it below the conversation.
+  queued?: boolean
 }
 
 // A lifecycle event interleaved with messages in the conversation timeline: the
@@ -120,10 +123,6 @@ type Task = {
   waitingFor?: string[]
   messages: Message[]
   events?: TaskEvent[]
-  // Follow-ups sent while the agent is busy wait here until a drainer picks
-  // them up. They're also appended to `messages` for display; this array holds
-  // the trailing user messages, in order, that claude hasn't read yet.
-  queued?: string[]
   // Present only when the task wedged on a claude error (not the agent's own
   // wedge): drives the retry button below the conversation. `committed` is
   // whether the failed turn's prompt reached the session — true means a retry

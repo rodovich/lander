@@ -43,6 +43,28 @@ describe('publicTask', () => {
     const out = publicTask(task)
     expect((out as { messages: Message[] }).messages).toBe(messages)
   })
+
+  it('projects the work queue onto the trailing user messages and drops the queue', () => {
+    const messages = [
+      msg({ role: 'user', text: 'p1' }),
+      msg({ role: 'assistant', text: 'r1' }),
+      msg({ role: 'user', text: 'p2' }),
+      msg({ role: 'user', text: 'p3' }),
+    ]
+    const out = publicTask({ session: 's', messages, queued: ['p2', 'p3'] })
+    const m = (out as { messages: Message[] }).messages
+    expect(m.map((x) => !!x.queued)).toEqual([false, false, true, true])
+    // The raw queue is not exposed.
+    expect('queued' in out).toBe(false)
+    // The source messages are untouched (projection clones only the flagged).
+    expect(messages.some((x) => x.queued)).toBe(false)
+  })
+
+  it('leaves messages untouched when nothing is queued', () => {
+    const messages = [msg({ role: 'user', text: 'p1' })]
+    const out = publicTask({ session: 's', messages })
+    expect((out as { messages: Message[] }).messages).toBe(messages)
+  })
 })
 
 describe('latestUpdateAt', () => {

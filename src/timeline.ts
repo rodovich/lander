@@ -12,33 +12,26 @@
 // on the App's richer Message/TaskEvent definitions — the concrete types flow
 // back out through the generic, so callers keep full type information.
 
-type Msg = { role: 'user' | 'assistant'; createdAt: string }
+type Msg = { role: 'user' | 'assistant'; createdAt: string; queued?: boolean }
 type Evt = { createdAt: string }
 
 export type TimelineItem<M, E> =
   | { kind: 'message'; at: string; message: M; index: number }
   | { kind: 'event'; at: string; event: E }
 
-// Which trailing user messages are still queued (claude hasn't read them yet).
-// `queued` is drained in order, so the still-waiting ones are always the last N
-// user messages — back-scan to find them. Callers dim these in the timeline.
-function queuedMessageIndices(task: {
-  messages: Msg[]
-  queued?: string[]
-}): Set<number> {
+// Which messages are still queued (claude hasn't read them yet). The server
+// flags them on the message (publicTask, projected from its work queue); we just
+// read the flag. Callers dim these and we sink them in the timeline.
+function queuedMessageIndices(task: { messages: Msg[] }): Set<number> {
   const indices = new Set<number>()
-  let remaining = task.queued?.length ?? 0
-  for (let i = task.messages.length - 1; i >= 0 && remaining > 0; i--) {
-    if (task.messages[i].role === 'user') {
-      indices.add(i)
-      remaining--
-    }
-  }
+  task.messages.forEach((m, i) => {
+    if (m.queued) indices.add(i)
+  })
   return indices
 }
 
 export function buildTimeline<M extends Msg, E extends Evt>(
-  task: { messages: M[]; events?: E[]; queued?: string[] },
+  task: { messages: M[]; events?: E[] },
   now: string,
 ): { items: TimelineItem<M, E>[]; queuedIndices: Set<number> } {
   const queuedIndices = queuedMessageIndices(task)

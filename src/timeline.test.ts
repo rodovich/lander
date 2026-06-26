@@ -3,10 +3,22 @@ import { buildTimeline } from './timeline'
 
 // Minimal message/event shapes that satisfy buildTimeline's structural
 // constraints; `id`/`kind` are just labels the assertions read back.
-type M = { role: 'user' | 'assistant'; createdAt: string; id: string }
+type M = {
+  role: 'user' | 'assistant'
+  createdAt: string
+  id: string
+  queued?: boolean
+}
 type E = { kind: string; createdAt: string }
 
 const u = (id: string, createdAt: string): M => ({ role: 'user', createdAt, id })
+// A still-queued follow-up: claude hasn't read it; the server flags it.
+const q = (id: string, createdAt: string): M => ({
+  role: 'user',
+  createdAt,
+  id,
+  queued: true,
+})
 const a = (id: string, createdAt: string): M => ({
   role: 'assistant',
   createdAt,
@@ -27,7 +39,7 @@ const seq = (items: ReturnType<typeof buildTimeline<M, E>>['items']) =>
   )
 
 const build = (
-  task: { messages: M[]; events?: E[]; queued?: string[] },
+  task: { messages: M[]; events?: E[] },
   now = T('23:59:59'),
 ) => buildTimeline<M, E>(task, now)
 
@@ -116,14 +128,10 @@ describe('buildTimeline queued follow-ups', () => {
     const messages = [
       u('p1', T('10:00:00')),
       a('r1', T('10:00:05')),
-      u('p2', T('10:02:00')),
+      q('p2', T('10:02:00')),
     ]
     const events = [ev('landed', T('10:01:00'))]
-    const { items, queuedIndices } = build({
-      messages,
-      events,
-      queued: ['p2 text'],
-    })
+    const { items, queuedIndices } = build({ messages, events })
     expect(seq(items)).toEqual([
       'user:p1',
       'asst:r1',
@@ -133,14 +141,14 @@ describe('buildTimeline queued follow-ups', () => {
     expect([...queuedIndices]).toEqual([2])
   })
 
-  it('reports the trailing N user messages as queued', () => {
+  it('reports the flagged messages as queued', () => {
     const messages = [
       u('p1', T('10:00:00')),
       a('r1', T('10:00:05')),
-      u('p2', T('10:02:00')),
-      u('p3', T('10:02:01')),
+      q('p2', T('10:02:00')),
+      q('p3', T('10:02:01')),
     ]
-    const { queuedIndices } = build({ messages, queued: ['p2', 'p3'] })
+    const { queuedIndices } = build({ messages })
     expect([...queuedIndices].sort((x, y) => x - y)).toEqual([2, 3])
   })
 })

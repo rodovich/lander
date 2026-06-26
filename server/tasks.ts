@@ -17,6 +17,11 @@ export type Message = {
   usage?: Usage
   // True while claude is still producing this message; cleared when it lands.
   pending?: boolean
+  // Client-facing only: set by publicTask on a follow-up still in the task's
+  // `queued` work queue (claude hasn't read it yet) so the UI can dim it. Derived
+  // from the queue at projection time, never stored — the queue is the source of
+  // truth — so it's the read/unread analog of the server-owned `pending`.
+  queued?: boolean
 }
 
 // A noteworthy point in a task's life, shown inline in the conversation
@@ -56,13 +61,42 @@ export type TaskEvent = {
 // arrays are shared with the source, not deep-cloned.
 export function publicTask<T extends object>(
   task: T,
-): Omit<T, 'token' | 'runId' | 'runCursor'> {
-  const { token: _t, runId: _r, runCursor: _c, ...rest } = task as T & {
+): Omit<T, 'token' | 'runId' | 'runCursor' | 'queued'> {
+  const {
+    token: _t,
+    runId: _r,
+    runCursor: _c,
+    queued,
+    ...rest
+  } = task as T & {
     token?: unknown
     runId?: unknown
     runCursor?: unknown
+    queued?: string[]
+    messages?: Message[]
   }
-  return rest
+  // Project the internal work queue onto the messages it refers to, then drop the
+  // queue itself. The unread follow-ups are the trailing N user messages (the
+  // queue holds one entry per unread follow-up, in order), so flag those. The
+  // client renders the flag — dimming what claude hasn't read — without seeing
+  // the server's queue or having to know that trailing-N rule. When nothing is
+  // queued we return the messages array untouched (shared, not cloned).
+  const slot = rest as { messages?: Message[] }
+  const messages = slot.messages
+  if (messages && queued?.length) {
+    const flagged = new Set<number>()
+    let remaining = queued.length
+    for (let i = messages.length - 1; i >= 0 && remaining > 0; i--) {
+      if (messages[i].role === 'user') {
+        flagged.add(i)
+        remaining--
+      }
+    }
+    slot.messages = messages.map((m, i) =>
+      flagged.has(i) ? { ...m, queued: true } : m,
+    )
+  }
+  return rest as Omit<T, 'token' | 'runId' | 'runCursor' | 'queued'>
 }
 
 // The timestamp of a task's most recent *completed* update: the newest of its
