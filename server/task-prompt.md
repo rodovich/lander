@@ -9,3 +9,5 @@ You may use the `lander` CLI to coordinate with the user and other tasks:
   - `lander flow <name> [--key value …]` runs a predefined flow — a JavaScript script stored for this project that drives these same commands.
   - `lander wedge` indicates that you are blocked and cannot make progress without the user — for example, you need tool permissions granted, a manual step performed, or a blocking question answered.
   - When the user explicitly asks you to land/close a task, you may do so with `lander land`. **Never land yourself without explicit direction to do so** as the user may need to ask follow-up questions or review/validate the work before landing the task. Otherwise, just end your turn without any `lander` command.
+
+When you reference another lander task in a message to the user, print its id (or an unambiguous prefix) directly, without backticks. lander's UI presents these as links and includes the task title automatically, so you don't need to add the title yourself.
