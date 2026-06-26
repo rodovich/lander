@@ -2,6 +2,8 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { Markdown } from './markdown'
 import type { TaskLinkResolver } from './markdown'
+import { buildTimeline } from './timeline'
+import type { TimelineItem } from './timeline'
 
 // Request headers that mark a call as coming from the human's browser. The
 // server gates permission-granting endpoints (creating a task with edit/commit
@@ -1300,109 +1302,16 @@ export function App() {
   const activelyViewing = !!current && tabActive && atBottom
 
   // The open task's conversation as a single stream: its messages in turn order,
-  // merged with its lifecycle events by timestamp.
-  //
-  // We can't just sort messages by `createdAt`: a follow-up sent while the agent
-  // is spinning up (queued, and so appended to the array) gets an earlier
-  // timestamp than the assistant reply it's waiting on, because that reply's
-  // timestamp is stamped lazily when claude's first token arrives (see the
-  // server's ensurePending). Sorting by time would then float the follow-up
-  // above the response it follows. Instead we pair turns positionally: every turn
-  // groups a run of consecutive user prompts with the single assistant message
-  // that answers them — follow-ups that queued up while the agent ran are sent
-  // as one batched turn, so a turn can hold several prompts under one reply.
-  // Still-queued prompts have no assistant yet and simply trail at the end,
-  // which is where they belong.
-  // The message indices of follow-ups still waiting in the queue. `queued` is
-  // drained in order, so it always corresponds to the last N user messages —
-  // dim those in the timeline, and sink them below everything else, to signal
-  // claude hasn't read them yet.
-  const queuedIndices = new Set<number>()
-  if (current) {
-    let remaining = current.queued?.length ?? 0
-    for (let i = current.messages.length - 1; i >= 0 && remaining > 0; i--) {
-      if (current.messages[i].role === 'user') {
-        queuedIndices.add(i)
-        remaining--
+  // merged with its lifecycle events by timestamp. The ordering rules (turn
+  // grouping, read-time anchoring, queued sinking, event splicing) all live in
+  // buildTimeline; `queuedIndices` rides back out so the render can dim the
+  // follow-ups claude hasn't read yet. `now` anchors any in-flight turn.
+  const { items: timeline, queuedIndices } = current
+    ? buildTimeline(current, new Date().toISOString())
+    : {
+        items: [] as TimelineItem<Message, TaskEvent>[],
+        queuedIndices: new Set<number>(),
       }
-    }
-  }
-
-  type TimelineItem =
-    | { kind: 'message'; at: string; message: Message; index: number }
-    | { kind: 'event'; at: string; event: TaskEvent }
-  const timeline: TimelineItem[] = []
-  if (current) {
-    // Group messages into turns: a run of consecutive user prompts plus the one
-    // assistant reply that answers them. A turn closes when its reply arrives, so
-    // the next user message opens a fresh turn; a leading or doubled assistant
-    // (e.g. a stray legacy message) just gets its own turn. Batched queued
-    // follow-ups mean a turn can carry several prompts before its single reply.
-    type Turn = { users: number[]; asst?: number }
-    const turnList: Turn[] = []
-    let cur: Turn | undefined
-    current.messages.forEach((m, i) => {
-      if (!cur || cur.asst !== undefined) {
-        cur = { users: [] }
-        turnList.push(cur)
-      }
-      if (m.role === 'user') cur.users.push(i)
-      else cur.asst = i
-    })
-    // Queued follow-ups are held aside: claude hasn't read them yet, so they
-    // belong below the whole conversation rather than at their enqueue time.
-    const ordered: TimelineItem[] = []
-    const queued: TimelineItem[] = []
-    const nowIso = new Date().toISOString()
-    for (const turn of turnList) {
-      const ai = turn.asst
-      // A turn whose prompts are all still queued (no reply yet) is one claude
-      // hasn't read; it sinks to the bottom below.
-      const queuedTurn =
-        ai === undefined &&
-        turn.users.length > 0 &&
-        turn.users.every((u) => queuedIndices.has(u))
-      // A turn enters the conversation when claude reads it — i.e. when its reply
-      // begins streaming (the assistant's lazily-stamped createdAt) — not when the
-      // prompt was typed. For a follow-up that sat queued those differ wildly, so
-      // anchoring the whole turn to the read time keeps an event that fired while
-      // it waited above the turn it eventually got, not below its stale enqueue
-      // time. Before the reply is stamped the turn is either still queued (sunk to
-      // the bottom below, so `at` is moot) or in flight right now — anchor the
-      // live turn to "now" so it likewise sits below already-past events, rather
-      // than briefly floating up to its enqueue time as the queue drains.
-      const at =
-        ai !== undefined
-          ? current.messages[ai].createdAt
-          : queuedTurn
-            ? current.messages[turn.users[0]].createdAt
-            : nowIso
-      const idxs = ai !== undefined ? [...turn.users, ai] : turn.users
-      for (const i of idxs) {
-        const message = current.messages[i]
-        const item: TimelineItem = { kind: 'message', at, message, index: i }
-        ;(queuedIndices.has(i) ? queued : ordered).push(item)
-      }
-    }
-    // Splice lifecycle events into the turn-ordered stream by timestamp: each
-    // event surfaces just before the first message it predates. Events are sparse
-    // and mark deliberate status crossings (wedged/landed and their inverses).
-    const events = [...(current.events ?? [])].sort((a, b) =>
-      a.createdAt.localeCompare(b.createdAt),
-    )
-    let e = 0
-    for (const item of ordered) {
-      while (e < events.length && events[e].createdAt <= item.at)
-        timeline.push({ kind: 'event', at: events[e].createdAt, event: events[e++] })
-      timeline.push(item)
-    }
-    // Trailing events — including any that arrived while a follow-up sat queued —
-    // surface before the queued prompts: a queued message's place in the
-    // conversation is fixed by when claude actually reads it, not when it was sent.
-    while (e < events.length)
-      timeline.push({ kind: 'event', at: events[e].createdAt, event: events[e++] })
-    for (const item of queued) timeline.push(item)
-  }
 
   // Roving-tabindex bookkeeping for the task list: the selected row is the one
   // reachable with Tab, and arrow keys move DOM focus between rows.
