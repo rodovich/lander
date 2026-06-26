@@ -1222,7 +1222,7 @@ export function App() {
 
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
-  const [retitling, setRetitling] = useState(false)
+  const [retitling, setRetitling] = useState<string | null>(null)
   const titleInputRef = useRef<HTMLInputElement>(null)
 
   const pathBySlug = new Map(projects.map((p) => [p.slug, p.path]))
@@ -1618,10 +1618,10 @@ export function App() {
 
   // Ask haiku (server-side) to name the task from its conversation.
   async function generateTitle() {
-    if (!current || retitling) return
+    if (!current || retitling === current.session) return
     const id = current.session
     const proj = current.projectSlug
-    setRetitling(true)
+    setRetitling(id)
     setError(null)
     try {
       const r = await fetch(`/api/${proj}/tasks/${id}/retitle`, {
@@ -1636,7 +1636,7 @@ export function App() {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
-      setRetitling(false)
+      setRetitling((prev) => (prev === id ? null : prev))
     }
   }
 
@@ -2272,7 +2272,7 @@ export function App() {
                       className="edit-title-button"
                       title="Regenerate title"
                       aria-label="Regenerate title"
-                      disabled={retitling}
+                      disabled={retitling === current.session}
                       onClick={() => void generateTitle()}
                     >
                       <svg
