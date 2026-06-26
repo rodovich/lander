@@ -730,6 +730,9 @@ async function reduceRun(
         delete t.runId
         delete t.runCursor
       }).catch(() => {})
+      // A turn just finished — agent activity is exactly when usage moves, so
+      // refresh the cached snapshot (rate-limited; the next poll carries it).
+      void refreshUsage()
       return 'done'
     }
 
@@ -773,6 +776,7 @@ async function reduceRun(
           delete t.runId
           delete t.runCursor
         }).catch(() => {})
+        void refreshUsage()
         return 'crashed'
       }
     }
@@ -1056,10 +1060,92 @@ function pickWindow(obj: unknown): UsageWindow | null {
   }
 }
 
-// Cache usage briefly so the UI's poll doesn't hammer the upstream endpoint or
-// the keychain. The window resets/utilization move slowly, so 60s is plenty.
-let usageCache: { at: number; body: unknown } | null = null
+type UsageBody = { session: UsageWindow | null; weekly: UsageWindow | null }
+
+// The last successful usage snapshot and when it was fetched. The tasks poll
+// embeds whatever's here, and the server — not the client — decides when to
+// refresh it (see refreshUsage). The window resets/utilization move slowly, so a
+// 60s floor between upstream fetches is plenty.
+let usageCache: { at: number; body: UsageBody } | null = null
 const USAGE_TTL_MS = 60_000
+// Dedupes concurrent refreshes so two triggers firing at once make one fetch.
+let usageRefreshing: Promise<void> | null = null
+// A one-shot timer armed for just after the soonest window resets (see below).
+let usageResetTimer: ReturnType<typeof setTimeout> | null = null
+
+// Fetch the current subscription usage straight from the OAuth endpoint. Returns
+// the normalized body, or an error tag the /api/usage route maps to a status.
+async function fetchUsage(): Promise<
+  { ok: true; body: UsageBody } | { ok: false; status: 502 | 503; error: string }
+> {
+  const token = await readOAuthToken()
+  if (!token)
+    return { ok: false, status: 503, error: 'no Claude OAuth token available' }
+  try {
+    const res = await fetch('https://api.anthropic.com/api/oauth/usage', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'anthropic-beta': 'oauth-2025-04-20',
+      },
+    })
+    if (!res.ok)
+      return { ok: false, status: 502, error: `usage endpoint returned ${res.status}` }
+    const data = (await res.json()) as Record<string, unknown>
+    // The statusline reads `.rate_limits.{five_hour,seven_day}`; tolerate the
+    // windows living at the top level too in case the endpoint differs.
+    const rl = (data.rate_limits as Record<string, unknown> | undefined) ?? data
+    return {
+      ok: true,
+      body: {
+        session: pickWindow(rl.five_hour ?? rl.fiveHour ?? rl.session),
+        weekly: pickWindow(rl.seven_day ?? rl.sevenDay ?? rl.weekly),
+      },
+    }
+  } catch (e) {
+    return { ok: false, status: 502, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+// Refresh the cached snapshot from upstream unless one was fetched within the
+// TTL. This 60s guard is the single rate limiter every trigger shares — the
+// per-turn refresh, the reset-time timer, the boot fetch, and the /api/usage
+// route all funnel through here, so none of them can hammer the OAuth endpoint
+// or the keychain. A failed fetch leaves the last snapshot in place. Re-arms the
+// reset timer off whatever snapshot we hold, so the cycle below survives a
+// transient upstream error.
+function refreshUsage(): Promise<void> {
+  if (usageCache && Date.now() - usageCache.at < USAGE_TTL_MS)
+    return Promise.resolve()
+  if (usageRefreshing) return usageRefreshing
+  usageRefreshing = (async () => {
+    const r = await fetchUsage()
+    if (r.ok) usageCache = { at: Date.now(), body: r.body }
+    if (usageCache) scheduleUsageReset(usageCache.body)
+  })().finally(() => {
+    usageRefreshing = null
+  })
+  return usageRefreshing
+}
+
+// Arm a one-shot refresh for just after the soonest of the two windows resets,
+// so the readout catches the utilization dropping back without waiting for the
+// next turn. It funnels through refreshUsage (the same 60s limiter) and, on
+// success, re-arms from the fresh resetsAt — so it perpetuates itself across
+// resets. A reset already past (or one the limiter would currently swallow)
+// clamps to the TTL, so we retry shortly rather than spin.
+function scheduleUsageReset(body: UsageBody): void {
+  const resets = [body.session?.resetsAt, body.weekly?.resetsAt]
+    .map((s) => (s ? Date.parse(s) : NaN))
+    .filter((n) => Number.isFinite(n))
+  if (!resets.length) return
+  const delay = Math.max(Math.min(...resets) + 2_000 - Date.now(), USAGE_TTL_MS)
+  if (usageResetTimer) clearTimeout(usageResetTimer)
+  usageResetTimer = setTimeout(() => {
+    usageResetTimer = null
+    void refreshUsage()
+  }, delay)
+  usageResetTimer.unref()
+}
 
 // The shared secret that marks a request as coming from the human's browser
 // (vs. a task's `lander` CLI). Prefer the env var dev.mjs sets — it hands the
@@ -1118,35 +1204,21 @@ const app = new Hono()
 // Current Claude subscription usage: the 5-hour session window and the 7-day
 // weekly window, each as { utilization (0-100), resetsAt }. Mirrors what the
 // `/usage` command in the Claude CLI shows, read from the same OAuth endpoint.
+// Served from the same cache the tasks poll embeds. The UI reads usage off the
+// poll now, so this is mainly a debug/external hook; it still honours the shared
+// limiter and forces a fetch only when there's nothing cached.
 app.get('/api/usage', async (c) => {
-  if (usageCache && Date.now() - usageCache.at < USAGE_TTL_MS)
-    return c.json(usageCache.body)
-  const token = await readOAuthToken()
-  if (!token)
-    return c.json({ error: 'no Claude OAuth token available' }, 503)
-  try {
-    const res = await fetch('https://api.anthropic.com/api/oauth/usage', {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'anthropic-beta': 'oauth-2025-04-20',
-      },
-    })
-    if (!res.ok)
-      return c.json({ error: `usage endpoint returned ${res.status}` }, 502)
-    const data = (await res.json()) as Record<string, unknown>
-    // The statusline reads `.rate_limits.{five_hour,seven_day}`; tolerate the
-    // windows living at the top level too in case the endpoint differs.
-    const rl =
-      (data.rate_limits as Record<string, unknown> | undefined) ?? data
-    const body = {
-      session: pickWindow(rl.five_hour ?? rl.fiveHour ?? rl.session),
-      weekly: pickWindow(rl.seven_day ?? rl.sevenDay ?? rl.weekly),
+  if (!usageCache || Date.now() - usageCache.at >= USAGE_TTL_MS) {
+    const r = await fetchUsage()
+    if (r.ok) {
+      usageCache = { at: Date.now(), body: r.body }
+      scheduleUsageReset(r.body)
+    } else if (!usageCache) {
+      return c.json({ error: r.error }, r.status)
     }
-    usageCache = { at: Date.now(), body }
-    return c.json(body)
-  } catch (e) {
-    return c.json({ error: e instanceof Error ? e.message : String(e) }, 502)
+    // else: the fetch failed but we hold a stale snapshot — serve it.
   }
+  return c.json(usageCache.body)
 })
 
 // List the configured projects; the first is the default the UI redirects to.
@@ -1161,8 +1233,15 @@ app.get('/api/:project/tasks', async (c) => {
     // By default only active tasks are listed; `?archived=1` lists only the
     // archived ones instead, each tagged so the UI can mark the row and offer
     // Restore.
+    // Account usage rides along with every tasks poll so the client never has to
+    // decide when it's stale (see refreshUsage for who triggers a refresh). It's
+    // global, not per-project — the same snapshot on every project's response.
+    const usage = usageCache?.body ?? null
     if (c.req.query('archived') !== '1')
-      return c.json((await readTasks(project.dataDir)).map(publicTask))
+      return c.json({
+        tasks: (await readTasks(project.dataDir)).map(publicTask),
+        usage,
+      })
     const archived = (await readTasks(project.archiveDir)).map((t) => ({
       ...t,
       archived: true,
@@ -1170,7 +1249,7 @@ app.get('/api/:project/tasks', async (c) => {
     archived.sort((a, b) =>
       (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt),
     )
-    return c.json(archived.map(publicTask))
+    return c.json({ tasks: archived.map(publicTask), usage })
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
@@ -2228,6 +2307,9 @@ console.log('projects:')
 for (const p of PROJECTS) console.log(`  ${p.slug}  ${p.path}`)
 void backfillSeen()
 void recoverQueues()
+// Prime the usage snapshot so the sidebar shows it on first load, before any
+// turn completes. Thereafter turn-ends and the reset timer keep it current.
+void refreshUsage()
 // Launch due scheduled tasks on boot (catching any whose time passed while the
 // server was down), then sweep every 15s to launch each as it comes due.
 void launchScheduled()

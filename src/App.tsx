@@ -358,70 +358,14 @@ function UsageBar({
   )
 }
 
-const USAGE_MIN_INTERVAL_MS = 60_000
-
 // Compact Claude subscription usage shown under the new-task form: the current
 // 5-hour session window and the 7-day weekly window, each a small progress bar
-// with its reset time. Fetched from the server, which proxies the OAuth usage
-// endpoint. Refreshed on mount and whenever `refreshSignal` changes (the parent
-// bumps it as agent responses complete), but no more than once a minute: a
-// request inside that window keeps the cached value and schedules a single
-// trailing refresh at the minute mark instead.
-function UsageSummary({ refreshSignal }: { refreshSignal: number }) {
-  const [usage, setUsage] = useState<Usage | null>(null)
-  const [failed, setFailed] = useState(false)
-
-  const cancelledRef = useRef(false)
-  const lastFetchRef = useRef(0)
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const fetchNow = () => {
-    lastFetchRef.current = Date.now()
-    fetch('/api/usage')
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((u: Usage) => {
-        if (!cancelledRef.current) {
-          setUsage(u)
-          setFailed(false)
-        }
-      })
-      .catch(() => {
-        if (!cancelledRef.current) setFailed(true)
-      })
-  }
-
-  // Refresh now if it's been at least a minute since the last fetch; otherwise
-  // leave the displayed value as-is and arm a single timer to refresh once the
-  // minute is up. A timer already in flight absorbs further requests.
-  const requestRefresh = () => {
-    const elapsed = Date.now() - lastFetchRef.current
-    if (elapsed >= USAGE_MIN_INTERVAL_MS) {
-      fetchNow()
-    } else if (!timerRef.current) {
-      timerRef.current = setTimeout(() => {
-        timerRef.current = null
-        if (!cancelledRef.current) fetchNow()
-      }, USAGE_MIN_INTERVAL_MS - elapsed)
-    }
-  }
-
-  // Runs on mount (page load) and on every refreshSignal change.
-  useEffect(() => {
-    requestRefresh()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshSignal])
-
-  useEffect(() => {
-    cancelledRef.current = false
-    return () => {
-      cancelledRef.current = true
-      if (timerRef.current) clearTimeout(timerRef.current)
-    }
-  }, [])
-
+// with its reset time. The snapshot rides in on every tasks poll (the server
+// owns when to refresh it from upstream), so this is purely presentational.
+function UsageSummary({ usage }: { usage: Usage | null }) {
   // Stay quiet until we have something to show; a missing token or endpoint
-  // error shouldn't clutter the sidebar.
-  if (failed || !usage || (!usage.session && !usage.weekly)) return null
+  // error leaves usage null, which shouldn't clutter the sidebar.
+  if (!usage || (!usage.session && !usage.weekly)) return null
 
   return (
     <div className="usage-summary">
@@ -1116,6 +1060,10 @@ function TaskActionsMenu({
 
 export function App() {
   const [tasks, setTasks] = useState<TaskWithProject[]>([])
+  // Account usage, carried on every tasks poll. The server decides when to
+  // refresh it from upstream (on turn-end and at each window reset); the client
+  // just shows the latest snapshot it was handed.
+  const [usage, setUsage] = useState<Usage | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
   // The project dropdown acts as a filter: `shown` holds the slugs whose tasks
   // are merged into the list. It is always either a single project or every
@@ -1456,16 +1404,6 @@ export function App() {
     for (const item of queued) timeline.push(item)
   }
 
-  // A monotonically rising count of finished assistant turns across all tasks.
-  // It ticks up each time a pending message lands (the poll flips `pending` to
-  // false), which UsageSummary watches as its cue to refresh — agent activity is
-  // exactly when usage moves.
-  const completedResponses = tasks.reduce(
-    (n, t) =>
-      n + t.messages.filter((m) => m.role === 'assistant' && !m.pending).length,
-    0,
-  )
-
   // Roving-tabindex bookkeeping for the task list: the selected row is the one
   // reachable with Tab, and arrow keys move DOM focus between rows.
   const taskItemRefs = useRef<(HTMLLIElement | null)[]>([])
@@ -1533,7 +1471,7 @@ export function App() {
   async function loadShownTasks(
     slugs: string[],
     includeArchived: boolean = view === 'archived',
-  ): Promise<TaskWithProject[]> {
+  ): Promise<{ tasks: TaskWithProject[]; usage: Usage | null }> {
     const lists = await Promise.all(
       slugs.map(async (slug) => {
         const r = await fetch(
@@ -1541,14 +1479,20 @@ export function App() {
         )
         const body = await r.json()
         if (!r.ok) throw new Error(body.error ?? r.statusText)
-        return (body as Task[]).map((t) => ({ ...t, projectSlug: slug }))
+        return {
+          tasks: (body.tasks as Task[]).map((t) => ({ ...t, projectSlug: slug })),
+          usage: (body.usage ?? null) as Usage | null,
+        }
       }),
     )
-    const merged = lists.flat()
+    const merged = lists.flatMap((l) => l.tasks)
     merged.sort((a, b) =>
       (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt),
     )
-    return merged
+    // Usage is global — every project's response carries the same snapshot, so
+    // take the first one that's populated.
+    const usage = lists.map((l) => l.usage).find((u) => u != null) ?? null
+    return { tasks: merged, usage }
   }
 
   // Load the project list once and show all projects by default. A task named
@@ -1624,9 +1568,10 @@ export function App() {
     let cancelled = false
     const refresh = () =>
       loadShownTasks(shown, view === 'archived')
-        .then((t) => {
+        .then(({ tasks, usage }) => {
           if (!cancelled) {
-            setTasks(t)
+            setTasks(tasks)
+            setUsage(usage)
             hasLoadedRef.current = true
           }
         })
@@ -1703,7 +1648,7 @@ export function App() {
       const body = await r.json()
       if (!r.ok) throw new Error(body.error ?? r.statusText)
       const created = body as Task
-      setTasks(await loadShownTasks(shown))
+      setTasks((await loadShownTasks(shown)).tasks)
       selectTask(created.session, targetSlug)
       setMessage('')
       // Edits default on for the next task; commits stay as the user left them.
@@ -1896,7 +1841,7 @@ export function App() {
       const body = await r.json()
       if (!r.ok) throw new Error(body.error ?? r.statusText)
       setReplies((prev) => ({ ...prev, [id]: '' }))
-      setTasks(await loadShownTasks(shown))
+      setTasks((await loadShownTasks(shown)).tasks)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -1924,7 +1869,7 @@ export function App() {
       })
       const body = await r.json()
       if (!r.ok) throw new Error(body.error ?? r.statusText)
-      setTasks(await loadShownTasks(shown))
+      setTasks((await loadShownTasks(shown)).tasks)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -1950,7 +1895,7 @@ export function App() {
       })
       const body = await r.json()
       if (!r.ok) throw new Error(body.error ?? r.statusText)
-      if (scope === 'task') setTasks(await loadShownTasks(shown))
+      if (scope === 'task') setTasks((await loadShownTasks(shown)).tasks)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -2044,7 +1989,7 @@ export function App() {
         const body = await r.json()
         throw new Error(body.error ?? r.statusText)
       }
-      setTasks(await loadShownTasks(shown))
+      setTasks((await loadShownTasks(shown)).tasks)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -2380,7 +2325,7 @@ export function App() {
           </button>
         </form>
 
-        <UsageSummary refreshSignal={completedResponses} />
+        <UsageSummary usage={usage} />
       </div>
 
       <div className="detail">
