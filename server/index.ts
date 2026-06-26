@@ -151,6 +151,21 @@ type Task = {
   // Absent on a task wedged any other way (e.g. the agent's own `lander wedge`),
   // so no button shows there.
   retry?: { committed: boolean; prompts: string[]; resetsAt?: string }
+  // The working directory the previous turn ended in, recorded by the Stop hook
+  // (see buildClaudeArgs / `lander record-cwd`). Each turn is a fresh `claude`
+  // process the server spawns with an explicit cwd; without this it always
+  // restarts at the project root, so a directory the agent moved into during a
+  // turn — most notably a git worktree it entered (EnterWorktree) — would be
+  // lost the moment the turn ends. runTurn resumes the next turn here instead,
+  // falling back to the project root when unset or no longer present. Named for
+  // the hook's `cwd` payload (which carries no worktree-specific field); a
+  // worktree is just one kind of cwd. Absent until the first turn completes.
+  cwd?: string
+  // The absolute path to this session's transcript JSONL, from the same Stop
+  // hook payload. Stored alongside cwd so the session file can be located
+  // directly rather than re-deriving it from the launch directory. Absent until
+  // the first turn completes.
+  transcriptPath?: string
 }
 
 // Bind the generic task store (server/store.ts) to the concrete Task type, so
@@ -424,6 +439,21 @@ function buildClaudeArgs(
           ],
         },
       ],
+      // At the end of every turn, persist the session's working directory (and
+      // transcript path) onto the task, so the next turn resumes where this one
+      // left off rather than back at the project root — see Task.cwd. The Stop
+      // hook's payload carries `cwd`/`transcript_path`; `record-cwd` forwards
+      // them. Best-effort: it never blocks the turn from ending.
+      Stop: [
+        {
+          hooks: [
+            {
+              type: 'command',
+              command: `${path.join(ROOT, 'bin', 'lander')} record-cwd`,
+            },
+          ],
+        },
+      ],
     },
   })
 
@@ -488,6 +518,20 @@ async function runTurn(
   const token = task.token ?? randomUUID()
   const claudeArgs = buildClaudeArgs(task, id, prompt, mode)
 
+  // Resume the turn in whatever directory the last one ended in (e.g. a worktree
+  // the agent entered), as recorded by the Stop hook on task.cwd. Guard it: a
+  // recorded dir that no longer exists (a worktree removed between turns) must
+  // not strand the task, so fall back to the project root. project.path is
+  // assumed present, so it skips the stat in the common case.
+  let cwd = project.path
+  if (task.cwd && task.cwd !== project.path) {
+    try {
+      if ((await stat(task.cwd)).isDirectory()) cwd = task.cwd
+    } catch {
+      // recorded dir is gone — fall back to the project root
+    }
+  }
+
   const runId = randomUUID()
   const runDir = path.join(project.runsDir, runId)
   await mkdir(runDir, { recursive: true })
@@ -495,7 +539,7 @@ async function runTurn(
     runId,
     taskId: id,
     project: project.slug,
-    cwd: project.path,
+    cwd,
     claudeArgs,
     env: {
       PATH: `${path.join(ROOT, 'bin')}:${process.env.PATH ?? ''}`,
@@ -1770,6 +1814,48 @@ app.post('/api/:project/tasks/:id/rest', async (c) => {
       )
       t.status = 'resting'
       t.updatedAt = at
+    })
+    const task = await readTask(project.dataDir, id)
+    if (!task) return c.json({ error: 'task not found' }, 404)
+    return c.json(publicTask(task))
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
+  }
+})
+
+// The session's working directory (and transcript path) at the end of a turn,
+// posted by the Stop hook via `lander record-cwd`. Persisted so the next turn
+// resumes here instead of the project root — see Task.cwd and runTurn. Only the
+// task itself (authenticating with its own token) or the UI may set it. A bare
+// cwd write isn't a turn boundary, so it doesn't bump updatedAt or emit an
+// event — it's invisible to the sort order and the timeline.
+app.post('/api/:project/tasks/:id/cwd', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  try {
+    const id = c.req.param('id')
+    if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    const file = path.join(project.dataDir, `${id}.json`)
+    if (!(await readTask(project.dataDir, id)))
+      return c.json({ error: 'task not found' }, 404)
+
+    const principal = await resolvePrincipal(c.req)
+    if (
+      principal.kind !== 'ui' &&
+      !(principal.kind === 'task' && principal.task.session === id)
+    )
+      return c.json({ error: 'only the task itself may record its cwd' }, 403)
+
+    const body = await c.req.json<{ cwd?: unknown; transcriptPath?: unknown }>()
+    if (typeof body.cwd !== 'string' || !body.cwd)
+      return c.json({ error: 'cwd is required' }, 400)
+    const cwd = body.cwd
+    const transcriptPath =
+      typeof body.transcriptPath === 'string' ? body.transcriptPath : undefined
+
+    await mutateTask(file, (t) => {
+      t.cwd = cwd
+      if (transcriptPath) t.transcriptPath = transcriptPath
     })
     const task = await readTask(project.dataDir, id)
     if (!task) return c.json({ error: 'task not found' }, 404)

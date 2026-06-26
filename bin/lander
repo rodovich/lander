@@ -592,6 +592,36 @@ async function bashGuard() {
   )
 }
 
+// --- record-cwd (Stop hook) ------------------------------------------------
+// Wired in by the server as a Stop hook (see buildClaudeArgs). At the end of
+// each turn claude pipes the session state as JSON on stdin —
+// { cwd, transcript_path, session_id, ... } — and we persist cwd and
+// transcript_path onto the task. Without this, every turn re-spawns claude at
+// the project root, so a directory the agent moved into mid-turn (most notably a
+// git worktree it entered via EnterWorktree) is lost between turns; recording it
+// lets the server resume the next turn there. Strictly best-effort: a Stop
+// hook's stdout is not surfaced and nothing here may keep the turn from ending,
+// so it swallows every error and never exits non-zero. It calls fetch directly
+// rather than going through call() — call() die()s on a non-ok response, which
+// would exit the hook non-zero for a transient server blip.
+async function recordCwd() {
+  try {
+    const input = JSON.parse((await readStdin()) || '{}')
+    const cwd = input.cwd
+    if (!API || !PROJECT || !TASK || typeof cwd !== 'string' || !cwd) return
+    const headers = { 'content-type': 'application/json', 'x-lander-task': TASK }
+    headers['x-lander-project'] = PROJECT
+    if (TOKEN) headers['x-lander-token'] = TOKEN
+    await fetch(`${API}/api/${PROJECT}/tasks/${TASK}/cwd`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ cwd, transcriptPath: input.transcript_path }),
+    })
+  } catch {
+    // best-effort: never let a hook failure interfere with turn completion
+  }
+}
+
 const [cmd, ...rest] = process.argv.slice(2)
 const run = {
   land: () => landTask(rest),
@@ -606,6 +636,7 @@ const run = {
   flow: () => runFlow(rest),
   run: () => runJob(rest),
   'bash-guard': () => bashGuard(),
+  'record-cwd': () => recordCwd(),
 }[cmd]
 if (!run)
   die(
