@@ -7,19 +7,16 @@ import {
   writeFile,
   mkdir,
   rename,
-  open,
   stat,
 } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
-import { execFile, spawn } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { reduceStreamLine, addUsage, type Step, type Usage } from './stream'
 import { applyUpdate, applyDone } from './apply'
 import {
   attachDaemonServer,
-  daemonConnected,
   daemonServes,
   sendToDaemon,
   openRunChannel,
@@ -27,7 +24,6 @@ import {
   requestResume,
 } from './daemon'
 import type { StartRunMessage, UsageBody } from './protocol'
-import { fetchUsage } from './usage'
 import {
   readTasks as readTasksStore,
   readTask as readTaskStore,
@@ -40,6 +36,7 @@ import {
   latestUpdateAt,
   recordStatusTransition,
   pendingMessage,
+  lastTurnPrompts,
   worktreeName,
   type Message,
   type TaskEvent,
@@ -60,12 +57,10 @@ const PROJECT_BY_SLUG = new Map<string, Project>(
   PROJECTS.map((p) => [p.slug, p]),
 )
 
-// Daemon split (docs/daemon-server-split-plan.md): when enabled, a run is driven
-// by the host daemon over a WebSocket instead of a detached `bin/lander run`
-// child writing files. Gated so the file path stays the default until the WS
-// path is proven; the lease/liveness file machinery is deleted only in the final
-// cutover step. The daemon authenticates its upgrade with DAEMON_TOKEN.
-const USE_DAEMON = process.env.LANDER_DAEMON === '1'
+// Daemon split (docs/daemon-server-split-plan.md): runs are driven by the host
+// daemon over a WebSocket — the server holds task state, drives the queue, and
+// serves the API/UI, but never spawns a process, touches a pid, or parses
+// stream-json. The daemon authenticates its WS upgrade with DAEMON_TOKEN.
 const DAEMON_TOKEN =
   process.env.LANDER_DAEMON_TOKEN?.trim() ||
   process.env.LANDER_UI_TOKEN?.trim() ||
@@ -158,7 +153,7 @@ type Task = {
   runId?: string
   runCursor?: number
   // Set when a run wedged on a claude error (a non-zero exit that wasn't a
-  // deliberate interrupt — see reduceRun), cleared when the task next starts a
+  // deliberate interrupt — see applyDone), cleared when the task next starts a
   // turn. Drives the UI's retry affordance below a wedged conversation, and
   // tells a retry how to recover. `committed` is our proxy for whether the
   // failed turn's prompt(s) actually reached the session: true if the run had
@@ -315,146 +310,28 @@ async function addProjectAllow(projectPath: string, rule: string): Promise<void>
   await writeFile(file, JSON.stringify(settings, null, 2) + '\n')
 }
 
-// The shape a turn's runner reads from its run dir's job.json. The server writes
-// it; bin/lander's `run` command consumes it. Everything the runner needs to
-// launch claude and where to record its progress lives here, so the runner needs
-// no other knowledge of tasks or the server.
-type RunJob = {
-  runId: string
-  taskId: string
-  project: string
-  cwd: string
-  claudeArgs: string[]
-  env: Record<string, string>
-  logPath: string
-  leasePath: string
-  donePath: string
-  idleTimeoutMs: number
-}
-
-// How long to wait for a freshly-launched runner to write its lease before
-// concluding it failed to start. Generous: a cold `node` start can take a beat.
-const RUN_START_GRACE_MS = 20_000
-// A streaming run is self-evidently alive, so only probe liveness once its log
-// has been silent this long — which also keeps the (process-spawning) probe
-// rare. Set above claude's normal between-output gaps so a thinking pause or a
-// slow tool doesn't trigger needless probing.
-const LIVENESS_QUIET_MS = 15_000
-// Don't spawn the `ps` probe more than once per this interval while a run stays
-// quiet.
-const LIVENESS_PROBE_INTERVAL_MS = 2_000
-// Backstop for a runner that's alive but wedged (so it neither streams nor
-// writes done.json): once its log has been silent this long, treat it as dead
-// regardless. The runner idle-kills claude after 10m of silence and then writes
-// done.json, so a healthy run can't stay quiet past this.
-const RUN_STALL_LIMIT_MS = 12 * 60_000
-// Slack allowed between the start time the runner recorded and the one the OS
-// reports for its pid, when deciding whether a still-present pid is the same
-// process. Comfortably above cold-start skew and `ps`'s 1s resolution, yet far
-// below any window in which a host could cycle its whole pid space and recycle
-// this exact pid.
-const START_MATCH_TOLERANCE_MS = 60_000
-
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-// Read a file, or null if it's missing/unreadable — used for the optional
-// lease/done markers a run may or may not have written yet.
-async function readFileMaybe(file: string): Promise<string | null> {
-  try {
-    return await readFile(file, 'utf8')
-  } catch {
-    return null
-  }
+// Wait (up to timeoutMs) for a daemon serving this project's slug to be
+// connected. Normally already true — dev launches the daemon with the server —
+// so the common path returns immediately; the wait only matters at boot or right
+// after a daemon restart. Returns whether one is serving by the deadline.
+async function awaitDaemonServing(
+  slug: string,
+  timeoutMs = 30_000,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (!daemonServes(slug) && Date.now() < deadline) await sleep(200)
+  return daemonServes(slug)
 }
 
-function safeParse<T>(raw: string | null): T | null {
-  if (raw == null) return null
-  try {
-    return JSON.parse(raw) as T
-  } catch {
-    return null
-  }
-}
-
-// Whether a process is still around. kill(pid, 0) sends no signal but throws if
-// the pid is gone; EPERM means it exists but isn't ours, which still counts.
-function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === 'EPERM'
-  }
-}
-
-// Parse ps(1)'s elapsed-time field "[[dd-]hh:]mm:ss" into seconds; null if it
-// doesn't match (so callers treat a surprise format as "unknown", not "dead").
-function parseEtime(s: string): number | null {
-  const m = s.trim().match(/^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/)
-  if (!m) return null
-  const [, dd, hh, mm, ss] = m
-  return (dd ? +dd : 0) * 86400 + (hh ? +hh : 0) * 3600 + +mm * 60 + +ss
-}
-
-// Whether the process holding a run's lease is still the original runner. A pid
-// is a recyclable number: a dead runner's pid can be handed to an unrelated
-// process, which `kill(pid, 0)` would report as alive. So we corroborate with
-// the process's start time — a reused pid belongs to a process that started
-// later, so the OS's elapsed time reconstructs a start that won't match the one
-// the runner recorded. Returns 'dead' (pid gone, or recycled), 'alive' (present
-// and the start matches), or 'unknown' (the pid is present but the `ps` probe
-// failed — a flaky probe must not be read as death).
-type Liveness = 'alive' | 'dead' | 'unknown'
-async function runnerLiveness(
-  pid: number,
-  startedAt: string,
-): Promise<Liveness> {
-  if (!pidAlive(pid)) return 'dead'
-  let out: string
-  try {
-    const r = await execFileAsync('ps', ['-o', 'etime=', '-p', String(pid)])
-    out = r.stdout.trim()
-  } catch {
-    // `ps` exits non-zero when the pid is gone, but kill(pid,0) just said it's
-    // there — so this is a transient failure (or a death racing us), not proof.
-    return 'unknown'
-  }
-  const elapsed = parseEtime(out)
-  if (elapsed == null) return 'unknown'
-  const osStart = Date.now() - elapsed * 1000
-  return Math.abs(osStart - Date.parse(startedAt)) < START_MATCH_TOLERANCE_MS
-    ? 'alive'
-    : 'dead'
-}
-
-// Stop a turn's runner so a riding task can be wedged out from under the agent.
-// The runner (its own process-group leader) handles SIGTERM by killing claude
-// and writing a clean done.json, which the in-flight reducer folds in —
-// finalizing whatever partial reply streamed without surfacing a crash. Best
-// effort: a run that already finished (no lease, or a dead pid) is a no-op.
-async function interruptRun(project: Project, runId: string): Promise<void> {
-  // Daemon path: the run has no lease file; ask the daemon to stop its child. It
-  // SIGKILLs claude and emits a clean done{interrupted:true}, which reduceRunWs
-  // folds in just like the file path's SIGTERM→done.json.
-  if (USE_DAEMON && daemonConnected()) {
-    sendToDaemon({ type: 'interrupt', runId })
-    return
-  }
-  const leasePath = path.join(project.runsDir, runId, 'lease.json')
-  const lease = safeParse<{ pid: number; startedAt: string }>(
-    await readFileMaybe(leasePath),
-  )
-  // Only signal a pid we've confirmed is still this run's runner — never a pid
-  // the OS may have recycled to an unrelated process.
-  if (
-    lease?.pid != null &&
-    lease.startedAt != null &&
-    (await runnerLiveness(lease.pid, lease.startedAt)) === 'alive'
-  ) {
-    try {
-      process.kill(lease.pid, 'SIGTERM')
-    } catch {}
-  }
+// Stop a turn so a riding task can be wedged out from under the agent: ask the
+// daemon to interrupt the run. It SIGKILLs claude and emits a clean
+// done{interrupted:true}, which reduceRunWs folds in — finalizing whatever
+// partial reply streamed without surfacing a crash. Best effort: a run that has
+// already finished is a no-op on the daemon side.
+function interruptRun(_project: Project, runId: string): void {
+  sendToDaemon({ type: 'interrupt', runId })
 }
 
 // Build the argv for one claude turn from the task's permissions and the prompt.
@@ -586,14 +463,13 @@ function buildClaudeArgs(
   ]
 }
 
-// Launch one claude turn as a detached runner that outlives this server process,
-// then reduce its streamed output onto the task. The runner (bin/lander run)
-// owns the claude child and appends raw stream-json to a per-run log; we only
-// read that log and write task state. So if the server restarts mid-turn the
-// agent keeps working, and a fresh process reattaches to the still-live run (see
-// driveTask / recoverQueues). The first turn establishes the session, later ones
-// resume it. Callers set "riding" via this; we record which run we're tracking
-// so a reattach can find it.
+// Run one claude turn on the host daemon and reduce its streamed updates onto the
+// task. The server builds the run spec and hands it to the daemon over the WS
+// (start-run); the daemon owns the claude child and the stream. Because the
+// daemon outlives the server, a server restart mid-turn doesn't stop the agent —
+// the fresh process reattaches over the WS and resumes from the persisted cursor
+// (see driveTask / recoverQueues). The first turn establishes the session, later
+// ones resume it. Marks "riding" and records the runId so a reattach can find it.
 async function runTurn(
   project: Project,
   id: string,
@@ -629,95 +505,38 @@ async function runTurn(
 
   const runId = randomUUID()
 
-  // Daemon path: hand the run to the host daemon over the WS link and reduce the
-  // structured updates it streams back (reduceRunWs). The daemon owns the claude
-  // child, the cwd resolution, and the stream reduction — so unlike the file path
-  // below the server computes no cwd and writes no run files; it sends the slug
-  // plus cwd hints and lets the daemon resolve the directory (decision 8). Falls
-  // through to the file path when no daemon is connected — or when the connected
-  // daemon doesn't serve this project's slug (it registers the ones it holds host
-  // paths for), so an unserved project keeps working via the file runner rather
-  // than being wedged by the daemon's "no such project" reply.
-  if (USE_DAEMON && daemonConnected() && daemonServes(project.slug)) {
+  // The host daemon owns run execution: it holds the claude child, resolves the
+  // cwd from the project slug + hints (decision 8), reduces the stream, and is the
+  // durable buffer for replay. The server never spawns a process or touches the
+  // filesystem for a run. Wait briefly for a daemon serving this project to be
+  // connected (dev launches it with the server, so it's normally already up); if
+  // none arrives, wedge the turn with an error rather than hang.
+  if (!(await awaitDaemonServing(project.slug))) {
     await mutateTask(file, (t) => {
-      t.status = 'riding'
-      if (!t.token) t.token = token
-      t.runId = runId
-      t.runCursor = 0
-      delete t.retry
-    })
-    const start: StartRunMessage = {
-      type: 'start-run',
-      runId,
-      taskId: id,
-      project: project.slug,
-      recordedCwd: task.cwd,
-      worktree: task.worktree,
-      claudeArgs,
-      env: {
-        PATH: `${path.join(ROOT, 'bin')}:${process.env.PATH ?? ''}`,
-        LANDER_API:
-          process.env.LANDER_PUBLIC_API?.trim() || `http://localhost:${port}`,
-        LANDER_PROJECT: project.slug,
-        LANDER_TASK: id,
-        LANDER_TOKEN: token,
-      },
-      idleTimeoutMs: 10 * 60_000,
-    }
-    sendToDaemon(start)
-    return reduceRunWs(project, id, runId)
+      const at = new Date().toISOString()
+      const msg = pendingMessage(t)
+      const text = 'error running claude: no daemon connected for this project'
+      if (msg) {
+        msg.text = text
+        msg.pending = false
+      } else {
+        t.messages.push({ role: 'assistant', text, createdAt: at })
+      }
+      recordStatusTransition(t, 'wedged', at)
+      t.status = 'wedged'
+      t.updatedAt = at
+      // The turn never reached claude, so nothing was committed — stash the
+      // prompt(s) so the user can just retry once a daemon is back (a transient
+      // daemon outage is the expected cause).
+      t.retry = { committed: false, prompts: lastTurnPrompts(t.messages) }
+    }).catch(() => {})
+    return 'crashed'
   }
 
-  // Resume the turn in whatever directory the last one ended in (e.g. a worktree
-  // the agent entered), as recorded by the Stop hook on task.cwd. Guard it: a
-  // recorded dir that no longer exists (a worktree removed between turns) must
-  // not strand the task, so fall back to the project root. project.path is
-  // assumed present, so it skips the stat in the common case.
-  //
-  // Exception: when the task is in a tracked worktree, launch from the project
-  // root and let `--worktree` (see buildClaudeArgs) re-enter it. ExitWorktree
-  // returns the session to its launch directory, so launching from the root is
-  // what lets a clean exit land back at the root rather than inside the
-  // now-departed worktree.
-  let cwd = project.path
-  if (!task.worktree && task.cwd && task.cwd !== project.path) {
-    try {
-      if ((await stat(task.cwd)).isDirectory()) cwd = task.cwd
-    } catch {
-      // recorded dir is gone — fall back to the project root
-    }
-  }
-
-  const runDir = path.join(project.runsDir, runId)
-  await mkdir(runDir, { recursive: true })
-  const job: RunJob = {
-    runId,
-    taskId: id,
-    project: project.slug,
-    cwd,
-    claudeArgs,
-    env: {
-      PATH: `${path.join(ROOT, 'bin')}:${process.env.PATH ?? ''}`,
-      // The base URL the runner (and the in-task CLI) use to reach this server.
-      // Defaults to localhost for a same-host server; override with
-      // LANDER_PUBLIC_API when the server is reached across a boundary (e.g. a
-      // container) so the daemon/CLI resolve it correctly — see the daemon split.
-      LANDER_API: process.env.LANDER_PUBLIC_API?.trim() || `http://localhost:${port}`,
-      LANDER_PROJECT: project.slug,
-      LANDER_TASK: id,
-      LANDER_TOKEN: token,
-    },
-    logPath: path.join(runDir, 'out.jsonl'),
-    leasePath: path.join(runDir, 'lease.json'),
-    donePath: path.join(runDir, 'done.json'),
-    idleTimeoutMs: 10 * 60_000,
-  }
-  await writeFile(path.join(runDir, 'job.json'), JSON.stringify(job, null, 2))
-
-  // Mark riding and record the run before launching, so a crash between here and
-  // the first reduce still leaves a reattachable pointer. Don't bump updatedAt:
-  // the riding flip isn't a turn boundary, and the user message that triggered
-  // this run already set it. updatedAt next moves when the assistant begins.
+  // Mark riding and record the run before sending, so a crash between here and the
+  // first update still leaves a resumable pointer (recoverQueues reattaches via
+  // the persisted runId/runCursor). Don't bump updatedAt: the riding flip isn't a
+  // turn boundary, and the triggering user message already set it.
   await mutateTask(file, (t) => {
     t.status = 'riding'
     if (!t.token) t.token = token
@@ -727,219 +546,39 @@ async function runTurn(
     delete t.retry
   })
 
-  // Detached and unref'd, in its own process group: a signal to this server's
-  // group (a manual restart, or the watcher in dev) won't reach it, so the agent
-  // runs on. stdio is ignored — the runner records everything to files.
-  const child = spawn(
-    process.execPath,
-    [path.join(ROOT, 'bin', 'lander'), 'run', path.join(runDir, 'job.json')],
-    { detached: true, stdio: 'ignore' },
-  )
-  child.unref()
-
-  return reduceRun(project, id, runId)
-}
-
-// Tail a run's append-only output log, reducing each stream-json line onto the
-// task, until the runner signals completion (writes done.json) or dies without
-// doing so. Resumes from the byte cursor persisted on the task, so a server that
-// restarts mid-run reattaches and picks up exactly where it left off. Returns
-// 'done' on normal completion (success or claude error) or 'crashed' if the
-// runner vanished mid-stream.
-async function reduceRun(
-  project: Project,
-  id: string,
-  runId: string,
-): Promise<'done' | 'crashed'> {
-  const file = path.join(project.dataDir, `${id}.json`)
-  const runDir = path.join(project.runsDir, runId)
-  const logPath = path.join(runDir, 'out.jsonl')
-  const leasePath = path.join(runDir, 'lease.json')
-  const donePath = path.join(runDir, 'done.json')
-
-  // The cursor lives on the task; we own it for the duration of this run (only
-  // one reducer runs per task — see driveTask's `running` guard), so a local
-  // copy is authoritative once seeded from disk.
-  const seed = await readTask(project.dataDir, id)
-  let cursor = seed?.runCursor ?? 0
-  // The turn's running token usage, summed across its inferences as they stream
-  // and replaced by the authoritative total when the result event lands. Seeded
-  // from the pending message so a reattach after a restart keeps the prefix it
-  // already folded in. `usageInf` is the last inference id counted, so an
-  // inference's repeated content-block events are summed only once.
-  let liveUsage: Usage | undefined = (seed ? pendingMessage(seed) : undefined)?.usage
-  let usageInf: string | undefined
-  // The session's driving (main-agent) model, from the run's `system`/`init`
-  // event — what we attribute every turn's usage to, regardless of which model
-  // logged the most output (a subagent on a cheaper model would otherwise skew
-  // it). Seeded from the persisted usage's model so a reattach past the init
-  // event keeps it.
-  let drivingModel: string | undefined = liveUsage?.model
-  // The reset time from a rejecting `rate_limit_event`, captured if this run hits
-  // the session limit. Carried onto the wedge's `retry` below, so a retry can wait
-  // for the limit to lift instead of firing into the same wall. In-memory for the
-  // run: the event lands microseconds before the failing turn's done marker, so a
-  // live reducer always sees both in one pass (a restart in that sub-second window
-  // would lose it — the retry then just falls back to an immediate one).
-  let rateLimitResetsAt: string | undefined
-  let sawLease = false
-  const startedAt = Date.now()
-  // When the log last grew, and when we last probed liveness: a run that keeps
-  // streaming never gets probed (it's plainly alive); we only check once it's
-  // gone quiet, and then no more than once per probe interval.
-  let lastProgressAt = Date.now()
-  let lastProbeAt = 0
-
-  while (true) {
-    const doneRaw = await readFileMaybe(donePath)
-    const done = safeParse<{
-      exitCode: number
-      interrupted?: boolean
-      stderr?: string
-    }>(doneRaw)
-
-    // Fold in any new bytes. Read only the slice past the cursor so a long run's
-    // log isn't re-read each poll. Stop at the last newline (a partial trailing
-    // line isn't a complete event yet) — except once done, when EOF terminates
-    // the final line too.
-    const st = await stat(logPath).catch(() => null)
-    if (st && st.size > cursor) {
-      // Bytes are arriving — the runner is plainly alive, so reset the quiet
-      // clock even if this batch ends mid-line and we fold nothing yet.
-      lastProgressAt = Date.now()
-      const len = st.size - cursor
-      const b = Buffer.alloc(len)
-      const fh = await open(logPath, 'r')
-      try {
-        await fh.read(b, 0, len, cursor)
-      } finally {
-        await fh.close()
-      }
-      let take = b.length
-      if (!done) {
-        const lastNl = b.lastIndexOf(0x0a)
-        take = lastNl >= 0 ? lastNl + 1 : 0
-      }
-      if (take > 0) {
-        const text = b.subarray(0, take).toString('utf8')
-        const steps: Step[] = []
-        let finalText: string | undefined
-        const blockedIds: string[] = []
-        let usageChanged = false
-        for (const raw of text.split('\n')) {
-          const line = raw.trim()
-          if (!line) continue
-          const reduced = reduceStreamLine(line, new Date().toISOString())
-          if (reduced.drivingModel) drivingModel = reduced.drivingModel
-          if (reduced.rateLimitResetsAt && !rateLimitResetsAt) {
-            // First sight of a session-limit rejection this run: the window just
-            // filled, which is a usage-moving event in its own right, so refresh
-            // the snapshot now rather than waiting for the failing turn's done
-            // marker below to do it. Both share refreshUsage's 60s limiter, so
-            // the two triggers collapse to a single upstream fetch.
-            void refreshUsage()
-          }
-          if (reduced.rateLimitResetsAt) rateLimitResetsAt = reduced.rateLimitResetsAt
-          steps.push(...reduced.steps)
-          if (reduced.finalText !== undefined) finalText = reduced.finalText
-          if (reduced.blockedIds) blockedIds.push(...reduced.blockedIds)
-          if (reduced.usage) {
-            if (reduced.usageFinal) {
-              // The result event's authoritative total supersedes the estimate.
-              liveUsage = reduced.usage
-              usageChanged = true
-            } else if (reduced.usageInferenceId !== usageInf) {
-              // A new inference's usage — add it once (its content-block events
-              // repeat the same numbers under the same id).
-              usageInf = reduced.usageInferenceId
-              liveUsage = addUsage(liveUsage, reduced.usage)
-              usageChanged = true
-            }
-          }
-        }
-        cursor += take
-        await mutateTask(file, (t) => {
-          applyUpdate(t, {
-            steps,
-            finalText,
-            blockedIds,
-            usage: liveUsage,
-            usageChanged,
-            drivingModel,
-            cursor,
-          })
-        }).catch(() => {})
-      }
-    }
-
-    if (done) {
-      const at = new Date().toISOString()
-      await mutateTask(file, (t) => {
-        applyDone(t, done, { rateLimitResetsAt, at })
-      }).catch(() => {})
-      // A turn just finished — agent activity is exactly when usage moves, so
-      // refresh the cached snapshot (rate-limited; the next poll carries it).
-      void refreshUsage()
-      return 'done'
-    }
-
-    // No done marker yet. A run that's still streaming is self-evidently alive,
-    // so only assess liveness once the log has gone quiet — which also keeps the
-    // probe (it spawns `ps`) rare. Throttle it so a long quiet stretch doesn't
-    // spawn one every poll.
-    const quietMs = Date.now() - lastProgressAt
-    if (
-      quietMs > LIVENESS_QUIET_MS &&
-      Date.now() - lastProbeAt > LIVENESS_PROBE_INTERVAL_MS
-    ) {
-      lastProbeAt = Date.now()
-      const lease = safeParse<{ pid: number; startedAt: string }>(
-        await readFileMaybe(leasePath),
-      )
-      if (lease?.pid != null) sawLease = true
-      const liveness =
-        lease?.pid != null && lease.startedAt != null
-          ? await runnerLiveness(lease.pid, lease.startedAt)
-          : 'unknown'
-      // Dead = the runner's pid is gone or was recycled to another process
-      // (start mismatch), or it never wrote a lease before the startup grace
-      // elapsed, or it's been silently wedged past the stall backstop. A merely
-      // 'unknown' probe (the pid's there but `ps` hiccuped) is not death — we
-      // keep waiting; the backstop bounds a genuinely stuck-but-alive runner.
-      const startupExpired =
-        !sawLease && Date.now() - startedAt > RUN_START_GRACE_MS
-      const dead =
-        (sawLease && liveness === 'dead') ||
-        startupExpired ||
-        quietMs > RUN_STALL_LIMIT_MS
-      if (dead) {
-        await mutateTask(file, (t) => {
-          const msg = pendingMessage(t)
-          if (msg) {
-            if (!msg.text) msg.text = 'error running claude: run interrupted'
-            msg.pending = false
-            t.updatedAt = new Date().toISOString()
-          }
-          delete t.runId
-          delete t.runCursor
-        }).catch(() => {})
-        void refreshUsage()
-        return 'crashed'
-      }
-    }
-
-    await sleep(200)
+  const start: StartRunMessage = {
+    type: 'start-run',
+    runId,
+    taskId: id,
+    project: project.slug,
+    // cwd hints — the daemon does the stat/fallback/worktree resolution locally.
+    recordedCwd: task.cwd,
+    worktree: task.worktree,
+    claudeArgs,
+    env: {
+      PATH: `${path.join(ROOT, 'bin')}:${process.env.PATH ?? ''}`,
+      // The base URL the daemon's claude (and the in-task CLI) use to reach this
+      // server. Defaults to localhost; override with LANDER_PUBLIC_API when the
+      // server is reached across a boundary (e.g. a container).
+      LANDER_API:
+        process.env.LANDER_PUBLIC_API?.trim() || `http://localhost:${port}`,
+      LANDER_PROJECT: project.slug,
+      LANDER_TASK: id,
+      LANDER_TOKEN: token,
+    },
+    idleTimeoutMs: 10 * 60_000,
   }
+  sendToDaemon(start)
+  return reduceRunWs(project, id, runId)
 }
 
-// The daemon-path analogue of reduceRun: instead of tailing a file, drain the
-// per-run channel the WS handler feeds (update/done/crashed) and fold each event
-// onto the task with the same applyUpdate/applyDone consumer. The daemon already
+// Drain the per-run channel the WS handler feeds (update/done/crashed) and fold
+// each event onto the task with the applyUpdate/applyDone consumer. The daemon
 // did the reduction and the cross-line usage accumulation, so an `update` maps
 // straight onto applyUpdate (seq becomes the run cursor); `done` finalizes;
-// `crashed` (the daemon stayed gone past the reconnect grace) mirrors the file
-// path's dead-runner branch. Returns 'done' on completion (success or claude
-// error) or 'crashed'. `resume` reattaches to a run already in flight (a server
+// `crashed` (the daemon stayed gone past the reconnect grace) finalizes the task
+// as an interrupted run. Returns 'done' on completion (success or claude error)
+// or 'crashed'. `resume` reattaches to a run already in flight (a server
 // reload, or queue recovery): it seeds the cursor from disk and asks a connected
 // daemon to replay from there — the daemon either replays its buffer or aborts a
 // run it no longer holds.
@@ -952,10 +591,8 @@ async function reduceRunWs(
   const file = path.join(project.dataDir, `${id}.json`)
   const channel = openRunChannel(runId)
   // The reset time from a rejecting rate_limit_event, carried onto applyDone's
-  // retry. The daemon resends the sticky value on each update; we keep the latest
-  // and fire a usage refresh the first time we see one (the window just filled).
+  // retry. The daemon resends the sticky value on each update; we keep the latest.
   let rateLimitResetsAt: string | undefined
-  let sawRateLimit = false
   // Only apply a seq past the last one we folded in — guards against a replayed
   // update from a resume-from. Seeded from the task's persisted run cursor so a
   // reattach resumes from exactly what's on disk; the channel mirrors it so the
@@ -981,7 +618,6 @@ async function reduceRunWs(
           delete t.runId
           delete t.runCursor
         }).catch(() => {})
-        void refreshUsage()
         return 'crashed'
       }
       if (ev.kind === 'update') {
@@ -989,12 +625,8 @@ async function reduceRunWs(
         if (u.seq <= lastSeq) continue
         lastSeq = u.seq
         channel.lastSeq = u.seq
-        if (u.rateLimitResetsAt && !sawRateLimit) {
-          // First session-limit rejection this run — the window just filled, a
-          // usage-moving event, so refresh now (shares refreshUsage's 60s floor).
-          sawRateLimit = true
-          void refreshUsage()
-        }
+        // The daemon owns usage refresh (it has its own rate-limit trigger); we
+        // only keep the reset time to carry onto applyDone's retry stash.
         if (u.rateLimitResetsAt) rateLimitResetsAt = u.rateLimitResetsAt
         await mutateTask(file, (t) => {
           applyUpdate(t, {
@@ -1015,8 +647,6 @@ async function reduceRunWs(
         }).catch(() => {})
         // Tell the daemon it can drop this run's replay buffer.
         sendToDaemon({ type: 'ack', runId })
-        // A turn just finished — agent activity is when usage moves, so refresh.
-        void refreshUsage()
         return 'done'
       }
     }
@@ -1054,24 +684,10 @@ async function driveTask(
     // the queue drain from that rather than the caller's hint.
     const existing = await readTask(project.dataDir, id)
     if (existing?.runId) {
-      // Only the file runner leaves a job.json. A daemon-driven run writes no
-      // files: reattach via reduceRunWs with resume, which asks the daemon to
-      // replay from the persisted cursor (or aborts if the daemon no longer holds
-      // it). With the daemon off every run has a job.json, so this stays the
-      // original file-path behavior; a no-job run in non-daemon mode is genuinely
-      // gone, so drop the pointer and let the turn replay.
-      const hasJob =
-        (await readFileMaybe(
-          path.join(project.runsDir, existing.runId, 'job.json'),
-        )) != null
-      if (hasJob) await reduceRun(project, id, existing.runId)
-      else if (USE_DAEMON)
-        await reduceRunWs(project, id, existing.runId, { resume: true })
-      else
-        await mutateTask(file, (t) => {
-          delete t.runId
-          delete t.runCursor
-        }).catch(() => {})
+      // Reattach via reduceRunWs with resume: it asks the daemon (which outlived
+      // our restart) to replay from the persisted cursor, or aborts the run if
+      // the daemon no longer holds it.
+      await reduceRunWs(project, id, existing.runId, { resume: true })
       const after = await readTask(project.dataDir, id)
       mode = after?.messages.some((m) => m.role === 'assistant')
         ? 'resume'
@@ -1273,64 +889,13 @@ async function launchScheduled(): Promise<void> {
   }
 }
 
-// The last successful usage snapshot and when it was fetched. The tasks poll
-// embeds whatever's here, and the server — not the client — decides when to
-// refresh it (see refreshUsage). The window resets/utilization move slowly, so a
-// 60s floor between upstream fetches is plenty.
+// The latest usage snapshot the daemon pushed (decision 6). The daemon owns the
+// fetch + refresh schedule and sends a `usage` message on each refresh, which
+// lands here via the WS handler; the server only caches it and serves it (the
+// tasks poll embeds it, /api/usage returns it). The server never reads the
+// credential or hits the OAuth endpoint, which is what lets it move into a
+// credential-less container later.
 let usageCache: { at: number; body: UsageBody } | null = null
-const USAGE_TTL_MS = 60_000
-// Dedupes concurrent refreshes so two triggers firing at once make one fetch.
-let usageRefreshing: Promise<void> | null = null
-// A one-shot timer armed for just after the soonest window resets (see below).
-let usageResetTimer: ReturnType<typeof setTimeout> | null = null
-
-// Refresh the cached snapshot from upstream unless one was fetched within the
-// TTL. This 60s guard is the single rate limiter every trigger shares — the
-// per-turn refresh, the reset-time timer, the boot fetch, and the /api/usage
-// route all funnel through here, so none of them can hammer the OAuth endpoint
-// or the keychain. A failed fetch leaves the last snapshot in place. Re-arms the
-// reset timer off whatever snapshot we hold, so the cycle below survives a
-// transient upstream error.
-//
-// In daemon mode the server doesn't own usage (decision 6): the daemon fetches,
-// schedules, and pushes snapshots, which land in usageCache via the `usage`
-// message handler. So every server-side trigger here becomes a no-op — the
-// server never reads the credential or hits the endpoint, which is what lets it
-// move into a credential-less container later.
-function refreshUsage(): Promise<void> {
-  if (USE_DAEMON) return Promise.resolve()
-  if (usageCache && Date.now() - usageCache.at < USAGE_TTL_MS)
-    return Promise.resolve()
-  if (usageRefreshing) return usageRefreshing
-  usageRefreshing = (async () => {
-    const r = await fetchUsage()
-    if (r.ok) usageCache = { at: Date.now(), body: r.body }
-    if (usageCache) scheduleUsageReset(usageCache.body)
-  })().finally(() => {
-    usageRefreshing = null
-  })
-  return usageRefreshing
-}
-
-// Arm a one-shot refresh for just after the soonest of the two windows resets,
-// so the readout catches the utilization dropping back without waiting for the
-// next turn. It funnels through refreshUsage (the same 60s limiter) and, on
-// success, re-arms from the fresh resetsAt — so it perpetuates itself across
-// resets. A reset already past (or one the limiter would currently swallow)
-// clamps to the TTL, so we retry shortly rather than spin.
-function scheduleUsageReset(body: UsageBody): void {
-  const resets = [body.session?.resetsAt, body.weekly?.resetsAt]
-    .map((s) => (s ? Date.parse(s) : NaN))
-    .filter((n) => Number.isFinite(n))
-  if (!resets.length) return
-  const delay = Math.max(Math.min(...resets) + 2_000 - Date.now(), USAGE_TTL_MS)
-  if (usageResetTimer) clearTimeout(usageResetTimer)
-  usageResetTimer = setTimeout(() => {
-    usageResetTimer = null
-    void refreshUsage()
-  }, delay)
-  usageResetTimer.unref()
-}
 
 // The shared secret that marks a request as coming from the human's browser
 // (vs. a task's `lander` CLI). Prefer the env var dev.mjs sets — it hands the
@@ -1388,27 +953,10 @@ const app = new Hono()
 
 // Current Claude subscription usage: the 5-hour session window and the 7-day
 // weekly window, each as { utilization (0-100), resetsAt }. Mirrors what the
-// `/usage` command in the Claude CLI shows, read from the same OAuth endpoint.
-// Served from the same cache the tasks poll embeds. The UI reads usage off the
-// poll now, so this is mainly a debug/external hook; it still honours the shared
-// limiter and forces a fetch only when there's nothing cached.
-app.get('/api/usage', async (c) => {
-  // In daemon mode the server never fetches — it only serves the snapshot the
-  // daemon pushes (decision 6). Serve whatever's cached, or 503 until the first
-  // push lands. Otherwise (file path) force a fetch when nothing fresh is cached.
-  if (!USE_DAEMON && (!usageCache || Date.now() - usageCache.at >= USAGE_TTL_MS)) {
-    const r = await fetchUsage()
-    if (r.ok) {
-      usageCache = { at: Date.now(), body: r.body }
-      scheduleUsageReset(r.body)
-    } else if (!usageCache) {
-      return c.json({ error: r.error }, r.status)
-    }
-    // else: the fetch failed but we hold a stale snapshot — serve it.
-  }
-  // Daemon path only: the fetch block above can't be reached with the flag on, so
-  // the cache is empty until the daemon's first push — 503 until then. On the file
-  // path this is unreachable (the block sets the cache or already returned).
+// `/usage` command in the Claude CLI shows. Served from the snapshot the daemon
+// pushes (decision 6) — the same cache the tasks poll embeds; the server never
+// fetches it. 503 until the daemon's first push lands.
+app.get('/api/usage', (c) => {
   if (!usageCache)
     return c.json({ error: 'no usage snapshot available yet' }, 503)
   return c.json(usageCache.body)
@@ -1427,8 +975,8 @@ app.get('/api/:project/tasks', async (c) => {
     // archived ones instead, each tagged so the UI can mark the row and offer
     // Restore.
     // Account usage rides along with every tasks poll so the client never has to
-    // decide when it's stale (see refreshUsage for who triggers a refresh). It's
-    // global, not per-project — the same snapshot on every project's response.
+    // decide when it's stale (the daemon refreshes and pushes it — decision 6).
+    // It's global, not per-project — the same snapshot on every project's response.
     const usage = usageCache?.body ?? null
     if (c.req.query('archived') !== '1')
       return c.json({
@@ -1802,7 +1350,7 @@ app.patch('/api/:project/tasks/:id', async (c) => {
     // human redirecting a wedge, or a spawner winding down a child it launched.
     // A task wedging or landing *itself* is finishing its own turn and runs on.
     // The interrupt fires after the status write below; the run's reducer folds
-    // in the partial reply and (reduceRun only wedges a still-riding task on a
+    // in the partial reply and (applyDone only wedges a still-riding task on a
     // non-deliberate exit) leaves the new non-riding status as-is.
     const selfInitiated =
       principal.kind === 'task' && principal.task.session === id
@@ -2531,40 +2079,13 @@ async function recoverQueues(): Promise<void> {
       if (task.scheduledFor) continue
       const everRan = task.messages.some((m) => m.role === 'assistant')
 
-      // A tracked daemon run writes no files: hand it to driveTask, whose
-      // reattach asks the daemon to replay from the persisted cursor (or aborts
-      // it if the daemon is gone past the grace). The daemon, having outlived our
-      // restart, still holds the run and its buffer.
-      if (task.runId && USE_DAEMON) {
+      // A tracked run: hand it to driveTask, whose reattach asks the daemon to
+      // replay from the persisted cursor (or aborts it if the daemon is gone past
+      // the grace). The daemon, having outlived our restart, still holds the run
+      // and its buffer.
+      if (task.runId) {
         void driveTask(project, id, 'resume')
         continue
-      }
-
-      // A tracked run: reattach if its runner is still alive or already wrote a
-      // done marker (driveTask reduces it to completion). If neither, the run
-      // was interrupted — drop the tracking and fall through to replay it.
-      if (task.runId) {
-        const runDir = path.join(project.runsDir, task.runId)
-        const done = (await readFileMaybe(path.join(runDir, 'done.json'))) != null
-        const lease = safeParse<{ pid: number; startedAt: string }>(
-          await readFileMaybe(path.join(runDir, 'lease.json')),
-        )
-        // No lease here means the runner never recorded itself — and since
-        // nothing is writing it at boot, that's a real absence, not a torn read,
-        // so the run is gone. Otherwise judge by pid + start time; an 'unknown'
-        // probe keeps us reattached rather than abandoning a possibly-live run.
-        const liveness: Liveness =
-          lease?.pid != null && lease.startedAt != null
-            ? await runnerLiveness(lease.pid, lease.startedAt)
-            : 'dead'
-        if (done || liveness !== 'dead') {
-          void driveTask(project, id, 'resume')
-          continue
-        }
-        await mutateTask(file, (t) => {
-          delete t.runId
-          delete t.runCursor
-        }).catch(() => {})
       }
 
       const hasQueue = !!(task.queued && task.queued.length)
@@ -2630,29 +2151,22 @@ const port = Number(process.env.PORT ?? 6181)
 const server = serve({ fetch: app.fetch, port })
 console.log(`api listening on http://localhost:${port}`)
 
-// When the daemon split is enabled, accept the host daemon's WebSocket and route
-// runs to it. The server's @hono/node-server serve() returns a Node http.Server,
-// which we hand to the WS layer to handle the /daemon upgrade. The daemon owns
-// usage end to end (decision 6): each pushed snapshot lands straight in the cache
-// the tasks poll embeds, and the server's own refreshUsage no-ops in this mode —
-// so the boot refreshUsage() below is a no-op here and the daemon's connect-time
-// push is what primes the snapshot.
-if (USE_DAEMON) {
-  attachDaemonServer(server as unknown as import('node:http').Server, {
-    token: DAEMON_TOKEN,
-    onUsage: (body) => {
-      usageCache = { at: Date.now(), body }
-    },
-  })
-  console.log(`daemon WS endpoint at ws://localhost:${port}/daemon`)
-}
+// Accept the host daemon's WebSocket and route runs to it. The server's
+// @hono/node-server serve() returns a Node http.Server, which we hand to the WS
+// layer to handle the /daemon upgrade. The daemon owns usage end to end (decision
+// 6): each pushed snapshot lands straight in the cache the tasks poll embeds and
+// the daemon's connect-time push primes it.
+attachDaemonServer(server as unknown as import('node:http').Server, {
+  token: DAEMON_TOKEN,
+  onUsage: (body) => {
+    usageCache = { at: Date.now(), body }
+  },
+})
+console.log(`daemon WS endpoint at ws://localhost:${port}/daemon`)
 console.log('projects:')
 for (const p of PROJECTS) console.log(`  ${p.slug}  ${p.path}`)
 void backfillSeen()
 void recoverQueues()
-// Prime the usage snapshot so the sidebar shows it on first load, before any
-// turn completes. Thereafter turn-ends and the reset timer keep it current.
-void refreshUsage()
 // Launch due scheduled tasks on boot (catching any whose time passed while the
 // server was down), then sweep every 15s to launch each as it comes due.
 void launchScheduled()
@@ -2661,9 +2175,9 @@ const scheduler = setInterval(() => void launchScheduled(), 15_000)
 // Shut down cleanly when the watcher restarts us (or on Ctrl-C): stop the
 // scheduler and let the HTTP server finish the requests already in flight before
 // exiting, so a reload doesn't drop a write mid-flight. In-flight runs need no
-// special handling — they're detached and keep going, and the fresh process
-// reattaches to them via the cursor persisted on each task. A timeout forces the
-// exit if a connection refuses to close, so a reload can't hang.
+// special handling — they live in the daemon, which outlives the server; the
+// fresh process reattaches over the WS and resumes each from the persisted cursor
+// (resume-from). A timeout forces the exit if a connection refuses to close.
 let shuttingDown = false
 function shutdown(): void {
   if (shuttingDown) return

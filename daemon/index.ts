@@ -25,9 +25,21 @@ import type {
   UsageMessage,
 } from '../server/protocol'
 
-const projectDirs = process.argv.slice(2).map((p) => path.resolve(p))
+// Project host paths come from argv, or PROJECT_DIRS (newline-separated, as
+// dev.mjs sets for the server) when argv is empty — so `npm run dev` can launch
+// the daemon with the same env the server gets.
+const fromArgv = process.argv.slice(2)
+const fromEnv = (process.env.PROJECT_DIRS ?? '')
+  .split('\n')
+  .map((s) => s.trim())
+  .filter(Boolean)
+const projectDirs = (fromArgv.length ? fromArgv : fromEnv).map((p) =>
+  path.resolve(p),
+)
 if (!projectDirs.length) {
-  console.error('usage: node daemon/index.ts /path/to/project [more ...]')
+  console.error(
+    'usage: node daemon/index.ts /path/to/project [more ...]  (or set PROJECT_DIRS)',
+  )
   process.exit(1)
 }
 // Map each served slug to its host path; the server keys runs by slug and the
