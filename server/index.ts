@@ -17,6 +17,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { reduceStreamLine, addUsage, type Step, type Usage } from './stream'
+import { applyUpdate, applyDone } from './apply'
 import {
   readTasks as readTasksStore,
   readTask as readTaskStore,
@@ -29,8 +30,6 @@ import {
   latestUpdateAt,
   recordStatusTransition,
   pendingMessage,
-  ensurePending,
-  lastTurnPrompts,
   worktreeName,
   type Message,
   type TaskEvent,
@@ -788,38 +787,15 @@ async function reduceRun(
         }
         cursor += take
         await mutateTask(file, (t) => {
-          if (steps.length || finalText !== undefined || blockedIds.length || usageChanged) {
-            // Bump updatedAt only on the batch that begins the assistant message
-            // (creates the pending one), not on every streamed batch: streaming
-            // churn shouldn't keep reordering the sidebar.
-            const begun = !pendingMessage(t)
-            const msg = ensurePending(t)
-            if (steps.length) msg.steps = [...(msg.steps ?? []), ...steps]
-            // The turn's terminal result event names the tool calls that were
-            // refused; flag their tool_result steps blocked. The result lands
-            // after those steps streamed (often in an earlier batch), so reconcile
-            // across the whole message, not just this batch.
-            if (blockedIds.length && msg.steps) {
-              const denied = new Set(blockedIds)
-              for (const s of msg.steps)
-                if (s.kind === 'tool_result' && s.toolUseId && denied.has(s.toolUseId))
-                  s.blocked = true
-            }
-            // Carry the running reply text onto the message as it lands so it
-            // survives a restart (the cursor won't replay it).
-            if (finalText !== undefined) msg.text = finalText
-            // Record the turn's running token usage as it streams (summed across
-            // inferences, finalized by the result event) so the UI's corner
-            // readout updates live, not just at turn end. Always attribute it to
-            // the session's driving model — not the per-inference or dominant
-            // model, which a tool-heavy subagent on a cheaper model would skew.
-            if (usageChanged && liveUsage)
-              msg.usage = drivingModel
-                ? { ...liveUsage, model: drivingModel }
-                : liveUsage
-            if (begun) t.updatedAt = msg.createdAt
-          }
-          t.runCursor = cursor
+          applyUpdate(t, {
+            steps,
+            finalText,
+            blockedIds,
+            usage: liveUsage,
+            usageChanged,
+            drivingModel,
+            cursor,
+          })
         }).catch(() => {})
       }
     }
@@ -827,48 +803,7 @@ async function reduceRun(
     if (done) {
       const at = new Date().toISOString()
       await mutateTask(file, (t) => {
-        const msg = ensurePending(t)
-        // Whether claude had begun replying before the run ended: real streamed
-        // content (steps or text) on the pending message, captured before we
-        // overwrite an empty one with the error below. On a claude error this is
-        // our proxy for "the user's turn reached the session and was committed" —
-        // if a reply had started, claude had accepted and recorded the prompt.
-        const hadOutput =
-          (msg.steps?.length ?? 0) > 0 || msg.text.trim().length > 0
-        // A non-zero exit with no reply text is an error to surface; otherwise
-        // the reduced text stands as the reply. A deliberate interrupt (the task
-        // was wedged mid-run) is not an error — keep the partial reply, and note
-        // the stop if nothing had streamed yet.
-        if (!msg.text && done.interrupted) msg.text = '_(interrupted)_'
-        else if (!msg.text && done.exitCode !== 0)
-          msg.text =
-            `error running claude: exited ${done.exitCode}` +
-            (done.stderr?.trim() ? `\n${done.stderr.trim()}` : '')
-        msg.pending = false
-        // A claude error — a non-zero exit that isn't a deliberate interrupt,
-        // most often an error HTTP response from the assistant — needs the
-        // user's attention, so wedge the task rather than letting driveTask
-        // quietly bring it to rest. We only override a still-riding task: if the
-        // agent already moved itself (its own `lander wedge`, or `lander land`),
-        // that stands. driveTask's finally only demotes riding→resting, so a
-        // wedge set here survives it.
-        if (done.exitCode !== 0 && !done.interrupted && t.status === 'riding') {
-          recordStatusTransition(t, 'wedged', at)
-          t.status = 'wedged'
-          // Stash what a retry needs: whether the failed turn was committed, and
-          // its prompt(s) for the re-send path. The error reply is now the
-          // trailing message, so the prompt(s) sit just before it. A session-limit
-          // rejection also carries its reset time, so the retry can be scheduled
-          // for then rather than fired into the same wall.
-          t.retry = {
-            committed: hadOutput,
-            prompts: lastTurnPrompts(t.messages),
-            ...(rateLimitResetsAt ? { resetsAt: rateLimitResetsAt } : {}),
-          }
-        }
-        t.updatedAt = at
-        delete t.runId
-        delete t.runCursor
+        applyDone(t, done, { rateLimitResetsAt, at })
       }).catch(() => {})
       // A turn just finished — agent activity is exactly when usage moves, so
       // refresh the cached snapshot (rate-limited; the next poll carries it).
