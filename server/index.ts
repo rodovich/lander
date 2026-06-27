@@ -19,6 +19,15 @@ import { fileURLToPath } from 'node:url'
 import { reduceStreamLine, addUsage, type Step, type Usage } from './stream'
 import { applyUpdate, applyDone } from './apply'
 import {
+  attachDaemonServer,
+  daemonConnected,
+  daemonServes,
+  sendToDaemon,
+  openRunChannel,
+  closeRunChannel,
+} from './daemon'
+import type { StartRunMessage } from './protocol'
+import {
   readTasks as readTasksStore,
   readTask as readTaskStore,
   writeTask as writeTaskStore,
@@ -49,6 +58,17 @@ const PROJECTS = parseProjects(ROOT, process.env, process.cwd())
 const PROJECT_BY_SLUG = new Map<string, Project>(
   PROJECTS.map((p) => [p.slug, p]),
 )
+
+// Daemon split (docs/daemon-server-split-plan.md): when enabled, a run is driven
+// by the host daemon over a WebSocket instead of a detached `bin/lander run`
+// child writing files. Gated so the file path stays the default until the WS
+// path is proven; the lease/liveness file machinery is deleted only in the final
+// cutover step. The daemon authenticates its upgrade with DAEMON_TOKEN.
+const USE_DAEMON = process.env.LANDER_DAEMON === '1'
+const DAEMON_TOKEN =
+  process.env.LANDER_DAEMON_TOKEN?.trim() ||
+  process.env.LANDER_UI_TOKEN?.trim() ||
+  ''
 
 type Task = {
   session: string
@@ -412,6 +432,13 @@ async function runnerLiveness(
 // finalizing whatever partial reply streamed without surfacing a crash. Best
 // effort: a run that already finished (no lease, or a dead pid) is a no-op.
 async function interruptRun(project: Project, runId: string): Promise<void> {
+  // Daemon path: the run has no lease file; ask the daemon to stop its child. It
+  // SIGKILLs claude and emits a clean done{interrupted:true}, which reduceRunWs
+  // folds in just like the file path's SIGTERM→done.json.
+  if (USE_DAEMON && daemonConnected()) {
+    sendToDaemon({ type: 'interrupt', runId })
+    return
+  }
   const leasePath = path.join(project.runsDir, runId, 'lease.json')
   const lease = safeParse<{ pid: number; startedAt: string }>(
     await readFileMaybe(leasePath),
@@ -599,6 +626,47 @@ async function runTurn(
   const token = task.token ?? randomUUID()
   const claudeArgs = buildClaudeArgs(task, id, prompt, mode)
 
+  const runId = randomUUID()
+
+  // Daemon path: hand the run to the host daemon over the WS link and reduce the
+  // structured updates it streams back (reduceRunWs). The daemon owns the claude
+  // child, the cwd resolution, and the stream reduction — so unlike the file path
+  // below the server computes no cwd and writes no run files; it sends the slug
+  // plus cwd hints and lets the daemon resolve the directory (decision 8). Falls
+  // through to the file path when no daemon is connected — or when the connected
+  // daemon doesn't serve this project's slug (it registers the ones it holds host
+  // paths for), so an unserved project keeps working via the file runner rather
+  // than being wedged by the daemon's "no such project" reply.
+  if (USE_DAEMON && daemonConnected() && daemonServes(project.slug)) {
+    await mutateTask(file, (t) => {
+      t.status = 'riding'
+      if (!t.token) t.token = token
+      t.runId = runId
+      t.runCursor = 0
+      delete t.retry
+    })
+    const start: StartRunMessage = {
+      type: 'start-run',
+      runId,
+      taskId: id,
+      project: project.slug,
+      recordedCwd: task.cwd,
+      worktree: task.worktree,
+      claudeArgs,
+      env: {
+        PATH: `${path.join(ROOT, 'bin')}:${process.env.PATH ?? ''}`,
+        LANDER_API:
+          process.env.LANDER_PUBLIC_API?.trim() || `http://localhost:${port}`,
+        LANDER_PROJECT: project.slug,
+        LANDER_TASK: id,
+        LANDER_TOKEN: token,
+      },
+      idleTimeoutMs: 10 * 60_000,
+    }
+    sendToDaemon(start)
+    return reduceRunWs(project, id, runId)
+  }
+
   // Resume the turn in whatever directory the last one ended in (e.g. a worktree
   // the agent entered), as recorded by the Stop hook on task.cwd. Guard it: a
   // recorded dir that no longer exists (a worktree removed between turns) must
@@ -619,7 +687,6 @@ async function runTurn(
     }
   }
 
-  const runId = randomUUID()
   const runDir = path.join(project.runsDir, runId)
   await mkdir(runDir, { recursive: true })
   const job: RunJob = {
@@ -864,6 +931,83 @@ async function reduceRun(
   }
 }
 
+// The daemon-path analogue of reduceRun: instead of tailing a file, drain the
+// per-run channel the WS handler feeds (update/done/crashed) and fold each event
+// onto the task with the same applyUpdate/applyDone consumer. The daemon already
+// did the reduction and the cross-line usage accumulation, so an `update` maps
+// straight onto applyUpdate (seq becomes the run cursor); `done` finalizes;
+// `crashed` (the daemon disconnected mid-run) mirrors the file path's dead-runner
+// branch. Returns 'done' on completion (success or claude error) or 'crashed'.
+async function reduceRunWs(
+  project: Project,
+  id: string,
+  runId: string,
+): Promise<'done' | 'crashed'> {
+  const file = path.join(project.dataDir, `${id}.json`)
+  const channel = openRunChannel(runId)
+  // The reset time from a rejecting rate_limit_event, carried onto applyDone's
+  // retry. The daemon resends the sticky value on each update; we keep the latest
+  // and fire a usage refresh the first time we see one (the window just filled).
+  let rateLimitResetsAt: string | undefined
+  let sawRateLimit = false
+  // Defend against a replayed update (a later resume-from step): only apply a seq
+  // past the last one we folded in.
+  let lastSeq = -1
+  try {
+    while (true) {
+      const ev = await channel.next()
+      if (ev.kind === 'crashed') {
+        await mutateTask(file, (t) => {
+          const msg = pendingMessage(t)
+          if (msg) {
+            if (!msg.text) msg.text = 'error running claude: run interrupted'
+            msg.pending = false
+            t.updatedAt = new Date().toISOString()
+          }
+          delete t.runId
+          delete t.runCursor
+        }).catch(() => {})
+        void refreshUsage()
+        return 'crashed'
+      }
+      if (ev.kind === 'update') {
+        const u = ev.msg
+        if (u.seq <= lastSeq) continue
+        lastSeq = u.seq
+        if (u.rateLimitResetsAt && !sawRateLimit) {
+          // First session-limit rejection this run — the window just filled, a
+          // usage-moving event, so refresh now (shares refreshUsage's 60s floor).
+          sawRateLimit = true
+          void refreshUsage()
+        }
+        if (u.rateLimitResetsAt) rateLimitResetsAt = u.rateLimitResetsAt
+        await mutateTask(file, (t) => {
+          applyUpdate(t, {
+            steps: u.steps,
+            finalText: u.finalText,
+            blockedIds: u.blockedIds ?? [],
+            usage: u.usage,
+            usageChanged: u.usageChanged,
+            drivingModel: u.drivingModel,
+            cursor: u.seq,
+          })
+        }).catch(() => {})
+      }
+      if (ev.kind === 'done') {
+        const at = new Date().toISOString()
+        await mutateTask(file, (t) => {
+          applyDone(t, ev.msg, { rateLimitResetsAt, at })
+        }).catch(() => {})
+        // A turn just finished — agent activity is when usage moves, so refresh.
+        void refreshUsage()
+        return 'done'
+      }
+    }
+  } finally {
+    closeRunChannel(runId)
+  }
+}
+
 // Tasks with a claude run (and its queue drain) in flight, keyed by task id.
 // Guards against spawning a second concurrent process on the same session: a
 // follow-up that arrives while this is set is appended to the task's `queued`
@@ -893,7 +1037,22 @@ async function driveTask(
     // the queue drain from that rather than the caller's hint.
     const existing = await readTask(project.dataDir, id)
     if (existing?.runId) {
-      await reduceRun(project, id, existing.runId)
+      // Only the file runner leaves a job.json to reattach to. A daemon-driven
+      // run writes no files, so the file reducer can't recover it across a
+      // restart (cross-restart daemon reattach awaits the resume-from step); drop
+      // the stale pointer and let the interrupted turn replay, exactly as
+      // recoverQueues does at boot. With the daemon off every run has a job.json,
+      // so this stays the original file-path behavior.
+      const hasJob =
+        (await readFileMaybe(
+          path.join(project.runsDir, existing.runId, 'job.json'),
+        )) != null
+      if (hasJob) await reduceRun(project, id, existing.runId)
+      else
+        await mutateTask(file, (t) => {
+          delete t.runId
+          delete t.runCursor
+        }).catch(() => {})
       const after = await readTask(project.dataDir, id)
       mode = after?.messages.some((m) => m.role === 'assistant')
         ? 'resume'
@@ -2521,6 +2680,22 @@ async function backfillSeen(): Promise<void> {
 const port = Number(process.env.PORT ?? 6181)
 const server = serve({ fetch: app.fetch, port })
 console.log(`api listening on http://localhost:${port}`)
+
+// When the daemon split is enabled, accept the host daemon's WebSocket and route
+// runs to it. The server's @hono/node-server serve() returns a Node http.Server,
+// which we hand to the WS layer to handle the /daemon upgrade. Usage the daemon
+// pushes feeds the same cache the tasks poll embeds (decision 6); for now the
+// server still has its own refreshUsage too — the full move happens in a later
+// step.
+if (USE_DAEMON) {
+  attachDaemonServer(server as unknown as import('node:http').Server, {
+    token: DAEMON_TOKEN,
+    onUsage: (body) => {
+      usageCache = { at: Date.now(), body }
+    },
+  })
+  console.log(`daemon WS endpoint at ws://localhost:${port}/daemon`)
+}
 console.log('projects:')
 for (const p of PROJECTS) console.log(`  ${p.slug}  ${p.path}`)
 void backfillSeen()

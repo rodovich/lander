@@ -67,9 +67,14 @@ export type RegisterMessage = {
   projects: { slug: string }[]
 }
 
-// A structured run update — exactly the fields `reduceStreamLine` produces, plus
-// the monotonic `seq` that keys idempotent apply/replay. `steps` is the activity
-// it contributes; the optional fields mirror the reducer's return.
+// A structured run update — one reduced batch of stream output, plus the
+// monotonic `seq` that keys idempotent apply/replay. The daemon owns the
+// reduction (reduceStreamLine + the cross-line accumulation that used to live in
+// reduceRun), so it sends the *resolved* running usage and a `usageChanged` flag
+// rather than the per-line inference id / final marker — this lines the message
+// up 1:1 with apply.ts's `ApplyUpdate` (the server maps `seq` → its run cursor
+// and folds it straight on with `applyUpdate`). `steps` is the activity the batch
+// contributes; the rest mirror the accumulator's resolved state.
 export type UpdateMessage = {
   type: 'update'
   runId: string
@@ -77,13 +82,11 @@ export type UpdateMessage = {
   steps: Step[]
   finalText?: string
   blockedIds?: string[]
+  // The run's accumulated token usage (summed across inferences, replaced by the
+  // result event's authoritative total) — present only when `usageChanged`.
   usage?: Usage
-  // The inference id `usage` belongs to when it's an assistant event's
-  // per-inference snapshot; absent on a result event's authoritative total.
-  usageInferenceId?: string
-  // True when `usage` is the result event's authoritative turn total (replaces
-  // the running estimate rather than adding to it).
-  usageFinal?: boolean
+  // Whether this batch moved usage; the server stores `usage` only when set.
+  usageChanged: boolean
   drivingModel?: string
   rateLimitResetsAt?: string
 }
