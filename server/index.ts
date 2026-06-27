@@ -630,7 +630,11 @@ async function runTurn(
     claudeArgs,
     env: {
       PATH: `${path.join(ROOT, 'bin')}:${process.env.PATH ?? ''}`,
-      LANDER_API: `http://localhost:${port}`,
+      // The base URL the runner (and the in-task CLI) use to reach this server.
+      // Defaults to localhost for a same-host server; override with
+      // LANDER_PUBLIC_API when the server is reached across a boundary (e.g. a
+      // container) so the daemon/CLI resolve it correctly — see the daemon split.
+      LANDER_API: process.env.LANDER_PUBLIC_API?.trim() || `http://localhost:${port}`,
       LANDER_PROJECT: project.slug,
       LANDER_TASK: id,
       LANDER_TOKEN: token,
