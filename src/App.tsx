@@ -1078,6 +1078,12 @@ function TaskActionsMenu({
 
 export function App() {
   const [tasks, setTasks] = useState<TaskWithProject[]>([])
+  // Active + archived tasks across shown projects, used only to resolve
+  // task-id mentions to links. The displayed `tasks` list holds just the
+  // current view's set (active OR archived — they come from separate
+  // endpoints), so without this an archived id referenced from an inbox
+  // message — or vice versa — wouldn't link.
+  const [linkTasks, setLinkTasks] = useState<TaskWithProject[]>([])
   // Account usage, carried on every tasks poll. The server decides when to
   // refresh it from upstream (on turn-end and at each window reset); the client
   // just shows the latest snapshot it was handed.
@@ -1513,6 +1519,27 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shownKey, view])
 
+  // Maintain the union of active and archived tasks for link resolution,
+  // independent of the current view. Archived state changes rarely, so this
+  // polls less often than the displayed list.
+  useEffect(() => {
+    if (shown.length === 0) return
+    let cancelled = false
+    const refresh = () =>
+      Promise.all([loadShownTasks(shown, false), loadShownTasks(shown, true)])
+        .then(([active, archived]) => {
+          if (!cancelled) setLinkTasks([...active.tasks, ...archived.tasks])
+        })
+        .catch(() => {})
+    refresh()
+    const timer = setInterval(refresh, 10000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shownKey])
+
   // The project a new task is created in: an explicit pick from the form's
   // dropdown if made, else the single shown project, else the project of the
   // task currently open, else the first project.
@@ -1536,8 +1563,8 @@ export function App() {
     const needle = id.toLowerCase()
     const matches =
       needle.length >= 36
-        ? tasks.filter((t) => t.session.toLowerCase() === needle)
-        : tasks.filter((t) => t.session.toLowerCase().startsWith(needle))
+        ? linkTasks.filter((t) => t.session.toLowerCase() === needle)
+        : linkTasks.filter((t) => t.session.toLowerCase().startsWith(needle))
     if (matches.length !== 1) return undefined
     const t = matches[0]
     return { href: `/${t.projectSlug}/${t.session}`, title: t.title }
