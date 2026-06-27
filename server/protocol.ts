@@ -45,17 +45,28 @@ export type InterruptMessage = {
 }
 
 // On reconnect, the server tells the daemon the last seq it applied for a live
-// run; the daemon replays buffered updates after `seq`.
+// run; the daemon replays buffered updates after `seq` (and re-sends `done` if
+// the run already finished). A run the daemon no longer holds (it restarted —
+// decision 2) is answered with an aborting `done`.
 export type ResumeFromMessage = {
   type: 'resume-from'
   runId: string
   seq: number
 }
 
+// The server has applied a run's `done`; the daemon may drop that run's replay
+// buffer. Until this lands the daemon retains the buffer (so a reconnect can
+// replay), bounded by a timeout so a lost ack can't leak it forever.
+export type AckMessage = {
+  type: 'ack'
+  runId: string
+}
+
 export type ServerToDaemon =
   | StartRunMessage
   | InterruptMessage
   | ResumeFromMessage
+  | AckMessage
 
 // ── Daemon → server ────────────────────────────────────────────────────────
 

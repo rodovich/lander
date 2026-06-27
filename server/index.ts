@@ -24,6 +24,7 @@ import {
   sendToDaemon,
   openRunChannel,
   closeRunChannel,
+  requestResume,
 } from './daemon'
 import type { StartRunMessage, UsageBody } from './protocol'
 import { fetchUsage } from './usage'
@@ -936,12 +937,17 @@ async function reduceRun(
 // onto the task with the same applyUpdate/applyDone consumer. The daemon already
 // did the reduction and the cross-line usage accumulation, so an `update` maps
 // straight onto applyUpdate (seq becomes the run cursor); `done` finalizes;
-// `crashed` (the daemon disconnected mid-run) mirrors the file path's dead-runner
-// branch. Returns 'done' on completion (success or claude error) or 'crashed'.
+// `crashed` (the daemon stayed gone past the reconnect grace) mirrors the file
+// path's dead-runner branch. Returns 'done' on completion (success or claude
+// error) or 'crashed'. `resume` reattaches to a run already in flight (a server
+// reload, or queue recovery): it seeds the cursor from disk and asks a connected
+// daemon to replay from there — the daemon either replays its buffer or aborts a
+// run it no longer holds.
 async function reduceRunWs(
   project: Project,
   id: string,
   runId: string,
+  { resume = false }: { resume?: boolean } = {},
 ): Promise<'done' | 'crashed'> {
   const file = path.join(project.dataDir, `${id}.json`)
   const channel = openRunChannel(runId)
@@ -950,9 +956,17 @@ async function reduceRunWs(
   // and fire a usage refresh the first time we see one (the window just filled).
   let rateLimitResetsAt: string | undefined
   let sawRateLimit = false
-  // Defend against a replayed update (a later resume-from step): only apply a seq
-  // past the last one we folded in.
-  let lastSeq = -1
+  // Only apply a seq past the last one we folded in — guards against a replayed
+  // update from a resume-from. Seeded from the task's persisted run cursor so a
+  // reattach resumes from exactly what's on disk; the channel mirrors it so the
+  // connection manager knows where to tell the daemon to replay from.
+  const seed = resume ? await readTask(project.dataDir, id) : null
+  let lastSeq = seed?.runCursor ?? -1
+  channel.lastSeq = lastSeq
+  // If a daemon is already connected when we reattach, ask it to replay now (the
+  // race where the channel opens after the daemon connected); if it connects
+  // later, the connection handler resumes us. Both are seq-deduped below.
+  if (resume) requestResume(runId)
   try {
     while (true) {
       const ev = await channel.next()
@@ -974,6 +988,7 @@ async function reduceRunWs(
         const u = ev.msg
         if (u.seq <= lastSeq) continue
         lastSeq = u.seq
+        channel.lastSeq = u.seq
         if (u.rateLimitResetsAt && !sawRateLimit) {
           // First session-limit rejection this run — the window just filled, a
           // usage-moving event, so refresh now (shares refreshUsage's 60s floor).
@@ -998,6 +1013,8 @@ async function reduceRunWs(
         await mutateTask(file, (t) => {
           applyDone(t, ev.msg, { rateLimitResetsAt, at })
         }).catch(() => {})
+        // Tell the daemon it can drop this run's replay buffer.
+        sendToDaemon({ type: 'ack', runId })
         // A turn just finished — agent activity is when usage moves, so refresh.
         void refreshUsage()
         return 'done'
@@ -1037,17 +1054,19 @@ async function driveTask(
     // the queue drain from that rather than the caller's hint.
     const existing = await readTask(project.dataDir, id)
     if (existing?.runId) {
-      // Only the file runner leaves a job.json to reattach to. A daemon-driven
-      // run writes no files, so the file reducer can't recover it across a
-      // restart (cross-restart daemon reattach awaits the resume-from step); drop
-      // the stale pointer and let the interrupted turn replay, exactly as
-      // recoverQueues does at boot. With the daemon off every run has a job.json,
-      // so this stays the original file-path behavior.
+      // Only the file runner leaves a job.json. A daemon-driven run writes no
+      // files: reattach via reduceRunWs with resume, which asks the daemon to
+      // replay from the persisted cursor (or aborts if the daemon no longer holds
+      // it). With the daemon off every run has a job.json, so this stays the
+      // original file-path behavior; a no-job run in non-daemon mode is genuinely
+      // gone, so drop the pointer and let the turn replay.
       const hasJob =
         (await readFileMaybe(
           path.join(project.runsDir, existing.runId, 'job.json'),
         )) != null
       if (hasJob) await reduceRun(project, id, existing.runId)
+      else if (USE_DAEMON)
+        await reduceRunWs(project, id, existing.runId, { resume: true })
       else
         await mutateTask(file, (t) => {
           delete t.runId
@@ -2511,6 +2530,15 @@ async function recoverQueues(): Promise<void> {
       // not the queue recovery (it carries a queued opening message too).
       if (task.scheduledFor) continue
       const everRan = task.messages.some((m) => m.role === 'assistant')
+
+      // A tracked daemon run writes no files: hand it to driveTask, whose
+      // reattach asks the daemon to replay from the persisted cursor (or aborts
+      // it if the daemon is gone past the grace). The daemon, having outlived our
+      // restart, still holds the run and its buffer.
+      if (task.runId && USE_DAEMON) {
+        void driveTask(project, id, 'resume')
+        continue
+      }
 
       // A tracked run: reattach if its runner is still alive or already wrote a
       // done marker (driveTask reduces it to completion). If neither, the run

@@ -30,6 +30,11 @@ export type RunEvent =
 class RunChannel {
   private queue: RunEvent[] = []
   private waiter: ((e: RunEvent) => void) | null = null
+  // The last seq the consumer (reduceRunWs) has applied for this run; the
+  // connection manager reads it to tell a (re)connecting daemon where to resume.
+  // Seeded from the task's persisted run cursor so a cold restart resumes from
+  // exactly what's on disk.
+  lastSeq = -1
   push(e: RunEvent): void {
     if (this.waiter) {
       const w = this.waiter
@@ -48,11 +53,19 @@ class RunChannel {
   }
 }
 
+// How long to hold an in-flight run open after the daemon drops before giving up
+// and crashing it. Covers a brief link blip and a `tsx watch` server reload (the
+// daemon survives and reconnects); past it we assume the daemon is gone.
+const RECONNECT_GRACE_MS = 15_000
+
 // The single connected daemon (phase 1 is one daemon, same host). A later
 // multi-daemon phase keys these by which daemon registered each slug.
 let daemon: WebSocket | null = null
 const registeredSlugs = new Set<string>()
 const channels = new Map<string, RunChannel>()
+// Armed when the daemon drops with runs still open: on expiry, if no daemon has
+// returned, the open runs are crashed. Cleared when a daemon (re)connects.
+let graceTimer: ReturnType<typeof setTimeout> | null = null
 
 export function daemonConnected(): boolean {
   return daemon != null
@@ -75,12 +88,45 @@ export function closeRunChannel(runId: string): void {
   channels.delete(runId)
 }
 
-// Push a control message to the daemon (start-run / interrupt / resume-from).
-// Returns false if no daemon is connected, so the caller can fall back.
+// Push a control message to the daemon (start-run / interrupt / resume-from /
+// ack). Returns false if no daemon is connected, so the caller can fall back.
 export function sendToDaemon(msg: ServerToDaemon): boolean {
   if (!daemon) return false
   daemon.send(JSON.stringify(msg))
   return true
+}
+
+// Arm the crash-after-grace timer for open runs when no daemon is connected —
+// shared by the disconnect handler (the daemon left) and a boot-time reattach
+// where the daemon never connects (requestResume below). On expiry, if still no
+// daemon, the open runs are crashed; a (re)connecting daemon clears it first and
+// its resume-from governs instead. One timer for the single daemon.
+function armGrace(): void {
+  if (daemon || !channels.size || graceTimer) return
+  graceTimer = setTimeout(() => {
+    graceTimer = null
+    if (daemon) return
+    for (const channel of channels.values()) channel.push({ kind: 'crashed' })
+  }, RECONNECT_GRACE_MS)
+  graceTimer.unref()
+}
+
+// Ask the daemon to resume a run from the channel's last-applied seq. Used when a
+// consumer reattaches to a run (a server reload or boot recovery); the symmetric
+// case — a daemon connecting while the channel is already open — is handled in the
+// connection handler. Both may fire; the daemon's replay is seq-deduped, so a
+// double resume is harmless. With no daemon connected we instead arm the grace, so
+// a run whose daemon never returns is eventually crashed rather than left hanging.
+export function requestResume(runId: string): void {
+  const channel = channels.get(runId)
+  if (!channel) return
+  if (!daemon) {
+    armGrace()
+    return
+  }
+  daemon.send(
+    JSON.stringify({ type: 'resume-from', runId, seq: channel.lastSeq }),
+  )
 }
 
 type DaemonServerOpts = {
@@ -117,7 +163,18 @@ export function attachDaemonServer(
     // One daemon at a time: a new connection supersedes any stale one.
     daemon = ws
     registeredSlugs.clear()
+    // A daemon is back — cancel any pending crash of open runs.
+    if (graceTimer) {
+      clearTimeout(graceTimer)
+      graceTimer = null
+    }
     console.log('daemon connected')
+    // Resume every run still being consumed: tell the daemon our last-applied
+    // seq and it replays buffered updates after it (or aborts the run if it no
+    // longer holds it — e.g. it restarted). Covers both a link blip and a server
+    // reload where the daemon outlived us; for a fresh run nothing is open yet.
+    for (const [runId, channel] of channels)
+      ws.send(JSON.stringify({ type: 'resume-from', runId, seq: channel.lastSeq }))
 
     ws.on('message', (data) => {
       let msg: DaemonToServer
@@ -148,10 +205,11 @@ export function attachDaemonServer(
       daemon = null
       registeredSlugs.clear()
       console.log('daemon disconnected')
-      // Finalize every run this daemon was driving: synthesize a crash so each
-      // reducer cleans up its task (the file path's dead-runner branch). A later
-      // step adds a reconnect grace + resume-from before giving up.
-      for (const channel of channels.values()) channel.push({ kind: 'crashed' })
+      // Don't crash open runs immediately — a reconnecting daemon resumes them
+      // (resume-from on connect). Only if none returns within the grace do we
+      // synthesize a crash so each reducer finalizes its task (the file path's
+      // dead-runner branch). With nothing open there's nothing to wait for.
+      armGrace()
     }
     ws.on('close', drop)
     ws.on('error', drop)

@@ -39,9 +39,20 @@ const WS_URL = process.env.LANDER_WS?.trim() || 'ws://localhost:6181/daemon'
 const TOKEN = process.env.LANDER_DAEMON_TOKEN?.trim() || ''
 const DEFAULT_IDLE_MS = Number(process.env.LANDER_IDLE_TIMEOUT_MS ?? 10 * 60_000)
 
-// One in-flight run's handle, so an interrupt can stop it.
-type Run = { interrupt: () => void }
+// One run's handle. Held from start until the server acks its `done` (or a
+// bounded timeout), so a reconnecting server can resume-from the buffer. `buffer`
+// is every update sent for the run, in seq order; `done` is set once finished.
+type Run = {
+  interrupt: () => void
+  child: ChildProcess
+  buffer: UpdateMessage[]
+  done?: DoneMessage
+  dropTimer?: ReturnType<typeof setTimeout>
+}
 const runs = new Map<string, Run>()
+// How long to retain a finished run's buffer waiting for the server's ack before
+// dropping it, so a lost ack can't leak the buffer forever.
+const RUN_BUFFER_TTL_MS = 120_000
 
 let ws: WebSocket | null = null
 
@@ -152,6 +163,9 @@ function startRun(msg: StartRunMessage): void {
 
   // Run-scoped reduction state (carried across stdout chunks).
   let seq = 0
+  // Every update sent, in seq order — retained so a reconnecting server can be
+  // replayed from its last-applied seq (resume-from).
+  const buffer: UpdateMessage[] = []
   let liveUsage: Usage | undefined
   let usageInf: string | undefined
   let drivingModel: string | undefined
@@ -221,7 +235,7 @@ function startRun(msg: StartRunMessage): void {
     }
 
     if (steps.length || finalText !== undefined || blockedIds.length || usageChanged) {
-      send({
+      const u: UpdateMessage = {
         type: 'update',
         runId: msg.runId,
         seq: ++seq,
@@ -232,7 +246,9 @@ function startRun(msg: StartRunMessage): void {
         usageChanged,
         drivingModel,
         rateLimitResetsAt,
-      })
+      }
+      buffer.push(u)
+      send(u)
     }
   }
 
@@ -241,14 +257,22 @@ function startRun(msg: StartRunMessage): void {
     settled = true
     clearTimeout(timer)
     flush(true) // fold the final partial line
-    send({
+    const doneMsg: DoneMessage = {
       type: 'done',
       runId: msg.runId,
       exitCode,
       interrupted,
       stderr: stderr.trim(),
-    })
-    runs.delete(msg.runId)
+    }
+    // Keep the run record (buffer + done) until the server acks, so a reconnect
+    // can replay it; a timeout drops it if the ack is lost. Don't delete here.
+    const rec = runs.get(msg.runId)
+    if (rec) {
+      rec.done = doneMsg
+      rec.dropTimer = setTimeout(() => runs.delete(msg.runId), RUN_BUFFER_TTL_MS)
+      rec.dropTimer.unref()
+    }
+    send(doneMsg)
     // A turn just finished — agent activity is when usage moves, so refresh.
     void refreshUsage()
   }
@@ -269,6 +293,8 @@ function startRun(msg: StartRunMessage): void {
   child.on('close', (code) => finish(code == null ? 1 : code))
 
   runs.set(msg.runId, {
+    child,
+    buffer,
     // Interrupt mirrors the old runner's SIGTERM handler: stop claude, finish
     // cleanly as interrupted (the server keeps the partial reply, no crash).
     interrupt: () => {
@@ -295,15 +321,59 @@ function onMessage(raw: string): void {
     case 'interrupt':
       runs.get(msg.runId)?.interrupt()
       break
-    case 'resume-from':
-      // Replay is a later step (the daemon holds no buffer yet); ignore for now.
+    case 'resume-from': {
+      const r = runs.get(msg.runId)
+      if (!r) {
+        // We no longer hold this run — we restarted (decision 2: a daemon restart
+        // aborts in-flight turns), or already dropped it after ack/timeout. Abort
+        // it so the server finalizes instead of hanging.
+        send({
+          type: 'done',
+          runId: msg.runId,
+          exitCode: 1,
+          interrupted: false,
+          stderr: 'daemon has no record of this run (restarted?); run aborted',
+        })
+        break
+      }
+      // Replay everything past the server's last-applied seq, then the terminal
+      // done if the run already finished. The server seq-dedups, so replaying a
+      // few it already has is harmless.
+      for (const u of r.buffer) if (u.seq > msg.seq) send(u)
+      if (r.done) send(r.done)
       break
+    }
+    case 'ack': {
+      const r = runs.get(msg.runId)
+      if (r?.dropTimer) clearTimeout(r.dropTimer)
+      runs.delete(msg.runId)
+      break
+    }
   }
 }
 
+// Kill any live claude children — best effort, on our own termination — so a
+// daemon restart doesn't orphan them (decision 2 aborts in-flight turns anyway).
+function killChildren(): void {
+  for (const r of runs.values()) {
+    try {
+      r.child.kill('SIGKILL')
+    } catch {}
+  }
+}
+process.on('SIGTERM', () => {
+  killChildren()
+  process.exit(0)
+})
+process.on('SIGINT', () => {
+  killChildren()
+  process.exit(0)
+})
+
 // Dial the server, announce our projects, and reconnect with a fixed backoff if
-// the link drops. In-flight children keep running across a brief reconnect, but
-// their updates are lost until the resume-from step lands a replay buffer.
+// the link drops. In-flight children keep running across a reconnect, and their
+// updates are retained per run, so the server resumes them (resume-from) from its
+// last-applied seq once it's back.
 function connect(): void {
   const url = TOKEN ? `${WS_URL}?token=${encodeURIComponent(TOKEN)}` : WS_URL
   const sock = new WebSocket(url)
