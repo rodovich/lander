@@ -131,6 +131,11 @@ type Task = {
   // rejection: while it's still in the future the button instead schedules the
   // retry for then. See the server's Task.retry for the full rationale.
   retry?: { committed: boolean; prompts: string[]; resetsAt?: string }
+  // The working directory the previous turn ended in, recorded by the Stop hook
+  // (see the server's Task.cwd). When it's a git worktree the agent entered, its
+  // name shows beside the project in the detail header. Absent until the first
+  // turn completes, or when the task never left the project root.
+  cwd?: string
 }
 
 // A task tagged with the slug of the project it came from, so the merged
@@ -193,6 +198,19 @@ function formatTimestamp(iso: string): string {
 // in the task list without showing the whole path.
 function lastPathComponent(p: string): string {
   return p.split('/').filter(Boolean).pop() ?? p
+}
+
+// The name of the git worktree a task's cwd sits in, or null when it's not in
+// one. Claude Code's `--worktree` flag roots worktrees at `.claude/worktrees/
+// <name>`, so the name is the path segment right after that marker (the cwd may
+// be a deeper subdirectory of the worktree, hence the index lookup rather than
+// a plain last component).
+function worktreeName(cwd: string | undefined): string | null {
+  if (!cwd) return null
+  const parts = cwd.split('/').filter(Boolean)
+  const i = parts.lastIndexOf('worktrees')
+  if (i < 1 || parts[i - 1] !== '.claude') return null
+  return parts[i + 1] ?? null
 }
 
 // The timestamp of a task's most recent *completed* update: the newest of its
@@ -2242,12 +2260,14 @@ export function App() {
             <div className="detail-header">
               <div className="detail-header-top">
                 <div className="detail-header-title">
-                  {projects.length > 1 && (
+                  {(projects.length > 1 || worktreeName(current.cwd)) && (
                     <div className="detail-project">
                       {lastPathComponent(
                         pathBySlug.get(current.projectSlug) ??
                           current.projectSlug,
                       )}
+                      {worktreeName(current.cwd) &&
+                        ` • ${worktreeName(current.cwd)}`}
                     </div>
                   )}
                   {editingTitle ? (
