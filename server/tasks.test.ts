@@ -6,6 +6,7 @@ import {
   pendingMessage,
   ensurePending,
   lastTurnPrompts,
+  worktreeName,
   type Message,
   type TaskEvent,
 } from './tasks'
@@ -236,5 +237,34 @@ describe('recordStatusTransition', () => {
     const t = task('wedged') // events undefined
     recordStatusTransition(t, 'resting', AT)
     expect(t.events).toEqual([{ kind: 'unwedged', title: 'My task', createdAt: AT }])
+  })
+})
+
+describe('worktreeName', () => {
+  const project = '/home/me/proj'
+
+  it('returns the name of a worktree directly under the worktrees dir', () => {
+    expect(worktreeName(project, '/home/me/proj/.claude/worktrees/feat-x')).toBe(
+      'feat-x',
+    )
+  })
+
+  it('keeps a slash-segmented worktree name whole', () => {
+    expect(
+      worktreeName(project, '/home/me/proj/.claude/worktrees/feature/x'),
+    ).toBe('feature/x')
+  })
+
+  it('rejects a path outside this project (never sets a bogus flag)', () => {
+    expect(worktreeName(project, '/somewhere/else/.claude/worktrees/x')).toBe(
+      undefined,
+    )
+    expect(worktreeName(project, '/home/me/proj/server')).toBe(undefined)
+  })
+
+  it('rejects the worktrees dir itself', () => {
+    expect(worktreeName(project, '/home/me/proj/.claude/worktrees')).toBe(
+      undefined,
+    )
   })
 })

@@ -622,6 +622,55 @@ async function recordCwd() {
   }
 }
 
+// --- record-worktree / clear-worktree (PostToolUse hooks) ------------------
+// Wired in by the server as PostToolUse hooks on EnterWorktree / ExitWorktree
+// (see buildClaudeArgs). claude pipes the tool call and its result as JSON on
+// stdin. On EnterWorktree we forward the new worktree's root path (the result's
+// `worktreePath`, falling back to the post-entry `cwd`) so the server tracks it
+// and relaunches later turns with `--worktree <name>` — what makes the agent's
+// own ExitWorktree work, since claude's worktree session doesn't survive
+// `--resume`. On ExitWorktree we clear it, so the flag stops and turns return to
+// the project root. Best-effort like record-cwd: swallow every error and never
+// exit non-zero, so a hook blip can't wedge a turn or undo the tool that ran.
+async function recordWorktree() {
+  try {
+    const input = JSON.parse((await readStdin()) || '{}')
+    const worktreePath = input.tool_response?.worktreePath ?? input.cwd
+    if (
+      !API ||
+      !PROJECT ||
+      !TASK ||
+      typeof worktreePath !== 'string' ||
+      !worktreePath
+    )
+      return
+    const headers = { 'content-type': 'application/json', 'x-lander-task': TASK }
+    headers['x-lander-project'] = PROJECT
+    if (TOKEN) headers['x-lander-token'] = TOKEN
+    await fetch(`${API}/api/${PROJECT}/tasks/${TASK}/worktree`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ worktreePath }),
+    })
+  } catch {
+    // best-effort: never let a hook failure interfere with turn completion
+  }
+}
+
+async function clearWorktree() {
+  try {
+    if (!API || !PROJECT || !TASK) return
+    const headers = { 'x-lander-task': TASK, 'x-lander-project': PROJECT }
+    if (TOKEN) headers['x-lander-token'] = TOKEN
+    await fetch(`${API}/api/${PROJECT}/tasks/${TASK}/worktree`, {
+      method: 'DELETE',
+      headers,
+    })
+  } catch {
+    // best-effort: never let a hook failure interfere with turn completion
+  }
+}
+
 const [cmd, ...rest] = process.argv.slice(2)
 const run = {
   land: () => landTask(rest),
@@ -637,6 +686,8 @@ const run = {
   run: () => runJob(rest),
   'bash-guard': () => bashGuard(),
   'record-cwd': () => recordCwd(),
+  'record-worktree': () => recordWorktree(),
+  'clear-worktree': () => clearWorktree(),
 }[cmd]
 if (!run)
   die(

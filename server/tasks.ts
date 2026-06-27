@@ -4,6 +4,7 @@
 // accessors. Typed structurally so they can be unit-tested without the full
 // server Task type (index.ts passes its Task, which satisfies these shapes).
 
+import path from 'node:path'
 import type { Step, Usage } from './stream'
 
 export type Message = {
@@ -191,4 +192,21 @@ export function ensurePending(task: { messages: Message[] }): Message {
     task.messages.push(msg)
   }
   return msg
+}
+
+// Derive the name to pass to `claude --worktree` from the absolute worktree root
+// the EnterWorktree hook reported (its `worktreePath`), given the project root.
+// Worktrees the agent enters live under `<project>/.claude/worktrees/<name>`, and
+// `--worktree <name>` re-enters one by that name — so the name is just the path
+// relative to that dir (kept whole, so a slash-segmented worktree name survives).
+// Returns undefined when the path isn't a worktree under this project, so a stray
+// path can never set a bogus flag that would strand every future turn.
+export function worktreeName(
+  projectPath: string,
+  worktreePath: string,
+): string | undefined {
+  const dir = path.join(projectPath, '.claude', 'worktrees')
+  const rel = path.relative(dir, worktreePath)
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return undefined
+  return rel
 }

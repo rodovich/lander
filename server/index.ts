@@ -31,6 +31,7 @@ import {
   pendingMessage,
   ensurePending,
   lastTurnPrompts,
+  worktreeName,
   type Message,
   type TaskEvent,
 } from './tasks'
@@ -173,6 +174,16 @@ type Task = {
   // directly rather than re-deriving it from the launch directory. Absent until
   // the first turn completes.
   transcriptPath?: string
+  // The name of the git worktree the agent is currently working in, set by the
+  // EnterWorktree PostToolUse hook (`lander record-worktree`) and cleared by the
+  // ExitWorktree one (`lander clear-worktree`). While set, every turn relaunches
+  // claude with `--worktree <name>` so the session is a real worktree session:
+  // claude's worktree state is per-process and doesn't survive `--resume`, so
+  // without re-entering each turn a resumed turn merely *runs in* the worktree dir
+  // (via Task.cwd) and the agent's own ExitWorktree no-ops. Re-entering also makes
+  // runTurn launch from the project root, so a clean exit lands back there rather
+  // than inside the departed worktree. Absent when the task isn't in a worktree.
+  worktree?: string
 }
 
 // Bind the generic task store (server/store.ts) to the concrete Task type, so
@@ -430,6 +441,13 @@ function buildClaudeArgs(
   mode: 'start' | 'resume',
 ): string[] {
   const sessionArgs = mode === 'start' ? ['--session-id', id] : ['--resume', id]
+  // While the agent is in a worktree (tracked by the Enter/ExitWorktree hooks),
+  // relaunch every turn as a worktree session. This re-establishes claude's
+  // worktree state, which is per-process and lost across `--resume`, so the
+  // agent's own ExitWorktree actually exits instead of no-op'ing. `--worktree`
+  // re-enters the worktree root, which is why runTurn launches these turns from
+  // the project root: ExitWorktree returns the session to the launch directory.
+  const worktreeArgs = task.worktree ? ['--worktree', task.worktree] : []
   const allowed: string[] = ['Bash(lander:*)']
   if (task.allowEdits) allowed.push('Edit', 'Write', 'MultiEdit')
   if (task.allowCommits) allowed.push('Bash(git:*)')
@@ -477,6 +495,31 @@ function buildClaudeArgs(
           ],
         },
       ],
+      // Track the worktree the agent moves into or out of, so later turns can
+      // relaunch as a real worktree session (`--worktree`) and the agent's own
+      // ExitWorktree works across resumes — see Task.worktree. EnterWorktree's
+      // payload carries the new worktree's `worktreePath`, which `record-worktree`
+      // forwards; `clear-worktree` drops the reference on exit. Both best-effort.
+      PostToolUse: [
+        {
+          matcher: 'EnterWorktree',
+          hooks: [
+            {
+              type: 'command',
+              command: `${path.join(ROOT, 'bin', 'lander')} record-worktree`,
+            },
+          ],
+        },
+        {
+          matcher: 'ExitWorktree',
+          hooks: [
+            {
+              type: 'command',
+              command: `${path.join(ROOT, 'bin', 'lander')} clear-worktree`,
+            },
+          ],
+        },
+      ],
       // At the end of every turn, persist the session's working directory (and
       // transcript path) onto the task, so the next turn resumes where this one
       // left off rather than back at the project root — see Task.cwd. The Stop
@@ -497,6 +540,7 @@ function buildClaudeArgs(
 
   return [
     ...sessionArgs,
+    ...worktreeArgs,
     ...editArgs,
     '--settings',
     hookSettings,
@@ -561,8 +605,14 @@ async function runTurn(
   // recorded dir that no longer exists (a worktree removed between turns) must
   // not strand the task, so fall back to the project root. project.path is
   // assumed present, so it skips the stat in the common case.
+  //
+  // Exception: when the task is in a tracked worktree, launch from the project
+  // root and let `--worktree` (see buildClaudeArgs) re-enter it. ExitWorktree
+  // returns the session to its launch directory, so launching from the root is
+  // what lets a clean exit land back at the root rather than inside the
+  // now-departed worktree.
   let cwd = project.path
-  if (task.cwd && task.cwd !== project.path) {
+  if (!task.worktree && task.cwd && task.cwd !== project.path) {
     try {
       if ((await stat(task.cwd)).isDirectory()) cwd = task.cwd
     } catch {
@@ -1919,6 +1969,75 @@ app.post('/api/:project/tasks/:id/cwd', async (c) => {
     await mutateTask(file, (t) => {
       t.cwd = cwd
       if (transcriptPath) t.transcriptPath = transcriptPath
+    })
+    const task = await readTask(project.dataDir, id)
+    if (!task) return c.json({ error: 'task not found' }, 404)
+    return c.json(publicTask(task))
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
+  }
+})
+
+// The git worktree the agent is currently in, tracked by the Enter/ExitWorktree
+// PostToolUse hooks (`lander record-worktree` / `clear-worktree`) so every turn
+// can relaunch as a real worktree session — see Task.worktree and buildClaudeArgs.
+// POST records it from EnterWorktree's reported `worktreePath` (only a path under
+// this project's worktrees dir is accepted, so a stray path can't strand turns
+// behind a bogus flag); DELETE clears it on exit. Like /cwd, only the task itself
+// or the UI may write, and neither is a turn boundary (no updatedAt, no event).
+app.post('/api/:project/tasks/:id/worktree', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  try {
+    const id = c.req.param('id')
+    if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    const file = path.join(project.dataDir, `${id}.json`)
+    if (!(await readTask(project.dataDir, id)))
+      return c.json({ error: 'task not found' }, 404)
+
+    const principal = await resolvePrincipal(c.req)
+    if (
+      principal.kind !== 'ui' &&
+      !(principal.kind === 'task' && principal.task.session === id)
+    )
+      return c.json({ error: 'only the task itself may record its worktree' }, 403)
+
+    const body = await c.req.json<{ worktreePath?: unknown }>()
+    if (typeof body.worktreePath !== 'string' || !body.worktreePath)
+      return c.json({ error: 'worktreePath is required' }, 400)
+    const name = worktreeName(project.path, body.worktreePath)
+    if (!name) return c.json({ error: 'not a worktree of this project' }, 400)
+
+    await mutateTask(file, (t) => {
+      t.worktree = name
+    })
+    const task = await readTask(project.dataDir, id)
+    if (!task) return c.json({ error: 'task not found' }, 404)
+    return c.json(publicTask(task))
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
+  }
+})
+
+app.delete('/api/:project/tasks/:id/worktree', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  try {
+    const id = c.req.param('id')
+    if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    const file = path.join(project.dataDir, `${id}.json`)
+    if (!(await readTask(project.dataDir, id)))
+      return c.json({ error: 'task not found' }, 404)
+
+    const principal = await resolvePrincipal(c.req)
+    if (
+      principal.kind !== 'ui' &&
+      !(principal.kind === 'task' && principal.task.session === id)
+    )
+      return c.json({ error: 'only the task itself may clear its worktree' }, 403)
+
+    await mutateTask(file, (t) => {
+      delete t.worktree
     })
     const task = await readTask(project.dataDir, id)
     if (!task) return c.json({ error: 'task not found' }, 404)
