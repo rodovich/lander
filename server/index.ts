@@ -14,7 +14,6 @@ import { readFileSync } from 'node:fs'
 import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import path from 'node:path'
-import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { reduceStreamLine, addUsage, type Step, type Usage } from './stream'
 import { applyUpdate, applyDone } from './apply'
@@ -26,7 +25,8 @@ import {
   openRunChannel,
   closeRunChannel,
 } from './daemon'
-import type { StartRunMessage } from './protocol'
+import type { StartRunMessage, UsageBody } from './protocol'
+import { fetchUsage } from './usage'
 import {
   readTasks as readTasksStore,
   readTask as readTaskStore,
@@ -1254,67 +1254,6 @@ async function launchScheduled(): Promise<void> {
   }
 }
 
-// Read the Claude Code OAuth access token the same way the CLI stores it: from
-// the macOS keychain under "Claude Code-credentials", falling back to the
-// ~/.claude/.credentials.json file used on Linux. Returns null if neither is
-// available (e.g. API-key auth), which the /api/usage route reports as 503.
-async function readOAuthToken(): Promise<string | null> {
-  try {
-    const { stdout } = await execFileAsync('security', [
-      'find-generic-password',
-      '-s',
-      'Claude Code-credentials',
-      '-w',
-    ])
-    const token = JSON.parse(stdout)?.claudeAiOauth?.accessToken
-    if (typeof token === 'string' && token) return token
-  } catch {
-    // not on macOS, or no keychain entry — try the file fallback
-  }
-  try {
-    const raw = await readFile(
-      path.join(os.homedir(), '.claude', '.credentials.json'),
-      'utf8',
-    )
-    const token = JSON.parse(raw)?.claudeAiOauth?.accessToken
-    if (typeof token === 'string' && token) return token
-  } catch {
-    // no credentials file either
-  }
-  return null
-}
-
-type UsageWindow = { utilization: number; resetsAt: string | null }
-
-// Coerce a reset moment to an ISO string. The OAuth usage endpoint returns it
-// as an ISO 8601 string (e.g. "2026-06-26T03:00:00.694553+00:00"), which we
-// pass through unchanged. Older/alternate shapes may carry a Unix epoch
-// (seconds) instead — the statusline feeds that straight to `date -r` — so a
-// bare number (or all-digit string) is treated as seconds-since-epoch.
-function toIso(v: unknown): string | null {
-  if (typeof v === 'number' && Number.isFinite(v))
-    return new Date(v * 1000).toISOString()
-  if (typeof v === 'string' && v)
-    return /^\d+$/.test(v) ? new Date(Number(v) * 1000).toISOString() : v
-  return null
-}
-
-// Normalize one window of the usage payload. Mirrors the fields the statusline
-// reads (`used_percentage`, `resets_at`); `utilization` is the 0-100 percentage.
-// The shape isn't a stable public API, so older spellings are tolerated too.
-function pickWindow(obj: unknown): UsageWindow | null {
-  if (!obj || typeof obj !== 'object') return null
-  const o = obj as Record<string, unknown>
-  const raw = o.used_percentage ?? o.utilization ?? o.percent ?? 0
-  const utilization = typeof raw === 'number' ? raw : Number(raw)
-  return {
-    utilization: Number.isFinite(utilization) ? utilization : 0,
-    resetsAt: toIso(o.resets_at ?? o.resetsAt ?? o.reset_at ?? o.reset),
-  }
-}
-
-type UsageBody = { session: UsageWindow | null; weekly: UsageWindow | null }
-
 // The last successful usage snapshot and when it was fetched. The tasks poll
 // embeds whatever's here, and the server — not the client — decides when to
 // refresh it (see refreshUsage). The window resets/utilization move slowly, so a
@@ -1326,39 +1265,6 @@ let usageRefreshing: Promise<void> | null = null
 // A one-shot timer armed for just after the soonest window resets (see below).
 let usageResetTimer: ReturnType<typeof setTimeout> | null = null
 
-// Fetch the current subscription usage straight from the OAuth endpoint. Returns
-// the normalized body, or an error tag the /api/usage route maps to a status.
-async function fetchUsage(): Promise<
-  { ok: true; body: UsageBody } | { ok: false; status: 502 | 503; error: string }
-> {
-  const token = await readOAuthToken()
-  if (!token)
-    return { ok: false, status: 503, error: 'no Claude OAuth token available' }
-  try {
-    const res = await fetch('https://api.anthropic.com/api/oauth/usage', {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'anthropic-beta': 'oauth-2025-04-20',
-      },
-    })
-    if (!res.ok)
-      return { ok: false, status: 502, error: `usage endpoint returned ${res.status}` }
-    const data = (await res.json()) as Record<string, unknown>
-    // The statusline reads `.rate_limits.{five_hour,seven_day}`; tolerate the
-    // windows living at the top level too in case the endpoint differs.
-    const rl = (data.rate_limits as Record<string, unknown> | undefined) ?? data
-    return {
-      ok: true,
-      body: {
-        session: pickWindow(rl.five_hour ?? rl.fiveHour ?? rl.session),
-        weekly: pickWindow(rl.seven_day ?? rl.sevenDay ?? rl.weekly),
-      },
-    }
-  } catch (e) {
-    return { ok: false, status: 502, error: e instanceof Error ? e.message : String(e) }
-  }
-}
-
 // Refresh the cached snapshot from upstream unless one was fetched within the
 // TTL. This 60s guard is the single rate limiter every trigger shares — the
 // per-turn refresh, the reset-time timer, the boot fetch, and the /api/usage
@@ -1366,7 +1272,14 @@ async function fetchUsage(): Promise<
 // or the keychain. A failed fetch leaves the last snapshot in place. Re-arms the
 // reset timer off whatever snapshot we hold, so the cycle below survives a
 // transient upstream error.
+//
+// In daemon mode the server doesn't own usage (decision 6): the daemon fetches,
+// schedules, and pushes snapshots, which land in usageCache via the `usage`
+// message handler. So every server-side trigger here becomes a no-op — the
+// server never reads the credential or hits the endpoint, which is what lets it
+// move into a credential-less container later.
 function refreshUsage(): Promise<void> {
+  if (USE_DAEMON) return Promise.resolve()
   if (usageCache && Date.now() - usageCache.at < USAGE_TTL_MS)
     return Promise.resolve()
   if (usageRefreshing) return usageRefreshing
@@ -1461,7 +1374,10 @@ const app = new Hono()
 // poll now, so this is mainly a debug/external hook; it still honours the shared
 // limiter and forces a fetch only when there's nothing cached.
 app.get('/api/usage', async (c) => {
-  if (!usageCache || Date.now() - usageCache.at >= USAGE_TTL_MS) {
+  // In daemon mode the server never fetches — it only serves the snapshot the
+  // daemon pushes (decision 6). Serve whatever's cached, or 503 until the first
+  // push lands. Otherwise (file path) force a fetch when nothing fresh is cached.
+  if (!USE_DAEMON && (!usageCache || Date.now() - usageCache.at >= USAGE_TTL_MS)) {
     const r = await fetchUsage()
     if (r.ok) {
       usageCache = { at: Date.now(), body: r.body }
@@ -1471,6 +1387,11 @@ app.get('/api/usage', async (c) => {
     }
     // else: the fetch failed but we hold a stale snapshot — serve it.
   }
+  // Daemon path only: the fetch block above can't be reached with the flag on, so
+  // the cache is empty until the daemon's first push — 503 until then. On the file
+  // path this is unreachable (the block sets the cache or already returned).
+  if (!usageCache)
+    return c.json({ error: 'no usage snapshot available yet' }, 503)
   return c.json(usageCache.body)
 })
 
@@ -2683,10 +2604,11 @@ console.log(`api listening on http://localhost:${port}`)
 
 // When the daemon split is enabled, accept the host daemon's WebSocket and route
 // runs to it. The server's @hono/node-server serve() returns a Node http.Server,
-// which we hand to the WS layer to handle the /daemon upgrade. Usage the daemon
-// pushes feeds the same cache the tasks poll embeds (decision 6); for now the
-// server still has its own refreshUsage too — the full move happens in a later
-// step.
+// which we hand to the WS layer to handle the /daemon upgrade. The daemon owns
+// usage end to end (decision 6): each pushed snapshot lands straight in the cache
+// the tasks poll embeds, and the server's own refreshUsage no-ops in this mode —
+// so the boot refreshUsage() below is a no-op here and the daemon's connect-time
+// push is what primes the snapshot.
 if (USE_DAEMON) {
   attachDaemonServer(server as unknown as import('node:http').Server, {
     token: DAEMON_TOKEN,

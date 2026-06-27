@@ -15,12 +15,14 @@ import { statSync } from 'node:fs'
 import path from 'node:path'
 import { reduceStreamLine, addUsage, type Usage } from '../server/stream'
 import { projectSlug } from '../server/projects'
+import { fetchUsage, type UsageBody } from '../server/usage'
 import type {
   ServerToDaemon,
   StartRunMessage,
   UpdateMessage,
   DoneMessage,
   RegisterMessage,
+  UsageMessage,
 } from '../server/protocol'
 
 const projectDirs = process.argv.slice(2).map((p) => path.resolve(p))
@@ -43,8 +45,65 @@ const runs = new Map<string, Run>()
 
 let ws: WebSocket | null = null
 
-function send(msg: UpdateMessage | DoneMessage | RegisterMessage): void {
+function send(
+  msg: UpdateMessage | DoneMessage | RegisterMessage | UsageMessage,
+): void {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
+}
+
+// ── Usage (decision 6) ──────────────────────────────────────────────────────
+// The daemon owns the account usage snapshot end to end: it reads the credential,
+// hits the OAuth endpoint, runs the whole refresh schedule (60s floor, per-turn
+// trigger, reset timer, boot/connect fetch), and pushes each snapshot to the
+// server — which only caches and serves it. This is the logic that used to live
+// in the server; only the credential read + fetch are shared (server/usage.ts).
+const USAGE_TTL_MS = 60_000
+let usageBody: UsageBody | null = null
+let usageAt = 0
+let usageRefreshing = false
+let usageResetTimer: ReturnType<typeof setTimeout> | null = null
+
+function pushUsage(): void {
+  if (usageBody)
+    send({ type: 'usage', session: usageBody.session, weekly: usageBody.weekly })
+}
+
+// Fetch unless a snapshot was taken within the TTL — the single 60s floor every
+// trigger shares (per-turn, reset timer, boot/connect), so none can hammer the
+// endpoint or the keychain. A fresh fetch pushes to the server and re-arms the
+// reset timer; a failed one leaves the last snapshot in place.
+function refreshUsage(): Promise<void> {
+  if (usageBody && Date.now() - usageAt < USAGE_TTL_MS) return Promise.resolve()
+  if (usageRefreshing) return Promise.resolve()
+  usageRefreshing = true
+  return (async () => {
+    const r = await fetchUsage()
+    if (r.ok) {
+      usageBody = r.body
+      usageAt = Date.now()
+      pushUsage()
+      scheduleUsageReset(r.body)
+    }
+  })().finally(() => {
+    usageRefreshing = false
+  })
+}
+
+// Arm a one-shot refresh just after the soonest window resets, so the readout
+// catches utilization dropping back without waiting for the next turn; re-arms
+// itself from each fresh snapshot. A reset already past clamps to the TTL.
+function scheduleUsageReset(body: UsageBody): void {
+  const resets = [body.session?.resetsAt, body.weekly?.resetsAt]
+    .map((s) => (s ? Date.parse(s) : NaN))
+    .filter((n) => Number.isFinite(n))
+  if (!resets.length) return
+  const delay = Math.max(Math.min(...resets) + 2_000 - Date.now(), USAGE_TTL_MS)
+  if (usageResetTimer) clearTimeout(usageResetTimer)
+  usageResetTimer = setTimeout(() => {
+    usageResetTimer = null
+    void refreshUsage()
+  }, delay)
+  usageResetTimer.unref()
 }
 
 // Resolve a start-run's launch directory from the project slug + cwd hints — the
@@ -97,6 +156,7 @@ function startRun(msg: StartRunMessage): void {
   let usageInf: string | undefined
   let drivingModel: string | undefined
   let rateLimitResetsAt: string | undefined
+  let sawRateLimit = false
   let buf = ''
   let stderr = ''
   let settled = false
@@ -135,6 +195,12 @@ function startRun(msg: StartRunMessage): void {
       if (!line) continue
       const r = reduceStreamLine(line, new Date().toISOString())
       if (r.drivingModel) drivingModel = r.drivingModel
+      if (r.rateLimitResetsAt && !sawRateLimit) {
+        // First session-limit rejection this run — the window just filled, a
+        // usage-moving event, so refresh now (shares the 60s floor).
+        sawRateLimit = true
+        void refreshUsage()
+      }
       if (r.rateLimitResetsAt) rateLimitResetsAt = r.rateLimitResetsAt
       steps.push(...r.steps)
       if (r.finalText !== undefined) finalText = r.finalText
@@ -183,6 +249,8 @@ function startRun(msg: StartRunMessage): void {
       stderr: stderr.trim(),
     })
     runs.delete(msg.runId)
+    // A turn just finished — agent activity is when usage moves, so refresh.
+    void refreshUsage()
   }
 
   child.stdout!.on('data', (d: Buffer) => {
@@ -246,6 +314,11 @@ function connect(): void {
       type: 'register',
       projects: [...pathBySlug.keys()].map((slug) => ({ slug })),
     })
+    // Prime the server's snapshot: re-push the last one we hold (so a reconnect
+    // re-fills the server cache immediately), then fetch a fresh one (the boot /
+    // connect trigger; the TTL floor collapses a redundant fetch).
+    pushUsage()
+    void refreshUsage()
   })
   sock.addEventListener('message', (ev) => onMessage(String(ev.data)))
   sock.addEventListener('close', () => {
