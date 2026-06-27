@@ -710,6 +710,14 @@ async function reduceRun(
           if (!line) continue
           const reduced = reduceStreamLine(line, new Date().toISOString())
           if (reduced.drivingModel) drivingModel = reduced.drivingModel
+          if (reduced.rateLimitResetsAt && !rateLimitResetsAt) {
+            // First sight of a session-limit rejection this run: the window just
+            // filled, which is a usage-moving event in its own right, so refresh
+            // the snapshot now rather than waiting for the failing turn's done
+            // marker below to do it. Both share refreshUsage's 60s limiter, so
+            // the two triggers collapse to a single upstream fetch.
+            void refreshUsage()
+          }
           if (reduced.rateLimitResetsAt) rateLimitResetsAt = reduced.rateLimitResetsAt
           steps.push(...reduced.steps)
           if (reduced.finalText !== undefined) finalText = reduced.finalText
