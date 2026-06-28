@@ -5,8 +5,14 @@
   --border: rgba(17, 0, 0, 0.12);
   --bg-tinted: rgba(17, 0, 0, 0.03);
   --selected: rgba(17, 0, 0, 0.06);
-  --accent: #8250df;
-  --error: #cf222e;
+  /* Task-status palette. Beyond the surfaces that carry a status (pills, count
+     chips, section headers, timeline labels, status action buttons), these now
+     double as the app's general accents: riding is the UI accent (focus rings,
+     links, copy-button hovers), wedged the danger/error tone, and landed the
+     positive tone (diff additions, low usage). */
+  --wedged: #dd6644;
+  --landed: #229966;
+  --riding: #6644ee;
 }
 
 * {
@@ -69,7 +75,7 @@ body {
 
 .project-select:focus-visible {
   outline: none;
-  box-shadow: inset 0 0 0 2px var(--accent);
+  box-shadow: inset 0 0 0 2px var(--riding);
 }
 
 .project-select-label {
@@ -126,7 +132,7 @@ body {
 .project-menu-check {
   flex-shrink: 0;
   width: 12px;
-  color: var(--accent);
+  color: var(--riding);
 }
 
 .project-menu-path {
@@ -154,7 +160,7 @@ body {
 
 .task-search:focus {
   outline: none;
-  box-shadow: inset 0 0 0 2px var(--accent);
+  box-shadow: inset 0 0 0 2px var(--riding);
 }
 
 .task-list {
@@ -164,16 +170,143 @@ body {
   list-style: none;
   margin: 0;
   padding: 0;
+  /* Height of a sticky status header; the date subheader sticks just below it.
+     Keep in sync with .task-group-header.status. */
+  --status-header-height: 28px;
 }
 
+/* A zero-height, non-sticky marker before each status header. The count chips
+   measure it (not the sticky header, which stays pinned once scrolled past) to
+   scroll a section to the top. */
+.task-section-anchor {
+  height: 0;
+  margin: 0;
+  padding: 0;
+}
+
+/* A blank gap setting one status section apart from the previous one (e.g. the
+   riding header off the end of the wedged rows). It lives on the anchor, not the
+   header: a chip-scroll aligns the anchor's top edge to the list top, so this
+   margin lands just above the viewport and the header stays flush — yet mid-list
+   the gap shows between sections. The first section needs no leading gap. */
+.task-section-anchor:not(.first) {
+  margin-top: 16px;
+}
+
+/* Section headers interleaved into the list. Both stick while scrolling: the
+   status header pins to the top, and a date subheader (shown only when a status
+   spans more than one date bucket) pins just beneath it. Opaque backgrounds so
+   scrolling rows pass behind them rather than showing through. */
+.task-group-header {
+  position: sticky;
+  z-index: 1;
+  /* Plain opaque base (so scrolling rows pass behind rather than through);
+     no tint, so the header reads as a label rather than a banner. */
+  background: var(--bg);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  user-select: none;
+}
+
+.task-group-header.status {
+  top: 0;
+  z-index: 2;
+  height: var(--status-header-height);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  font-size: 13px;
+}
+
+.task-group-header.status.wedged {
+  color: var(--wedged);
+}
+
+.task-group-header.status.riding {
+  color: var(--riding);
+}
+
+.task-group-header.status.resting {
+  color: var(--muted);
+}
+
+.task-group-header.status.landed {
+  color: var(--landed);
+}
+
+.task-group-header.date {
+  top: var(--status-header-height);
+  /* Tight top padding so the date hugs the status header when it sits directly
+     beneath it — the first date in a status, or any date while pinned in sticky
+     mode. Non-first dates regain separation from the row above via margin below. */
+  padding: 1px 16px 5px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* A date that follows task rows (rather than its status header) needs breathing
+   room above it. The margin separates it from that row when flowing, yet
+   collapses out of view once the date pins beneath the status header on scroll,
+   so the sticky pair stays tight. The first date in a status has no such margin. */
+.task-group-header.date:not(.first) {
+  margin-top: 6px;
+}
+
+/* The date subheader echoes its status color (a step down in size from the
+   status header keeps the hierarchy). Resting/unknown stay muted. */
+.task-group-header.date.wedged {
+  color: var(--wedged);
+}
+
+.task-group-header.date.riding {
+  color: var(--riding);
+}
+
+.task-group-header.date.landed {
+  color: var(--landed);
+}
+
+/* A row lays its content column beside the kebab menu; align-items keeps the
+   kebab at the top, level with the title row, rather than centered. */
 .task-item {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 10px 10px 16px;
   cursor: pointer;
 }
 
+/* The stacked content (title, optional archived tag, time) beside the kebab.
+   min-width:0 lets the title ellipsize instead of stretching the row. */
+.task-item-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  /* The breathing room the title row used to gain from the kebab that sat in
+     it — now an explicit gap between the title and the time below. */
+  gap: 4px;
+}
+
+/* Hover washes a row with a faint tint of its status color — lighter than the
+   selection tint, so a selected row (defined below, equal specificity but later)
+   keeps its stronger wash even while hovered. Resting/unknown stay neutral. */
 .task-item:hover {
   background: var(--bg-tinted);
+}
+
+.task-item.wedged:hover {
+  background: color-mix(in srgb, var(--wedged) 8%, transparent);
+}
+
+.task-item.riding:hover {
+  background: color-mix(in srgb, var(--riding) 8%, transparent);
+}
+
+.task-item.landed:hover {
+  background: color-mix(in srgb, var(--landed) 8%, transparent);
 }
 
 .task-item:focus {
@@ -182,11 +315,25 @@ body {
 
 .task-item:focus-visible {
   outline: none;
-  box-shadow: inset 0 0 0 2px var(--accent);
+  box-shadow: inset 0 0 0 2px var(--riding);
 }
 
+/* A selected row is washed with a tint of its own status color (resting and
+   any unknown status fall back to the neutral selection tone). */
 .task-item.selected {
   background: var(--selected);
+}
+
+.task-item.selected.wedged {
+  background: color-mix(in srgb, var(--wedged) 14%, transparent);
+}
+
+.task-item.selected.riding {
+  background: color-mix(in srgb, var(--riding) 14%, transparent);
+}
+
+.task-item.selected.landed {
+  background: color-mix(in srgb, var(--landed) 14%, transparent);
 }
 
 /* Task name and its project leaf share a row; the project keeps its full
@@ -195,35 +342,44 @@ body {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  margin-bottom: 2px;
 }
 
 .task-title {
-  font-weight: 600;
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  opacity: 0.85;
 }
 
-/* A small accent dot marking a task whose latest update the viewer hasn't seen.
-   Sits before the title; centered against the baseline-aligned row. */
+/* Only unread tasks get a bold title — read ones stay regular weight. */
+.task-item.unread .task-title {
+  font-weight: 600;
+}
+
+/* A small dot marking a task whose latest update the viewer hasn't seen. Sits
+   before the title; centered against the baseline-aligned row. It wears the
+   row's status color (resting/unknown fall back to muted). */
 .unseen-dot {
   flex-shrink: 0;
   align-self: center;
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--muted);
 }
 
-.task-item.landed:not(.selected) {
-  background: var(--bg-tinted);
+.task-item.wedged .unseen-dot {
+  background: var(--wedged);
 }
 
-.task-item.landed .task-title {
-  opacity: 0.75;
+.task-item.riding .unseen-dot {
+  background: var(--riding);
+}
+
+.task-item.landed .unseen-dot {
+  background: var(--landed);
 }
 
 .task-meta-row {
@@ -233,7 +389,7 @@ body {
 }
 
 .task-status {
-  color: var(--accent);
+  color: var(--riding);
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -256,12 +412,12 @@ body {
   white-space: nowrap;
 }
 
-/* The kebab (⋮) trigger and its menu sit at the right of a task row. The
-   wrapper holds the button; the menu itself is position:fixed (see below) so
-   the scrolling list can't clip it. */
+/* The kebab (⋮) trigger and its menu. A direct child of the task item (beside
+   the content column), held to its natural width at the row's right. No
+   transform here — that would become the containing block for the position:fixed
+   popup below and throw off its viewport-based coordinates. */
 .task-menu {
   flex-shrink: 0;
-  align-self: center;
 }
 
 .task-kebab {
@@ -287,7 +443,7 @@ body {
 
 .task-kebab:focus-visible {
   outline: none;
-  box-shadow: inset 0 0 0 2px var(--accent);
+  box-shadow: inset 0 0 0 2px var(--riding);
 }
 
 /* Fixed-positioned (anchored to the kebab's live rect) so the scrolling task
@@ -323,14 +479,14 @@ body {
 }
 
 /* Each action wears the color its status carries elsewhere (status pills,
-   timeline labels): launch matches riding's blue, since launching sets the task
-   riding. Archive/restore aren't statuses — both muted. */
+   timeline labels): launch matches the riding color, since launching sets the
+   task riding. Archive/restore aren't statuses — both muted. */
 .task-menu-item-launch {
-  color: #0969da;
+  color: var(--riding);
 }
 
 .task-menu-item-wedge {
-  color: #bf8700;
+  color: var(--wedged);
 }
 
 .task-menu-item-rest {
@@ -338,7 +494,7 @@ body {
 }
 
 .task-menu-item-land {
-  color: #1a7f37;
+  color: var(--landed);
 }
 
 /* Mark-unread isn't a status either — muted, alongside archive/restore. */
@@ -402,11 +558,11 @@ body {
 }
 
 .task-status.wedged {
-  color: #bf8700;
+  color: var(--wedged);
 }
 
 .task-status.riding {
-  color: #0969da;
+  color: var(--riding);
 }
 
 /* The quiet default once a turn finishes — neither blocked nor done. */
@@ -415,7 +571,7 @@ body {
 }
 
 .task-status.landed {
-  color: #1a7f37;
+  color: var(--landed);
 }
 
 /* The per-status count row under the filter dropdown. Each entry wears its
@@ -430,10 +586,25 @@ body {
   font-size: 11px;
 }
 
+/* Rendered as a button so a click scrolls its status section to the top. */
 .task-count {
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.03em;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.task-count:hover {
+  text-decoration: underline;
+}
+
+.task-count:focus-visible {
+  outline: none;
+  text-decoration: underline;
 }
 
 .task-count-num {
@@ -441,11 +612,11 @@ body {
 }
 
 .task-count.wedged {
-  color: #bf8700;
+  color: var(--wedged);
 }
 
 .task-count.riding {
-  color: #0969da;
+  color: var(--riding);
 }
 
 .task-count.resting {
@@ -453,13 +624,12 @@ body {
 }
 
 .task-count.landed {
-  color: #1a7f37;
+  color: var(--landed);
 }
 
 .task-time {
   color: var(--muted);
   font-size: 12px;
-  margin-top: 2px;
 }
 
 .empty {
@@ -502,7 +672,7 @@ body {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg-tinted);
-  color: #0969da;
+  color: var(--riding);
   cursor: pointer;
 }
 
@@ -559,16 +729,12 @@ body {
 .usage-bar-fill {
   height: 100%;
   border-radius: 3px;
-  background: #1a7f37;
+  background: var(--landed);
   transition: width 0.3s ease;
 }
 
-.usage-bar-fill.medium {
-  background: #bf8700;
-}
-
 .usage-bar-fill.high {
-  background: var(--error);
+  background: var(--wedged);
 }
 
 .usage-reset {
@@ -602,18 +768,19 @@ body {
   font-size: 20px;
 }
 
-/* Stacks the project name above the task title in the header. */
+/* Stacks the project name above the task title in the header (the 2px between
+   them comes from the column gap, not a child margin). */
 .detail-header-title {
   display: flex;
   flex-direction: column;
   flex: 1;
   min-width: 0;
+  gap: 2px;
 }
 
 .detail-project {
   color: var(--muted);
   font-size: 12px;
-  margin-bottom: 2px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -701,7 +868,7 @@ body {
 
 .title-input:focus {
   outline: none;
-  box-shadow: inset 0 0 0 2px var(--accent);
+  box-shadow: inset 0 0 0 2px var(--riding);
 }
 
 .detail-meta {
@@ -764,7 +931,7 @@ body {
 }
 
 .message-copy:hover {
-  color: var(--accent);
+  color: var(--riding);
   background: var(--bg-tinted);
 }
 
@@ -773,7 +940,7 @@ body {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--accent);
+  color: var(--riding);
 }
 
 .message-time {
@@ -889,7 +1056,7 @@ body {
 }
 
 .code-copy:hover {
-  color: var(--accent);
+  color: var(--riding);
   background: var(--bg-tinted);
 }
 
@@ -900,7 +1067,7 @@ body {
 }
 
 .message-text a {
-  color: var(--accent);
+  color: var(--riding);
 }
 
 /* A linked task reference (a bare id/short id swapped for the task's title).
@@ -993,19 +1160,19 @@ body {
   font-weight: 600;
 }
 
-/* Same blue as the "riding" status pill. */
+/* Same color as the "riding" status pill. */
 .status-transition-label.launched {
-  color: #0969da;
+  color: var(--riding);
 }
 
-/* Same amber as the "wedged" status pill. */
+/* Same color as the "wedged" status pill. */
 .status-transition-label.wedged {
-  color: #bf8700;
+  color: var(--wedged);
 }
 
-/* Same green as the "landed" status pill. */
+/* Same color as the "landed" status pill. */
 .status-transition-label.landed {
-  color: #1a7f37;
+  color: var(--landed);
 }
 
 /* Same muted tone as the "resting" status pill — a scheduled task rests. */
@@ -1022,7 +1189,7 @@ body {
 }
 
 .status-transition-await-link {
-  color: #0969da;
+  color: var(--riding);
   text-decoration: none;
 }
 
@@ -1097,7 +1264,7 @@ body {
 }
 
 .inference-copy:hover {
-  color: var(--accent);
+  color: var(--riding);
   background: var(--bg-tinted);
 }
 
@@ -1136,7 +1303,7 @@ body {
 
 .step-diff-toggle:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--accent);
+  box-shadow: 0 0 0 2px var(--riding);
   border-radius: 3px;
 }
 
@@ -1172,13 +1339,13 @@ body {
 }
 
 .diff-line.add {
-  color: #1a7f37;
-  background: color-mix(in srgb, #1a7f37 8%, transparent);
+  color: var(--landed);
+  background: color-mix(in srgb, var(--landed) 8%, transparent);
 }
 
 .diff-line.del {
-  color: var(--error);
-  background: color-mix(in srgb, var(--error) 8%, transparent);
+  color: var(--wedged);
+  background: color-mix(in srgb, var(--wedged) 8%, transparent);
 }
 
 .step-tool-name {
@@ -1186,31 +1353,31 @@ body {
   padding: 1px 7px;
   border: none;
   border-radius: 4px;
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--accent);
+  background: color-mix(in srgb, var(--riding) 12%, transparent);
+  color: var(--riding);
   font: inherit;
   font-weight: 600;
   cursor: pointer;
 }
 
 .step-tool-name:hover {
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  background: color-mix(in srgb, var(--riding) 20%, transparent);
 }
 
 .step-tool-name:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--accent);
+  box-shadow: 0 0 0 2px var(--riding);
 }
 
-/* A blocked (permission-refused) or failed (errored) tool call reads red;
-   a clean call keeps the default accent. */
+/* A blocked (permission-refused) or failed (errored) tool call takes the wedged
+   tone; a clean call keeps the riding accent. */
 .step-tool-name.errored {
-  background: color-mix(in srgb, var(--error) 14%, transparent);
-  color: var(--error);
+  background: color-mix(in srgb, var(--wedged) 14%, transparent);
+  color: var(--wedged);
 }
 
 .step-tool-name.errored:hover {
-  background: color-mix(in srgb, var(--error) 22%, transparent);
+  background: color-mix(in srgb, var(--wedged) 22%, transparent);
 }
 
 /* The grant popup, anchored under the tool chip. Fixed-positioned (with top/left
@@ -1243,7 +1410,7 @@ body {
 .tool-popup-tool {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--riding);
 }
 
 /* Only an errored call shows a status word ("blocked"/"failed"), so it always
@@ -1252,7 +1419,7 @@ body {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--error);
+  color: var(--wedged);
 }
 
 .tool-popup-input {
@@ -1269,7 +1436,7 @@ body {
 
 .tool-popup-input:focus {
   outline: none;
-  box-shadow: inset 0 0 0 2px var(--accent);
+  box-shadow: inset 0 0 0 2px var(--riding);
 }
 
 .tool-popup-actions {
@@ -1285,7 +1452,7 @@ body {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg-tinted);
-  color: #0969da;
+  color: var(--riding);
   cursor: pointer;
 }
 
@@ -1314,8 +1481,8 @@ body {
    a bare `error` — the global `.error` block sets a large padding that would
    otherwise bloat the chip and this peek.) */
 .step-result.errored {
-  color: var(--error);
-  border-left-color: var(--error);
+  color: var(--wedged);
+  border-left-color: var(--wedged);
 }
 
 /* Revealed under its chip, the output aligns with a diff's indentation so the
@@ -1325,7 +1492,7 @@ body {
 }
 
 /* Retry affordance for a conversation wedged on a claude error. Scrolls with the
-   message list as its last item, left-aligned; carries launch blue, since
+   message list as its last item, left-aligned; carries the riding color, since
    retrying sends the task riding again. */
 .retry-bar {
   display: flex;
@@ -1335,10 +1502,10 @@ body {
   font: inherit;
   font-weight: 600;
   padding: 6px 12px;
-  border: 1px solid color-mix(in srgb, #0969da 40%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--riding) 40%, var(--border));
   border-radius: 6px;
   background: var(--bg-tinted);
-  color: #0969da;
+  color: var(--riding);
   cursor: pointer;
 }
 
@@ -1428,6 +1595,6 @@ body {
 }
 
 .error {
-  color: var(--error);
+  color: var(--wedged);
   padding: 16px 28px 0;
 }

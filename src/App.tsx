@@ -194,6 +194,37 @@ function formatTimestamp(iso: string): string {
   return d.toLocaleString()
 }
 
+// The task list shows the full date+time for older rows but, for tasks updated
+// today, just the time — the "Today" date header already supplies the day.
+function formatTaskTime(iso: string, todayStart: number): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  if (d.getTime() >= todayStart)
+    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  return d.toLocaleString()
+}
+
+type DateCategory = 'today' | 'week' | 'older'
+
+// Bucket a timestamp into the list's date sections: today (>= local midnight),
+// this week (>= the preceding Sunday), or older.
+function dateCategory(
+  iso: string,
+  todayStart: number,
+  weekStart: number,
+): DateCategory {
+  const ts = Date.parse(iso)
+  if (Number.isNaN(ts) || ts < weekStart) return 'older'
+  if (ts >= todayStart) return 'today'
+  return 'week'
+}
+
+const DATE_CATEGORY_LABELS: Record<DateCategory, string> = {
+  today: 'Today',
+  week: 'This week',
+  older: 'Older',
+}
+
 // "/Users/me/code/myapp" -> "myapp"; the leaf is enough to tell projects apart
 // in the task list without showing the whole path.
 function lastPathComponent(p: string): string {
@@ -351,8 +382,8 @@ function UsageBar({
   reset: string
 }) {
   const pct = Math.max(0, Math.min(100, Math.round(window.utilization)))
-  // Same thresholds as the statusline: green under 70, amber 70-89, red 90+.
-  const level = pct >= 90 ? 'high' : pct >= 70 ? 'medium' : ''
+  // Two bands: low (landed) under 80, high (wedged) at 80 and above.
+  const level = pct >= 80 ? 'high' : ''
   return (
     <div className="usage-window">
       <div className="usage-window-head">
@@ -700,8 +731,8 @@ const EVENT_VERB: Record<TaskEvent['kind'], string> = {
 
 // A lifecycle event shown inline in the conversation: the task's name (as of
 // that moment) followed by the verb — e.g. "Fix the parser launched". The name
-// is italic and the verb is set apart by weight/color (blue for launched like
-// the riding status, amber for wedged, green for landed, plain otherwise).
+// is italic and the verb is set apart by weight/color (each verb wears its
+// status color — launched like riding, wedged, landed — plain otherwise).
 // Presented like the
 // working-spinner row (unbubbled, muted) but without the spinner, since the
 // event is complete.
@@ -1296,6 +1327,79 @@ export function App() {
     (a, b) => (STATUS_RANK[a.status] ?? 3) - (STATUS_RANK[b.status] ?? 3),
   )
 
+  // Flatten orderedTasks into a list of rows interleaved with sticky headers:
+  // a status header at every status change and, within a status whose tasks
+  // span more than one date bucket, a date subheader at every bucket change.
+  // Each task row keeps its orderedTasks index so the roving-tabindex refs and
+  // keyboard navigation stay aligned with that array.
+  const dayNow = new Date()
+  const todayStart = new Date(
+    dayNow.getFullYear(),
+    dayNow.getMonth(),
+    dayNow.getDate(),
+  ).getTime()
+  const weekStart = (() => {
+    const s = new Date(todayStart)
+    s.setDate(s.getDate() - s.getDay())
+    return s.getTime()
+  })()
+
+  const dateCatsByStatus = new Map<string, Set<DateCategory>>()
+  for (const t of orderedTasks) {
+    const set = dateCatsByStatus.get(t.status) ?? new Set<DateCategory>()
+    set.add(dateCategory(t.updatedAt ?? t.createdAt, todayStart, weekStart))
+    dateCatsByStatus.set(t.status, set)
+  }
+
+  type TaskRow =
+    | { kind: 'status'; key: string; status: string; first: boolean }
+    | {
+        kind: 'date'
+        key: string
+        category: DateCategory
+        status: string
+        first: boolean
+      }
+    | { kind: 'task'; key: string; task: TaskWithProject; index: number }
+
+  const taskRows: TaskRow[] = []
+  let rowStatus: string | null = null
+  let rowCategory: DateCategory | null = null
+  orderedTasks.forEach((task, index) => {
+    if (task.status !== rowStatus) {
+      taskRows.push({
+        kind: 'status',
+        key: `status-${task.status}`,
+        status: task.status,
+        // The first section gets no leading gap (nothing precedes it).
+        first: rowStatus === null,
+      })
+      rowStatus = task.status
+      rowCategory = null
+    }
+    const category = dateCategory(
+      task.updatedAt ?? task.createdAt,
+      todayStart,
+      weekStart,
+    )
+    if (
+      (dateCatsByStatus.get(task.status)?.size ?? 0) > 1 &&
+      category !== rowCategory
+    ) {
+      taskRows.push({
+        kind: 'date',
+        key: `date-${task.status}-${category}`,
+        category,
+        status: task.status,
+        // The first date in a status sits directly under the status header
+        // (rowCategory is reset to null at each status change).
+        first: rowCategory === null,
+      })
+      rowCategory = category
+    }
+    taskRows.push({ kind: 'task', key: task.session, task, index })
+  })
+
   // Per-status counts for the summary row below the filter dropdown, ordered
   // left-to-right as the reverse of the list (landed, resting, riding, wedged
   // — STATUS_RANK descending). Only statuses present after filtering appear.
@@ -1338,6 +1442,22 @@ export function App() {
   // Roving-tabindex bookkeeping for the task list: the selected row is the one
   // reachable with Tab, and arrow keys move DOM focus between rows.
   const taskItemRefs = useRef<(HTMLLIElement | null)[]>([])
+  const taskListRef = useRef<HTMLUListElement>(null)
+  // A zero-height, non-sticky anchor sits just before each status header, keyed
+  // by status, so the count chips can scroll its section to the top. We can't
+  // measure the header itself: the headers all share top:0, so a header you've
+  // scrolled past stays pinned at the top and reports its pinned position, not
+  // where its section begins. The static anchor always reports its true layout
+  // position, so the rect delta to the list top is correct scrolling either way.
+  const sectionAnchorRefs = useRef<Map<string, HTMLLIElement>>(new Map())
+  function scrollToStatus(status: string) {
+    const anchor = sectionAnchorRefs.current.get(status)
+    const list = taskListRef.current
+    if (!anchor || !list) return
+    const delta =
+      anchor.getBoundingClientRect().top - list.getBoundingClientRect().top
+    list.scrollTo({ top: list.scrollTop + delta, behavior: 'smooth' })
+  }
   const selectedIndex = orderedTasks.findIndex((t) => t.session === selected)
   const rovingIndex = selectedIndex >= 0 ? selectedIndex : 0
 
@@ -2115,9 +2235,14 @@ export function App() {
         {projects.length > 0 && statusCounts.length > 0 && (
           <div className="task-counts">
             {statusCounts.map(([status, count]) => (
-              <span key={status} className={'task-count ' + status}>
+              <button
+                key={status}
+                type="button"
+                className={'task-count ' + status}
+                onClick={() => scrollToStatus(status)}
+              >
                 <span className="task-count-num">{count}</span> {status}
-              </span>
+              </button>
             ))}
           </div>
         )}
@@ -2129,20 +2254,68 @@ export function App() {
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
-        <ul className="task-list" role="listbox" aria-label="Tasks">
+        <ul
+          ref={taskListRef}
+          className="task-list"
+          role="listbox"
+          aria-label="Tasks"
+        >
           {tasks.length === 0 && (
             <li className="empty" role="presentation">No tasks yet</li>
           )}
           {tasks.length > 0 && orderedTasks.length === 0 && (
             <li className="empty" role="presentation">No matching tasks</li>
           )}
-          {orderedTasks.map((task, index) => {
+          {taskRows.map((row) => {
+            if (row.kind === 'status') {
+              return (
+                <Fragment key={row.key}>
+                  <li
+                    ref={(el) => {
+                      if (el) sectionAnchorRefs.current.set(row.status, el)
+                      else sectionAnchorRefs.current.delete(row.status)
+                    }}
+                    className={
+                      'task-section-anchor' + (row.first ? ' first' : '')
+                    }
+                    role="presentation"
+                    aria-hidden="true"
+                  />
+                  <li
+                    role="presentation"
+                    className={
+                      'task-group-header status ' +
+                      row.status +
+                      (row.first ? ' first' : '')
+                    }
+                  >
+                    {row.status}
+                  </li>
+                </Fragment>
+              )
+            }
+            if (row.kind === 'date') {
+              return (
+                <li
+                  key={row.key}
+                  role="presentation"
+                  className={
+                    'task-group-header date ' +
+                    row.status +
+                    (row.first ? ' first' : '')
+                  }
+                >
+                  {DATE_CATEGORY_LABELS[row.category]}
+                </li>
+              )
+            }
+            const { task, index } = row
             // The dot shows once the task has a seen marker (set on creation or
             // backfilled) and its latest completed update is newer than it.
             const unseen = isUnread(task)
             return (
             <li
-              key={task.session}
+              key={row.key}
               ref={(el) => {
                 taskItemRefs.current[index] = el
               }}
@@ -2152,52 +2325,39 @@ export function App() {
               className={
                 'task-item' +
                 (task.session === selected ? ' selected' : '') +
-                (task.status === 'landed' ? ' landed' : '') +
-                (task.archived ? ' archived' : '')
+                ' ' +
+                task.status +
+                (task.archived ? ' archived' : '') +
+                (unseen ? ' unread' : '')
               }
               onClick={() => selectTask(task.session, task.projectSlug)}
               onKeyDown={(e) => onTaskKeyDown(e, index, task)}
             >
-              <div className="task-title-row">
-                {unseen && (
-                  <span
-                    className="unseen-dot"
-                    aria-label="Unviewed updates"
-                    title="Unviewed updates"
-                  />
+              <div className="task-item-main">
+                <div className="task-title-row">
+                  {unseen && (
+                    <span
+                      className="unseen-dot"
+                      aria-label="Unviewed updates"
+                      title="Unviewed updates"
+                    />
+                  )}
+                  <div className="task-title">{task.title}</div>
+                  {showProjectLabels && (
+                    <span className="task-project">
+                      {lastPathComponent(
+                        pathBySlug.get(task.projectSlug) ?? task.projectSlug,
+                      )}
+                    </span>
+                  )}
+                </div>
+                {task.archived && (
+                  <div className="task-meta-row">
+                    <span className="task-archived-tag">archived</span>
+                  </div>
                 )}
-                <div className="task-title">{task.title}</div>
-                {showProjectLabels && (
-                  <span className="task-project">
-                    {lastPathComponent(
-                      pathBySlug.get(task.projectSlug) ?? task.projectSlug,
-                    )}
-                  </span>
-                )}
-                <TaskActionsMenu
-                  task={task}
-                  onAction={(action) => {
-                    if (action === 'launch') void launchNow(task)
-                    else if (action === 'wedge') void setStatus(task, 'wedged')
-                    else if (action === 'rest') void setStatus(task, 'resting')
-                    else if (action === 'land') void setStatus(task, 'landed')
-                    else if (action === 'markUnread') void markUnread(task.session)
-                    else if (action === 'archive') void archiveTask(task, true)
-                    else if (action === 'restore') void archiveTask(task, false)
-                  }}
-                />
-              </div>
-              <div className="task-meta-row">
-                <span
-                  className={
-                    'task-status' +
-                    (task.status === 'wedged' ? ' wedged' : '') +
-                    (task.status === 'riding' ? ' riding' : '') +
-                    (task.status === 'resting' ? ' resting' : '') +
-                    (task.status === 'landed' ? ' landed' : '')
-                  }
-                >
-                  {task.status}
+                <div className="task-time">
+                  {formatTaskTime(task.updatedAt ?? task.createdAt, todayStart)}
                   {task.scheduledFor && (
                     <svg
                       className="scheduled-moon"
@@ -2214,14 +2374,20 @@ export function App() {
                       <path d="M13.5 9.5A5.5 5.5 0 1 1 6.5 2.5 4.3 4.3 0 0 0 13.5 9.5z" />
                     </svg>
                   )}
-                </span>
-                {task.archived && (
-                  <span className="task-archived-tag">archived</span>
-                )}
+                </div>
               </div>
-              <div className="task-time">
-                {formatTimestamp(task.updatedAt ?? task.createdAt)}
-              </div>
+              <TaskActionsMenu
+                task={task}
+                onAction={(action) => {
+                  if (action === 'launch') void launchNow(task)
+                  else if (action === 'wedge') void setStatus(task, 'wedged')
+                  else if (action === 'rest') void setStatus(task, 'resting')
+                  else if (action === 'land') void setStatus(task, 'landed')
+                  else if (action === 'markUnread') void markUnread(task.session)
+                  else if (action === 'archive') void archiveTask(task, true)
+                  else if (action === 'restore') void archiveTask(task, false)
+                }}
+              />
             </li>
             )
           })}
