@@ -723,14 +723,16 @@ body {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 20px 28px;
 }
 
+/* No bubble — messages run flush; the horizontal padding lines their content
+   up with the header above and the composer below (both inset 28px). */
 .message {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px 14px;
+  padding: 12px 28px;
+}
+
+/* User turns carry a tint to set them apart; assistant turns stay bare. */
+.message-user {
   background: var(--bg-tinted);
 }
 
@@ -777,10 +779,6 @@ body {
 .message-time {
   color: var(--muted);
   font-size: 12px;
-}
-
-.message-assistant {
-  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
 }
 
 /* Queued follow-ups claude hasn't picked up yet, dimmed to read as pending. */
@@ -946,7 +944,14 @@ body {
   gap: 8px;
   color: var(--muted);
   font-style: italic;
-  padding: 4px 2px;
+  padding: 4px 28px;
+}
+
+/* When the spinner trails a message it already sits within that message's
+   28px inset, so drop the horizontal padding to avoid doubling it. */
+.message .message-pending {
+  padding-left: 0;
+  padding-right: 0;
 }
 
 .spinner {
@@ -966,13 +971,15 @@ body {
 }
 
 /* A status transition in the conversation timeline: unbubbled and muted like
-   the working-spinner row, but without the spinner since the change is done. */
+   the working-spinner row, but without the spinner since the change is done.
+   Shares the user turn's tint and the messages' 28px inset for alignment. */
 .status-transition {
   display: flex;
   align-items: center;
   gap: 8px;
   color: var(--muted);
-  padding: 4px 0;
+  padding: 8px 28px;
+  background: var(--bg-tinted);
 }
 
 /* Name + verb travel together, more tightly spaced than the row's own gap. */
