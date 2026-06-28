@@ -403,6 +403,21 @@ body {
   vertical-align: -1px;
 }
 
+/* The spinner that marks a riding task, sitting beside the date where the moon
+   sits for a scheduled one. Border-based like .spinner, but sized to the moon
+   (11px) and tinted with the riding color so the motion reads as "running". */
+.riding-spinner {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-left: 4px;
+  vertical-align: 0;
+  border: 1.5px solid color-mix(in srgb, var(--riding) 35%, transparent);
+  border-top-color: var(--riding);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
 /* The project leaf shown next to a task's name when projects are intermixed.
    It claims the space it needs (the name yields), so it never shrinks. */
 .task-project {

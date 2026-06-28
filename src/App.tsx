@@ -2374,6 +2374,9 @@ export function App() {
                       <path d="M13.5 9.5A5.5 5.5 0 1 1 6.5 2.5 4.3 4.3 0 0 0 13.5 9.5z" />
                     </svg>
                   )}
+                  {task.status === 'riding' && (
+                    <span className="riding-spinner" aria-label="Riding" />
+                  )}
                 </div>
               </div>
               <TaskActionsMenu
