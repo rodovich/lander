@@ -2128,11 +2128,9 @@ export function App() {
           : ''
   const viewLabel =
     view === 'unread' ? 'Unread' : view === 'archived' ? 'Archived' : ''
-  const filterSummary = filterBase
-    ? filterBase +
-      (timeLabel ? ` • ${timeLabel}` : '') +
-      (viewLabel ? ` • ${viewLabel}` : '')
-    : filterBase
+  // The base (project name) and the time/view suffixes are rendered as separate
+  // spans so the name can carry heavier weight than the suffixes (see CSS).
+  const filterSuffixes = [timeLabel, viewLabel].filter(Boolean)
 
   return (
     <div className="layout">
@@ -2146,7 +2144,17 @@ export function App() {
               aria-expanded={menuOpen}
               onClick={() => setMenuOpen((o) => !o)}
             >
-              <span className="project-select-label">{filterSummary}</span>
+              <span className="project-select-label">
+                {filterBase && (
+                  <span className="project-select-name">{filterBase}</span>
+                )}
+                {filterSuffixes.map((s) => (
+                  <span key={s} className="project-select-suffix">
+                    {' • '}
+                    {s}
+                  </span>
+                ))}
+              </span>
               <span className="project-select-caret">▾</span>
             </button>
             {menuOpen && (
