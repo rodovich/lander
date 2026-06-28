@@ -142,12 +142,23 @@ body {
   white-space: nowrap;
 }
 
+/* Tinted toolbar holding the status links and search field, matching the
+   project dropdown above it. The gap spaces the two rows with no dividing
+   border between them. */
+.task-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--bg-tinted);
+  border-bottom: 1px solid var(--border);
+}
+
 .task-search {
   width: 100%;
-  padding: 10px 16px;
-  border: none;
-  border-bottom: 1px solid var(--border);
-  border-radius: 0;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
   background: var(--bg);
   color: var(--fg);
   font: inherit;
@@ -595,9 +606,6 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 12px;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-tinted);
   font-size: 11px;
 }
 

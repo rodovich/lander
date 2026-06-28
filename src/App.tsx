@@ -2232,28 +2232,30 @@ export function App() {
             )}
           </div>
         )}
-        {projects.length > 0 && statusCounts.length > 0 && (
-          <div className="task-counts">
-            {statusCounts.map(([status, count]) => (
-              <button
-                key={status}
-                type="button"
-                className={'task-count ' + status}
-                onClick={() => scrollToStatus(status)}
-              >
-                <span className="task-count-num">{count}</span> {status}
-              </button>
-            ))}
-          </div>
-        )}
-        <input
-          ref={searchInputRef}
-          type="search"
-          className="task-search"
-          placeholder="Search tasks (⌘⇧F)"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-        />
+        <div className="task-toolbar">
+          {projects.length > 0 && statusCounts.length > 0 && (
+            <div className="task-counts">
+              {statusCounts.map(([status, count]) => (
+                <button
+                  key={status}
+                  type="button"
+                  className={'task-count ' + status}
+                  onClick={() => scrollToStatus(status)}
+                >
+                  <span className="task-count-num">{count}</span> {status}
+                </button>
+              ))}
+            </div>
+          )}
+          <input
+            ref={searchInputRef}
+            type="search"
+            className="task-search"
+            placeholder="Search tasks (⌘⇧F)"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          />
+        </div>
         <ul
           ref={taskListRef}
           className="task-list"
