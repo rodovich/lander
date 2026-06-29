@@ -387,8 +387,8 @@ function UsageBar({
   reset: string
 }) {
   const pct = Math.max(0, Math.min(100, Math.round(window.utilization)))
-  // Two bands: low (landed) under 80, high (wedged) at 80 and above.
-  const level = pct >= 80 ? 'high' : ''
+  // Two bands: low (landed) under 90, high (wedged) at 90 and above.
+  const level = pct >= 90 ? 'high' : ''
   return (
     <div className="usage-window">
       <div className="usage-window-head">
