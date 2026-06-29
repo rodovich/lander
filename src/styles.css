@@ -1194,11 +1194,46 @@ body {
 }
 
 /* A linked task reference (a bare id/short id swapped for the task's title).
-   Set apart from ordinary links with a dotted underline so it reads as a
-   resolved mention rather than a typed-out URL. */
+   Set apart from ordinary links with a tinted chip — same shape as the tool-call
+   chips — colored by the task's status so its state reads at a glance. */
 .message-text a.task-mention {
-  text-decoration: underline dotted;
-  text-underline-offset: 2px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  text-decoration: none;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--riding) 12%, transparent);
+  color: var(--riding);
+}
+
+.message-text a.task-mention:hover {
+  background: color-mix(in srgb, var(--riding) 20%, transparent);
+}
+
+.message-text a.task-mention.wedged {
+  background: color-mix(in srgb, var(--wedged) 12%, transparent);
+  color: var(--wedged);
+}
+
+.message-text a.task-mention.wedged:hover {
+  background: color-mix(in srgb, var(--wedged) 20%, transparent);
+}
+
+.message-text a.task-mention.landed {
+  background: color-mix(in srgb, var(--landed) 12%, transparent);
+  color: var(--landed);
+}
+
+.message-text a.task-mention.landed:hover {
+  background: color-mix(in srgb, var(--landed) 20%, transparent);
+}
+
+.message-text a.task-mention.resting {
+  background: color-mix(in srgb, var(--muted) 14%, transparent);
+  color: var(--muted);
+}
+
+.message-text a.task-mention.resting:hover {
+  background: color-mix(in srgb, var(--muted) 22%, transparent);
 }
 
 .message-text hr {
@@ -1306,13 +1341,46 @@ body {
   flex-direction: column;
 }
 
+/* The awaited-task links wear the same status-tinted chips as task mentions,
+   colored by each awaited task's current status. */
 .status-transition-await-link {
-  color: var(--riding);
+  padding: 1px 6px;
+  border-radius: 4px;
   text-decoration: none;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--riding) 12%, transparent);
+  color: var(--riding);
 }
 
 .status-transition-await-link:hover {
-  text-decoration: underline;
+  background: color-mix(in srgb, var(--riding) 20%, transparent);
+}
+
+.status-transition-await-link.wedged {
+  background: color-mix(in srgb, var(--wedged) 12%, transparent);
+  color: var(--wedged);
+}
+
+.status-transition-await-link.wedged:hover {
+  background: color-mix(in srgb, var(--wedged) 20%, transparent);
+}
+
+.status-transition-await-link.landed {
+  background: color-mix(in srgb, var(--landed) 12%, transparent);
+  color: var(--landed);
+}
+
+.status-transition-await-link.landed:hover {
+  background: color-mix(in srgb, var(--landed) 20%, transparent);
+}
+
+.status-transition-await-link.resting {
+  background: color-mix(in srgb, var(--muted) 14%, transparent);
+  color: var(--muted);
+}
+
+.status-transition-await-link.resting:hover {
+  background: color-mix(in srgb, var(--muted) 22%, transparent);
 }
 
 .status-transition-await-list {

@@ -741,7 +741,15 @@ const EVENT_VERB: Record<TaskEvent['kind'], string> = {
 // Presented like the
 // working-spinner row (unbubbled, muted) but without the spinner, since the
 // event is complete.
-function StatusTransition({ event, slug }: { event: TaskEvent; slug: string }) {
+function StatusTransition({
+  event,
+  slug,
+  linkTask,
+}: {
+  event: TaskEvent
+  slug: string
+  linkTask: TaskLinkResolver
+}) {
   // An "awaiting" event reads "<name> awaiting <task>" with the awaited task
   // linked; with several, it reads "<name> awaiting tasks" and lists them as
   // links below. Any time fallback the task also has isn't shown — the condition
@@ -749,11 +757,19 @@ function StatusTransition({ event, slug }: { event: TaskEvent; slug: string }) {
   if (event.kind === 'awaiting') {
     const tasks = event.awaiting ?? []
     const single = tasks.length === 1
-    const link = (t: { session: string; title: string }) => (
-      <a className="status-transition-await-link" href={`/${slug}/${t.session}`}>
-        {t.title}
-      </a>
-    )
+    // Tint each awaited link by its task's current status (when resolvable),
+    // matching the status chips used for task mentions.
+    const link = (t: { session: string; title: string }) => {
+      const status = linkTask(t.session)?.status
+      return (
+        <a
+          className={`status-transition-await-link${status ? ` ${status}` : ''}`}
+          href={`/${slug}/${t.session}`}
+        >
+          {t.title}
+        </a>
+      )
+    }
     return (
       <div className="status-transition-awaiting">
         <div className="status-transition">
@@ -1831,7 +1847,11 @@ export function App() {
         : linkTasks.filter((t) => t.session.toLowerCase().startsWith(needle))
     if (matches.length !== 1) return undefined
     const t = matches[0]
-    return { href: `/${t.projectSlug}/${t.session}`, title: t.title }
+    return {
+      href: `/${t.projectSlug}/${t.session}`,
+      title: t.title,
+      status: t.status,
+    }
   }
 
   function onSubmit(e: React.FormEvent) {
@@ -2828,6 +2848,7 @@ export function App() {
                       key={`e-${item.event.kind}-${item.at}`}
                       event={item.event}
                       slug={current.projectSlug}
+                      linkTask={resolveTaskLink}
                     />
                   )
                 }

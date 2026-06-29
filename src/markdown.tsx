@@ -13,7 +13,7 @@ import { Fragment, useState, type ReactNode } from 'react'
 // doesn't touch the stored message or what's sent to the model.
 export type TaskLinkResolver = (
   id: string,
-) => { href: string; title: string } | undefined
+) => { href: string; title: string; status: string } | undefined
 
 // Only allow link schemes that can't execute script.
 export function safeHref(url: string): string | undefined {
@@ -105,7 +105,12 @@ function renderInline(
         const link = linkTask(m[0])
         if (!link) return <Fragment key={k}>{m[0]}</Fragment>
         return (
-          <a key={k} className="task-mention" href={link.href} title={m[0]}>
+          <a
+            key={k}
+            className={`task-mention ${link.status}`}
+            href={link.href}
+            title={m[0]}
+          >
             {link.title}
           </a>
         )

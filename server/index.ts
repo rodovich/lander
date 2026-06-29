@@ -86,7 +86,7 @@ type Task = {
   allowCommits: boolean
   // The session id of the task that spawned this one (`lander launch`), or absent
   // for tasks a human started from the UI. Records provenance — the same
-  // relationship the opening message's "↩ Spawned from" backlink shows in prose —
+  // relationship the opening message's "Launched by" backlink shows in prose —
   // in a form the server can check: it gates `lander land <id>`, which lets a task
   // wind down only the tasks it launched, not arbitrary ones. Absent on tasks
   // saved before this field existed (treated as "no known spawner").
@@ -1203,12 +1203,14 @@ app.post('/api/:project/tasks', async (c) => {
       }
     }
 
-    // When a task spawns this one, lead the opening message with a link back to
-    // the spawner so both the agent and a human reader can trace its origin.
-    // The title is generated from rawMessage so the backlink can't skew it.
+    // When a task spawns this one, lead the opening message with a reference back
+    // to the spawner so both the agent and a human reader can trace its origin.
+    // Emitting the bare spawner id (not a markdown link) lets the client's
+    // task-mention linking render it as a status-tinted chip like any other task
+    // reference. The title is generated from rawMessage so the backlink can't skew it.
     const message =
       principal.kind === 'task'
-        ? `↩ Spawned from [${principal.task.title}](/${principal.slug}/${principal.task.session})\n\n${rawMessage}`
+        ? `Launched by ${principal.task.session}:\n\n${rawMessage}`
         : rawMessage
 
     // Title is optional; when omitted, show a "…" placeholder and have haiku
@@ -1757,10 +1759,13 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
 
     // When one task messages another, lead with a backlink to the sender, just
     // like the spawn backlink, so the recipient (and a human reader) can trace
-    // who sent it. A task messaging itself, or the human via the UI, is bare.
+    // who sent it. Emitting the bare sender id (not a markdown link) lets the
+    // client's task-mention linking render it as a status-tinted chip like any
+    // other task reference. A task messaging itself, or the human via the UI, is
+    // bare.
     const message =
       principal.kind === 'task' && principal.task.session !== id
-        ? `✉ From [${principal.task.title}](/${principal.slug}/${principal.task.session})\n\n${rawMessage}`
+        ? `From ${principal.task.session}:\n\n${rawMessage}`
         : rawMessage
 
     // A `--date`/`--time` and/or `--await` send defers delivery; absent all,

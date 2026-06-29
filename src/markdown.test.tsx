@@ -243,7 +243,7 @@ describe('task-mention linking', () => {
   const linkTask = (id: string) => {
     const needle = id.toLowerCase()
     if (FULL === needle || (needle.length === 8 && FULL.startsWith(needle)))
-      return { href: `/proj/${FULL}`, title: 'Fix the parser' }
+      return { href: `/proj/${FULL}`, title: 'Fix the parser', status: 'riding' }
     return undefined
   }
   const render = (text: string) =>
