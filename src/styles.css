@@ -963,7 +963,7 @@ body {
   padding: 12px 28px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
 }
 
 /* User turns carry a tint to set them apart; assistant turns stay bare. */
@@ -1172,20 +1172,15 @@ body {
   font-weight: 600;
 }
 
+/* No padding of its own — it inherits the inset from whatever .message wraps
+   it (the trailing pending row, or the standalone riding row), so the spacing
+   before the assistant message begins is consistent across both cases. */
 .message-pending {
   display: flex;
   align-items: center;
   gap: 8px;
   color: var(--muted);
   font-style: italic;
-  padding: 4px 28px;
-}
-
-/* When the spinner trails a message it already sits within that message's
-   28px inset, so drop the horizontal padding to avoid doubling it. */
-.message .message-pending {
-  padding-left: 0;
-  padding-right: 0;
 }
 
 .spinner {

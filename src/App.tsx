@@ -2822,9 +2822,11 @@ export function App() {
               {current.status === 'riding' &&
                 current.messages[current.messages.length - 1]?.role ===
                   'user' && (
-                  <div className="message-pending">
-                    <span className="spinner" aria-hidden />
-                    claude is working…
+                  <div className="message">
+                    <div className="message-pending">
+                      <span className="spinner" aria-hidden />
+                      claude is working…
+                    </div>
                   </div>
                 )}
               {current.status === 'wedged' && current.retry && (
