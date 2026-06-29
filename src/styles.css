@@ -948,10 +948,22 @@ body {
   border-top: 1px solid var(--border);
 }
 
+/* Close the timeline off with a rule below the last section so it reads as a
+   bounded block when the conversation is shorter than the window. When the
+   conversation overflows and is scrolled to the bottom this rule meets the
+   composer bar's own top border — the composer's -1px margin (below) overlaps
+   it so the two never stack into a double-thick line. */
+.messages > *:last-child {
+  border-bottom: 1px solid var(--border);
+}
+
 /* No bubble — messages run flush; the horizontal padding lines their content
    up with the header above and the composer below (both inset 28px). */
 .message {
   padding: 12px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 /* User turns carry a tint to set them apart; assistant turns stay bare. */
@@ -963,7 +975,6 @@ body {
   display: flex;
   gap: 8px;
   align-items: baseline;
-  margin-bottom: 6px;
 }
 
 .message-copy {
@@ -1281,9 +1292,9 @@ body {
    so a turn's worth of interleaved text and tool calls reads as one unit. */
 .turn-sep {
   width: 100%;
-  margin: 2px 0;
+  margin: 0;
   border: none;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--border-secondary);
 }
 
 /* One model inference's steps. Anchors its copy button and keeps the same gap
@@ -1577,6 +1588,9 @@ body {
   padding: 16px 28px;
   border-top: 1px solid var(--border);
   background: var(--bg-tinted);
+  /* Overlap the last message's bottom rule by 1px so a fully-scrolled
+     overflowing conversation shows a single border here, not a double one. */
+  margin-top: -1px;
 }
 
 .composer {
