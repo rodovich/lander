@@ -2778,11 +2778,26 @@ export function App() {
                     </svg>
                   </button>
                   <CopyIdButton id={current.session} />
+                  <TaskActionsMenu
+                    task={current}
+                    onAction={(action) => {
+                      if (action === 'launch') void launchNow(current)
+                      else if (action === 'wedge')
+                        void setStatus(current, 'wedged')
+                      else if (action === 'rest')
+                        void setStatus(current, 'resting')
+                      else if (action === 'land')
+                        void setStatus(current, 'landed')
+                      else if (action === 'markUnread')
+                        void markUnread(current.session)
+                      else if (action === 'archive')
+                        void archiveTask(current, true)
+                      else if (action === 'restore')
+                        void archiveTask(current, false)
+                    }}
+                  />
                 </div>
               )}
-              {/* The status actions that used to live here as buttons now ride
-                  each row's kebab menu in the task list (including this open
-                  task's own row). */}
               <div className="detail-meta">
                 <span
                   className={
