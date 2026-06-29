@@ -1213,6 +1213,19 @@ export function App() {
     () => !document.hidden && document.hasFocus(),
   )
 
+  // Whether DOM focus currently rests on a row inside the task list. While it
+  // does, the Unread view holds onto tasks the viewer reads in place (see the
+  // sticky-unread set below) so the list doesn't reshuffle under the keyboard;
+  // moving focus to a text field or another window drops that hold.
+  const [listFocused, setListFocused] = useState(false)
+  // Sessions to keep in the Unread view even though they've been read, because
+  // they were read while the list held focus. Accrues every unread session seen
+  // during a focused spell and clears when focus leaves the list, at which point
+  // the plain unread filter reapplies. Newly-unread tasks need no entry here —
+  // they pass the filter on their own — but joining the set keeps them visible
+  // if the viewer then reads them without leaving the list.
+  const [stickyUnread, setStickyUnread] = useState<Set<string>>(new Set())
+
   // Latest tasks readable from timer callbacks that outlive the render that
   // scheduled them (the dwell timer below marks a task seen 3s later).
   const tasksRef = useRef(tasks)
@@ -1230,6 +1243,28 @@ export function App() {
       window.removeEventListener('blur', update)
     }
   }, [])
+
+  // Maintain the sticky-unread set. Outside the focused Unread view it stays
+  // empty (so the filter is the plain one). While the list holds focus on the
+  // Unread view, fold every currently-unread session into it — including ones
+  // that just arrived — so that reading a task (which clears its unread mark)
+  // leaves it in the list rather than yanking it out from under the cursor.
+  useEffect(() => {
+    if (view !== 'unread' || !listFocused) {
+      setStickyUnread((prev) => (prev.size ? new Set() : prev))
+      return
+    }
+    setStickyUnread((prev) => {
+      let next = prev
+      for (const t of tasks) {
+        if (isUnread(t) && !prev.has(t.session)) {
+          if (next === prev) next = new Set(prev)
+          next.add(t.session)
+        }
+      }
+      return next
+    })
+  }, [view, listFocused, tasks])
 
   // Mark a task caught-up: advance its server-side `seenAt` to its latest
   // completed update, which clears its unseen dot. Optimistically advances the
@@ -1309,7 +1344,8 @@ export function App() {
           return false
       }
     }
-    if (view === 'unread' && !isUnread(t)) return false
+    if (view === 'unread' && !isUnread(t) && !stickyUnread.has(t.session))
+      return false
     return query ? t.title.toLowerCase().includes(query) : true
   })
 
@@ -2270,6 +2306,14 @@ export function App() {
           className="task-list"
           role="listbox"
           aria-label="Tasks"
+          onFocus={() => setListFocused(true)}
+          onBlur={(e) => {
+            // focusout bubbles, so this fires when focus hops between rows too;
+            // only count it as leaving when the new target is outside the list
+            // (a text field, another pane, or — with a null target — the window).
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+              setListFocused(false)
+          }}
         >
           {tasks.length === 0 && (
             <li className="empty" role="presentation">No tasks yet</li>
