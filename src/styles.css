@@ -74,6 +74,11 @@ body {
   appearance: none;
 }
 
+.project-select:hover {
+  background: var(--selected);
+  color: var(--fg);
+}
+
 .project-select:focus-visible {
   outline: none;
   box-shadow: inset 0 0 0 2px var(--riding);
@@ -103,7 +108,6 @@ body {
 
 .project-select-caret {
   flex-shrink: 0;
-  font-size: 10px;
 }
 
 .project-menu {
@@ -503,7 +507,7 @@ body {
 }
 
 .task-kebab:hover {
-  background: var(--border);
+  background: var(--selected);
   color: var(--fg);
 }
 
@@ -881,7 +885,7 @@ body {
 
 .edit-title-button:hover {
   opacity: 1;
-  background: var(--bg-tinted);
+  background: var(--selected);
 }
 
 /* Keep the sparkle visible and pulsing while haiku is naming the task. */
@@ -995,7 +999,7 @@ body {
 
 .message-copy:hover {
   color: var(--riding);
-  background: var(--bg-tinted);
+  background: var(--selected);
 }
 
 .message-role {
