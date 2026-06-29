@@ -395,9 +395,23 @@ body {
   outline: none;
 }
 
+/* The focus ring wears the row's own status color (resting/unknown fall back
+   to muted), matching the hover and selected tints below. */
 .task-item:focus-visible {
   outline: none;
+  box-shadow: inset 0 0 0 2px var(--muted);
+}
+
+.task-item.wedged:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--wedged);
+}
+
+.task-item.riding:focus-visible {
   box-shadow: inset 0 0 0 2px var(--riding);
+}
+
+.task-item.landed:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--landed);
 }
 
 /* A selected row is washed with a tint of its own status color (resting and
@@ -759,6 +773,12 @@ body {
   background: var(--bg);
   color: var(--fg);
   resize: vertical;
+}
+
+.new-task input:focus,
+.new-task textarea:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--riding);
 }
 
 .new-task button {
@@ -1626,6 +1646,11 @@ body {
   background: var(--bg);
   color: var(--fg);
   resize: vertical;
+}
+
+.composer:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--riding);
 }
 
 .composer:disabled {
