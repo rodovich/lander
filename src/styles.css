@@ -1521,6 +1521,17 @@ body {
   border-left: none;
 }
 
+/* A subagent's folded trace reads like a miniature of the main conversation, so
+   its prose takes the regular UI font at the message size rather than inheriting
+   the mono of the chip it nests under. The tool chips and result peeks inside
+   re-assert their own mono, so only the agent's own narration resets — matching
+   how the main trace mixes prose and mono tool output. An absolute size (not em)
+   keeps a sub-subagent's trace from compounding the reduction. */
+.sub-steps {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
+}
+
 .step-tool {
   position: relative;
   display: flex;

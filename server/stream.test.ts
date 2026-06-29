@@ -42,6 +42,14 @@ describe('summarizeToolInput', () => {
     expect(summarizeToolInput({ foo: 'bar' })).toBe('{"foo":"bar"}')
   })
 
+  it('leads an Agent summary with its subagent_type', () => {
+    expect(
+      summarizeToolInput({ subagent_type: 'Explore', description: 'find the reducer' }),
+    ).toBe('Explore: find the reducer')
+    // subagent_type alone (no description) still surfaces, not the JSON fallback.
+    expect(summarizeToolInput({ subagent_type: 'Explore' })).toBe('Explore')
+  })
+
   it('skips non-string field values and falls through', () => {
     // file_path is present but not a string, so it is ignored.
     expect(summarizeToolInput({ file_path: 123, command: 'ls' })).toBe('ls')
@@ -341,6 +349,55 @@ describe('reduceStreamLine', () => {
       AT,
     )
     expect(r.steps[0].inferenceId).toBeUndefined()
+  })
+
+  it('stamps a subagent event with parent_tool_use_id and keeps its text out of finalText', () => {
+    // A subagent's assistant event: claude tags it with the spawning Agent/Explore
+    // call's id. Both blocks carry parentToolUseId, and the subagent's prose must
+    // NOT become the turn's reply text (that belongs to the main agent alone).
+    const r = reduceStreamLine(
+      JSON.stringify({
+        type: 'assistant',
+        parent_tool_use_id: 'tu_agent',
+        message: {
+          id: 'msg_sub',
+          content: [
+            { type: 'text', text: 'subagent thinking' },
+            { type: 'tool_use', name: 'Read', id: 'tu_inner', input: { file_path: '/f' } },
+          ],
+        },
+      }),
+      AT,
+    )
+    expect(r.steps.map((s) => s.parentToolUseId)).toEqual(['tu_agent', 'tu_agent'])
+    expect(r.finalText).toBeUndefined()
+  })
+
+  it('stamps a subagent tool_result with parent_tool_use_id', () => {
+    const r = reduceStreamLine(
+      JSON.stringify({
+        type: 'user',
+        parent_tool_use_id: 'tu_agent',
+        message: {
+          content: [{ type: 'tool_result', tool_use_id: 'tu_inner', content: 'ok' }],
+        },
+      }),
+      AT,
+    )
+    expect(r.steps[0].parentToolUseId).toBe('tu_agent')
+  })
+
+  it('leaves parentToolUseId undefined and sets finalText for the main agent', () => {
+    const r = reduceStreamLine(
+      JSON.stringify({
+        type: 'assistant',
+        parent_tool_use_id: null,
+        message: { id: 'msg_main', content: [{ type: 'text', text: 'reply' }] },
+      }),
+      AT,
+    )
+    expect(r.steps[0].parentToolUseId).toBeUndefined()
+    expect(r.finalText).toBe('reply')
   })
 
   it('preserves block order across mixed content', () => {

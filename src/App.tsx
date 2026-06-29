@@ -31,6 +31,12 @@ type Step = {
   // prior results and ran again — which we rule a line at. Absent on tool_result
   // steps and on steps recorded before the server emitted it.
   inferenceId?: string
+  // Set on a subagent's steps (text/tool_use/tool_result alike): the id of the
+  // Agent/Explore tool_use that spawned it. We fold a subagent's whole trace under
+  // that spawning chip rather than splicing it into the main trace. Absent on the
+  // main agent's own steps; nesting can run deep (a sub-subagent points at its
+  // spawner), so these links form the tree.
+  parentToolUseId?: string
   // tool_use: the call as a settings.json permission rule, e.g. `Bash(ls)`.
   rule?: string
   // tool_use, for the file-writing tools (Edit/Write/MultiEdit): the change as
@@ -611,6 +617,7 @@ function ToolStep({
   onAllow,
   detailOpen,
   onToggleDetail,
+  subSteps,
 }: {
   step: Step
   status: ToolStatus
@@ -625,14 +632,19 @@ function ToolStep({
   // `all` is set when the user option/shift-clicked, asking to toggle every
   // detail in the message rather than just this one.
   onToggleDetail: (all: boolean) => void
+  // A subagent-spawning call (Agent/Explore) gets its subagent's whole activity
+  // trace as its revealable detail, pre-rendered by the caller. Absent otherwise.
+  subSteps?: React.ReactNode
 }) {
   const hasDiff = !!step.edits && step.edits.length > 0
-  // Edits reveal their diff; everything else reveals its captured output (if any
-  // — a still-running call has none yet). The diff wins so an Edit doesn't also
-  // dump its noisy confirmation text.
-  const hasResult = !hasDiff && !!result?.text
-  const hasDetail = hasDiff || hasResult
-  const noun = hasDiff ? 'diff' : 'output'
+  // A subagent spawner reveals the nested trace; an edit reveals its diff;
+  // everything else reveals its captured output (if any — a still-running call has
+  // none yet). The trace subsumes the call's result text (it ends with the
+  // subagent's final reply), and the diff wins over an Edit's noisy confirmation.
+  const hasChildren = !!subSteps
+  const hasResult = !hasDiff && !hasChildren && !!result?.text
+  const hasDetail = hasDiff || hasChildren || hasResult
+  const noun = hasDiff ? 'diff' : hasChildren ? 'activity' : 'output'
   const ref = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
   // The popup is fixed-positioned (so the scrolling timeline can't clip it), so
@@ -698,6 +710,7 @@ function ToolStep({
           toggleTitle={`${detailOpen ? 'Hide' : 'Show'} ${noun} (⌥/⇧ for all)`}
         >
           {hasDiff && <DiffView edits={step.edits!} />}
+          {hasChildren && <div className="steps sub-steps">{subSteps}</div>}
           {hasResult && (
             <div
               className={'step-result' + (result!.isError ? ' errored' : '')}
@@ -736,6 +749,7 @@ function Step({
   detailOpen,
   onToggleDetail,
   linkTask,
+  subSteps,
 }: {
   step: Step
   status: ToolStatus
@@ -748,6 +762,9 @@ function Step({
   detailOpen: boolean
   onToggleDetail: (all: boolean) => void
   linkTask: TaskLinkResolver
+  // A subagent spawner's nested trace, pre-rendered by the caller; passed through
+  // to ToolStep as the chip's revealable detail.
+  subSteps?: React.ReactNode
 }) {
   if (step.kind === 'tool_use') {
     return (
@@ -762,6 +779,7 @@ function Step({
         onAllow={onAllow}
         detailOpen={detailOpen}
         onToggleDetail={onToggleDetail}
+        subSteps={subSteps}
       />
     )
   }
@@ -2954,7 +2972,13 @@ export function App() {
                           { text?: string; isError?: boolean }
                         >()
                         const hasToolUse = new Set<string>()
-                        for (const s of m.steps) {
+                        // A subagent's steps (tagged with their spawning call's id)
+                        // don't render inline — they fold into that call's chip. Map
+                        // each spawning id to its direct children's step indices so
+                        // renderStep can nest them; the links go arbitrarily deep, so
+                        // rendering a child recurses on its own children in turn.
+                        const childrenByParent = new Map<string, number[]>()
+                        m.steps.forEach((s, j) => {
                           if (s.kind === 'tool_result' && s.toolUseId) {
                             outcomes.set(s.toolUseId, !!s.blocked)
                             resultById.set(s.toolUseId, {
@@ -2964,41 +2988,61 @@ export function App() {
                           }
                           if (s.kind === 'tool_use' && s.toolUseId)
                             hasToolUse.add(s.toolUseId)
-                        }
-                        // Keys of every chip with revealable detail (a diff, or a
-                        // result with text) in this message, so an option/shift-
-                        // click on one can toggle them all together.
+                          if (s.parentToolUseId) {
+                            const sibs = childrenByParent.get(s.parentToolUseId)
+                            if (sibs) sibs.push(j)
+                            else childrenByParent.set(s.parentToolUseId, [j])
+                          }
+                        })
+                        // Keys of every chip with revealable detail (a diff, a
+                        // result with text, or a nested subagent trace) in this
+                        // message, so an option/shift-click on one toggles them all
+                        // together — nested chips included, since their keys index
+                        // the same flat step array.
                         const detailKeys = m.steps!
                           .map((s, j) =>
                             s.kind === 'tool_use' &&
                             (s.edits?.length ||
                               (s.toolUseId &&
-                                resultById.get(s.toolUseId)?.text))
+                                (resultById.get(s.toolUseId)?.text ||
+                                  childrenByParent.has(s.toolUseId))))
                               ? `${i}:${j}`
                               : null,
                           )
                           .filter((k): k is string => k !== null)
-                        // Group consecutive steps by the model inference that
-                        // produced them: a text/tool_use step whose inferenceId
-                        // differs from the last one seen opens a new group. Only
-                        // those steps carry an id, so a turn's interleaved
-                        // tool_results stay with the current group. Each group is
-                        // one inference — ruled apart from the next and given its
-                        // own copy button for that inference's text, since a turn
-                        // can hold several and each is worth copying on its own.
-                        const groups: number[][] = []
-                        let lastInf: string | undefined
-                        m.steps.forEach((s, j) => {
-                          if (
-                            groups.length === 0 ||
-                            (s.inferenceId &&
-                              lastInf !== undefined &&
-                              s.inferenceId !== lastInf)
-                          )
-                            groups.push([])
-                          groups[groups.length - 1].push(j)
-                          if (s.inferenceId) lastInf = s.inferenceId
-                        })
+                        // Group consecutive step indices by the model inference
+                        // that produced them: a text/tool_use step whose
+                        // inferenceId differs from the last one seen opens a new
+                        // group. Only those steps carry an id, so a turn's
+                        // interleaved tool_results stay with the current group. Each
+                        // group is one inference — ruled apart from the next. Serves
+                        // both the main trace and, recursively, each subagent's own
+                        // (see renderSubSteps).
+                        const groupByInference = (idxs: number[]): number[][] => {
+                          const gs: number[][] = []
+                          let last: string | undefined
+                          for (const j of idxs) {
+                            const s = m.steps![j]
+                            if (
+                              gs.length === 0 ||
+                              (s.inferenceId &&
+                                last !== undefined &&
+                                s.inferenceId !== last)
+                            )
+                              gs.push([])
+                            gs[gs.length - 1].push(j)
+                            if (s.inferenceId) last = s.inferenceId
+                          }
+                          return gs
+                        }
+                        // The main trace omits subagent steps entirely — they're
+                        // folded under their spawning chip — so their inference ids
+                        // never open a main-trace group nor feed its copy buttons.
+                        const groups = groupByInference(
+                          m.steps
+                            .map((_, j) => j)
+                            .filter((j) => !m.steps![j].parentToolUseId),
+                        )
                         const renderStep = (j: number) => {
                           const s = m.steps![j]
                           const key = `${i}:${j}`
@@ -3043,6 +3087,17 @@ export function App() {
                             hasToolUse.has(s.toolUseId)
                           )
                             return null
+                          // A subagent spawner (Agent/Explore) carries its
+                          // subagent's steps as children; render them as the chip's
+                          // nested trace. renderStep recurses, so a sub-subagent's
+                          // own chips nest in turn.
+                          const childIdxs =
+                            s.kind === 'tool_use' && s.toolUseId
+                              ? childrenByParent.get(s.toolUseId)
+                              : undefined
+                          const subSteps = childIdxs?.length
+                            ? renderSubSteps(childIdxs)
+                            : undefined
                           return (
                             <Step
                               key={j}
@@ -3061,9 +3116,23 @@ export function App() {
                                 toggleDetail(key, all ? detailKeys : [key])
                               }
                               linkTask={resolveTaskLink}
+                              subSteps={subSteps}
                             />
                           )
                         }
+                        // A subagent's folded trace, grouped into its own turns the
+                        // same way the main trace is — ruled apart by a turn-sep so
+                        // its inferences read as distinct turns. Mutually recursive
+                        // with renderStep (a nested subagent nests in turn).
+                        const renderSubSteps = (childIdxs: number[]) =>
+                          groupByInference(childIdxs).map((idxs, k) => (
+                            <Fragment key={k}>
+                              {k > 0 && <hr className="turn-sep" />}
+                              <div className="inference">
+                                {idxs.map(renderStep)}
+                              </div>
+                            </Fragment>
+                          ))
                         // Each inference's copyable text: its text blocks, in
                         // order, joined as they read.
                         const groupTexts = groups.map((idxs) =>

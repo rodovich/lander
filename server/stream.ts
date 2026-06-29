@@ -24,6 +24,15 @@ export type Step = {
   // steps (harness output, attributed to the preceding inference by position) and
   // on steps recorded before this field existed.
   inferenceId?: string
+  // The stream's top-level `parent_tool_use_id`: when this block was produced by
+  // a subagent (the Agent/Explore tools spawn one), the id of the parent tool_use
+  // that spawned it — otherwise absent. It's set on the subagent's own text,
+  // tool_use, and tool_result blocks alike (the whole nested trace), and points at
+  // the spawning chip's `toolUseId`, so the UI can fold a subagent's activity in
+  // under that chip instead of interleaving it with the main agent's. Nesting goes
+  // arbitrarily deep — a sub-subagent's blocks carry its spawner's id — so the
+  // parent→child links form the tree. Absent on every main-agent block.
+  parentToolUseId?: string
   // tool_use only: the call rendered as a settings.json permission string
   // (e.g. `Bash(npm run build)`), used to seed the "allow" popup.
   rule?: string
@@ -80,9 +89,13 @@ export function summarizeToolInput(input: unknown): string {
     str('pattern') ||
     str('query') ||
     str('url') ||
-    str('description') ||
-    JSON.stringify(i)
-  const flat = v.replace(/\s+/g, ' ').trim()
+    str('description')
+  // The Agent tool carries the agent flavor in `subagent_type`; lead its summary
+  // with it (e.g. `Explore: <description>`) so an Explore call reads differently
+  // from a general Agent at a glance — both share the bare tool name `Agent`.
+  const sub = str('subagent_type')
+  const summary = sub ? (v ? `${sub}: ${v}` : sub) : v || JSON.stringify(i)
+  const flat = summary.replace(/\s+/g, ' ').trim()
   return flat.length > 200 ? flat.slice(0, 200) + '…' : flat
 }
 
@@ -278,10 +291,22 @@ export function reduceStreamLine(
   } else if (ev.type === 'assistant' && Array.isArray(ev.message?.content)) {
     const inferenceId =
       typeof ev.message.id === 'string' ? ev.message.id : undefined
+    // Set on every block of a subagent's events; absent (claude sends null) on the
+    // main agent's. Carried onto each step so the UI can nest a subagent's trace.
+    const parentToolUseId =
+      typeof ev.parent_tool_use_id === 'string' ? ev.parent_tool_use_id : undefined
     for (const block of ev.message.content) {
       if (block.type === 'text' && block.text) {
-        steps.push({ kind: 'text', text: block.text, inferenceId, createdAt: at })
-        finalText = block.text
+        steps.push({
+          kind: 'text',
+          text: block.text,
+          inferenceId,
+          parentToolUseId,
+          createdAt: at,
+        })
+        // Only the main agent's text is the turn's reply; a subagent's prose stays
+        // inside its own trace and must not overwrite the message's reply text.
+        if (!parentToolUseId) finalText = block.text
       } else if (block.type === 'tool_use') {
         steps.push({
           kind: 'tool_use',
@@ -289,6 +314,7 @@ export function reduceStreamLine(
           input: summarizeToolInput(block.input),
           toolUseId: block.id,
           inferenceId,
+          parentToolUseId,
           rule: toolRule(block.name, block.input),
           edits: diffEdits(block.name, block.input),
           createdAt: at,
@@ -304,12 +330,19 @@ export function reduceStreamLine(
       usageInferenceId = inferenceId
     }
   } else if (ev.type === 'user' && Array.isArray(ev.message?.content)) {
+    // A subagent's own tool results come back as user events tagged with its
+    // spawning call's id, just like its assistant blocks — carry it so they nest
+    // under the same chip. The parent call's result (delivered to the main agent)
+    // carries no parent id and stays at top level.
+    const parentToolUseId =
+      typeof ev.parent_tool_use_id === 'string' ? ev.parent_tool_use_id : undefined
     for (const block of ev.message.content) {
       if (block.type === 'tool_result') {
         steps.push({
           kind: 'tool_result',
           text: summarizeToolResult(block.content),
           toolUseId: block.tool_use_id,
+          parentToolUseId,
           isError: block.is_error === true,
           createdAt: at,
         })
