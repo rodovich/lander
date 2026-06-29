@@ -1682,6 +1682,9 @@ body {
    retrying sends the task riding again. */
 .retry-bar {
   display: flex;
+  /* Inset the button to 28px like the messages above and composer below, so it
+     doesn't sit flush against the conversation's left edge. */
+  padding: 12px 28px;
 }
 
 .retry-button {
