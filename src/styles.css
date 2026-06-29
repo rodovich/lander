@@ -1059,6 +1059,10 @@ body {
   color: var(--riding);
 }
 
+.message-user .message-role {
+  color: var(--muted);
+}
+
 .message-time {
   color: var(--muted);
   font-size: 12px;
