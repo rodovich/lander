@@ -876,10 +876,6 @@ body {
   background: none;
   color: var(--muted);
   cursor: pointer;
-  opacity: 0;
-}
-
-.title-row:hover .edit-title-button {
   opacity: 0.6;
 }
 
