@@ -822,7 +822,7 @@ function StatusTransition({
   linkTask: TaskLinkResolver
 }) {
   // An "awaiting" event reads "<name> awaiting <task>" with the awaited task
-  // linked; with several, it reads "<name> awaiting tasks" and lists them as
+  // linked; with several, it reads "<name> awaiting <N> tasks" and lists them as
   // links below. Any time fallback the task also has isn't shown — the condition
   // is the point.
   if (event.kind === 'awaiting') {
@@ -842,14 +842,14 @@ function StatusTransition({
       )
     }
     return (
-      <div className="status-transition-awaiting">
-        <div className="status-transition">
+      <div className="status-transition status-transition-awaiting">
+        <div className="status-transition-await-head">
           <span className="status-transition-event">
             {event.title && (
               <span className="status-transition-name">{event.title}</span>
             )}
             <span className="status-transition-label awaiting">
-              awaiting{single ? '' : ' tasks'}
+              awaiting{single ? '' : ` ${tasks.length} tasks`}
             </span>
             {single && link(tasks[0])}
           </span>

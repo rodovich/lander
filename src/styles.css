@@ -1335,10 +1335,21 @@ body {
 }
 
 /* An "awaiting" event stacks its row above the list of awaited tasks (when
-   there's more than one); a single awaited task sits inline on the row. */
+   there's more than one); a single awaited task sits inline on the row. The
+   element also carries `.status-transition`, so the box's padding and tint wrap
+   the list too — this just turns that row into a column with a small gap. */
 .status-transition-awaiting {
-  display: flex;
   flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+/* The event + timestamp share the first line as their own row inside the
+   awaiting column. */
+.status-transition-await-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 /* The awaited-task links wear the same status-tinted chips as task mentions,
@@ -1384,9 +1395,13 @@ body {
 }
 
 .status-transition-await-list {
-  margin: 0 0 4px;
-  padding-left: 22px;
+  margin: 0;
+  padding-left: 16px;
   color: var(--muted);
+}
+
+.status-transition-await-list li {
+  margin: 0.25em 0;
 }
 
 /* The launch time trailing a "scheduled" event reads as a quiet timestamp. */
