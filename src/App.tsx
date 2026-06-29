@@ -2321,7 +2321,16 @@ export function App() {
           {tasks.length > 0 && orderedTasks.length === 0 && (
             <li className="empty" role="presentation">No matching tasks</li>
           )}
-          {taskRows.map((row) => {
+          {taskRows.map((row, ri) => {
+            // Faint rules bracket each contiguous run of task rows around the
+            // headers. The header→tasks rule (rule-below) rides on the header so it
+            // pins with it in sticky mode. The tasks→header rule rides in the flow
+            // just above the header as its own <li>, so it scrolls up and out of
+            // view as the header pins (no separator between stacked sticky headers)
+            // and keeps clear of the header text below it.
+            const prevIsTask = ri > 0 && taskRows[ri - 1].kind === 'task'
+            const nextIsTask =
+              ri < taskRows.length - 1 && taskRows[ri + 1].kind === 'task'
             if (row.kind === 'status') {
               return (
                 <Fragment key={row.key}>
@@ -2336,12 +2345,20 @@ export function App() {
                     role="presentation"
                     aria-hidden="true"
                   />
+                  {prevIsTask && (
+                    <li
+                      className="task-rule"
+                      role="presentation"
+                      aria-hidden="true"
+                    />
+                  )}
                   <li
                     role="presentation"
                     className={
                       'task-group-header status ' +
                       row.status +
-                      (row.first ? ' first' : '')
+                      (row.first ? ' first' : '') +
+                      (nextIsTask ? ' rule-below' : '')
                     }
                   >
                     {row.status}
@@ -2351,17 +2368,26 @@ export function App() {
             }
             if (row.kind === 'date') {
               return (
-                <li
-                  key={row.key}
-                  role="presentation"
-                  className={
-                    'task-group-header date ' +
-                    row.status +
-                    (row.first ? ' first' : '')
-                  }
-                >
-                  {DATE_CATEGORY_LABELS[row.category]}
-                </li>
+                <Fragment key={row.key}>
+                  {prevIsTask && (
+                    <li
+                      className="task-rule task-rule-date"
+                      role="presentation"
+                      aria-hidden="true"
+                    />
+                  )}
+                  <li
+                    role="presentation"
+                    className={
+                      'task-group-header date ' +
+                      row.status +
+                      (row.first ? ' first' : '') +
+                      (nextIsTask ? ' rule-below' : '')
+                    }
+                  >
+                    {DATE_CATEGORY_LABELS[row.category]}
+                  </li>
+                </Fragment>
               )
             }
             const { task, index } = row

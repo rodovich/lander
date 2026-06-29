@@ -3,6 +3,7 @@
   --fg: rgba(17, 0, 0, 0.85);
   --muted: rgba(17, 0, 0, 0.55);
   --border: rgba(17, 0, 0, 0.12);
+  --border-secondary: rgba(17, 0, 0, 0.06);
   --bg-tinted: rgba(17, 0, 0, 0.03);
   --selected: rgba(17, 0, 0, 0.06);
   /* Task-status palette. Beyond the surfaces that carry a status (pills, count
@@ -195,9 +196,9 @@ body {
   list-style: none;
   margin: 0;
   padding: 0;
-  /* Height of a sticky status header; the date subheader sticks just below it.
-     Keep in sync with .task-group-header.status. */
-  --status-header-height: 28px;
+  /* Height of a sticky status header (8px + 15px line + 8px); the date subheader
+     sticks just below it. Keep in sync with .task-group-header.status. */
+  --status-header-height: 31px;
 }
 
 /* A zero-height, non-sticky marker before each status header. The count chips
@@ -234,6 +235,11 @@ body {
   user-select: none;
 }
 
+/* Exactly --status-header-height tall (8px + 15px line + 8px, via centering), with
+   box-sizing so a rule-below border counts *into* that height rather than adding a
+   32nd pixel. Status headers all pin at top:0 and stack as you scroll — a later one
+   painting over the earlier — so any extra pixel on the earlier one peeks out below
+   the cover as an errant line. Keeping every status the same height avoids that. */
 .task-group-header.status {
   top: 0;
   z-index: 2;
@@ -243,6 +249,7 @@ body {
   align-items: center;
   padding: 0 16px;
   font-size: 13px;
+  line-height: 15px;
 }
 
 .task-group-header.status.wedged {
@@ -261,22 +268,16 @@ body {
   color: var(--landed);
 }
 
+/* 21px tall (13px line + 8px below); no top padding, so it pins flush beneath the
+   status header — the 8px gap to the status text above comes from the status's
+   centered text (for a first date) or the .task-rule-date above it (for a later
+   one). */
 .task-group-header.date {
   top: var(--status-header-height);
-  /* Tight top padding so the date hugs the status header when it sits directly
-     beneath it — the first date in a status, or any date while pinned in sticky
-     mode. Non-first dates regain separation from the row above via margin below. */
-  padding: 1px 16px 5px;
+  padding: 0 16px 8px;
   font-size: 11px;
+  line-height: 13px;
   color: var(--muted);
-}
-
-/* A date that follows task rows (rather than its status header) needs breathing
-   room above it. The margin separates it from that row when flowing, yet
-   collapses out of view once the date pins beneath the status header on scroll,
-   so the sticky pair stays tight. The first date in a status has no such margin. */
-.task-group-header.date:not(.first) {
-  margin-top: 6px;
 }
 
 /* The date subheader echoes its status color (a step down in size from the
@@ -291,6 +292,31 @@ body {
 
 .task-group-header.date.landed {
   color: var(--landed);
+}
+
+/* The header→tasks divider rides on the header (border, not a separate row), so
+   it stays pinned and visible at the header's bottom edge while sticky. */
+.task-group-header.rule-below {
+  border-bottom: 1px solid var(--border-secondary);
+}
+
+/* The tasks→header divider, by contrast, is its own zero-height row sitting just
+   above the header in normal flow. Living off the header lets it scroll up and
+   out of view as the header pins — so stacked sticky headers (RESTING over OLDER)
+   meet with no rule between them. It carries no spacing of its own: the 8px to the
+   header text below is that header's padding-top (status) or margin-top (date),
+   and the gap to the list above is the last task's padding. */
+.task-rule {
+  height: 0;
+  margin: 0;
+  border-top: 1px solid var(--border-secondary);
+}
+
+/* Above a date subheader the rule also supplies the 8px down to the date text
+   (the date has no top padding, so it can pin flush). The gap stays on the rule —
+   which scrolls away with the tasks — not on the sticky date. */
+.task-rule-date {
+  padding-bottom: 8px;
 }
 
 /* A row lays its content column beside the kebab menu; align-items keeps the
