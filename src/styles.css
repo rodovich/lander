@@ -788,31 +788,20 @@ body {
   flex-direction: column;
 }
 
+/* The project name, title row, and meta row are direct children stacked by the
+   column gap; none of them carry their own margins. */
 .detail-header {
-  padding: 24px 28px 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.detail-header-top {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 24px 28px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-tinted);
 }
 
 .detail-header h1 {
-  margin: 0 0 6px;
+  margin: 0;
   font-size: 20px;
-}
-
-/* Stacks the project name above the task title in the header (the 2px between
-   them comes from the column gap, not a child margin). */
-.detail-header-title {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-  gap: 2px;
 }
 
 .detail-project {
@@ -830,7 +819,6 @@ body {
   align-items: center;
   gap: 6px;
   min-width: 0;
-  margin: 0 0 6px;
 }
 
 .title-row h1 {
@@ -865,7 +853,7 @@ body {
   opacity: 0;
 }
 
-.detail-header-top:hover .edit-title-button {
+.title-row:hover .edit-title-button {
   opacity: 0.6;
 }
 
@@ -875,7 +863,7 @@ body {
 }
 
 /* Keep the sparkle visible and pulsing while haiku is naming the task. */
-.detail-header-top .edit-title-button:disabled {
+.title-row .edit-title-button:disabled {
   opacity: 0.6;
   cursor: default;
   animation: title-pulse 1s ease-in-out infinite;
@@ -890,7 +878,6 @@ body {
 .title-input {
   flex: 1;
   min-width: 0;
-  margin: 0 0 6px;
   padding: 0 4px;
   font: inherit;
   font-size: 20px;
@@ -912,7 +899,6 @@ body {
   display: flex;
   gap: 12px;
   align-items: baseline;
-  margin-bottom: 20px;
 }
 
 /* The list layout stacks the time under the status with a small offset; in
@@ -927,6 +913,13 @@ body {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+}
+
+/* Rule a 1px line between every consecutive section — messages and status
+   transitions alike — so the flush, bubble-less timeline still reads as
+   discrete rows. */
+.messages > * + * {
+  border-top: 1px solid var(--border);
 }
 
 /* No bubble — messages run flush; the horizontal padding lines their content
@@ -1557,6 +1550,7 @@ body {
   gap: 12px;
   padding: 16px 28px;
   border-top: 1px solid var(--border);
+  background: var(--bg-tinted);
 }
 
 .composer {
