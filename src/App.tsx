@@ -2630,9 +2630,10 @@ export function App() {
                 )}
                 <div className="task-time">
                   {formatTaskTime(task.updatedAt ?? task.createdAt, todayStart)}
-                  {task.scheduledFor && (
+                  {(task.scheduledFor ||
+                    (task.waitingFor && task.waitingFor.length > 0)) && (
                     <svg
-                      className="scheduled-moon"
+                      className="scheduled-clock"
                       width="11"
                       height="11"
                       viewBox="0 0 16 16"
@@ -2641,9 +2642,10 @@ export function App() {
                       strokeWidth="1.5"
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      aria-label="Scheduled"
+                      aria-label={task.scheduledFor ? 'Scheduled' : 'Awaiting'}
                     >
-                      <path d="M13.5 9.5A5.5 5.5 0 1 1 6.5 2.5 4.3 4.3 0 0 0 13.5 9.5z" />
+                      <circle cx="8" cy="8" r="6" />
+                      <path d="M8 4.5V8l2.5 1.5" />
                     </svg>
                   )}
                   {task.status === 'riding' && (

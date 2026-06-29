@@ -491,16 +491,16 @@ body {
   letter-spacing: 0.03em;
 }
 
-/* The crescent that marks a scheduled task (resting, or wedged on a deferred
-   session-limit retry) as set to launch. It inherits the status color via
-   currentColor and sits on the text baseline. */
-.scheduled-moon {
+/* The clock that marks a deferred task — one scheduled for a later time, or
+   resting until the tasks it awaits have landed. It inherits the status color
+   via currentColor and sits on the text baseline. */
+.scheduled-clock {
   margin-left: 4px;
   vertical-align: -1px;
 }
 
-/* The spinner that marks a riding task, sitting beside the date where the moon
-   sits for a scheduled one. Border-based like .spinner, but sized to the moon
+/* The spinner that marks a riding task, sitting beside the date where the clock
+   sits for a deferred one. Border-based like .spinner, but sized to the clock
    (11px) and tinted with the riding color so the motion reads as "running". */
 .riding-spinner {
   display: inline-block;
