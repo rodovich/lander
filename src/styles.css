@@ -495,8 +495,7 @@ body {
    resting until the tasks it awaits have landed. It inherits the status color
    via currentColor and sits on the text baseline. */
 .scheduled-clock {
-  margin-left: 4px;
-  vertical-align: -1px;
+  flex-shrink: 0;
 }
 
 /* The spinner that marks a riding task, sitting beside the date where the clock
@@ -506,8 +505,7 @@ body {
   display: inline-block;
   width: 9px;
   height: 9px;
-  margin-left: 4px;
-  vertical-align: 0;
+  flex-shrink: 0;
   border: 1.5px solid color-mix(in srgb, var(--riding) 35%, transparent);
   border-top-color: var(--riding);
   border-radius: 50%;
@@ -740,6 +738,11 @@ body {
 .task-time {
   color: var(--muted);
   font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  /* 4px reads as the icons' base spacing; the extra 2px sets them off from the
+     date. gap replaces the per-icon margin-left so it stays uniform. */
+  gap: 6px;
 }
 
 .empty {

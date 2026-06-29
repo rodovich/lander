@@ -199,9 +199,14 @@ function formatTimestamp(iso: string): string {
 function formatTaskTime(iso: string, todayStart: number): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
-  if (d.getTime() >= todayStart)
-    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-  return d.toLocaleString()
+  const time = { hour: 'numeric', minute: '2-digit' } as const
+  if (d.getTime() >= todayStart) return d.toLocaleTimeString([], time)
+  const date = d.toLocaleDateString([], {
+    year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  })
+  return `${date} • ${d.toLocaleTimeString([], time)}`
 }
 
 type DateCategory = 'today' | 'week' | 'older'
