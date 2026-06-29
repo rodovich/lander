@@ -1454,25 +1454,28 @@ body {
   background: var(--bg-tinted);
 }
 
-.step-tool {
-  position: relative;
+/* A disclosure: the triangle's row, with revealed content dropping below it.
+   Shared by a tool chip's detail and a folded turn so the two read alike. */
+.collapsible {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.85em;
 }
 
-.step-tool-row {
+.collapsible-row {
   display: flex;
   align-items: baseline;
   gap: 8px;
 }
 
-/* The disclosure triangle left of a tool chip with revealable detail (a diff or
-   captured output). A bare caret that rotates when open; kept narrow so it reads
-   as a hinge on the chip. */
-.step-diff-toggle {
+/* The triangle button (and, for a turn fold, the summary text beside the caret).
+   A fixed 12px so the caret renders at one size regardless of the surrounding
+   text scale — tool chips sit in 0.85em mono, turn folds in the message base —
+   keeping the two hinges identical. */
+.collapsible-toggle {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
   flex-shrink: 0;
   padding: 0;
   border: none;
@@ -1480,17 +1483,51 @@ body {
   color: var(--muted);
   cursor: pointer;
   line-height: 1;
-  align-self: center;
+  font-size: 12px;
+  text-align: left;
 }
 
-.step-diff-toggle:hover {
+.collapsible-toggle:hover {
   color: var(--fg);
 }
 
-.step-diff-toggle:focus-visible {
+.collapsible-toggle:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px var(--riding);
   border-radius: 3px;
+}
+
+/* A fold's summary text ("12 STEPS, 34 TOOLS…"), riding inside the toggle. */
+.collapsible-label {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* The revealed content, indented behind a line down its left that marks the
+   section's scope. A nested .step-result drops its own line so they don't stack. */
+.collapsible-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-left: 4px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+}
+
+.collapsible-body .step-result {
+  margin-left: 0;
+  padding-left: 0;
+  border-left: none;
+}
+
+.step-tool {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
 }
 
 .step-diff-caret {
@@ -1503,25 +1540,25 @@ body {
   transform: rotate(90deg);
 }
 
-/* The revealed diff: removed lines red, added lines green, in a tinted block
-   indented to sit under the chip. */
+/* The revealed diff: removed lines red, added lines green, in a tinted block.
+   It sits inside .collapsible-body, which supplies the indent and left line. */
 .step-diff {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-left: 16px;
 }
 
 .diff-hunk {
   margin: 0;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
   background: var(--bg-tinted);
   overflow-x: auto;
   white-space: pre;
   font-size: 0.95em;
   line-height: 1.45;
+}
+
+.diff-line {
+  padding: 0 4px;
 }
 
 .diff-line.add {
@@ -1669,12 +1706,6 @@ body {
 .step-result.errored {
   color: var(--wedged);
   border-left-color: var(--wedged);
-}
-
-/* Revealed under its chip, the output aligns with a diff's indentation so the
-   caret hinge lines up. */
-.step-tool .step-result {
-  margin-left: 16px;
 }
 
 /* Retry affordance for a conversation wedged on a claude error. Scrolls with the

@@ -546,6 +546,53 @@ function DiffView({ edits }: { edits: { old: string; new: string }[] }) {
   )
 }
 
+// A disclosure: a triangle that rotates open, with revealable content dropping
+// below behind a line down its left that marks the section's scope. The triangle
+// either carries its own `label` (e.g. a turn's "12 STEPS…" summary) or sits
+// beside an independently-clickable `summary` (e.g. a tool chip, which has its
+// own click action). Both the tool detail and the turn fold render through this,
+// so they share one look. `onToggle` gets the click event so a caller can read
+// modifier keys.
+function Collapsible({
+  open,
+  onToggle,
+  label,
+  summary,
+  toggleTitle,
+  toggleLabel,
+  children,
+}: {
+  open: boolean
+  onToggle: (e: React.MouseEvent) => void
+  label?: React.ReactNode
+  summary?: React.ReactNode
+  toggleTitle?: string
+  toggleLabel?: string
+  children?: React.ReactNode
+}) {
+  return (
+    <div className="collapsible">
+      <div className="collapsible-row">
+        <button
+          type="button"
+          className="collapsible-toggle"
+          aria-expanded={open}
+          aria-label={toggleLabel}
+          title={toggleTitle}
+          onClick={onToggle}
+        >
+          <span className={'step-diff-caret' + (open ? ' open' : '')}>▶</span>
+          {label}
+        </button>
+        {summary}
+      </div>
+      {open && children && (
+        <div className="collapsible-body">{children}</div>
+      )}
+    </div>
+  )
+}
+
 // A tool call in the activity trace: a clickable chip (red when the call was
 // blocked or failed) that toggles a grant popup. When the chip has revealable detail — a
 // file-writing tool's diff, or any other tool's captured output — it also gets
@@ -621,40 +668,46 @@ function ToolStep({
     }
   }, [open, onClose])
 
+  // The chip (and its input) read the same whether or not the call has revealable
+  // detail; when it does, they ride beside the disclosure triangle as its summary.
+  const chip = (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        className={
+          'step-tool-name' +
+          (status === 'blocked' || status === 'failed' ? ' errored' : '')
+        }
+        aria-expanded={open}
+        onClick={onToggle}
+      >
+        {step.tool}
+      </button>
+      {step.input && <span className="step-tool-input">{step.input}</span>}
+    </>
+  )
   return (
     <div className="step-tool" ref={ref}>
-      <div className="step-tool-row">
-        {hasDetail && (
-          <button
-            type="button"
-            className="step-diff-toggle"
-            aria-expanded={detailOpen}
-            aria-label={`${detailOpen ? 'Hide' : 'Show'} ${noun}`}
-            title={`${detailOpen ? 'Hide' : 'Show'} ${noun} (⌥/⇧ for all)`}
-            onClick={(e) => onToggleDetail(e.altKey || e.shiftKey)}
-          >
-            <span className={'step-diff-caret' + (detailOpen ? ' open' : '')}>▶</span>
-          </button>
-        )}
-        <button
-          ref={buttonRef}
-          type="button"
-          className={
-            'step-tool-name' +
-            (status === 'blocked' || status === 'failed' ? ' errored' : '')
-          }
-          aria-expanded={open}
-          onClick={onToggle}
+      {hasDetail ? (
+        <Collapsible
+          open={detailOpen}
+          onToggle={(e) => onToggleDetail(e.altKey || e.shiftKey)}
+          summary={chip}
+          toggleLabel={`${detailOpen ? 'Hide' : 'Show'} ${noun}`}
+          toggleTitle={`${detailOpen ? 'Hide' : 'Show'} ${noun} (⌥/⇧ for all)`}
         >
-          {step.tool}
-        </button>
-        {step.input && <span className="step-tool-input">{step.input}</span>}
-      </div>
-      {detailOpen && hasDiff && <DiffView edits={step.edits!} />}
-      {detailOpen && hasResult && (
-        <div className={'step-result' + (result!.isError ? ' errored' : '')}>
-          {result!.text}
-        </div>
+          {hasDiff && <DiffView edits={step.edits!} />}
+          {hasResult && (
+            <div
+              className={'step-result' + (result!.isError ? ' errored' : '')}
+            >
+              {result!.text}
+            </div>
+          )}
+        </Collapsible>
+      ) : (
+        <div className="collapsible-row">{chip}</div>
       )}
       {open && anchor && (
         <ToolPopup
@@ -1322,6 +1375,21 @@ export function App() {
     })
   }
 
+  // Assistant turns (other than the most recent) collapse their middle stretch
+  // of inference steps behind a disclosure; this holds the message indices the
+  // viewer has expanded. It's cleared on task switch, so each task opens with its
+  // history folded down again.
+  const [expandedTurns, setExpandedTurns] = useState<Set<number>>(new Set())
+
+  function toggleTurn(messageIndex: number) {
+    setExpandedTurns((prev) => {
+      const next = new Set(prev)
+      if (next.has(messageIndex)) next.delete(messageIndex)
+      else next.add(messageIndex)
+      return next
+    })
+  }
+
   // The two ambient conditions (alongside having a task open) that make the
   // viewer "actively viewing" it: the conversation is scrolled to its bottom,
   // and this browser tab is the active, focused one.
@@ -1902,6 +1970,7 @@ export function App() {
     setEditingTitle(false)
     setOpenTool(null)
     setOpenDetails(new Set())
+    setExpandedTurns(new Set())
   }, [selected])
 
   // Focus and select the title when entering edit mode.
@@ -2995,29 +3064,82 @@ export function App() {
                             />
                           )
                         }
-                        return groups.map((idxs, g) => {
-                          // This inference's copyable text: its text blocks, in
-                          // order, joined as they read.
-                          const text = idxs
+                        // Each inference's copyable text: its text blocks, in
+                        // order, joined as they read.
+                        const groupTexts = groups.map((idxs) =>
+                          idxs
                             .map((j) => m.steps![j])
                             .filter((s) => s.kind === 'text' && s.text)
                             .map((s) => s.text)
-                            .join('\n\n')
-                          return (
-                            <Fragment key={g}>
-                              {g > 0 && <hr className="turn-sep" />}
-                              <div className="inference">
-                                {text && (
-                                  <CopyButton
-                                    text={text}
-                                    className="inference-copy"
-                                  />
-                                )}
-                                {idxs.map(renderStep)}
-                              </div>
-                            </Fragment>
-                          )
-                        })
+                            .join('\n\n'),
+                        )
+                        const renderGroup = (g: number, showSep = g > 0) => (
+                          <Fragment key={g}>
+                            {showSep && <hr className="turn-sep" />}
+                            <div className="inference">
+                              {groupTexts[g] && (
+                                <CopyButton
+                                  text={groupTexts[g]}
+                                  className="inference-copy"
+                                />
+                              )}
+                              {groups[g].map(renderStep)}
+                            </div>
+                          </Fragment>
+                        )
+                        // Assistant turns fold down: the first inference step
+                        // stays, the step with the most text and everything after
+                        // it stays, and the run between them collapses into a
+                        // disclosure. The first step only stays if it has prose of
+                        // its own — a textless opener (just tool calls) folds in
+                        // with the rest. A turn still being written renders in full
+                        // (its shape isn't settled yet), as does any turn too
+                        // short to have a gap.
+                        const longestIdx = groupTexts.reduce(
+                          (best, t, g) =>
+                            t.length > groupTexts[best].length ? g : best,
+                          0,
+                        )
+                        const showFirst = groupTexts[0].length > 0
+                        const hiddenStart = showFirst ? 1 : 0
+                        const hidden = groups.slice(hiddenStart, longestIdx)
+                        const folds =
+                          m.role === 'assistant' &&
+                          !m.pending &&
+                          hidden.length > 0
+                        if (!folds) return groups.map((_, g) => renderGroup(g))
+                        const toolCount = hidden
+                          .flat()
+                          .filter((j) => m.steps![j].kind === 'tool_use').length
+                        const open = expandedTurns.has(i)
+                        return (
+                          <>
+                            {showFirst && renderGroup(0)}
+                            {showFirst && <hr className="turn-sep" />}
+                            <Collapsible
+                              open={open}
+                              onToggle={() => toggleTurn(i)}
+                              label={
+                                <span className="collapsible-label">
+                                  {hidden.length} step
+                                  {hidden.length === 1 ? '' : 's'}
+                                  {toolCount > 0 &&
+                                    `, ${toolCount} tool${
+                                      toolCount === 1 ? '' : 's'
+                                    }`}
+                                  …
+                                </span>
+                              }
+                            >
+                              {hidden.map((_, k) =>
+                                renderGroup(k + hiddenStart, k > 0),
+                              )}
+                            </Collapsible>
+                            {groups
+                              .slice(longestIdx)
+                              .map((_, k) => renderGroup(k + longestIdx))}
+                          </>
+                        )
                       })()}
                     </div>
                   ) : (
