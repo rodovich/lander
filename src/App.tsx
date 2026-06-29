@@ -2106,17 +2106,18 @@ export function App() {
   }
 
   // Dropdown summary: "All projects" when every project is shown, otherwise the
-  // single shown project's path. The active time filter ("Today"/"This week",
-  // not "Any time") and the non-default views ("Unread"/"Archived", not the
-  // "Inbox" default) each append a "• …" suffix, in that order (e.g. "All
-  // projects • Today • Unread").
+  // single shown project's leaf (just the last path segment — the menu items
+  // still show full paths). The active time filter ("Today"/"This week", not
+  // "Any time") and the non-default views ("Unread"/"Archived", not the "Inbox"
+  // default) each append a "• …" suffix, in that order (e.g. "All projects •
+  // Today • Unread").
   const filterBase =
     projects.length === 0
       ? ''
       : allShown && projects.length > 1
         ? 'All projects'
         : shown.length === 1
-          ? pathBySlug.get(shown[0]) ?? shown[0]
+          ? lastPathComponent(pathBySlug.get(shown[0]) ?? shown[0])
           : `${shown.length} of ${projects.length}`
   const timeLabel =
     timeFilter === 'today'
