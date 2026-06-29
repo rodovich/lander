@@ -200,9 +200,11 @@ body {
   list-style: none;
   margin: 0;
   padding: 0;
-  /* Height of a sticky status header (8px + 15px line + 8px); the date subheader
-     sticks just below it. Keep in sync with .task-group-header.status. */
-  --status-header-height: 31px;
+  /* Height a status header collapses to when it's split into date subheaders: 8px
+     above the label + its 15px line, with no bottom gap (the date subheader's own
+     top padding supplies the gap below it). The date subheader pins flush beneath,
+     so it shares this value. Keep in sync with .task-group-header.status.split. */
+  --split-status-header-height: 23px;
 }
 
 /* A zero-height, non-sticky marker before each status header. The count chips
@@ -239,21 +241,52 @@ body {
   user-select: none;
 }
 
-/* Exactly --status-header-height tall (8px + 15px line + 8px, via centering), with
+/* A status-only header is 31px (8px + 15px line + 8px, via centering), with
    box-sizing so a rule-below border counts *into* that height rather than adding a
-   32nd pixel. Status headers all pin at top:0 and stack as you scroll — a later one
-   painting over the earlier — so any extra pixel on the earlier one peeks out below
-   the cover as an errant line. Keeping every status the same height avoids that. */
+   32nd pixel. Status headers pin at top:0 and stack as you scroll — a later one
+   painting over the earlier — so a uniform height keeps an earlier one's bottom
+   (and its rule) from peeking below the cover as an errant line. A split header is
+   shorter (see .split below), so it forgoes that uniformity by design. */
 .task-group-header.status {
   top: 0;
-  z-index: 2;
-  height: var(--status-header-height);
+  height: 31px;
   box-sizing: border-box;
   display: flex;
   align-items: center;
   padding: 0 16px;
   font-size: 13px;
   line-height: 15px;
+}
+
+/* The section kebab sits at the header's right, aligned with the row kebabs
+   below: the header pads 16px but the rows pad 10px on the right, so a -6px
+   margin pulls the button out to that 10px line. margin-left:auto takes the
+   slack, pushing the menu right while the label keeps the left. */
+.task-group-header.status .section-menu {
+  margin-left: auto;
+  margin-right: -6px;
+}
+
+/* When split into dates, the status header is shorter: it keeps the 8px above its
+   label but drops the 8px below (the date subheader's own top padding supplies the
+   gap down to the date text), so 23px rather than 31px. The date subheader pins
+   flush at its bottom. padding-top holds the label down by 8px since the box no
+   longer centers it within a taller frame. */
+.task-group-header.status.split {
+  height: var(--split-status-header-height);
+  padding-top: 8px;
+}
+
+/* The date subheader isn't a flex row, so its kebab overlays absolutely rather
+   than stretching the header. The header is sticky (a positioned ancestor), so
+   right:10px lands the button on the same line as the row kebabs below; top:50%
+   with a -11px margin (half the 22px kebab) centers it in the header's band. A
+   margin, not a transform — a transform would trap the fixed popup. */
+.task-group-header.date .section-menu {
+  position: absolute;
+  top: 50%;
+  margin-top: -11px;
+  right: 10px;
 }
 
 .task-group-header.status.wedged {
@@ -272,13 +305,14 @@ body {
   color: var(--landed);
 }
 
-/* 21px tall (13px line + 8px below); no top padding, so it pins flush beneath the
-   status header — the 8px gap to the status text above comes from the status's
-   centered text (for a first date) or the .task-rule-date above it (for a later
-   one). */
+/* 29px tall (8px + 13px line + 8px): the date subheader owns its full visual band
+   — the 8px above the text as well as below — so its kebab can center within it.
+   It pins beneath the status header (which suppresses its own bottom gap when
+   split, below), and the 8px top padding is the gap down to the date text whether
+   the header above is the status (first date) or a .task-rule (a later one). */
 .task-group-header.date {
-  top: var(--status-header-height);
-  padding: 0 16px 8px;
+  top: var(--split-status-header-height);
+  padding: 8px 16px;
   font-size: 11px;
   line-height: 13px;
   color: var(--muted);
@@ -307,20 +341,13 @@ body {
 /* The tasks→header divider, by contrast, is its own zero-height row sitting just
    above the header in normal flow. Living off the header lets it scroll up and
    out of view as the header pins — so stacked sticky headers (RESTING over OLDER)
-   meet with no rule between them. It carries no spacing of its own: the 8px to the
-   header text below is that header's padding-top (status) or margin-top (date),
-   and the gap to the list above is the last task's padding. */
+   meet with no rule between them. It carries no spacing of its own: the 8px down to
+   the header text below comes from that header (a status centers its text; a date
+   pads its top), and the gap to the list above is the last task's padding. */
 .task-rule {
   height: 0;
   margin: 0;
   border-top: 1px solid var(--border-secondary);
-}
-
-/* Above a date subheader the rule also supplies the 8px down to the date text
-   (the date has no top padding, so it can pin flush). The gap stays on the rule —
-   which scrolls away with the tasks — not on the sticky date. */
-.task-rule-date {
-  padding-bottom: 8px;
 }
 
 /* A row lays its content column beside the kebab menu; align-items keeps the
@@ -540,6 +567,8 @@ body {
   color: var(--fg);
   font: inherit;
   font-size: 13px;
+  /* Not inherited from the section header (which is 600) — menu text reads plain. */
+  font-weight: 400;
   text-align: left;
   cursor: pointer;
 }

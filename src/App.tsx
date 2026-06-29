@@ -1107,6 +1107,102 @@ function TaskActionsMenu({
   )
 }
 
+// The kebab on a section header (a status, or a date subheader within a split
+// status). Its one action archives every task in that section at once. Shares the
+// row kebab's trigger and popup styling, opening the popup down and to the right
+// from the trigger like the task menu; with a single item it skips the roving
+// navigation.
+function SectionActionsMenu({
+  count,
+  onArchive,
+}: {
+  count: number
+  onArchive: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const itemRef = useRef<HTMLButtonElement>(null)
+  const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(
+    null,
+  )
+
+  useEffect(() => {
+    if (!open) {
+      setAnchor(null)
+      return
+    }
+    const place = () => {
+      const r = buttonRef.current?.getBoundingClientRect()
+      if (r) setAnchor({ top: r.bottom + 4, left: r.left })
+    }
+    place()
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [open])
+
+  // Focus the single item once the popup is placed, so Escape/Enter land on it.
+  useEffect(() => {
+    if (open && anchor) itemRef.current?.focus()
+  }, [open, anchor])
+
+  return (
+    <div className="task-menu section-menu" ref={ref}>
+      <button
+        ref={buttonRef}
+        type="button"
+        className="task-kebab"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Section actions"
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen((o) => !o)
+        }}
+      >
+        ⋮
+      </button>
+      {open && anchor && (
+        <div
+          className="task-menu-popup"
+          role="menu"
+          style={{ top: anchor.top, left: anchor.left }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            ref={itemRef}
+            type="button"
+            role="menuitem"
+            tabIndex={-1}
+            className="task-menu-item task-menu-item-archive"
+            onClick={(e) => {
+              e.stopPropagation()
+              setOpen(false)
+              onArchive()
+            }}
+          >
+            Archive {count} {count === 1 ? 'task' : 'tasks'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function App() {
   const [tasks, setTasks] = useState<TaskWithProject[]>([])
   // Active + archived tasks across shown projects, used only to resolve
@@ -1381,10 +1477,16 @@ export function App() {
   })()
 
   const dateCatsByStatus = new Map<string, Set<DateCategory>>()
+  // Tasks per status+date bucket, keyed `${status}|${category}`, for the count a
+  // date subheader's archive menu shows (and archives).
+  const countByStatusDate = new Map<string, number>()
   for (const t of orderedTasks) {
+    const cat = dateCategory(t.updatedAt ?? t.createdAt, todayStart, weekStart)
     const set = dateCatsByStatus.get(t.status) ?? new Set<DateCategory>()
-    set.add(dateCategory(t.updatedAt ?? t.createdAt, todayStart, weekStart))
+    set.add(cat)
     dateCatsByStatus.set(t.status, set)
+    const k = `${t.status}|${cat}`
+    countByStatusDate.set(k, (countByStatusDate.get(k) ?? 0) + 1)
   }
 
   type TaskRow =
@@ -1448,6 +1550,7 @@ export function App() {
       (a, b) => (STATUS_RANK[b[0]] ?? 3) - (STATUS_RANK[a[0]] ?? 3),
     )
   })()
+  const countByStatus = new Map(statusCounts)
 
   // The effective selection: the user's pick if it's still visible, otherwise
   // the first task in the list (e.g. after filtering hides the prior pick).
@@ -2103,6 +2206,45 @@ export function App() {
     }
   }
 
+  // Archive every task in a section at once (the section header's kebab). A
+  // section is a status, or — when the status is broken out into date buckets —
+  // a single status+date bucket, so passing a category narrows the targets to
+  // that date range. Drops them all optimistically, fires the per-task archive
+  // calls in parallel, then reloads to reconcile — including any that failed,
+  // which the reload brings back. Only offered for non-riding sections (a riding
+  // task has a live run the server won't archive), so every target is archivable.
+  async function archiveSection(status: string, category?: DateCategory) {
+    const targets = orderedTasks.filter(
+      (t) =>
+        t.status === status &&
+        (category == null ||
+          dateCategory(t.updatedAt ?? t.createdAt, todayStart, weekStart) ===
+            category),
+    )
+    if (targets.length === 0) return
+    const ids = new Set(targets.map((t) => t.session))
+    setError(null)
+    setTasks((prev) => prev.filter((t) => !ids.has(t.session)))
+    try {
+      await Promise.all(
+        targets.map(async (t) => {
+          const r = await fetch(`/api/${t.projectSlug}/tasks/${t.session}/archive`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ archived: true }),
+          })
+          if (!r.ok) {
+            const body = await r.json()
+            throw new Error(body.error ?? r.statusText)
+          }
+        }),
+      )
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+    setTasks((await loadShownTasks(shown)).tasks)
+  }
+
   // Launch a scheduled task now, ahead of its time (the header's "launch"
   // button). The server clears the schedule, records the launch, and starts the
   // agent; polling reconciles the new status.
@@ -2373,10 +2515,27 @@ export function App() {
                       'task-group-header status ' +
                       row.status +
                       (row.first ? ' first' : '') +
+                      ((dateCatsByStatus.get(row.status)?.size ?? 0) > 1
+                        ? ' split'
+                        : '') +
                       (nextIsTask ? ' rule-below' : '')
                     }
                   >
-                    {row.status}
+                    <span className="task-group-label">{row.status}</span>
+                    {/* The archive menu rides the leaf header: here only when the
+                        status isn't broken out into dates (otherwise each date
+                        subheader carries its own, below). A riding task has a live
+                        run the server won't archive, so that section gets none;
+                        the archived view is already the archive, so it gets none
+                        either. */}
+                    {view !== 'archived' &&
+                      row.status !== 'riding' &&
+                      (dateCatsByStatus.get(row.status)?.size ?? 0) <= 1 && (
+                        <SectionActionsMenu
+                          count={countByStatus.get(row.status) ?? 0}
+                          onArchive={() => archiveSection(row.status)}
+                        />
+                      )}
                   </li>
                 </Fragment>
               )
@@ -2386,7 +2545,7 @@ export function App() {
                 <Fragment key={row.key}>
                   {prevIsTask && (
                     <li
-                      className="task-rule task-rule-date"
+                      className="task-rule"
                       role="presentation"
                       aria-hidden="true"
                     />
@@ -2400,7 +2559,24 @@ export function App() {
                       (nextIsTask ? ' rule-below' : '')
                     }
                   >
-                    {DATE_CATEGORY_LABELS[row.category]}
+                    <span className="task-group-label">
+                      {DATE_CATEGORY_LABELS[row.category]}
+                    </span>
+                    {/* The leaf header for a date-broken status: its menu
+                        archives only this status+date bucket. Riding never breaks
+                        out a menu (live runs); archived view shows none. */}
+                    {view !== 'archived' && row.status !== 'riding' && (
+                      <SectionActionsMenu
+                        count={
+                          countByStatusDate.get(
+                            `${row.status}|${row.category}`,
+                          ) ?? 0
+                        }
+                        onArchive={() =>
+                          archiveSection(row.status, row.category)
+                        }
+                      />
+                    )}
                   </li>
                 </Fragment>
               )
