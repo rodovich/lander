@@ -8,7 +8,7 @@
 // callbacks).
 import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
-import { inDateRange, taskMetadata } from './task-metadata.js'
+import { inDateRange, matchesText, taskMetadata } from './task-metadata.js'
 
 const {
   LANDER_API: API,
@@ -197,28 +197,40 @@ function parseDateArg(flag, value) {
   return ms
 }
 
-// `lander list [--status <s>] [--since <when>] [--until <when>] [--json]` —
-// the project's tasks, newest first, as metadata only (id, title, status,
+// `lander list [--status <s>] [--since <when>] [--until <when>] [--text <terms>] [--json]`
+// — the project's tasks, newest first, as metadata only (id, title, status,
 // createdAt, updatedAt) — never their conversation, in either output mode
-// (see taskMetadata). --since/--until filter by createdAt, inclusive.
+// (see taskMetadata), even when --text matched inside one. --since/--until
+// filter by createdAt, inclusive. --text searches title + message text,
+// case-insensitively; repeat it for an AND, comma-delimit one occurrence for
+// an OR (see matchesText).
 async function listTasks(args) {
   let status
   let json = false
   let since
   let until
+  const textGroups = []
   for (let i = 0; i < args.length; i++) {
     const a = args[i]
     if (a === '--status') status = args[++i]
     else if (a === '--json') json = true
     else if (a === '--since') since = parseDateArg('--since', args[++i])
     else if (a === '--until') until = parseDateArg('--until', args[++i])
-    else die(`list: unexpected argument ${a}`)
+    else if (a === '--text') {
+      const terms = (args[++i] ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+      if (!terms.length) die('--text expects at least one non-empty term')
+      textGroups.push(terms)
+    } else die(`list: unexpected argument ${a}`)
   }
   const res = await call(PROJECT, '/tasks', { method: 'GET' })
   let tasks = Array.isArray(res) ? res : (res.tasks ?? [])
   if (status) tasks = tasks.filter((t) => t.status === status)
   if (since != null || until != null)
     tasks = tasks.filter((t) => inDateRange(t.createdAt, { since, until }))
+  if (textGroups.length) tasks = tasks.filter((t) => matchesText(t, textGroups))
   const meta = tasks.map(taskMetadata)
   if (json) return void console.log(JSON.stringify(meta, null, 2))
   if (!meta.length) return void console.log('(no tasks)')

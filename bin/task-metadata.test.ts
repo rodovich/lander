@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { inDateRange, taskMetadata } from './task-metadata.js'
+import { inDateRange, matchesText, taskMetadata } from './task-metadata.js'
 
 describe('taskMetadata', () => {
   it('keeps only id/title/status/timestamps, dropping the conversation', () => {
@@ -70,5 +70,36 @@ describe('inDateRange', () => {
 
   it('includes a createdAt within both bounds', () => {
     expect(inDateRange('2026-06-17T00:00:00.000Z', { since, until })).toBe(true)
+  })
+})
+
+describe('matchesText', () => {
+  const task = {
+    title: 'Fix the Auth timeout',
+    messages: [
+      { role: 'user', text: 'sessions are dropping after a few minutes' },
+      { role: 'assistant', text: 'found it — the refresh token expires early' },
+    ],
+  }
+
+  it('matches with no groups', () => {
+    expect(matchesText(task, [])).toBe(true)
+  })
+
+  it('matches a term in the title, case-insensitively', () => {
+    expect(matchesText(task, [['auth']])).toBe(true)
+  })
+
+  it('matches a term only found in a message', () => {
+    expect(matchesText(task, [['refresh token']])).toBe(true)
+  })
+
+  it('ORs terms within a single group', () => {
+    expect(matchesText(task, [['nonexistent', 'timeout']])).toBe(true)
+  })
+
+  it('ANDs across groups, failing if any group has no match', () => {
+    expect(matchesText(task, [['auth'], ['timeout']])).toBe(true)
+    expect(matchesText(task, [['auth'], ['nonexistent']])).toBe(false)
   })
 })
