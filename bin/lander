@@ -8,7 +8,7 @@
 // callbacks).
 import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
-import { taskMetadata } from './task-metadata.js'
+import { inDateRange, taskMetadata } from './task-metadata.js'
 
 const {
   LANDER_API: API,
@@ -189,21 +189,36 @@ async function resolveId(idOrPrefix, { archived = false } = {}) {
   return matches[0].id
 }
 
-// `lander list [--status <s>] [--json]` — the project's tasks, newest first,
-// as metadata only (id, title, status, createdAt, updatedAt) — never their
-// conversation, in either output mode (see taskMetadata).
+// Parse a --since/--until value (anything Date can parse, same leniency as
+// --date elsewhere) into epoch ms, dying with a clear message if it can't.
+function parseDateArg(flag, value) {
+  const ms = Date.parse(value)
+  if (Number.isNaN(ms)) die(`${flag} expects a parseable date/time, got ${value}`)
+  return ms
+}
+
+// `lander list [--status <s>] [--since <when>] [--until <when>] [--json]` —
+// the project's tasks, newest first, as metadata only (id, title, status,
+// createdAt, updatedAt) — never their conversation, in either output mode
+// (see taskMetadata). --since/--until filter by createdAt, inclusive.
 async function listTasks(args) {
   let status
   let json = false
+  let since
+  let until
   for (let i = 0; i < args.length; i++) {
     const a = args[i]
     if (a === '--status') status = args[++i]
     else if (a === '--json') json = true
+    else if (a === '--since') since = parseDateArg('--since', args[++i])
+    else if (a === '--until') until = parseDateArg('--until', args[++i])
     else die(`list: unexpected argument ${a}`)
   }
   const res = await call(PROJECT, '/tasks', { method: 'GET' })
   let tasks = Array.isArray(res) ? res : (res.tasks ?? [])
   if (status) tasks = tasks.filter((t) => t.status === status)
+  if (since != null || until != null)
+    tasks = tasks.filter((t) => inDateRange(t.createdAt, { since, until }))
   const meta = tasks.map(taskMetadata)
   if (json) return void console.log(JSON.stringify(meta, null, 2))
   if (!meta.length) return void console.log('(no tasks)')

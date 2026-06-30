@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { taskMetadata } from './task-metadata.js'
+import { inDateRange, taskMetadata } from './task-metadata.js'
 
 describe('taskMetadata', () => {
   it('keeps only id/title/status/timestamps, dropping the conversation', () => {
@@ -44,5 +44,31 @@ describe('taskMetadata', () => {
       updatedAt: '2026-06-30T00:00:00.000Z',
     })
     expect(unscheduled).not.toHaveProperty('scheduledFor')
+  })
+})
+
+describe('inDateRange', () => {
+  const since = Date.parse('2026-06-15T00:00:00.000Z')
+  const until = Date.parse('2026-06-20T00:00:00.000Z')
+
+  it('passes everything when neither bound is set', () => {
+    expect(inDateRange('2020-01-01T00:00:00.000Z', {})).toBe(true)
+  })
+
+  it('excludes a createdAt before --since', () => {
+    expect(inDateRange('2026-06-14T23:59:59.999Z', { since })).toBe(false)
+  })
+
+  it('excludes a createdAt after --until', () => {
+    expect(inDateRange('2026-06-20T00:00:00.001Z', { until })).toBe(false)
+  })
+
+  it('includes the bounds themselves (inclusive)', () => {
+    expect(inDateRange('2026-06-15T00:00:00.000Z', { since })).toBe(true)
+    expect(inDateRange('2026-06-20T00:00:00.000Z', { until })).toBe(true)
+  })
+
+  it('includes a createdAt within both bounds', () => {
+    expect(inDateRange('2026-06-17T00:00:00.000Z', { since, until })).toBe(true)
   })
 })
