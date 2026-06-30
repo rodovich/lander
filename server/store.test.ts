@@ -5,7 +5,7 @@ import path from 'node:path'
 import { readTasks, readTask, writeTask, mutateTask } from './store'
 
 type Rec = {
-  session: string
+  id: string
   createdAt: string
   updatedAt?: string
   title?: string
@@ -14,7 +14,7 @@ type Rec = {
 
 let dir: string
 const file = (id: string) => path.join(dir, `${id}.json`)
-const rec = (over: Partial<Rec> & { session: string }): Rec => ({
+const rec = (over: Partial<Rec> & { id: string }): Rec => ({
   createdAt: '2026-01-01T00:00:00.000Z',
   ...over,
 })
@@ -36,36 +36,36 @@ describe('readTasks', () => {
   })
 
   it('skips non-.json entries, including mid-write .tmp files', async () => {
-    await writeFile(file('a'), JSON.stringify(rec({ session: 'a' })))
+    await writeFile(file('a'), JSON.stringify(rec({ id: 'a' })))
     await writeFile(path.join(dir, 'a.json.deadbeef.tmp'), '{ partial')
     await writeFile(path.join(dir, 'notes.txt'), 'hello')
     await mkdir(path.join(dir, 'subdir'))
     const tasks = await readTasks<Rec>(dir)
-    expect(tasks.map((t) => t.session)).toEqual(['a'])
+    expect(tasks.map((t) => t.id)).toEqual(['a'])
   })
 
   it('skips unreadable/invalid-JSON files without aborting the listing', async () => {
-    await writeFile(file('good'), JSON.stringify(rec({ session: 'good' })))
+    await writeFile(file('good'), JSON.stringify(rec({ id: 'good' })))
     await writeFile(file('bad'), 'not json {')
     const tasks = await readTasks<Rec>(dir)
-    expect(tasks.map((t) => t.session)).toEqual(['good'])
+    expect(tasks.map((t) => t.id)).toEqual(['good'])
   })
 
   it('sorts by updatedAt descending (newest first)', async () => {
     await writeFile(
       file('old'),
-      JSON.stringify(rec({ session: 'old', updatedAt: '2026-01-01T00:00:00.000Z' })),
+      JSON.stringify(rec({ id: 'old', updatedAt: '2026-01-01T00:00:00.000Z' })),
     )
     await writeFile(
       file('new'),
-      JSON.stringify(rec({ session: 'new', updatedAt: '2026-03-01T00:00:00.000Z' })),
+      JSON.stringify(rec({ id: 'new', updatedAt: '2026-03-01T00:00:00.000Z' })),
     )
     await writeFile(
       file('mid'),
-      JSON.stringify(rec({ session: 'mid', updatedAt: '2026-02-01T00:00:00.000Z' })),
+      JSON.stringify(rec({ id: 'mid', updatedAt: '2026-02-01T00:00:00.000Z' })),
     )
     const tasks = await readTasks<Rec>(dir)
-    expect(tasks.map((t) => t.session)).toEqual(['new', 'mid', 'old'])
+    expect(tasks.map((t) => t.id)).toEqual(['new', 'mid', 'old'])
   })
 
   it('falls back to createdAt when updatedAt is absent', async () => {
@@ -73,22 +73,22 @@ describe('readTasks', () => {
     // older updatedAt. 'a' must sort first via the createdAt fallback.
     await writeFile(
       file('a'),
-      JSON.stringify(rec({ session: 'a', createdAt: '2026-05-01T00:00:00.000Z' })),
+      JSON.stringify(rec({ id: 'a', createdAt: '2026-05-01T00:00:00.000Z' })),
     )
     await writeFile(
       file('b'),
       JSON.stringify(
-        rec({ session: 'b', updatedAt: '2026-04-01T00:00:00.000Z' }),
+        rec({ id: 'b', updatedAt: '2026-04-01T00:00:00.000Z' }),
       ),
     )
     const tasks = await readTasks<Rec>(dir)
-    expect(tasks.map((t) => t.session)).toEqual(['a', 'b'])
+    expect(tasks.map((t) => t.id)).toEqual(['a', 'b'])
   })
 })
 
 describe('readTask', () => {
   it('returns the parsed record for an existing file', async () => {
-    const r = rec({ session: 'x', title: 'hi' })
+    const r = rec({ id: 'x', title: 'hi' })
     await writeFile(file('x'), JSON.stringify(r))
     expect(await readTask<Rec>(dir, 'x')).toEqual(r)
   })
@@ -105,19 +105,19 @@ describe('readTask', () => {
 
 describe('writeTask', () => {
   it('writes JSON that round-trips through readTask', async () => {
-    const r = rec({ session: 'r', title: 'round', n: 7 })
+    const r = rec({ id: 'r', title: 'round', n: 7 })
     await writeTask(file('r'), r)
     expect(await readTask<Rec>(dir, 'r')).toEqual(r)
   })
 
   it('pretty-prints with two-space indentation', async () => {
-    await writeTask(file('p'), rec({ session: 'p' }))
+    await writeTask(file('p'), rec({ id: 'p' }))
     const raw = await readFile(file('p'), 'utf8')
-    expect(raw).toContain('\n  "session": "p"')
+    expect(raw).toContain('\n  "id": "p"')
   })
 
   it('leaves no temp file behind (atomic rename)', async () => {
-    await writeTask(file('a'), rec({ session: 'a' }))
+    await writeTask(file('a'), rec({ id: 'a' }))
     const entries = await readdir(dir)
     expect(entries).toEqual(['a.json'])
     expect(entries.some((e) => e.endsWith('.tmp'))).toBe(false)
@@ -125,19 +125,19 @@ describe('writeTask', () => {
 
   it('handles concurrent writes to different files without colliding', async () => {
     await Promise.all([
-      writeTask(file('one'), rec({ session: 'one' })),
-      writeTask(file('two'), rec({ session: 'two' })),
-      writeTask(file('three'), rec({ session: 'three' })),
+      writeTask(file('one'), rec({ id: 'one' })),
+      writeTask(file('two'), rec({ id: 'two' })),
+      writeTask(file('three'), rec({ id: 'three' })),
     ])
     const tasks = await readTasks<Rec>(dir)
-    expect(tasks.map((t) => t.session).sort()).toEqual(['one', 'three', 'two'])
+    expect(tasks.map((t) => t.id).sort()).toEqual(['one', 'three', 'two'])
     expect((await readdir(dir)).some((e) => e.endsWith('.tmp'))).toBe(false)
   })
 })
 
 describe('mutateTask', () => {
   it('reads, applies the mutation, and persists it', async () => {
-    await writeTask(file('m'), rec({ session: 'm', n: 1 }))
+    await writeTask(file('m'), rec({ id: 'm', n: 1 }))
     await mutateTask<Rec>(file('m'), (t) => {
       t.n = (t.n ?? 0) + 1
       t.title = 'changed'
@@ -147,9 +147,9 @@ describe('mutateTask', () => {
   })
 
   it('reads fresh from disk, so it does not clobber an out-of-band edit', async () => {
-    await writeTask(file('m'), rec({ session: 'm', title: 'orig', n: 1 }))
+    await writeTask(file('m'), rec({ id: 'm', title: 'orig', n: 1 }))
     // Simulate an HTTP endpoint editing a different field between writes.
-    await writeFile(file('m'), JSON.stringify(rec({ session: 'm', title: 'edited', n: 1 })))
+    await writeFile(file('m'), JSON.stringify(rec({ id: 'm', title: 'edited', n: 1 })))
     await mutateTask<Rec>(file('m'), (t) => {
       t.n = 99
     })
@@ -159,7 +159,7 @@ describe('mutateTask', () => {
   })
 
   it('serializes overlapping mutations so neither update is lost', async () => {
-    await writeTask(file('m'), rec({ session: 'm', n: 0 }))
+    await writeTask(file('m'), rec({ id: 'm', n: 0 }))
     // Two concurrent read-modify-writes to the same file, each touching a
     // different field. mutateTask's read and write are not adjacent (the write
     // awaits a rename), so without per-file serialization the second reads the
@@ -174,7 +174,7 @@ describe('mutateTask', () => {
   })
 
   it('runs queued mutations in call order', async () => {
-    await writeTask(file('m'), rec({ session: 'm', title: '' }))
+    await writeTask(file('m'), rec({ id: 'm', title: '' }))
     // Each reads the title and appends a marker. Only a serialized
     // read-append-write yields 'abc'; overlapping reads would each start from ''
     // and the last writer would leave a single character.
@@ -187,7 +187,7 @@ describe('mutateTask', () => {
   })
 
   it('one failed mutation does not wedge the file’s queue', async () => {
-    await writeTask(file('m'), rec({ session: 'm', n: 0 }))
+    await writeTask(file('m'), rec({ id: 'm', n: 0 }))
     const boom = mutateTask<Rec>(file('m'), () => {
       throw new Error('boom')
     })

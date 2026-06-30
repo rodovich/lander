@@ -21,26 +21,26 @@ const msg = (over: Partial<Message>): Message => ({
 describe('publicTask', () => {
   it('strips token, runId and runCursor, preserving everything else', () => {
     const out = publicTask({
-      session: 's',
+      id: 's',
       title: 't',
       token: 'secret',
       runId: 'r1',
       runCursor: 42,
       allowEdits: true,
     })
-    expect(out).toEqual({ session: 's', title: 't', allowEdits: true })
+    expect(out).toEqual({ id: 's', title: 't', allowEdits: true })
     expect('token' in out).toBe(false)
     expect('runId' in out).toBe(false)
     expect('runCursor' in out).toBe(false)
   })
 
   it('does not choke when the stripped fields are absent', () => {
-    expect(publicTask({ session: 's' })).toEqual({ session: 's' })
+    expect(publicTask({ id: 's' })).toEqual({ id: 's' })
   })
 
   it('returns a shallow copy (nested arrays are shared, not cloned)', () => {
     const messages = [msg({ text: 'hi' })]
-    const task = { session: 's', messages, token: 'x' }
+    const task = { id: 's', messages, token: 'x' }
     const out = publicTask(task)
     expect((out as { messages: Message[] }).messages).toBe(messages)
   })
@@ -52,7 +52,7 @@ describe('publicTask', () => {
       msg({ role: 'user', text: 'p2' }),
       msg({ role: 'user', text: 'p3' }),
     ]
-    const out = publicTask({ session: 's', messages, queued: ['p2', 'p3'] })
+    const out = publicTask({ id: 's', messages, queued: ['p2', 'p3'] })
     const m = (out as { messages: Message[] }).messages
     expect(m.map((x) => !!x.queued)).toEqual([false, false, true, true])
     // The raw queue is not exposed.
@@ -63,7 +63,7 @@ describe('publicTask', () => {
 
   it('leaves messages untouched when nothing is queued', () => {
     const messages = [msg({ role: 'user', text: 'p1' })]
-    const out = publicTask({ session: 's', messages })
+    const out = publicTask({ id: 's', messages })
     expect((out as { messages: Message[] }).messages).toBe(messages)
   })
 })

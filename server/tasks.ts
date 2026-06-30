@@ -52,7 +52,7 @@ export type TaskEvent = {
   // event) so the UI can render them as links. A task awaiting tasks may also
   // carry a --date/--time fallback, but we don't surface that here — the
   // condition is the point.
-  awaiting?: { session: string; title: string }[]
+  awaiting?: { id: string; title: string }[]
   createdAt: string
 }
 

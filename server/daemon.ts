@@ -13,6 +13,7 @@ import type {
   ServerToDaemon,
   UpdateMessage,
   DoneMessage,
+  SessionMessage,
   UsageBody,
 } from './protocol'
 
@@ -23,6 +24,7 @@ import type {
 export type RunEvent =
   | { kind: 'update'; msg: UpdateMessage }
   | { kind: 'done'; msg: DoneMessage }
+  | { kind: 'session'; msg: SessionMessage }
   | { kind: 'crashed' }
 
 // A single-consumer async queue: events buffer until pulled, and a pull before
@@ -192,6 +194,7 @@ export function attachDaemonServer(
           break
         case 'update':
         case 'done':
+        case 'session':
           channels.get(msg.runId)?.push({ kind: msg.type, msg } as RunEvent)
           break
         case 'usage':

@@ -100,12 +100,15 @@ type TaskEvent = {
   // 'scheduled' only: when the task is set to launch, shown beside the verb.
   scheduledFor?: string
   // 'awaiting' only: the tasks this one is resting on, rendered as links.
-  awaiting?: { session: string; title: string }[]
+  awaiting?: { id: string; title: string }[]
   createdAt: string
 }
 
 type Task = {
-  session: string
+  // The task's own short id (a nanoid; legacy tasks carry the uuid they were
+  // keyed by). Distinct from the assistant session that backs its turns, which
+  // the daemon owns and the client never sees.
+  id: string
   title: string
   status: string
   createdAt: string
@@ -337,9 +340,9 @@ function slugFromPath(): string {
   return window.location.pathname.split('/').filter(Boolean)[0] ?? ''
 }
 
-// The selected task's session is the second path segment, e.g.
+// The selected task's id is the second path segment, e.g.
 // "/users-me-code-app/task1/" -> "task1". Empty when no task is in the URL.
-function sessionFromPath(): string {
+function taskIdFromPath(): string {
   return window.location.pathname.split('/').filter(Boolean)[1] ?? ''
 }
 
@@ -830,12 +833,12 @@ function StatusTransition({
     const single = tasks.length === 1
     // Tint each awaited link by its task's current status (when resolvable),
     // matching the status chips used for task mentions.
-    const link = (t: { session: string; title: string }) => {
-      const status = linkTask(t.session)?.status
+    const link = (t: { id: string; title: string }) => {
+      const status = linkTask(t.id)?.status
       return (
         <a
           className={`status-transition-await-link${status ? ` ${status}` : ''}`}
-          href={`/${slug}/${t.session}`}
+          href={`/${slug}/${t.id}`}
         >
           {t.title}
         </a>
@@ -860,7 +863,7 @@ function StatusTransition({
         {!single && (
           <ul className="status-transition-await-list">
             {tasks.map((t) => (
-              <li key={t.session}>{link(t)}</li>
+              <li key={t.id}>{link(t)}</li>
             ))}
           </ul>
         )}
@@ -1326,8 +1329,8 @@ export function App() {
   )
   // The user's explicit task pick. The effective selection (`selected`, below)
   // falls back to the first visible task when this one is filtered away.
-  const [selectedSession, setSelectedSession] = useState<string | null>(
-    () => sessionFromPath() || null,
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(
+    () => taskIdFromPath() || null,
   )
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
@@ -1359,7 +1362,7 @@ export function App() {
   )
   const [submitting, setSubmitting] = useState(false)
 
-  // Each task keeps its own draft and in-flight state, keyed by session, so you
+  // Each task keeps its own draft and in-flight state, keyed by id, so you
   // can start a reply in one task, switch away, and come back to finish it; the
   // drafts persist across reloads alongside the new-task message.
   const [replies, setReplies] = usePersistentState<Record<string, string>>(
@@ -1421,8 +1424,8 @@ export function App() {
   // sticky-unread set below) so the list doesn't reshuffle under the keyboard;
   // moving focus to a text field or another window drops that hold.
   const [listFocused, setListFocused] = useState(false)
-  // Sessions to keep in the Unread view even though they've been read, because
-  // they were read while the list held focus. Accrues every unread session seen
+  // Tasks to keep in the Unread view even though they've been read, because
+  // they were read while the list held focus. Accrues every unread task seen
   // during a focused spell and clears when focus leaves the list, at which point
   // the plain unread filter reapplies. Newly-unread tasks need no entry here —
   // they pass the filter on their own — but joining the set keeps them visible
@@ -1449,7 +1452,7 @@ export function App() {
 
   // Maintain the sticky-unread set. Outside the focused Unread view it stays
   // empty (so the filter is the plain one). While the list holds focus on the
-  // Unread view, fold every currently-unread session into it — including ones
+  // Unread view, fold every currently-unread task into it — including ones
   // that just arrived — so that reading a task (which clears its unread mark)
   // leaves it in the list rather than yanking it out from under the cursor.
   useEffect(() => {
@@ -1460,9 +1463,9 @@ export function App() {
     setStickyUnread((prev) => {
       let next = prev
       for (const t of tasks) {
-        if (isUnread(t) && !prev.has(t.session)) {
+        if (isUnread(t) && !prev.has(t.id)) {
           if (next === prev) next = new Set(prev)
-          next.add(t.session)
+          next.add(t.id)
         }
       }
       return next
@@ -1474,16 +1477,16 @@ export function App() {
   // local copy so the dot clears at once; the 2s poll reconciles. The server
   // stores the marker monotonically, so a stale/older value never moves it back.
   // Reads tasksRef so a delayed (dwell-timer) call sees the freshest data.
-  async function markSeen(session: string) {
-    const task = tasksRef.current.find((t) => t.session === session)
+  async function markSeen(id: string) {
+    const task = tasksRef.current.find((t) => t.id === id)
     if (!task) return
     const at = latestUpdateAt(task)
     if (!at || (task.seenAt && task.seenAt >= at)) return
     setTasks((prev) =>
-      prev.map((t) => (t.session === session ? { ...t, seenAt: at } : t)),
+      prev.map((t) => (t.id === id ? { ...t, seenAt: at } : t)),
     )
     try {
-      await fetch(`/api/${task.projectSlug}/tasks/${session}/seen`, {
+      await fetch(`/api/${task.projectSlug}/tasks/${id}/seen`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ at }),
@@ -1498,14 +1501,14 @@ export function App() {
   // the local marker so the dot appears at once; the 2s poll reconciles. The
   // next time the viewer reads the task, markSeen advances the marker forward
   // again.
-  async function markUnread(session: string) {
-    const task = tasksRef.current.find((t) => t.session === session)
+  async function markUnread(id: string) {
+    const task = tasksRef.current.find((t) => t.id === id)
     if (!task) return
     setTasks((prev) =>
-      prev.map((t) => (t.session === session ? { ...t, seenAt: '' } : t)),
+      prev.map((t) => (t.id === id ? { ...t, seenAt: '' } : t)),
     )
     try {
-      await fetch(`/api/${task.projectSlug}/tasks/${session}/unread`, {
+      await fetch(`/api/${task.projectSlug}/tasks/${id}/unread`, {
         method: 'POST',
       })
     } catch {
@@ -1547,7 +1550,7 @@ export function App() {
           return false
       }
     }
-    if (view === 'unread' && !isUnread(t) && !stickyUnread.has(t.session))
+    if (view === 'unread' && !isUnread(t) && !stickyUnread.has(t.id))
       return false
     return query ? t.title.toLowerCase().includes(query) : true
   })
@@ -1642,7 +1645,7 @@ export function App() {
       })
       rowCategory = category
     }
-    taskRows.push({ kind: 'task', key: task.session, task, index })
+    taskRows.push({ kind: 'task', key: task.id, task, index })
   })
 
   // Per-status counts for the summary row below the filter dropdown, ordered
@@ -1662,10 +1665,10 @@ export function App() {
   // The effective selection: the user's pick if it's still visible, otherwise
   // the first task in the list (e.g. after filtering hides the prior pick).
   const selected =
-    selectedSession && tasks.some((t) => t.session === selectedSession)
-      ? selectedSession
-      : orderedTasks[0]?.session ?? null
-  const current = tasks.find((t) => t.session === selected) ?? null
+    selectedTaskId && tasks.some((t) => t.id === selectedTaskId)
+      ? selectedTaskId
+      : orderedTasks[0]?.id ?? null
+  const current = tasks.find((t) => t.id === selected) ?? null
 
   // The open task's latest completed update, and whether the viewer is actively
   // viewing it (open + tab active + scrolled to the bottom where new content
@@ -1704,12 +1707,12 @@ export function App() {
       anchor.getBoundingClientRect().top - list.getBoundingClientRect().top
     list.scrollTo({ top: list.scrollTop + delta, behavior: 'smooth' })
   }
-  const selectedIndex = orderedTasks.findIndex((t) => t.session === selected)
+  const selectedIndex = orderedTasks.findIndex((t) => t.id === selected)
   const rovingIndex = selectedIndex >= 0 ? selectedIndex : 0
 
-  function selectTask(session: string, projectSlug: string) {
-    setSelectedSession(session)
-    window.history.pushState(null, '', `/${projectSlug}/${session}`)
+  function selectTask(id: string, projectSlug: string) {
+    setSelectedTaskId(id)
+    window.history.pushState(null, '', `/${projectSlug}/${id}`)
   }
 
   function focusTaskAt(index: number) {
@@ -1742,7 +1745,7 @@ export function App() {
       case 'Enter':
       case ' ':
         e.preventDefault()
-        selectTask(task.session, task.projectSlug)
+        selectTask(task.id, task.projectSlug)
         break
     }
   }
@@ -1807,20 +1810,20 @@ export function App() {
   // Keep the selection in sync when navigating with the browser back/forward
   // buttons.
   useEffect(() => {
-    const onPop = () => setSelectedSession(sessionFromPath() || null)
+    const onPop = () => setSelectedTaskId(taskIdFromPath() || null)
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
 
-  // Mirror the effective selection into the URL as /<project>/<session>. Held
-  // off until tasks have loaded so a deep-linked session isn't clobbered before
+  // Mirror the effective selection into the URL as /<project>/<id>. Held
+  // off until tasks have loaded so a deep-linked task isn't clobbered before
   // its project's tasks arrive. replaceState (not push) corrects the URL in
   // place without adding spurious history entries.
   const hasLoadedRef = useRef(false)
   useEffect(() => {
     if (!hasLoadedRef.current) return
-    const cur = tasks.find((t) => t.session === selected)
-    const desired = cur ? `/${cur.projectSlug}/${cur.session}` : '/'
+    const cur = tasks.find((t) => t.id === selected)
+    const desired = cur ? `/${cur.projectSlug}/${cur.id}` : '/'
     if (window.location.pathname !== desired) {
       window.history.replaceState(null, '', desired)
     }
@@ -1926,15 +1929,19 @@ export function App() {
   // plain text. This is purely presentational — the stored message and what's
   // sent to the model are untouched.
   const resolveTaskLink: TaskLinkResolver = (id) => {
+    // A legacy/garbled reference can hand us an empty id (e.g. an old "awaiting"
+    // event saved under the pre-rename shape); resolve it to no link rather than
+    // throwing and taking down the whole task view.
+    if (!id) return undefined
     const needle = id.toLowerCase()
     const matches =
       needle.length >= 36
-        ? linkTasks.filter((t) => t.session.toLowerCase() === needle)
-        : linkTasks.filter((t) => t.session.toLowerCase().startsWith(needle))
+        ? linkTasks.filter((t) => t.id?.toLowerCase() === needle)
+        : linkTasks.filter((t) => t.id?.toLowerCase().startsWith(needle))
     if (matches.length !== 1) return undefined
     const t = matches[0]
     return {
-      href: `/${t.projectSlug}/${t.session}`,
+      href: `/${t.projectSlug}/${t.id}`,
       title: t.title,
       status: t.status,
     }
@@ -1971,7 +1978,7 @@ export function App() {
       if (!r.ok) throw new Error(body.error ?? r.statusText)
       const created = body as Task
       setTasks((await loadShownTasks(shown)).tasks)
-      selectTask(created.session, targetSlug)
+      selectTask(created.id, targetSlug)
       setMessage('')
       // Edits default on for the next task; commits stay as the user left them.
       setNewAllowEdits(true)
@@ -2008,14 +2015,14 @@ export function App() {
 
   async function saveTitle() {
     if (!current) return
-    const id = current.session
+    const id = current.id
     const proj = current.projectSlug
     const next = titleDraft.trim()
     setEditingTitle(false)
     if (!next || next === current.title) return
     // Optimistic; the PATCH persists it and polling will reconcile.
     setTasks((prev) =>
-      prev.map((t) => (t.session === id ? { ...t, title: next } : t)),
+      prev.map((t) => (t.id === id ? { ...t, title: next } : t)),
     )
     try {
       const r = await fetch(`/api/${proj}/tasks/${id}`, {
@@ -2034,8 +2041,8 @@ export function App() {
 
   // Ask haiku (server-side) to name the task from its conversation.
   async function generateTitle() {
-    if (!current || retitling === current.session) return
-    const id = current.session
+    if (!current || retitling === current.id) return
+    const id = current.id
     const proj = current.projectSlug
     setRetitling(id)
     setError(null)
@@ -2047,7 +2054,7 @@ export function App() {
       if (!r.ok) throw new Error(body.error ?? r.statusText)
       const updated = body as Task
       setTasks((prev) =>
-        prev.map((t) => (t.session === id ? { ...t, title: updated.title } : t)),
+        prev.map((t) => (t.id === id ? { ...t, title: updated.title } : t)),
       )
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -2117,7 +2124,7 @@ export function App() {
   // dot. An update that arrives *while* actively viewing is past that baseline,
   // so it's marked seen at once.
   const dwellTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const viewSessionRef = useRef<string | null>(null)
+  const viewTaskIdRef = useRef<string | null>(null)
   const viewBaselineRef = useRef<string>('')
   useEffect(() => {
     if (!activelyViewing || !current) {
@@ -2125,31 +2132,31 @@ export function App() {
         clearTimeout(dwellTimerRef.current)
         dwellTimerRef.current = null
       }
-      viewSessionRef.current = null
+      viewTaskIdRef.current = null
       return
     }
-    const session = current.session
-    if (viewSessionRef.current !== session) {
+    const id = current.id
+    if (viewTaskIdRef.current !== id) {
       // Just began actively viewing this task: snapshot the baseline and arm the
       // dwell. Anything already present clears only once the 2s elapses.
-      viewSessionRef.current = session
+      viewTaskIdRef.current = id
       viewBaselineRef.current = currentLatest
       if (dwellTimerRef.current) clearTimeout(dwellTimerRef.current)
       dwellTimerRef.current = setTimeout(() => {
         dwellTimerRef.current = null
-        void markSeen(session)
+        void markSeen(id)
       }, 2000)
     } else if (currentLatest > viewBaselineRef.current) {
       // A new update landed while actively viewing — seen immediately.
       viewBaselineRef.current = currentLatest
-      void markSeen(session)
+      void markSeen(id)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activelyViewing, currentLatest, current?.session])
+  }, [activelyViewing, currentLatest, current?.id])
 
   async function sendReply() {
     if (!current) return
-    const id = current.session
+    const id = current.id
     const proj = current.projectSlug
     const draft = replies[id] ?? ''
     if (!draft.trim() || sendingBy[id]) return
@@ -2180,7 +2187,7 @@ export function App() {
   // task's `retry` info; here we just fire it and refresh.
   async function retryTask() {
     if (!current) return
-    const id = current.session
+    const id = current.id
     const proj = current.projectSlug
     if (retryingBy[id]) return
     setRetryingBy((prev) => ({ ...prev, [id]: true }))
@@ -2206,7 +2213,7 @@ export function App() {
   // grant shows up.
   async function allowTool(rule: string, scope: 'task' | 'project') {
     if (!current) return
-    const id = current.session
+    const id = current.id
     const proj = current.projectSlug
     setOpenTool(null)
     setError(null)
@@ -2226,11 +2233,11 @@ export function App() {
 
   async function setAllowEdits(checked: boolean) {
     if (!current) return
-    const id = current.session
+    const id = current.id
     const proj = current.projectSlug
     // Optimistic; the PATCH persists it and polling will reconcile.
     setTasks((prev) =>
-      prev.map((t) => (t.session === id ? { ...t, allowEdits: checked } : t)),
+      prev.map((t) => (t.id === id ? { ...t, allowEdits: checked } : t)),
     )
     try {
       const r = await fetch(`/api/${proj}/tasks/${id}`, {
@@ -2249,11 +2256,11 @@ export function App() {
 
   async function setAllowCommits(checked: boolean) {
     if (!current) return
-    const id = current.session
+    const id = current.id
     const proj = current.projectSlug
     // Optimistic; the PATCH persists it and polling will reconcile.
     setTasks((prev) =>
-      prev.map((t) => (t.session === id ? { ...t, allowCommits: checked } : t)),
+      prev.map((t) => (t.id === id ? { ...t, allowCommits: checked } : t)),
     )
     try {
       const r = await fetch(`/api/${proj}/tasks/${id}`, {
@@ -2271,12 +2278,12 @@ export function App() {
   }
 
   async function setStatus(task: TaskWithProject, status: string) {
-    const id = task.session
+    const id = task.id
     const proj = task.projectSlug
     setError(null)
     // Optimistic; the PATCH persists it and polling will reconcile.
     setTasks((prev) =>
-      prev.map((t) => (t.session === id ? { ...t, status } : t)),
+      prev.map((t) => (t.id === id ? { ...t, status } : t)),
     )
     try {
       const r = await fetch(`/api/${proj}/tasks/${id}`, {
@@ -2298,10 +2305,10 @@ export function App() {
   // either action moves the row out of the current view: optimistically drop it
   // from the list. A reload reconciles.
   async function archiveTask(task: TaskWithProject, archived: boolean) {
-    const id = task.session
+    const id = task.id
     const proj = task.projectSlug
     setError(null)
-    setTasks((prev) => prev.filter((t) => t.session !== id))
+    setTasks((prev) => prev.filter((t) => t.id !== id))
     try {
       const r = await fetch(`/api/${proj}/tasks/${id}/archive`, {
         method: 'POST',
@@ -2334,13 +2341,13 @@ export function App() {
             category),
     )
     if (targets.length === 0) return
-    const ids = new Set(targets.map((t) => t.session))
+    const ids = new Set(targets.map((t) => t.id))
     setError(null)
-    setTasks((prev) => prev.filter((t) => !ids.has(t.session)))
+    setTasks((prev) => prev.filter((t) => !ids.has(t.id)))
     try {
       await Promise.all(
         targets.map(async (t) => {
-          const r = await fetch(`/api/${t.projectSlug}/tasks/${t.session}/archive`, {
+          const r = await fetch(`/api/${t.projectSlug}/tasks/${t.id}/archive`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ archived: true }),
@@ -2361,14 +2368,14 @@ export function App() {
   // button). The server clears the schedule, records the launch, and starts the
   // agent; polling reconciles the new status.
   async function launchNow(task: TaskWithProject) {
-    const id = task.session
+    const id = task.id
     const proj = task.projectSlug
     setError(null)
     // Optimistic: drop the schedule and flip to riding so the button clears at
     // once and the launch button gives way to the resting one.
     setTasks((prev) =>
       prev.map((t) =>
-        t.session === id
+        t.id === id
           ? { ...t, status: 'riding', scheduledFor: undefined }
           : t,
       ),
@@ -2704,17 +2711,17 @@ export function App() {
                 taskItemRefs.current[index] = el
               }}
               role="option"
-              aria-selected={task.session === selected}
+              aria-selected={task.id === selected}
               tabIndex={index === rovingIndex ? 0 : -1}
               className={
                 'task-item' +
-                (task.session === selected ? ' selected' : '') +
+                (task.id === selected ? ' selected' : '') +
                 ' ' +
                 task.status +
                 (task.archived ? ' archived' : '') +
                 (unseen ? ' unread' : '')
               }
-              onClick={() => selectTask(task.session, task.projectSlug)}
+              onClick={() => selectTask(task.id, task.projectSlug)}
               onKeyDown={(e) => onTaskKeyDown(e, index, task)}
             >
               <div className="task-item-main">
@@ -2772,7 +2779,7 @@ export function App() {
                   else if (action === 'wedge') void setStatus(task, 'wedged')
                   else if (action === 'rest') void setStatus(task, 'resting')
                   else if (action === 'land') void setStatus(task, 'landed')
-                  else if (action === 'markUnread') void markUnread(task.session)
+                  else if (action === 'markUnread') void markUnread(task.id)
                   else if (action === 'archive') void archiveTask(task, true)
                   else if (action === 'restore') void archiveTask(task, false)
                 }}
@@ -2872,7 +2879,7 @@ export function App() {
                     className="edit-title-button"
                     title="Regenerate title"
                     aria-label="Regenerate title"
-                    disabled={retitling === current.session}
+                    disabled={retitling === current.id}
                     onClick={() => void generateTitle()}
                   >
                     <svg
@@ -2889,7 +2896,7 @@ export function App() {
                       <path d="M13 10.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z" />
                     </svg>
                   </button>
-                  <CopyIdButton id={current.session} />
+                  <CopyIdButton id={current.id} />
                   <TaskActionsMenu
                     task={current}
                     onAction={(action) => {
@@ -2901,7 +2908,7 @@ export function App() {
                       else if (action === 'land')
                         void setStatus(current, 'landed')
                       else if (action === 'markUnread')
-                        void markUnread(current.session)
+                        void markUnread(current.id)
                       else if (action === 'archive')
                         void archiveTask(current, true)
                       else if (action === 'restore')
@@ -3244,7 +3251,7 @@ export function App() {
                   <button
                     type="button"
                     className="retry-button"
-                    disabled={retryingBy[current.session] ?? false}
+                    disabled={retryingBy[current.id] ?? false}
                     onClick={() => void retryTask()}
                     title={
                       retryResetTime(current.retry)
@@ -3271,14 +3278,14 @@ export function App() {
                   current.archived ? 'Restore this task to reply' : 'Reply…'
                 }
                 rows={3}
-                value={replies[current.session] ?? ''}
+                value={replies[current.id] ?? ''}
                 disabled={
-                  (sendingBy[current.session] ?? false) || !!current.archived
+                  (sendingBy[current.id] ?? false) || !!current.archived
                 }
                 onChange={(e) =>
                   setReplies((prev) => ({
                     ...prev,
-                    [current.session]: e.target.value,
+                    [current.id]: e.target.value,
                   }))
                 }
                 onKeyDown={onReplyKeyDown}

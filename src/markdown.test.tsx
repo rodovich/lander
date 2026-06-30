@@ -288,3 +288,46 @@ describe('task-mention linking', () => {
     expect(html).toContain(`href="/proj/${FULL}"`)
   })
 })
+
+describe('task-mention linking — nanoid ids', () => {
+  // The server now mints nanoid-style ids (mixed case, `_`/`-`, lengths 10 and
+  // 21) rather than hex uuids; the detector must linkify those too.
+  const ID = 'gqc9qIVdF-I8nsAxwHwDk'
+  const linkTask = (id: string) => {
+    const needle = id.toLowerCase()
+    if (ID.toLowerCase().startsWith(needle))
+      return { href: `/proj/${ID}`, title: 'Fix the parser', status: 'riding' }
+    return undefined
+  }
+  const render = (text: string) =>
+    renderToStaticMarkup(<Markdown text={text} linkTask={linkTask} />)
+
+  it('links a full 21-char nanoid id in a backlink prefix', () => {
+    const html = render(`From ${ID}:\n\nhello`)
+    expect(html).toContain(`href="/proj/${ID}"`)
+    expect(html).toContain('>Fix the parser</a>')
+  })
+
+  it('links a 10-char prefix of a nanoid id', () => {
+    // `gqc9qIVdF-` is the first 10 chars of the known id and resolves uniquely.
+    const html = render('gqc9qIVdF- pinged')
+    expect(html).toContain(`href="/proj/${ID}"`)
+  })
+
+  it('leaves an unrelated 10-char token as literal text', () => {
+    const html = render('Bra9gs7BFe acked')
+    expect(html).not.toContain('<a')
+    expect(html).toContain('Bra9gs7BFe')
+  })
+
+  it('links a standalone 8-char short id', () => {
+    const html = render('gqc9qIVd is riding')
+    expect(html).toContain(`href="/proj/${ID}"`)
+  })
+
+  it('leaves an ordinary same-length word as literal text', () => {
+    const html = render('resolver and Background were updated')
+    expect(html).not.toContain('<a')
+    expect(html).toContain('resolver')
+  })
+})

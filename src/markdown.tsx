@@ -92,15 +92,19 @@ function renderInline(
     },
   ]
 
-  // A bare task reference: a full UUID, or a standalone 8-hex-char short id (not
-  // embedded in a longer hex run or hyphenated id). Only added when a resolver
-  // is supplied; the resolver decides whether the candidate names a real task,
-  // so a coincidental hex token that matches nothing falls back to literal text.
-  // The internal link uses a plain anchor (no target) like the lifecycle-event
-  // task links, so it navigates within the app.
+  // A bare task reference: a legacy UUID, or a nanoid-style id (or short-id
+  // prefix) drawn from the `[A-Za-z0-9_-]` alphabet the server mints ids from —
+  // 8 chars (the short id `lander list` prints) up through the 21-char full id,
+  // standing alone rather than embedded in a longer alphanumeric/hyphenated run.
+  // The UUID form is matched first so a legacy id is taken whole, not clipped to
+  // its first 21 chars. Only added when a resolver is supplied; the resolver
+  // decides whether the candidate names a real task, so a coincidental token
+  // (an ordinary word of the same length) that matches nothing falls back to
+  // literal text. The internal link uses a plain anchor (no target) like the
+  // lifecycle-event task links, so it navigates within the app.
   if (linkTask) {
     patterns.push({
-      re: /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?<![0-9a-f-])[0-9a-f]{8}(?![0-9a-f-])/i,
+      re: /(?<![0-9A-Za-z_-])(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9A-Za-z_-]{8,21})(?![0-9A-Za-z_-])/i,
       render: (m, k) => {
         const link = linkTask(m[0])
         if (!link) return <Fragment key={k}>{m[0]}</Fragment>

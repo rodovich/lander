@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import {
   readdir,
   readFile,
@@ -66,8 +66,37 @@ const DAEMON_TOKEN =
   process.env.LANDER_UI_TOKEN?.trim() ||
   ''
 
+// A task's id: a short, URL-safe nanoid-style token, distinct from the assistant
+// session id (a uuid the daemon mints — see Task.sessionId). Chars are drawn from
+// a 64-symbol alphabet, so `& 63` over random bytes is uniform. Tasks refer to
+// each other by this id; it's the filename, the URL segment, the LANDER_TASK env,
+// and the x-lander-task header.
+const ID_ALPHABET =
+  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-'
+function newTaskId(): string {
+  const bytes = randomBytes(10)
+  let id = ''
+  for (let i = 0; i < bytes.length; i++) id += ID_ALPHABET[bytes[i] & 63]
+  return id
+}
+
+// Validates a task id arriving from an untrusted source (URL segment, header,
+// await list) before it's used to build a filesystem path. Matches both the
+// nanoid alphabet above and the uuids that legacy tasks are still keyed by; the
+// length bound and the closed character class (no `/` or `.`) keep it path-safe.
+const TASK_ID = /^[A-Za-z0-9_-]{1,64}$/
+
 type Task = {
-  session: string
+  // The task's own id (a short nanoid; legacy tasks carry the uuid they were
+  // keyed by — backfilled from the filename, see backfillIds). Always equals the
+  // task's filename stem.
+  id: string
+  // The assistant (claude) session id backing this task's turns, minted by the
+  // daemon on the first turn and reported back for the server to persist (see
+  // SessionMessage / reduceRunWs). Passed to the daemon each turn so it can
+  // `--resume` the same session. Decoupled from `id` so a task can later run
+  // multiple or fresh sessions. Absent until the first turn mints one.
+  sessionId?: string
   title: string
   status: string
   createdAt: string
@@ -84,7 +113,7 @@ type Task = {
   seenAt?: string
   allowEdits: boolean
   allowCommits: boolean
-  // The session id of the task that spawned this one (`lander launch`), or absent
+  // The id of the task that spawned this one (`lander launch`), or absent
   // for tasks a human started from the UI. Records provenance — the same
   // relationship the opening message's "Launched by" backlink shows in prose —
   // in a form the server can check: it gates `lander land <id>`, which lets a task
@@ -335,16 +364,10 @@ function interruptRun(_project: Project, runId: string): void {
 }
 
 // Build the argv for one claude turn from the task's permissions and the prompt.
-// The first turn establishes the session with `--session-id`; later turns
-// continue it with `--resume`. Output is stream-json so the runner can stream
-// each event to the log as it arrives.
-function buildClaudeArgs(
-  task: Task,
-  id: string,
-  prompt: string,
-  mode: 'start' | 'resume',
-): string[] {
-  const sessionArgs = mode === 'start' ? ['--session-id', id] : ['--resume', id]
+// The session flag (`--session-id` on a fresh session, `--resume` after) is the
+// daemon's to add — it owns the assistant session id (see startRun) — so it isn't
+// here. Output is stream-json so the runner can stream each event as it arrives.
+function buildClaudeArgs(task: Task, prompt: string): string[] {
   // While the agent is in a worktree (tracked by the Enter/ExitWorktree hooks),
   // relaunch every turn as a worktree session. This re-establishes claude's
   // worktree state, which is per-process and lost across `--resume`, so the
@@ -443,7 +466,6 @@ function buildClaudeArgs(
   })
 
   return [
-    ...sessionArgs,
     ...worktreeArgs,
     ...editArgs,
     '--settings',
@@ -468,13 +490,13 @@ function buildClaudeArgs(
 // (start-run); the daemon owns the claude child and the stream. Because the
 // daemon outlives the server, a server restart mid-turn doesn't stop the agent —
 // the fresh process reattaches over the WS and resumes from the persisted cursor
-// (see driveTask / recoverQueues). The first turn establishes the session, later
-// ones resume it. Marks "riding" and records the runId so a reattach can find it.
+// (see driveTask / recoverQueues). The daemon mints the assistant session on the
+// first turn and resumes it after, keyed by the `sessionId` hint below. Marks
+// "riding" and records the runId so a reattach can find it.
 async function runTurn(
   project: Project,
   id: string,
   prompt: string,
-  mode: 'start' | 'resume',
 ): Promise<'done' | 'crashed'> {
   const file = path.join(project.dataDir, `${id}.json`)
   let task: Task
@@ -501,7 +523,7 @@ async function runTurn(
   // The token the in-task `lander` CLI sends back to authenticate as this task.
   // Backfilled for tasks created before tokens existed.
   const token = task.token ?? randomUUID()
-  const claudeArgs = buildClaudeArgs(task, id, prompt, mode)
+  const claudeArgs = buildClaudeArgs(task, prompt)
 
   const runId = randomUUID()
 
@@ -554,6 +576,9 @@ async function runTurn(
     // cwd hints — the daemon does the stat/fallback/worktree resolution locally.
     recordedCwd: task.cwd,
     worktree: task.worktree,
+    // The assistant session to resume; absent on the first turn, so the daemon
+    // mints one and reports it back (reduceRunWs persists it onto task.sessionId).
+    sessionId: task.sessionId,
     claudeArgs,
     env: {
       PATH: `${path.join(ROOT, 'bin')}:${process.env.PATH ?? ''}`,
@@ -620,6 +645,15 @@ async function reduceRunWs(
         }).catch(() => {})
         return 'crashed'
       }
+      if (ev.kind === 'session') {
+        // The daemon minted (or re-announced) this task's assistant session id.
+        // Persist it once so every later turn resumes the same session. Idempotent:
+        // a replayed announcement after a reconnect finds it already set.
+        await mutateTask(file, (t) => {
+          if (!t.sessionId) t.sessionId = ev.msg.sessionId
+        }).catch(() => {})
+        continue
+      }
       if (ev.kind === 'update') {
         const u = ev.msg
         if (u.seq <= lastSeq) continue
@@ -667,31 +701,22 @@ const running = new Set<string>()
 // at "resting" once the queue is empty, unless the agent set its own status
 // mid-run (e.g. `lander wedge` to ask for input, or `lander land`), which we
 // must not clobber.
-async function driveTask(
-  project: Project,
-  id: string,
-  firstMode: 'start' | 'resume',
-): Promise<void> {
+async function driveTask(project: Project, id: string): Promise<void> {
   if (running.has(id)) return
   running.add(id)
   const file = path.join(project.dataDir, `${id}.json`)
-  let mode = firstMode
   try {
     // Reattach first: if a previous turn's run is still tracked (its runner
     // outlived a server restart, or finished while we were down), finish
-    // reducing it before starting anything queued. Afterwards the session is
-    // established iff the task has any assistant turn, so derive the mode for
-    // the queue drain from that rather than the caller's hint.
+    // reducing it before starting anything queued. Whether each turn starts a
+    // fresh session or resumes is the daemon's call from task.sessionId, so
+    // nothing here needs to track it.
     const existing = await readTask(project.dataDir, id)
     if (existing?.runId) {
       // Reattach via reduceRunWs with resume: it asks the daemon (which outlived
       // our restart) to replay from the persisted cursor, or aborts the run if
       // the daemon no longer holds it.
       await reduceRunWs(project, id, existing.runId, { resume: true })
-      const after = await readTask(project.dataDir, id)
-      mode = after?.messages.some((m) => m.role === 'assistant')
-        ? 'resume'
-        : 'start'
     }
     // Retry a name that failed to generate at creation (or on a prior wakeup).
     // Every wakeup flows through here — a user follow-up and a scheduled/awaited
@@ -719,8 +744,7 @@ async function driveTask(
         }
       }).catch(() => {})
       if (!batch.length) break
-      await runTurn(project, id, batch.join('\n\n'), mode)
-      mode = 'resume'
+      await runTurn(project, id, batch.join('\n\n'))
     }
   } finally {
     running.delete(id)
@@ -735,13 +759,12 @@ async function driveTask(
 
   // A follow-up can land after our final drain read but before we left the
   // running set, with the sender seeing us as still active and so not starting
-  // its own drainer. Re-check once and pick it back up if so. The session
-  // already exists by now, so resume.
+  // its own drainer. Re-check once and pick it back up if so.
   let leftover = false
   await mutateTask(file, (t) => {
     leftover = !!(t.queued && t.queued.length)
   }).catch(() => {})
-  if (leftover) void driveTask(project, id, 'resume')
+  if (leftover) void driveTask(project, id)
 }
 
 // Launch a deferred (scheduled) task now: clear its scheduledFor, record the
@@ -782,7 +805,7 @@ async function launchTask(project: Project, id: string): Promise<boolean> {
     }
     go = true
   }).catch(() => {})
-  if (go) void driveTask(project, id, everRan ? 'resume' : 'start')
+  if (go) void driveTask(project, id)
   return go
 }
 
@@ -814,7 +837,6 @@ async function deliverScheduledMessages(
     ((m.waitFor?.length ?? 0) > 0 && m.waitFor!.every((w) => landed.get(w)))
 
   let drive = false
-  let everRan = false
   await mutateTask(file, (t) => {
     // Hold delivery while the recipient hasn't launched yet — it's itself
     // awaiting a future time or an await condition; the message waits for it.
@@ -826,7 +848,6 @@ async function deliverScheduledMessages(
     const rest = pending.filter((m) => !isDue(m))
     if (rest.length) t.scheduledMessages = rest
     else delete t.scheduledMessages
-    everRan = t.messages.some((m) => m.role === 'assistant')
     const at = new Date().toISOString()
     // Delivery revives a wedged/landed recipient, same as a live send; record
     // the transition a hair ahead of the messages so the timeline orders right.
@@ -840,9 +861,8 @@ async function deliverScheduledMessages(
     drive = true
   }).catch(() => {})
   // Mirror the /messages endpoint: a run already in flight drains the queue when
-  // it finishes; otherwise start a drainer now. Resume if the session exists.
-  if (drive && !running.has(id))
-    void driveTask(project, id, everRan ? 'resume' : 'start')
+  // it finishes; otherwise start a drainer now.
+  if (drive && !running.has(id)) void driveTask(project, id)
 }
 
 // Scan every project for scheduled tasks whose launch time has arrived and run
@@ -928,7 +948,7 @@ const UI_TOKEN = await loadUiToken()
 // holds itself. `anon` is an unidentified caller and may grant nothing.
 type Principal =
   | { kind: 'ui' }
-  | { kind: 'task'; task: Task; slug: string }
+  | { kind: 'task'; task: Task; slug: string; id: string }
   | { kind: 'anon' }
 
 async function resolvePrincipal(req: {
@@ -938,13 +958,15 @@ async function resolvePrincipal(req: {
   const token = req.header('x-lander-token')
   const taskId = req.header('x-lander-task')
   const projectSlug = req.header('x-lander-project')
-  if (token && taskId && projectSlug && UUID.test(taskId)) {
+  if (token && taskId && projectSlug && TASK_ID.test(taskId)) {
     const project = PROJECT_BY_SLUG.get(projectSlug)
     const task = project && (await readTask(project.dataDir, taskId))
     // Constant value compare is fine here: the token is a random UUID, so a
-    // timing side-channel doesn't meaningfully narrow the search space.
+    // timing side-channel doesn't meaningfully narrow the search space. The
+    // header id is the task's id, carried on the principal so callers needn't
+    // re-read the (legacy-named) field off the task.
     if (task && task.token && task.token === token)
-      return { kind: 'task', task, slug: projectSlug }
+      return { kind: 'task', task, slug: projectSlug, id: taskId }
   }
   return { kind: 'anon' }
 }
@@ -1001,7 +1023,7 @@ app.get('/api/:project/tasks/:id', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
   const id = c.req.param('id')
-  if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+  if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
   const task = await readTask(project.dataDir, id)
   if (!task) return c.json({ error: 'task not found' }, 404)
   return c.json(publicTask(task))
@@ -1074,7 +1096,7 @@ async function resolveAwait(
     return { error: '--await expects a list of task ids' }
   const ids = value as string[]
   for (const id of ids) {
-    if (!UUID.test(id)) return { error: `invalid await task id: ${id}` }
+    if (!TASK_ID.test(id)) return { error: `invalid await task id: ${id}` }
     if (selfId && id === selfId) return { error: 'a task cannot await itself' }
     if (!(await readTask(project.dataDir, id)))
       return { error: `await task not found: ${id}` }
@@ -1117,11 +1139,11 @@ async function awaitReaches(
 async function describeAwaited(
   project: Project,
   ids: string[],
-): Promise<{ session: string; title: string }[]> {
-  const out: { session: string; title: string }[] = []
+): Promise<{ id: string; title: string }[]> {
+  const out: { id: string; title: string }[] = []
   for (const id of ids) {
     const t = await readTask(project.dataDir, id)
-    out.push({ session: id, title: t?.title ?? id.slice(0, 8) })
+    out.push({ id, title: t?.title ?? id.slice(0, 8) })
   }
   return out
 }
@@ -1210,12 +1232,12 @@ app.post('/api/:project/tasks', async (c) => {
     // reference. The title is generated from rawMessage so the backlink can't skew it.
     const message =
       principal.kind === 'task'
-        ? `Launched by ${principal.task.session}:\n\n${rawMessage}`
+        ? `Launched by ${principal.id}:\n\n${rawMessage}`
         : rawMessage
 
     // Title is optional; when omitted, show a "…" placeholder and have haiku
     // name the task in the background so creation never blocks on it.
-    const id = randomUUID()
+    const id = newTaskId()
     const now = new Date().toISOString()
     // The creation event, timestamped a hair before the opening message so the
     // timeline shows it ahead of that message. A task awaiting other tasks gets
@@ -1234,7 +1256,7 @@ app.post('/api/:project/tasks', async (c) => {
       createdAt: new Date(Date.parse(now) - 1).toISOString(),
     }
     const task: Task = {
-      session: id,
+      id,
       title: title || '…',
       // A deferred task rests until the scheduler launches it at scheduledFor.
       // Otherwise "riding" while claude works on the opening message (driveTask
@@ -1254,7 +1276,7 @@ app.post('/api/:project/tasks', async (c) => {
       // later land what it launched (see the PATCH land gate). A UI-started task
       // has no spawner.
       ...(principal.kind === 'task'
-        ? { spawnedBy: principal.task.session }
+        ? { spawnedBy: principal.id }
         : {}),
       // Authenticates this task's own callbacks (see Task.token).
       token: randomUUID(),
@@ -1284,7 +1306,7 @@ app.post('/api/:project/tasks', async (c) => {
 
     // Kick off claude in the project directory; reply is appended when it
     // finishes. A deferred task waits for the scheduler instead.
-    if (message.trim() && !deferred) void driveTask(project, id, 'start')
+    if (message.trim() && !deferred) void driveTask(project, id)
 
     return c.json(publicTask(task), 201)
   } catch (e) {
@@ -1292,14 +1314,13 @@ app.post('/api/:project/tasks', async (c) => {
   }
 })
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 app.patch('/api/:project/tasks/:id', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
   try {
     const id = c.req.param('id')
-    if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
     const file = path.join(project.dataDir, `${id}.json`)
 
     let task: Task
@@ -1342,8 +1363,8 @@ app.patch('/api/:project/tasks/:id', async (c) => {
     if (
       body.status === 'landed' &&
       principal.kind === 'task' &&
-      principal.task.session !== id &&
-      task.spawnedBy !== principal.task.session
+      principal.id !== id &&
+      task.spawnedBy !== principal.id
     )
       return c.json({ error: 'a task may only land tasks it launched' }, 403)
 
@@ -1355,7 +1376,7 @@ app.patch('/api/:project/tasks/:id', async (c) => {
     // in the partial reply and (applyDone only wedges a still-riding task on a
     // non-deliberate exit) leaves the new non-riding status as-is.
     const selfInitiated =
-      principal.kind === 'task' && principal.task.session === id
+      principal.kind === 'task' && principal.id === id
     const runId = task.runId
     const interrupt =
       (body.status === 'wedged' || body.status === 'landed') &&
@@ -1415,7 +1436,7 @@ app.post('/api/:project/tasks/:id/launch', async (c) => {
   if (!project) return c.json({ error: 'unknown project' }, 404)
   try {
     const id = c.req.param('id')
-    if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
     const launched = await launchTask(project, id)
     if (!launched)
       return c.json({ error: 'task is not scheduled' }, 409)
@@ -1448,7 +1469,7 @@ app.post('/api/:project/tasks/:id/rest', async (c) => {
   if (!project) return c.json({ error: 'unknown project' }, 404)
   try {
     const id = c.req.param('id')
-    if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
     const file = path.join(project.dataDir, `${id}.json`)
     if (!(await readTask(project.dataDir, id)))
       return c.json({ error: 'task not found' }, 404)
@@ -1535,7 +1556,7 @@ app.post('/api/:project/tasks/:id/cwd', async (c) => {
   if (!project) return c.json({ error: 'unknown project' }, 404)
   try {
     const id = c.req.param('id')
-    if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
     const file = path.join(project.dataDir, `${id}.json`)
     if (!(await readTask(project.dataDir, id)))
       return c.json({ error: 'task not found' }, 404)
@@ -1543,7 +1564,7 @@ app.post('/api/:project/tasks/:id/cwd', async (c) => {
     const principal = await resolvePrincipal(c.req)
     if (
       principal.kind !== 'ui' &&
-      !(principal.kind === 'task' && principal.task.session === id)
+      !(principal.kind === 'task' && principal.id === id)
     )
       return c.json({ error: 'only the task itself may record its cwd' }, 403)
 
@@ -1578,7 +1599,7 @@ app.post('/api/:project/tasks/:id/worktree', async (c) => {
   if (!project) return c.json({ error: 'unknown project' }, 404)
   try {
     const id = c.req.param('id')
-    if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
     const file = path.join(project.dataDir, `${id}.json`)
     if (!(await readTask(project.dataDir, id)))
       return c.json({ error: 'task not found' }, 404)
@@ -1586,7 +1607,7 @@ app.post('/api/:project/tasks/:id/worktree', async (c) => {
     const principal = await resolvePrincipal(c.req)
     if (
       principal.kind !== 'ui' &&
-      !(principal.kind === 'task' && principal.task.session === id)
+      !(principal.kind === 'task' && principal.id === id)
     )
       return c.json({ error: 'only the task itself may record its worktree' }, 403)
 
@@ -1612,7 +1633,7 @@ app.delete('/api/:project/tasks/:id/worktree', async (c) => {
   if (!project) return c.json({ error: 'unknown project' }, 404)
   try {
     const id = c.req.param('id')
-    if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
     const file = path.join(project.dataDir, `${id}.json`)
     if (!(await readTask(project.dataDir, id)))
       return c.json({ error: 'task not found' }, 404)
@@ -1620,7 +1641,7 @@ app.delete('/api/:project/tasks/:id/worktree', async (c) => {
     const principal = await resolvePrincipal(c.req)
     if (
       principal.kind !== 'ui' &&
-      !(principal.kind === 'task' && principal.task.session === id)
+      !(principal.kind === 'task' && principal.id === id)
     )
       return c.json({ error: 'only the task itself may clear its worktree' }, 403)
 
@@ -1646,7 +1667,7 @@ app.post('/api/:project/tasks/:id/archive', async (c) => {
   if (!project) return c.json({ error: 'unknown project' }, 404)
   try {
     const id = c.req.param('id')
-    if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
     const body = await c.req
       .json<{ archived?: unknown }>()
       .catch(() => ({}) as { archived?: unknown })
@@ -1677,7 +1698,7 @@ app.post('/api/:project/tasks/:id/retitle', async (c) => {
   if (!project) return c.json({ error: 'unknown project' }, 404)
   try {
     const id = c.req.param('id')
-    if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
     const file = path.join(project.dataDir, `${id}.json`)
 
     let task: Task
@@ -1728,7 +1749,7 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
   if (!project) return c.json({ error: 'unknown project' }, 404)
   try {
     const id = c.req.param('id')
-    if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
     const file = path.join(project.dataDir, `${id}.json`)
 
     let task: Task
@@ -1764,8 +1785,8 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
     // other task reference. A task messaging itself, or the human via the UI, is
     // bare.
     const message =
-      principal.kind === 'task' && principal.task.session !== id
-        ? `From ${principal.task.session}:\n\n${rawMessage}`
+      principal.kind === 'task' && principal.id !== id
+        ? `From ${principal.id}:\n\n${rawMessage}`
         : rawMessage
 
     // A `--date`/`--time` and/or `--await` send defers delivery; absent all,
@@ -1812,7 +1833,7 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
 
     // If a run is already in flight it will drain this message when it
     // finishes; otherwise start a drainer to resume the session now.
-    if (!running.has(id)) void driveTask(project, id, 'resume')
+    if (!running.has(id)) void driveTask(project, id)
 
     return c.json(publicTask(task))
   } catch (e) {
@@ -1841,7 +1862,7 @@ app.post('/api/:project/tasks/:id/retry', async (c) => {
   if (!project) return c.json({ error: 'unknown project' }, 404)
   try {
     const id = c.req.param('id')
-    if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
     const file = path.join(project.dataDir, `${id}.json`)
 
     let task: Task
@@ -1913,7 +1934,7 @@ app.post('/api/:project/tasks/:id/retry', async (c) => {
     // Drive now only for an immediate retry; a deferred one waits for the
     // scheduler. Resume the session if no run is already in flight (mirrors
     // /messages).
-    if (!defer && !running.has(id)) void driveTask(project, id, 'resume')
+    if (!defer && !running.has(id)) void driveTask(project, id)
 
     const updated = await readTask(project.dataDir, id)
     return c.json(publicTask(updated ?? task))
@@ -1932,7 +1953,7 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
   if (!project) return c.json({ error: 'unknown project' }, 404)
   try {
     const id = c.req.param('id')
-    if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
     const file = path.join(project.dataDir, `${id}.json`)
 
     // Granting a tool rule widens what the agent can run, so it's the human's
@@ -1972,7 +1993,7 @@ app.post('/api/:project/tasks/:id/seen', async (c) => {
   if (!project) return c.json({ error: 'unknown project' }, 404)
   try {
     const id = c.req.param('id')
-    if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
 
     const body = await c.req.json<{ at?: unknown }>()
     const at = typeof body.at === 'string' ? body.at : ''
@@ -2014,7 +2035,7 @@ app.post('/api/:project/tasks/:id/unread', async (c) => {
   if (!project) return c.json({ error: 'unknown project' }, 404)
   try {
     const id = c.req.param('id')
-    if (!UUID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
 
     // Look in both tasks/ and archived/, mirroring /seen: an archived row can
     // carry an unseen dot too, and either should be markable unread.
@@ -2089,7 +2110,7 @@ async function recoverQueues(): Promise<void> {
       // the grace). The daemon, having outlived our restart, still holds the run
       // and its buffer.
       if (task.runId) {
-        void driveTask(project, id, 'resume')
+        void driveTask(project, id)
         continue
       }
 
@@ -2110,7 +2131,8 @@ async function recoverQueues(): Promise<void> {
           } else {
             // The opening run died before any reply. Replay the original opening
             // prompt (the last/only user message) without adding a duplicate
-            // display message; driveTask will run it as a fresh "start".
+            // display message; driveTask runs it as a fresh turn (no sessionId
+            // persisted yet, so the daemon mints one).
             const opening = [...t.messages]
               .reverse()
               .find((m) => m.role === 'user')
@@ -2118,7 +2140,7 @@ async function recoverQueues(): Promise<void> {
           }
         }
       }).catch(() => {})
-      void driveTask(project, id, everRan ? 'resume' : 'start')
+      void driveTask(project, id)
     }
   }
 }
@@ -2152,6 +2174,56 @@ async function backfillSeen(): Promise<void> {
   }
 }
 
+// One-time migration of the pre-rename `session` field, when a task's only
+// identity was its filename (which doubled as `session`) and "awaiting" lifecycle
+// events stored their awaited tasks as `{ session, title }`. Two fixes per file:
+// give the task an `id` (always its filename stem — legacy tasks keep the uuid
+// they were keyed by, new ones already carry their nanoid), and rewrite any
+// legacy `awaiting` event entries to `{ id, title }` so the UI's link rendering
+// (which now reads `.id`) doesn't choke on an undefined id. Covers archived tasks
+// too, since the UI reads those back. Idempotent: a file already in the new shape
+// is left untouched.
+type LegacyAwait = { id?: string; session?: string; title: string }
+async function backfillIds(): Promise<void> {
+  for (const project of PROJECTS) {
+    for (const dir of [project.dataDir, project.archiveDir]) {
+      let names: string[]
+      try {
+        names = await readdir(dir)
+      } catch {
+        continue
+      }
+      for (const name of names) {
+        if (!name.endsWith('.json')) continue
+        const file = path.join(dir, name)
+        const stem = name.slice(0, -'.json'.length)
+        try {
+          const task = JSON.parse(await readFile(file, 'utf8')) as Task
+          const legacyAwaits = (task.events ?? []).some((e) =>
+            (e.awaiting as LegacyAwait[] | undefined)?.some(
+              (a) => a.id === undefined && a.session !== undefined,
+            ),
+          )
+          if (task.id !== undefined && !legacyAwaits) continue
+          await mutateTask(file, (t) => {
+            if (t.id === undefined) t.id = stem
+            for (const e of t.events ?? []) {
+              for (const a of (e.awaiting as LegacyAwait[] | undefined) ?? []) {
+                if (a.id === undefined && a.session !== undefined) {
+                  a.id = a.session
+                  delete a.session
+                }
+              }
+            }
+          })
+        } catch {
+          // skip unreadable/invalid files
+        }
+      }
+    }
+  }
+}
+
 const port = Number(process.env.PORT ?? 6181)
 const server = serve({ fetch: app.fetch, port })
 console.log(`api listening on http://localhost:${port}`)
@@ -2170,6 +2242,7 @@ attachDaemonServer(server as unknown as import('node:http').Server, {
 console.log(`daemon WS endpoint at ws://localhost:${port}/daemon`)
 console.log('projects:')
 for (const p of PROJECTS) console.log(`  ${p.slug}  ${p.path}`)
+void backfillIds()
 void backfillSeen()
 void recoverQueues()
 // Launch due scheduled tasks on boot (catching any whose time passed while the

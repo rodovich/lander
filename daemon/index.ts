@@ -11,6 +11,7 @@
 //        LANDER_IDLE_TIMEOUT_MS (per-run idle kill, default 10m — start-run wins)
 
 import { spawn, type ChildProcess } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { statSync } from 'node:fs'
 import path from 'node:path'
 import { reduceStreamLine, addUsage, type Usage } from '../server/stream'
@@ -21,6 +22,7 @@ import type {
   StartRunMessage,
   UpdateMessage,
   DoneMessage,
+  SessionMessage,
   RegisterMessage,
   UsageMessage,
 } from '../server/protocol'
@@ -58,6 +60,10 @@ type Run = {
   interrupt: () => void
   child: ChildProcess
   buffer: UpdateMessage[]
+  // The session id this run minted (only when it began a fresh session, i.e. the
+  // server sent no `sessionId` to resume). Re-sent ahead of the buffer on
+  // resume-from so a server that reconnected mid-first-turn still learns it.
+  mintedSession?: string
   done?: DoneMessage
   dropTimer?: ReturnType<typeof setTimeout>
 }
@@ -69,7 +75,12 @@ const RUN_BUFFER_TTL_MS = 120_000
 let ws: WebSocket | null = null
 
 function send(
-  msg: UpdateMessage | DoneMessage | RegisterMessage | UsageMessage,
+  msg:
+    | UpdateMessage
+    | DoneMessage
+    | SessionMessage
+    | RegisterMessage
+    | UsageMessage,
 ): void {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
 }
@@ -167,11 +178,24 @@ function startRun(msg: StartRunMessage): void {
     return
   }
 
-  const child: ChildProcess = spawn('claude', msg.claudeArgs, {
+  // The daemon owns the assistant session id now (it's decoupled from the lander
+  // task id). The server resumes an existing session by sending `sessionId`;
+  // absent it, this is the task's first turn, so mint a fresh session id, launch
+  // it with `--session-id`, and report it back (below) for the server to persist.
+  const sessionId = msg.sessionId ?? randomUUID()
+  const sessionArgs = msg.sessionId
+    ? ['--resume', msg.sessionId]
+    : ['--session-id', sessionId]
+
+  const child: ChildProcess = spawn('claude', [...sessionArgs, ...msg.claudeArgs], {
     cwd,
     env: { ...process.env, ...msg.env },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
+
+  // Tell the server the session we minted, so it persists it on the task and
+  // resumes it next turn. Only for a fresh session — a resume already knows it.
+  if (!msg.sessionId) send({ type: 'session', runId: msg.runId, sessionId })
 
   // Run-scoped reduction state (carried across stdout chunks).
   let seq = 0
@@ -307,6 +331,7 @@ function startRun(msg: StartRunMessage): void {
   runs.set(msg.runId, {
     child,
     buffer,
+    mintedSession: msg.sessionId ? undefined : sessionId,
     // Interrupt mirrors the old runner's SIGTERM handler: stop claude, finish
     // cleanly as interrupted (the server keeps the partial reply, no crash).
     interrupt: () => {
@@ -348,6 +373,11 @@ function onMessage(raw: string): void {
         })
         break
       }
+      // Re-announce a minted session id first: a server that reconnected mid
+      // first-turn may not have persisted it yet, and it must land before the
+      // run's done so the next turn can resume. Idempotent on the server side.
+      if (r.mintedSession)
+        send({ type: 'session', runId: msg.runId, sessionId: r.mintedSession })
       // Replay everything past the server's last-applied seq, then the terminal
       // done if the run already finished. The server seq-dedups, so replaying a
       // few it already has is harmless.

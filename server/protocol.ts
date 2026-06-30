@@ -32,6 +32,13 @@ export type StartRunMessage = {
   // daemon does the stat/fallback/worktree resolution locally.
   recordedCwd?: string
   worktree?: string
+  // The assistant session to resume, when the task already has one (a prior turn
+  // minted it — see SessionMessage). Absent on a task's first turn: the daemon
+  // mints a fresh session id, launches with `--session-id`, and reports it back
+  // for the server to persist and pass here (→ `--resume`) on later turns. This
+  // is what decouples the lander task id (a short nanoid the server owns) from
+  // the assistant session id (a uuid the daemon owns).
+  sessionId?: string
   claudeArgs: string[]
   env: Record<string, string>
   idleTimeoutMs: number
@@ -112,6 +119,18 @@ export type DoneMessage = {
   stderr: string
 }
 
+// The assistant session id the daemon minted for a task's first turn (it owns
+// session-id generation now — decision: tasks are decoupled from sessions). Sent
+// once, right after the child spawns, so the server can persist it on the task
+// and pass it back as `sessionId` (→ `--resume`) on every later turn. The daemon
+// also holds it on the run record and re-sends it on resume-from, so a reconnect
+// mid-first-turn doesn't lose it. The daemon never informs the agent of it.
+export type SessionMessage = {
+  type: 'session'
+  runId: string
+  sessionId: string
+}
+
 // A fresh usage snapshot, pushed whenever the daemon refreshes (per-turn, on the
 // reset timer, at boot). Not tied to any run; the server caches and serves it
 // verbatim. Carries the same `UsageBody` shape (session + weekly windows).
@@ -125,4 +144,5 @@ export type DaemonToServer =
   | RegisterMessage
   | UpdateMessage
   | DoneMessage
+  | SessionMessage
   | UsageMessage

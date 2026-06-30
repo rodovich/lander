@@ -123,7 +123,7 @@ async function launchTask(rest) {
     method: 'POST',
     body: JSON.stringify(o),
   })
-  console.log(task.session) // print new task id for the orchestrator to track
+  console.log(task.id) // print new task id for the orchestrator to track
 }
 
 // Put the current task to rest with a scheduled wakeup. Takes the same
@@ -181,11 +181,11 @@ async function resolveId(idOrPrefix, { archived = false } = {}) {
   // along with every poll); tolerate a bare array too in case the shape reverts.
   const tasks = Array.isArray(res) ? res : (res.tasks ?? [])
   const pool = archived ? tasks.filter((t) => t.archived) : tasks
-  const matches = pool.filter((t) => t.session.startsWith(idOrPrefix))
+  const matches = pool.filter((t) => t.id.startsWith(idOrPrefix))
   if (matches.length === 0) die(`no task matching ${idOrPrefix}`)
   if (matches.length > 1)
     die(`ambiguous task id ${idOrPrefix} (${matches.length} matches)`)
-  return matches[0].session
+  return matches[0].id
 }
 
 // `lander list [--status <s>] [--json]` — the project's tasks, newest first.
@@ -206,7 +206,7 @@ async function listTasks(args) {
   for (const t of tasks) {
     const sched = t.scheduledFor ? `  ⏰ ${t.scheduledFor}` : ''
     console.log(
-      `${t.session.slice(0, 8)}  ${t.status.padEnd(7)}  ${t.title}${sched}`,
+      `${t.id.slice(0, 8)}  ${t.status.padEnd(7)}  ${t.title}${sched}`,
     )
   }
 }
@@ -224,7 +224,7 @@ async function viewTask(args) {
   const task = await call(PROJECT, `/tasks/${id}`, { method: 'GET' })
   if (json) return void console.log(JSON.stringify(task, null, 2))
   console.log(`${task.title}  [${task.status}]`)
-  console.log(`id: ${task.session}`)
+  console.log(`id: ${task.id}`)
   if (task.scheduledFor) console.log(`scheduled: ${task.scheduledFor}`)
   console.log(`edits: ${task.allowEdits}  commits: ${task.allowCommits}`)
   for (const m of task.messages.slice(-6)) {
@@ -372,7 +372,7 @@ function makeLander(inputs) {
         method: 'POST',
         body: JSON.stringify(o),
       })
-      return task.session // the new task's id
+      return task.id // the new task's id
     },
     async send(target, message, opts = {}) {
       if (!message?.trim()) die('lander.send: a message is required')
