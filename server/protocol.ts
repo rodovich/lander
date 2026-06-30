@@ -83,6 +83,16 @@ export type ServerToDaemon =
 export type RegisterMessage = {
   type: 'register'
   projects: { slug: string }[]
+  // True while the daemon is draining for a handoff — finishing its riding turns
+  // and taking no new ones. The server keeps a draining daemon off new runs (it
+  // stays owner of the runs it already holds). Absent/false for a normal daemon.
+  draining?: boolean
+  // The run-ids this daemon currently holds, sent on every (re)connect so the
+  // server rebuilds run ownership from reality and resumes each run only on its
+  // true holder (never aborting it on a daemon that doesn't hold it). Omitted by a
+  // pre-announcement daemon — which the server then treats the legacy way (assume
+  // it holds every open run); an empty array means it genuinely holds none.
+  runs?: string[]
 }
 
 // A structured run update — one reduced batch of stream output, plus the

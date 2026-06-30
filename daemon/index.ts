@@ -468,6 +468,12 @@ function connect(): void {
     send({
       type: 'register',
       projects: [...pathBySlug.keys()].map((slug) => ({ slug })),
+      // Tell the server whether we're handing off (so it routes no new runs to us)
+      // and exactly which in-flight runs we still hold, so it resumes each only on
+      // its real owner — and a reconnect mid-drain reclaims our runs instead of
+      // losing them to the fresh primary.
+      draining,
+      runs: [...runs.keys()],
     })
     // Prime the server's snapshot: re-push the last one we hold (so a reconnect
     // re-fills the server cache immediately), then fetch a fresh one (the boot /
@@ -478,13 +484,11 @@ function connect(): void {
   sock.addEventListener('message', (ev) => onMessage(String(ev.data)))
   sock.addEventListener('close', () => {
     if (ws === sock) ws = null
-    if (draining) {
-      // Lost the link mid-drain: we can't relay our runs' output anymore, so
-      // don't reconnect (we'd look like a fresh primary and be handed new runs we
-      // refuse). The supervisor's max-drain SIGTERM reaps us; the server
-      // reassigns our open runs to the live primary.
-      return
-    }
+    // Always reconnect — including while draining. A server reload drops us
+    // mid-drain, and only we still hold our in-flight runs, so we must reconnect
+    // and re-announce them (with draining:true) for the server to resume them on
+    // us rather than crash them. draining:true keeps the server from routing new
+    // runs to us, and we still exit once our runs finish.
     console.log('disconnected; retrying in 1s')
     setTimeout(connect, 1000)
   })
