@@ -7,14 +7,19 @@
 // as primary and routes all future turns to it, while the draining one finishes
 // what it's riding. So a daemon edit takes effect at turn boundaries with no
 // interruption. A max-drain timer SIGTERMs a daemon that never finishes, bounding
-// the worst case to today's hard-restart behavior.
+// the worst case to today's hard-restart behavior. And if the live daemon exits
+// on its own (crash, idle-kill, an external kill), we respawn it — the stack must
+// never sit daemon-less, or tasks fail to start with "no daemon connected".
 //
-// Runs the daemon with plain `tsx` (no --watch); this file owns the watching.
+// The lifecycle decisions live in daemon-supervisor.mjs (unit-tested); this file
+// wires them to the real `tsx` spawner, the fs watcher, and process signals. Runs
+// the daemon with plain `tsx` (no --watch); this file owns the watching.
 
 import { spawn } from 'node:child_process'
 import { watch } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createSupervisor } from './daemon-supervisor.mjs'
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
 const ENTRY = 'daemon/index.ts'
@@ -28,41 +33,14 @@ const WATCHED = [
   'server/usage.ts',
   'server/protocol.ts',
 ]
-// How long to let a draining daemon finish before forcing it down. Past this a
-// riding turn is presumed stuck; SIGTERM falls back to the daemon's hard-kill.
-const MAX_DRAIN_MS = Number(process.env.LANDER_MAX_DRAIN_MS ?? 15 * 60_000)
 
-let current = null
-const draining = new Set()
-
-function spawnDaemon() {
-  const child = spawn('tsx', [ENTRY], { cwd: ROOT, stdio: 'inherit', env: process.env })
-  child.on('exit', () => {
-    draining.delete(child)
-    if (current === child) current = null
-  })
-  current = child
-}
-
-function reload() {
-  const old = current
-  if (old) {
-    // Hand off: tell the old daemon to drain, and stop tracking it as current so
-    // the next edit doesn't re-signal it. It exits itself once its runs finish.
-    draining.add(old)
-    try {
-      old.kill('SIGUSR1')
-    } catch {}
-    const force = setTimeout(() => {
-      try {
-        old.kill('SIGTERM')
-      } catch {}
-    }, MAX_DRAIN_MS)
-    force.unref()
-    old.on('exit', () => clearTimeout(force))
-  }
-  spawnDaemon()
-}
+const sup = createSupervisor({
+  spawn: () => spawn('tsx', [ENTRY], { cwd: ROOT, stdio: 'inherit', env: process.env }),
+  // How long to let a draining daemon finish before forcing it down. Past this a
+  // riding turn is presumed stuck; SIGTERM falls back to the daemon's hard-kill.
+  maxDrainMs: Number(process.env.LANDER_MAX_DRAIN_MS ?? 15 * 60_000),
+  log: (m) => console.error(m),
+})
 
 // Watch parent dirs (robust to editors that replace a file's inode on save) and
 // filter to the watched basenames. Debounced so a burst of writes triggers one
@@ -80,7 +58,7 @@ for (const [dir, bases] of byDir) {
     watch(dir, (_event, filename) => {
       if (!filename || !bases.has(path.basename(filename))) return
       clearTimeout(debounce)
-      debounce = setTimeout(reload, 200)
+      debounce = setTimeout(() => sup.reload(), 200)
     })
   } catch {
     // a missing dir just isn't watched
@@ -89,13 +67,9 @@ for (const [dir, bases] of byDir) {
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
-    for (const child of [current, ...draining]) {
-      try {
-        child?.kill('SIGTERM')
-      } catch {}
-    }
+    sup.shutdown()
     process.exit(0)
   })
 }
 
-spawnDaemon()
+sup.spawnDaemon()
