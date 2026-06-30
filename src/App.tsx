@@ -1015,9 +1015,14 @@ type TaskAction =
   | 'wedge'
   | 'rest'
   | 'land'
+  | 'copyId'
   | 'markUnread'
   | 'archive'
   | 'restore'
+
+// The non-status actions that sit below a separator at the foot of the kebab
+// menu. A single divider is drawn before the first of these that appears.
+const FOOTER_ACTIONS = new Set<TaskAction>(['copyId', 'markUnread', 'archive'])
 
 // The kebab (⋮) menu on a task list row. It carries the status actions that
 // used to live as buttons in the detail header, plus Archive/Restore — but only
@@ -1047,6 +1052,7 @@ function TaskActionsMenu({
   //  - wedge:   any task not already wedged
   //  - rest:    a wedged or landed task, to return it to rest
   //  - land:       any task not already landed
+  //  - copyId:     any task, to copy its id to the clipboard
   //  - markUnread: any task that isn't already showing unviewed updates
   //  - archive:    any non-riding task (a riding one has a live run)
   const items: { action: TaskAction; label: string }[] = []
@@ -1058,6 +1064,7 @@ function TaskActionsMenu({
     if (task.status === 'wedged' || task.status === 'landed')
       items.push({ action: 'rest', label: 'Rest' })
     if (task.status !== 'landed') items.push({ action: 'land', label: 'Land' })
+    items.push({ action: 'copyId', label: 'Copy ID' })
     if (!isUnread(task))
       items.push({ action: 'markUnread', label: 'Mark unread' })
     if (task.status !== 'riding')
@@ -1170,12 +1177,12 @@ function TaskActionsMenu({
         >
           {items.map((it, i) => (
             <Fragment key={it.action}>
-              {/* Set the footer actions (Mark unread, Archive) apart from the
-                  status actions above with a single separator before the first
-                  of them. */}
+              {/* Set the footer actions (Copy ID, Mark unread, Archive) apart
+                  from the status actions above with a single separator before
+                  the first of them. */}
               {i > 0 &&
-                (it.action === 'markUnread' || it.action === 'archive') &&
-                items[i - 1].action !== 'markUnread' && (
+                FOOTER_ACTIONS.has(it.action) &&
+                !FOOTER_ACTIONS.has(items[i - 1].action) && (
                   <div className="task-menu-sep" role="separator" />
                 )}
               <button
@@ -2779,6 +2786,8 @@ export function App() {
                   else if (action === 'wedge') void setStatus(task, 'wedged')
                   else if (action === 'rest') void setStatus(task, 'resting')
                   else if (action === 'land') void setStatus(task, 'landed')
+                  else if (action === 'copyId')
+                    void navigator.clipboard.writeText(task.id).catch(() => {})
                   else if (action === 'markUnread') void markUnread(task.id)
                   else if (action === 'archive') void archiveTask(task, true)
                   else if (action === 'restore') void archiveTask(task, false)
@@ -2907,6 +2916,10 @@ export function App() {
                         void setStatus(current, 'resting')
                       else if (action === 'land')
                         void setStatus(current, 'landed')
+                      else if (action === 'copyId')
+                        void navigator.clipboard
+                          .writeText(current.id)
+                          .catch(() => {})
                       else if (action === 'markUnread')
                         void markUnread(current.id)
                       else if (action === 'archive')

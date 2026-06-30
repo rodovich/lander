@@ -608,7 +608,12 @@ body {
   color: var(--landed);
 }
 
-/* Mark-unread isn't a status either — muted, alongside archive/restore. */
+/* Copy-ID and mark-unread aren't statuses either — muted, alongside
+   archive/restore. */
+.task-menu-item-copyId {
+  color: var(--muted);
+}
+
 .task-menu-item-markUnread {
   color: var(--muted);
 }
@@ -621,7 +626,7 @@ body {
   color: var(--muted);
 }
 
-/* Divider setting the archive action apart from the status actions above. */
+/* Divider setting the footer actions apart from the status actions above. */
 .task-menu-sep {
   height: 1px;
   margin: 4px 6px;
