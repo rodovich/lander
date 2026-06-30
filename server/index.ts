@@ -57,7 +57,7 @@ const PROJECT_BY_SLUG = new Map<string, Project>(
   PROJECTS.map((p) => [p.slug, p]),
 )
 
-// Daemon split (docs/daemon-server-split-plan.md): runs are driven by the host
+// Daemon split: runs are driven by the host
 // daemon over a WebSocket — the server holds task state, drives the queue, and
 // serves the API/UI, but never spawns a process, touches a pid, or parses
 // stream-json. The daemon authenticates its WS upgrade with DAEMON_TOKEN.

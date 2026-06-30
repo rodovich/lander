@@ -1,5 +1,5 @@
-// The shared message contract for the daemon ⇄ server WebSocket link (see
-// docs/daemon-server-split-plan.md, "Wire protocol"). Types only: this module is
+// The shared message contract for the daemon ⇄ server WebSocket link. Types
+// only: this module is
 // pure dead code today — it defines the shapes both sides will exchange once the
 // run lifecycle moves across the network, and is wired up by later steps. It must
 // not import index.ts or carry any runtime logic.

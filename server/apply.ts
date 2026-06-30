@@ -1,6 +1,6 @@
 // The pure task-mutation consumer: how a run-update mutates a task, decoupled
-// from where updates come from (a tailed file today, a WebSocket later — see
-// docs/daemon-server-split-plan.md). reduceRun in index.ts produces the resolved
+// from where updates come from (a tailed file today, a WebSocket later).
+// reduceRun in index.ts produces the resolved
 // update/done payloads from the byte stream and hands them here; these functions
 // fold them onto the task and nothing else. They do no I/O and have no
 // side-effects beyond mutating the passed task in place — in particular they do

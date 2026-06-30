@@ -1,5 +1,5 @@
-// Server side of the daemon ⇄ server WebSocket link (see
-// docs/daemon-server-split-plan.md). This module owns the transport only: it
+// Server side of the daemon ⇄ server WebSocket link. This module owns the
+// transport only: it
 // accepts the daemon's connection, routes inbound run messages to the per-run
 // channel a reducer is draining, and lets the server push run control back. The
 // claude-specific reduction lives daemon-side; the task-mutation consumer lives

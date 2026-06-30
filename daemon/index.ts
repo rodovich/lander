@@ -1,6 +1,6 @@
 // The host daemon: owns the claude children the server used to spawn as detached
 // `bin/lander run` runners, reduces their stream-json, and relays structured
-// updates to the server over a WebSocket (see docs/daemon-server-split-plan.md).
+// updates to the server over a WebSocket.
 // It holds the project host paths (its own argv), resolves each run's cwd
 // locally, and runs claude natively — so the server can stay claude-agnostic and
 // (later) move into a container. Phase 1: same host, same user, same credentials.
