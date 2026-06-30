@@ -170,6 +170,55 @@ async function restTask(args) {
   console.log('resting')
 }
 
+// Relaunch the current task under a fresh assistant (claude) session, keeping the
+// same task id. Takes the same trigger flags as `launch` (--date/--time/--await)
+// plus a positional message (or `-` for stdin); operates on the current TASK env
+// like `rest`, with no target id. Without a trigger the seal happens now and the
+// in-flight turn drains the message into the new session; with one it's deferred,
+// and the old session stays live until the trigger fires.
+//
+// --clear drops a pending scheduled relaunch (the inverse, like `rest --clear`),
+// taking no trigger of its own; idempotent.
+async function relaunchTask(args) {
+  if (!TASK) die('no current task (LANDER_TASK unset)')
+  const o = {}
+  const pos = []
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]
+    if (a === '--date') o.date = args[++i]
+    else if (a === '--time') o.time = Number(args[++i])
+    else if (a === '--await') o.await = args[++i]
+    else if (a === '--clear') o.clear = true
+    else pos.push(a)
+  }
+  if (o.clear) {
+    if (o.date != null || o.time != null || o.await != null)
+      die('relaunch --clear takes no trigger (--date/--time/--await)')
+    const res = await call(PROJECT, `/tasks/${TASK}/relaunch`, {
+      method: 'POST',
+      body: JSON.stringify({ clear: true }),
+    })
+    console.log(res.cleared ? 'scheduled relaunch cleared' : 'nothing to clear')
+    return
+  }
+  let message = pos.shift()
+  if (message === '-') message = await readStdin()
+  if (!message?.trim()) die('usage: lander relaunch <message>')
+  validateSchedule(o)
+  o.await = await resolveAwait(o.await, { self: TASK })
+  await call(PROJECT, `/tasks/${TASK}/relaunch`, {
+    method: 'POST',
+    body: JSON.stringify({
+      message,
+      date: o.date,
+      time: o.time,
+      await: o.await,
+    }),
+  })
+  const scheduled = o.date != null || o.time != null || o.await != null
+  console.log(scheduled ? 'relaunch scheduled' : 'relaunching')
+}
+
 // Resolve a task id from a full id or any unambiguous prefix (so an agent can
 // paste the short id `lander list` prints). Matches within the caller's project.
 // `archived` resolves among archived tasks instead of active ones (for restore).
@@ -451,6 +500,30 @@ function makeLander(inputs) {
         body: JSON.stringify(o),
       })
     },
+    async relaunch(message, opts = {}) {
+      // { clear: true } drops a pending scheduled relaunch instead of arming one;
+      // returns whether anything was disarmed.
+      if (opts.clear) {
+        const res = await call(PROJECT, `/tasks/${TASK}/relaunch`, {
+          method: 'POST',
+          body: JSON.stringify({ clear: true }),
+        })
+        return res.cleared
+      }
+      if (!message?.trim()) die('lander.relaunch: a message is required')
+      const o = { date: opts.date, time: opts.time }
+      validateSchedule(o)
+      o.await = await resolveAwait(opts.await, { self: TASK })
+      await call(PROJECT, `/tasks/${TASK}/relaunch`, {
+        method: 'POST',
+        body: JSON.stringify({
+          message,
+          date: o.date,
+          time: o.time,
+          await: o.await,
+        }),
+      })
+    },
     assist: (prompt, ...args) => runClaude(prompt, args).trim(),
     shell: (command, ...args) => runShell(command, args).trim(),
     flow: (name, inputs = {}) => runFlowByName(name, inputs),
@@ -609,6 +682,7 @@ const run = {
   land: () => landTask(rest),
   wedge: () => setStatus('wedged'),
   rest: () => restTask(rest),
+  relaunch: () => relaunchTask(rest),
   launch: () => launchTask(rest),
   list: () => listTasks(rest),
   view: () => viewTask(rest),
@@ -625,6 +699,7 @@ if (!run)
   die(
     `unknown command: ${cmd ?? '(none)'} — try ` +
       'land [id...] | wedge | rest (--date|--time|--await|--clear) | ' +
+      'relaunch <message> [--date|--time|--await|--clear] | ' +
       'launch <message> | list | view <id> | send <id> <message> | ' +
       'archive <id...> [--restore] | assist <prompt> | flow <name>',
   )

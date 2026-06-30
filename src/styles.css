@@ -1318,8 +1318,9 @@ body {
   font-weight: 600;
 }
 
-/* Same color as the "riding" status pill. */
-.status-transition-label.launched {
+/* Same color as the "riding" status pill — a (re)launch starts a turn. */
+.status-transition-label.launched,
+.status-transition-label.relaunched {
   color: var(--riding);
 }
 

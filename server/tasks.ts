@@ -41,12 +41,20 @@ export type TaskEvent = {
     | 'landed'
     | 'unlanded'
     | 'renamed'
+    // The divider `lander relaunch` records when it seals the task's assistant
+    // session so the next turn mints a fresh claude session (see sealForRelaunch).
+    // Recorded twice for a scheduled relaunch: once at arm time carrying
+    // `scheduledFor` (the pending indicator), then again at delivery without it
+    // (the actual divider) — the same pattern a deferred `rest` shows as a
+    // 'scheduled' then a 'launched'.
+    | 'relaunched'
   // The task's title at the time of the event. Absent on a launch/schedule event
   // until the first generated name amends it, and on events saved before titles
   // were captured.
   title?: string
-  // 'scheduled' only: the date/time the task is set to launch, shown beside the
-  // verb (the event's own createdAt is when it was scheduled).
+  // 'scheduled' (and an armed 'relaunched') only: the date/time the task is set
+  // to launch/relaunch, shown beside the verb (the event's own createdAt is when
+  // it was scheduled).
   scheduledFor?: string
   // 'awaiting' only: the tasks this one is resting on (id + title as of the
   // event) so the UI can render them as links. A task awaiting tasks may also
@@ -145,6 +153,104 @@ export function recordStatusTransition(
       title: task.title,
       createdAt: at,
     })
+}
+
+// Seal a task's assistant session so its next turn mints a fresh claude session,
+// and record the 'relaunched' divider event. This is the heart of `lander
+// relaunch`: the daemon mints a new session whenever it's handed a turn with no
+// `sessionId` (it `--resume`s the same one otherwise), so deleting the field is
+// all it takes — the new session is minted lazily on the next turn that drains a
+// queued message, never pre-allocated. The old session's still-streaming turn is
+// a `--resume`, which emits no session announcement, so nothing races this clear
+// (see reduceRunWs's set-once `if (!t.sessionId)`). Touches only session + event
+// state; the caller owns the message/queue/status for the next turn.
+export function sealForRelaunch(
+  task: { sessionId?: string; title: string; events?: TaskEvent[] },
+  at: string,
+): void {
+  delete task.sessionId
+  ;(task.events ??= []).push({ kind: 'relaunched', title: task.title, createdAt: at })
+}
+
+// The immediate `lander relaunch <message>` mutation: seal the session, then
+// append the relaunch message and queue it for the (now fresh) session, going
+// riding. Called mid-turn of the old session in the normal path — the in-flight
+// driveTask loop drains the queued message after the current turn's `done`, and
+// because the session is sealed that turn hands the daemon no `sessionId`, so a
+// new session is minted. Revives a wedged/landed task too (records the un-wedge a
+// hair ahead so the timeline orders right), and supersedes any pending retry.
+export function applyRelaunch(
+  task: {
+    sessionId?: string
+    status: string
+    title: string
+    updatedAt?: string
+    events?: TaskEvent[]
+    messages: Message[]
+    queued?: string[]
+    retry?: unknown
+  },
+  message: string,
+  at: string,
+): void {
+  recordStatusTransition(task, 'riding', new Date(Date.parse(at) - 1).toISOString())
+  sealForRelaunch(task, at)
+  task.messages.push({ role: 'user', text: message, createdAt: at })
+  ;(task.queued ??= []).push(message)
+  task.status = 'riding'
+  task.updatedAt = at
+  delete task.retry
+}
+
+// Append a batch of now-due scheduled messages and queue them for the session —
+// the shared tail of an immediate and a scheduled delivery. If any due entry is
+// a relaunch (`lander relaunch --date/--time/--await`), seal the session once and
+// lead with the relaunch text so the fresh session reads it first; ordinary due
+// messages keep their order and follow. The caller has already split due from
+// not-yet-due and recorded the riding transition; this only mutates the
+// session/message/queue state.
+export function applyDueMessages(
+  task: {
+    sessionId?: string
+    title: string
+    events?: TaskEvent[]
+    messages: Message[]
+    queued?: string[]
+  },
+  due: { text: string; relaunch?: boolean }[],
+  at: string,
+): void {
+  const relaunch = due.filter((m) => m.relaunch)
+  const rest = due.filter((m) => !m.relaunch)
+  // Seal once even if several relaunch entries are due in the same sweep.
+  if (relaunch.length) sealForRelaunch(task, at)
+  for (const m of [...relaunch, ...rest]) {
+    task.messages.push({ role: 'user', text: m.text, createdAt: at })
+    ;(task.queued ??= []).push(m.text)
+  }
+}
+
+// Arm a scheduled relaunch: stash a relaunch-flagged scheduled message whose own
+// `deliverAt`/`waitFor` trigger seals the session on delivery, and record a
+// pending 'relaunched' event (carrying the launch time, when known) so the UI
+// shows the coming relaunch. Crucially does NOT clear `sessionId` now — the old
+// session stays live until the trigger fires, so pre-trigger interim messages
+// still resume it, consistent with every other scheduled wakeup. We deliberately
+// don't set task-level `scheduledFor` (that would block delivery and could
+// double-fire launchTask); the message's own trigger drives it.
+export function armScheduledRelaunch(
+  task: {
+    title: string
+    events?: TaskEvent[]
+    scheduledMessages?: { text: string; deliverAt?: string; waitFor?: string[]; relaunch?: boolean }[]
+  },
+  entry: { text: string; deliverAt?: string; waitFor?: string[] },
+  at: string,
+): void {
+  ;(task.scheduledMessages ??= []).push({ ...entry, relaunch: true })
+  const event: TaskEvent = { kind: 'relaunched', title: task.title, createdAt: at }
+  if (entry.deliverAt) event.scheduledFor = entry.deliverAt
+  ;(task.events ??= []).push(event)
 }
 
 // The user messages that made up a task's most recent turn: the consecutive run

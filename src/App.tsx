@@ -96,8 +96,13 @@ type TaskEvent = {
     | 'landed'
     | 'unlanded'
     | 'renamed'
+    // The divider `lander relaunch` records when it seals the assistant session.
+    // An armed scheduled relaunch carries `scheduledFor` (the pending indicator);
+    // the divider recorded on delivery does not.
+    | 'relaunched'
   title?: string
-  // 'scheduled' only: when the task is set to launch, shown beside the verb.
+  // 'scheduled' (and an armed 'relaunched') only: when the task is set to
+  // launch/relaunch, shown beside the verb.
   scheduledFor?: string
   // 'awaiting' only: the tasks this one is resting on, rendered as links.
   awaiting?: { id: string; title: string }[]
@@ -806,6 +811,7 @@ const EVENT_VERB: Record<TaskEvent['kind'], string> = {
   landed: 'landed',
   unlanded: 'un-landed',
   renamed: 'renamed',
+  relaunched: 'relaunched',
 }
 
 // A lifecycle event shown inline in the conversation: the task's name (as of
@@ -878,12 +884,15 @@ function StatusTransition({
         )}
         <span className={`status-transition-label ${event.kind}`}>
           {EVENT_VERB[event.kind]}
-          {event.kind === 'scheduled' && event.scheduledFor && (
-            <span className="status-transition-when">
-              {' '}
-              {formatTimestamp(event.scheduledFor)}
-            </span>
-          )}
+          {/* A 'scheduled' rest and an armed scheduled 'relaunch' both show the
+              time they'll fire beside the verb. */}
+          {(event.kind === 'scheduled' || event.kind === 'relaunched') &&
+            event.scheduledFor && (
+              <span className="status-transition-when">
+                {' '}
+                {formatTimestamp(event.scheduledFor)}
+              </span>
+            )}
         </span>
       </span>
       <span className="status-transition-time">

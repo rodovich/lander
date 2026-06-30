@@ -7,6 +7,9 @@ import {
   ensurePending,
   lastTurnPrompts,
   worktreeName,
+  applyRelaunch,
+  applyDueMessages,
+  armScheduledRelaunch,
   type Message,
   type TaskEvent,
 } from './tasks'
@@ -237,6 +240,159 @@ describe('recordStatusTransition', () => {
     const t = task('wedged') // events undefined
     recordStatusTransition(t, 'resting', AT)
     expect(t.events).toEqual([{ kind: 'unwedged', title: 'My task', createdAt: AT }])
+  })
+})
+
+describe('applyRelaunch', () => {
+  const AT = '2026-06-01T00:00:00.000Z'
+  type RelaunchTask = {
+    sessionId?: string
+    status: string
+    title: string
+    updatedAt?: string
+    events?: TaskEvent[]
+    messages: Message[]
+    queued?: string[]
+    retry?: unknown
+  }
+  const task = (over: Partial<RelaunchTask> = {}): RelaunchTask => ({
+    sessionId: 'sess-old',
+    status: 'riding',
+    title: 'My task',
+    updatedAt: '2026-05-01T00:00:00.000Z',
+    messages: [msg({ role: 'user', text: 'q' }), msg({ text: 'reply' })],
+    ...over,
+  })
+
+  it('seals the session, appends the relaunched divider, and queues the message', () => {
+    const t = task()
+    applyRelaunch(t, 'go again', AT)
+    // The old session is gone — the next turn hands the daemon no sessionId, so it
+    // mints a fresh one (the whole point of relaunch).
+    expect('sessionId' in t).toBe(false)
+    // The divider event marks where the new session begins.
+    expect(t.events).toContainEqual({
+      kind: 'relaunched',
+      title: 'My task',
+      createdAt: AT,
+    })
+    // The message is appended and queued for the fresh session; status rides.
+    expect(t.messages.at(-1)).toMatchObject({ role: 'user', text: 'go again' })
+    expect(t.queued).toEqual(['go again'])
+    expect(t.status).toBe('riding')
+    expect(t.updatedAt).toBe(AT)
+  })
+
+  it('a relaunch with no session yet just opens a fresh one (harmless)', () => {
+    const t = task({ sessionId: undefined })
+    applyRelaunch(t, 'go', AT)
+    expect('sessionId' in t).toBe(false)
+    expect(t.queued).toEqual(['go'])
+  })
+
+  it('revives a wedged task, recording the un-wedge ahead of the divider', () => {
+    const t = task({ status: 'wedged' })
+    applyRelaunch(t, 'go', AT)
+    const kinds = (t.events ?? []).map((e) => e.kind)
+    // The un-wedge is recorded a hair before the relaunch divider.
+    expect(kinds).toEqual(['unwedged', 'relaunched'])
+    const unwedged = t.events!.find((e) => e.kind === 'unwedged')!
+    expect(unwedged.createdAt < AT).toBe(true)
+    expect(t.status).toBe('riding')
+  })
+
+  it('supersedes any pending retry', () => {
+    const t = task({ retry: { committed: false, prompts: ['x'] } })
+    applyRelaunch(t, 'go', AT)
+    expect('retry' in t).toBe(false)
+  })
+})
+
+describe('armScheduledRelaunch', () => {
+  const AT = '2026-06-01T00:00:00.000Z'
+  const WHEN = '2026-06-02T00:00:00.000Z'
+
+  it('stashes a relaunch-flagged scheduled message without clearing the session', () => {
+    const t = {
+      sessionId: 'sess-old',
+      title: 'My task',
+      messages: [] as Message[],
+    }
+    armScheduledRelaunch(t, { text: 'later', deliverAt: WHEN }, AT)
+    // The session stays live until the trigger fires — pre-trigger messages still
+    // resume it.
+    expect(t.sessionId).toBe('sess-old')
+    expect((t as { scheduledMessages?: unknown[] }).scheduledMessages).toEqual([
+      { text: 'later', deliverAt: WHEN, relaunch: true },
+    ])
+    // The armed event carries the launch time as the pending indicator.
+    expect((t as { events?: TaskEvent[] }).events).toContainEqual({
+      kind: 'relaunched',
+      title: 'My task',
+      createdAt: AT,
+      scheduledFor: WHEN,
+    })
+  })
+
+  it('omits scheduledFor on a pure await trigger', () => {
+    const t = { title: 'My task' } as {
+      title: string
+      events?: TaskEvent[]
+      scheduledMessages?: { text: string; waitFor?: string[]; relaunch?: boolean }[]
+    }
+    armScheduledRelaunch(t, { text: 'later', waitFor: ['abc'] }, AT)
+    expect(t.scheduledMessages).toEqual([
+      { text: 'later', waitFor: ['abc'], relaunch: true },
+    ])
+    expect(t.events).toEqual([
+      { kind: 'relaunched', title: 'My task', createdAt: AT },
+    ])
+  })
+})
+
+describe('applyDueMessages', () => {
+  const AT = '2026-06-01T00:00:00.000Z'
+
+  it('appends and queues ordinary due messages without touching the session', () => {
+    const t = {
+      sessionId: 'sess-old',
+      title: 'My task',
+      messages: [] as Message[],
+    }
+    applyDueMessages(t, [{ text: 'a' }, { text: 'b' }], AT)
+    expect(t.sessionId).toBe('sess-old')
+    expect((t as { events?: TaskEvent[] }).events).toBeUndefined()
+    expect(t.messages.map((m) => m.text)).toEqual(['a', 'b'])
+    expect((t as { queued?: string[] }).queued).toEqual(['a', 'b'])
+  })
+
+  it('seals the session and pushes the divider when a due entry is a relaunch', () => {
+    const t = {
+      sessionId: 'sess-old',
+      title: 'My task',
+      messages: [] as Message[],
+    }
+    applyDueMessages(t, [{ text: 'fresh', relaunch: true }], AT)
+    expect('sessionId' in t).toBe(false)
+    expect((t as { events?: TaskEvent[] }).events).toEqual([
+      { kind: 'relaunched', title: 'My task', createdAt: AT },
+    ])
+    expect((t as { queued?: string[] }).queued).toEqual(['fresh'])
+  })
+
+  it('seals once and orders the relaunch text first when both are due', () => {
+    const t = {
+      sessionId: 'sess-old',
+      title: 'My task',
+      messages: [] as Message[],
+    }
+    applyDueMessages(t, [{ text: 'ordinary' }, { text: 'relaunch', relaunch: true }], AT)
+    expect('sessionId' in t).toBe(false)
+    // One divider, not one per entry.
+    expect((t as { events?: TaskEvent[] }).events).toHaveLength(1)
+    // The relaunch text leads so the fresh session reads it first.
+    expect(t.messages.map((m) => m.text)).toEqual(['relaunch', 'ordinary'])
+    expect((t as { queued?: string[] }).queued).toEqual(['relaunch', 'ordinary'])
   })
 })
 

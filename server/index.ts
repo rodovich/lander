@@ -38,6 +38,9 @@ import {
   pendingMessage,
   lastTurnPrompts,
   worktreeName,
+  applyRelaunch,
+  applyDueMessages,
+  armScheduledRelaunch,
   type Message,
   type TaskEvent,
 } from './tasks'
@@ -152,6 +155,12 @@ type Task = {
     text: string
     deliverAt?: string
     waitFor?: string[]
+    // Set by `lander relaunch --date/--time/--await`: on delivery the scheduler
+    // seals task.sessionId and records a 'relaunched' event before appending this
+    // message, so the delivering turn mints a fresh assistant session — the
+    // deferred analog of the immediate /relaunch endpoint. The seal happens at the
+    // trigger, not at call time, so the old session stays live until then.
+    relaunch?: boolean
   }[]
   // ISO timestamp a scheduled task is set to launch. Set at creation via
   // `--date`/`--time`, or later via `lander rest` to re-sleep a running task;
@@ -852,10 +861,11 @@ async function deliverScheduledMessages(
     // Delivery revives a wedged/landed recipient, same as a live send; record
     // the transition a hair ahead of the messages so the timeline orders right.
     recordStatusTransition(t, 'riding', new Date(Date.parse(at) - 1).toISOString())
-    for (const m of due) {
-      t.messages.push({ role: 'user', text: m.text, createdAt: at })
-      ;(t.queued ??= []).push(m.text)
-    }
+    // Append (and queue) the due messages. If any is a relaunch, applyDueMessages
+    // seals the session and records the divider before appending, so the
+    // delivering turn mints a fresh assistant session — the deferred analog of
+    // the immediate /relaunch endpoint.
+    applyDueMessages(t, due, at)
     t.status = 'riding'
     t.updatedAt = at
     drive = true
@@ -1540,6 +1550,127 @@ app.post('/api/:project/tasks/:id/rest', async (c) => {
     const task = await readTask(project.dataDir, id)
     if (!task) return c.json({ error: 'task not found' }, 404)
     return c.json(publicTask(task))
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
+  }
+})
+
+// Relaunch the current task under a fresh assistant (claude) session, keeping the
+// same task id (`lander relaunch`). A task's claude session lives entirely in
+// `task.sessionId`, decoupled from the task id: the daemon mints a new session
+// whenever it's handed a turn with no `sessionId` (and `--resume`s the same one
+// otherwise), so "relaunch under a new session" is just "clear sessionId, then
+// drive the next turn" — the session is minted lazily on the delivering turn,
+// never pre-allocated.
+//
+// Immediate (no trigger): seal the session now and queue `message` for the next
+// turn (applyRelaunch). Called mid-turn of the old session in the normal path, so
+// the in-flight driveTask loop drains the queued message after the current turn's
+// `done`; because the session is now sealed, that turn hands the daemon no
+// session and a fresh one is minted. The old turn is never interrupted — only
+// next-turn state is touched — so it keeps streaming into its old reply until
+// `done`, the 'relaunched' event renders as the divider, and the queued message
+// is dimmed until the new session reads it.
+//
+// Scheduled (`--date`/`--time`/`--await`): seal AT the trigger, not now. Stash a
+// relaunch-flagged scheduled message (armScheduledRelaunch); the old session
+// stays live until the trigger, so pre-trigger interim messages resume it, and
+// deliverScheduledMessages seals + drives when it fires. We don't set task-level
+// `scheduledFor` (that would block delivery and could double-fire launchTask) —
+// the message's own trigger drives it.
+//
+// `{ clear: true }` drops a pending scheduled relaunch (the relaunch-flagged
+// scheduled messages); it leaves the armed 'relaunched' event as history, like
+// `rest --clear` leaves its 'scheduled' event. Only the task itself or the UI may
+// relaunch — a task relaunches its own session.
+app.post('/api/:project/tasks/:id/relaunch', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  try {
+    const id = c.req.param('id')
+    if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    const file = path.join(project.dataDir, `${id}.json`)
+    if (!(await readTask(project.dataDir, id)))
+      return c.json({ error: 'task not found' }, 404)
+
+    const principal = await resolvePrincipal(c.req)
+    if (
+      principal.kind !== 'ui' &&
+      !(principal.kind === 'task' && principal.id === id)
+    )
+      return c.json({ error: 'only the task itself may relaunch its session' }, 403)
+
+    const body = await c.req.json<{
+      message?: unknown
+      date?: unknown
+      time?: unknown
+      await?: unknown
+      clear?: unknown
+    }>()
+
+    // Drop a pending scheduled relaunch armed earlier — the analog of `rest
+    // --clear`. Removes only the relaunch-flagged scheduled messages (an ordinary
+    // `lander send` deferral is untouched); idempotent, reporting whether anything
+    // was disarmed.
+    if (body.clear) {
+      if (body.date != null || body.time != null || body.await != null)
+        return c.json(
+          { error: 'clear takes no trigger (--date/--time/--await)' },
+          400,
+        )
+      let cleared = false
+      await mutateTask(file, (t) => {
+        const pending = t.scheduledMessages ?? []
+        const rest = pending.filter((m) => !m.relaunch)
+        cleared = rest.length !== pending.length
+        if (!cleared) return
+        if (rest.length) t.scheduledMessages = rest
+        else delete t.scheduledMessages
+        t.updatedAt = new Date().toISOString()
+      })
+      const task = await readTask(project.dataDir, id)
+      if (!task) return c.json({ error: 'task not found' }, 404)
+      return c.json({ ...publicTask(task), cleared })
+    }
+
+    const rawMessage = typeof body.message === 'string' ? body.message : ''
+    if (!rawMessage.trim()) return c.json({ error: 'message is required' }, 400)
+
+    // A `--date`/`--time` and/or `--await` relaunch defers the seal to the
+    // trigger; absent all, seal now. Mirror `lander send`'s trigger resolution.
+    const sched = resolveSchedule(body)
+    if ('error' in sched) return c.json({ error: sched.error }, 400)
+    const awaited = await resolveAwait(project, body.await)
+    if ('error' in awaited) return c.json({ error: awaited.error }, 400)
+    const deliverAt = sched.scheduledFor ?? undefined
+    const waitFor = awaited.waitFor.length ? awaited.waitFor : undefined
+
+    const at = new Date().toISOString()
+
+    if (deliverAt || waitFor) {
+      // Scheduled (B): arm a relaunch-flagged scheduled message; the session is
+      // sealed by deliverScheduledMessages when the trigger fires, not now.
+      await mutateTask(file, (t) => {
+        armScheduledRelaunch(t, { text: rawMessage, deliverAt, waitFor }, at)
+      })
+      const armed = await readTask(project.dataDir, id)
+      if (!armed) return c.json({ error: 'task not found' }, 404)
+      return c.json(publicTask(armed))
+    }
+
+    // Immediate (A): seal now and queue the message for the fresh session.
+    await mutateTask(file, (t) => {
+      applyRelaunch(t, rawMessage, at)
+    })
+    // The normal path is a mid-turn call, where running.has(id) is already true:
+    // the in-flight drainer picks up the queued message and the sealed session
+    // mints a fresh one. If nothing is running (e.g. relaunching a rested/landed
+    // task), start a drainer now.
+    if (!running.has(id)) void driveTask(project, id)
+
+    const updated = await readTask(project.dataDir, id)
+    if (!updated) return c.json({ error: 'task not found' }, 404)
+    return c.json(publicTask(updated))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
