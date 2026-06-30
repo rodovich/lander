@@ -73,6 +73,11 @@ const runs = new Map<string, Run>()
 const RUN_BUFFER_TTL_MS = 120_000
 
 let ws: WebSocket | null = null
+// Set by SIGUSR1 (the dev supervisor's drain signal): finish the runs we're
+// riding, take no new ones, and exit once they're all done — handing off to the
+// fresh daemon the supervisor spawned. A daemon source edit thus never interrupts
+// an in-flight turn. SIGTERM still hard-kills as the supervisor's max-drain cap.
+let draining = false
 
 function send(
   msg:
@@ -83,6 +88,16 @@ function send(
     | UsageMessage,
 ): void {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
+}
+
+// Once draining, exit cleanly the moment our last run is acked/dropped, so the
+// fresh daemon is the only one left. No-op until then — we keep relaying our
+// in-flight runs and honoring interrupts for them.
+function exitIfDrained(): void {
+  if (draining && runs.size === 0) {
+    console.log('drained; exiting for handoff')
+    process.exit(0)
+  }
 }
 
 // ── Usage (decision 6) ──────────────────────────────────────────────────────
@@ -305,7 +320,10 @@ function startRun(msg: StartRunMessage): void {
     const rec = runs.get(msg.runId)
     if (rec) {
       rec.done = doneMsg
-      rec.dropTimer = setTimeout(() => runs.delete(msg.runId), RUN_BUFFER_TTL_MS)
+      rec.dropTimer = setTimeout(() => {
+        runs.delete(msg.runId)
+        exitIfDrained()
+      }, RUN_BUFFER_TTL_MS)
       rec.dropTimer.unref()
     }
     send(doneMsg)
@@ -353,6 +371,19 @@ function onMessage(raw: string): void {
   }
   switch (msg.type) {
     case 'start-run':
+      if (draining) {
+        // We're handing off; the server routes new runs to the fresh primary, so
+        // this shouldn't arrive — but if it does, abort cleanly rather than start
+        // work we'd interrupt at exit.
+        send({
+          type: 'done',
+          runId: msg.runId,
+          exitCode: 1,
+          interrupted: false,
+          stderr: 'daemon draining; run not started',
+        })
+        break
+      }
       startRun(msg)
       break
     case 'interrupt':
@@ -389,6 +420,7 @@ function onMessage(raw: string): void {
       const r = runs.get(msg.runId)
       if (r?.dropTimer) clearTimeout(r.dropTimer)
       runs.delete(msg.runId)
+      exitIfDrained()
       break
     }
   }
@@ -410,6 +442,17 @@ process.on('SIGTERM', () => {
 process.on('SIGINT', () => {
   killChildren()
   process.exit(0)
+})
+
+// Graceful handoff (drain): the dev supervisor (daemon-watch.mjs) sends SIGUSR1 on
+// a daemon source edit instead of killing us. Stop taking new runs (the server
+// already routes those to the fresh daemon), finish the turns we're riding, and
+// exit once they're done — so a code edit never interrupts an in-flight turn.
+process.on('SIGUSR1', () => {
+  if (draining) return
+  draining = true
+  console.log(`draining ${runs.size} run(s) before handoff`)
+  exitIfDrained()
 })
 
 // Dial the server, announce our projects, and reconnect with a fixed backoff if
@@ -435,6 +478,13 @@ function connect(): void {
   sock.addEventListener('message', (ev) => onMessage(String(ev.data)))
   sock.addEventListener('close', () => {
     if (ws === sock) ws = null
+    if (draining) {
+      // Lost the link mid-drain: we can't relay our runs' output anymore, so
+      // don't reconnect (we'd look like a fresh primary and be handed new runs we
+      // refuse). The supervisor's max-drain SIGTERM reaps us; the server
+      // reassigns our open runs to the live primary.
+      return
+    }
     console.log('disconnected; retrying in 1s')
     setTimeout(connect, 1000)
   })

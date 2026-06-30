@@ -60,17 +60,24 @@ class RunChannel {
 // daemon survives and reconnects); past it we assume the daemon is gone.
 const RECONNECT_GRACE_MS = 15_000
 
-// The single connected daemon (phase 1 is one daemon, same host). A later
-// multi-daemon phase keys these by which daemon registered each slug.
-let daemon: WebSocket | null = null
+// Daemon connections. Normally one, but a drain-handoff briefly runs two: when a
+// daemon is told to drain (it finishes its riding turns and exits — see the dev
+// supervisor and the daemon's SIGUSR1 handler), a fresh daemon connects and
+// becomes `primary` — the one that receives all new runs — while the draining one
+// stays connected to finish the runs it still owns. `runOwner` maps each in-flight
+// run to the daemon holding it, so interrupt/resume-from/ack reach the right one
+// and the new primary doesn't try to resume a run a draining daemon is finishing.
+let primary: WebSocket | null = null
+const daemons = new Set<WebSocket>()
+const runOwner = new Map<string, WebSocket>()
 const registeredSlugs = new Set<string>()
 const channels = new Map<string, RunChannel>()
-// Armed when the daemon drops with runs still open: on expiry, if no daemon has
+// Armed when no daemon is connected with runs still open: on expiry, if none has
 // returned, the open runs are crashed. Cleared when a daemon (re)connects.
 let graceTimer: ReturnType<typeof setTimeout> | null = null
 
 export function daemonConnected(): boolean {
-  return daemon != null
+  return primary != null
 }
 
 export function daemonServes(slug: string): boolean {
@@ -90,11 +97,21 @@ export function closeRunChannel(runId: string): void {
   channels.delete(runId)
 }
 
-// Push a control message to the daemon (start-run / interrupt / resume-from /
-// ack). Returns false if no daemon is connected, so the caller can fall back.
+// Push a control message to the daemon that owns its run. `start-run` goes to the
+// current primary and records it as the run's owner; interrupt/resume-from/ack
+// follow that ownership, falling back to the primary for a run we have no owner
+// for (e.g. one seeded from disk at boot, before any daemon adopted it). Returns
+// false if there's no daemon to take it, so the caller can fall back.
 export function sendToDaemon(msg: ServerToDaemon): boolean {
-  if (!daemon) return false
-  daemon.send(JSON.stringify(msg))
+  let target: WebSocket | null
+  if (msg.type === 'start-run') {
+    target = primary
+    if (target) runOwner.set(msg.runId, target)
+  } else {
+    target = runOwner.get(msg.runId) ?? primary
+  }
+  if (!target) return false
+  target.send(JSON.stringify(msg))
   return true
 }
 
@@ -104,10 +121,10 @@ export function sendToDaemon(msg: ServerToDaemon): boolean {
 // daemon, the open runs are crashed; a (re)connecting daemon clears it first and
 // its resume-from governs instead. One timer for the single daemon.
 function armGrace(): void {
-  if (daemon || !channels.size || graceTimer) return
+  if (primary || !channels.size || graceTimer) return
   graceTimer = setTimeout(() => {
     graceTimer = null
-    if (daemon) return
+    if (primary) return
     for (const channel of channels.values()) channel.push({ kind: 'crashed' })
   }, RECONNECT_GRACE_MS)
   graceTimer.unref()
@@ -122,11 +139,12 @@ function armGrace(): void {
 export function requestResume(runId: string): void {
   const channel = channels.get(runId)
   if (!channel) return
-  if (!daemon) {
+  const target = runOwner.get(runId) ?? primary
+  if (!target) {
     armGrace()
     return
   }
-  daemon.send(
+  target.send(
     JSON.stringify({ type: 'resume-from', runId, seq: channel.lastSeq }),
   )
 }
@@ -162,21 +180,31 @@ export function attachDaemonServer(
   })
 
   wss.on('connection', (ws: WebSocket) => {
-    // One daemon at a time: a new connection supersedes any stale one.
-    daemon = ws
+    // The newcomer becomes primary — new runs go to it. Any daemon already
+    // connected is a draining predecessor: it stays connected to finish the runs
+    // it owns but takes no new ones. registeredSlugs tracks the primary, so clear
+    // it for the newcomer's `register` to repopulate.
+    daemons.add(ws)
+    primary = ws
     registeredSlugs.clear()
-    // A daemon is back — cancel any pending crash of open runs.
+    // A daemon is here — cancel any pending crash of open runs.
     if (graceTimer) {
       clearTimeout(graceTimer)
       graceTimer = null
     }
     console.log('daemon connected')
-    // Resume every run still being consumed: tell the daemon our last-applied
-    // seq and it replays buffered updates after it (or aborts the run if it no
-    // longer holds it — e.g. it restarted). Covers both a link blip and a server
-    // reload where the daemon outlived us; for a fresh run nothing is open yet.
-    for (const [runId, channel] of channels)
+    // Resume the runs this primary should own: every open run not still held by a
+    // live (draining) daemon. Adopt it and ask for a replay from our last-applied
+    // seq — the daemon replays its buffer or aborts a run it no longer holds (e.g.
+    // it restarted). Covers a link blip, a server reload (daemon outlived us), and
+    // boot recovery. A run a draining predecessor still owns is left to finish
+    // there; resuming it here would only draw a spurious abort.
+    for (const [runId, channel] of channels) {
+      const owner = runOwner.get(runId)
+      if (owner && owner !== ws && daemons.has(owner)) continue
+      runOwner.set(runId, ws)
       ws.send(JSON.stringify({ type: 'resume-from', runId, seq: channel.lastSeq }))
+    }
 
     ws.on('message', (data) => {
       let msg: DaemonToServer
@@ -204,15 +232,34 @@ export function attachDaemonServer(
     })
 
     const drop = () => {
-      if (daemon !== ws) return // already superseded
-      daemon = null
-      registeredSlugs.clear()
+      if (!daemons.has(ws)) return // already gone
+      daemons.delete(ws)
+      if (primary === ws) {
+        primary = null
+        registeredSlugs.clear()
+      }
       console.log('daemon disconnected')
-      // Don't crash open runs immediately — a reconnecting daemon resumes them
-      // (resume-from on connect). Only if none returns within the grace do we
-      // synthesize a crash so each reducer finalizes its task (the file path's
-      // dead-runner branch). With nothing open there's nothing to wait for.
-      armGrace()
+      // Orphan the runs this daemon held — release them so whoever is/becomes
+      // primary takes them over.
+      const orphaned: string[] = []
+      for (const [runId, owner] of runOwner)
+        if (owner === ws) {
+          runOwner.delete(runId)
+          if (channels.has(runId)) orphaned.push(runId)
+        }
+      if (primary) {
+        // Another daemon is still live (a draining predecessor died, or this was
+        // one and the primary is fine): ask it to resume each orphan — it replays
+        // if it holds it, else aborts it (a daemon that dropped mid-turn loses its
+        // runs, same as a hard restart).
+        for (const runId of orphaned) requestResume(runId)
+      } else {
+        // No daemon at all: don't crash open runs immediately — a reconnecting
+        // daemon resumes them (resume-from on connect). Only if none returns
+        // within the grace do we synthesize a crash so each reducer finalizes its
+        // task (the file path's dead-runner branch).
+        armGrace()
+      }
     }
     ws.on('close', drop)
     ws.on('error', drop)

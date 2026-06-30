@@ -56,10 +56,11 @@ concurrently(
     // server/index.ts while lander runs on its own repo — no longer loses a run.
     { command: 'tsx watch server/index.ts', name: 'api', prefixColor: 'green' },
     // The host daemon owns claude process management + stream reduction + usage.
-    // It reads PROJECT_DIRS from the env above. `watch` reloads it on daemon
-    // edits; a reload aborts any in-flight turn (decision 2), which the server
-    // surfaces as a wedge the user can retry.
-    { command: 'tsx watch daemon/index.ts', name: 'daemon', prefixColor: 'magenta' },
+    // It reads PROJECT_DIRS from the env above. daemon-watch.mjs supervises it: on
+    // a daemon source edit it drains the running daemon (finish riding turns, take
+    // no new ones, exit when empty) and hands off to a fresh one, so an edit no
+    // longer aborts in-flight turns — it takes effect at the next turn boundary.
+    { command: 'node daemon-watch.mjs', name: 'daemon', prefixColor: 'magenta' },
   ],
   { killOthers: ['failure', 'success'] },
 ).result.catch(() => process.exit(1))
