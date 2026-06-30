@@ -92,10 +92,12 @@ function renderInline(
     },
   ]
 
-  // A bare task reference: a legacy UUID, or a nanoid-style id (or short-id
-  // prefix) drawn from the `[A-Za-z0-9_-]` alphabet the server mints ids from —
-  // 8 chars (the short id `lander list` prints) up through the 21-char full id,
-  // standing alone rather than embedded in a longer alphanumeric/hyphenated run.
+  // A bare task reference: a legacy UUID, or a nanoid-style id (or unambiguous
+  // prefix of one, as `lander view`/`send`/`archive` accept) drawn from the
+  // `[A-Za-z0-9_-]` alphabet the server mints ids from — 8 chars (short enough
+  // to be a usable prefix, long enough that an ordinary word rarely collides)
+  // up through the 21-char full id, standing alone rather than embedded in a
+  // longer alphanumeric/hyphenated run.
   // The UUID form is matched first so a legacy id is taken whole, not clipped to
   // its first 21 chars. Only added when a resolver is supplied; the resolver
   // decides whether the candidate names a real task, so a coincidental token

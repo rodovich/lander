@@ -8,6 +8,7 @@
 // callbacks).
 import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
+import { taskMetadata } from './task-metadata.js'
 
 const {
   LANDER_API: API,
@@ -188,7 +189,9 @@ async function resolveId(idOrPrefix, { archived = false } = {}) {
   return matches[0].id
 }
 
-// `lander list [--status <s>] [--json]` — the project's tasks, newest first.
+// `lander list [--status <s>] [--json]` — the project's tasks, newest first,
+// as metadata only (id, title, status, createdAt, updatedAt) — never their
+// conversation, in either output mode (see taskMetadata).
 async function listTasks(args) {
   let status
   let json = false
@@ -201,12 +204,13 @@ async function listTasks(args) {
   const res = await call(PROJECT, '/tasks', { method: 'GET' })
   let tasks = Array.isArray(res) ? res : (res.tasks ?? [])
   if (status) tasks = tasks.filter((t) => t.status === status)
-  if (json) return void console.log(JSON.stringify(tasks, null, 2))
-  if (!tasks.length) return void console.log('(no tasks)')
-  for (const t of tasks) {
+  const meta = tasks.map(taskMetadata)
+  if (json) return void console.log(JSON.stringify(meta, null, 2))
+  if (!meta.length) return void console.log('(no tasks)')
+  for (const t of meta) {
     const sched = t.scheduledFor ? `  ⏰ ${t.scheduledFor}` : ''
     console.log(
-      `${t.id.slice(0, 8)}  ${t.status.padEnd(7)}  ${t.title}${sched}`,
+      `${t.id}  ${t.status.padEnd(7)}  ${t.createdAt}  ${t.updatedAt}  ${t.title}${sched}`,
     )
   }
 }
