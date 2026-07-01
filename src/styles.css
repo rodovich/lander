@@ -498,6 +498,13 @@ body {
   flex-shrink: 0;
 }
 
+/* The clockwise arrow that marks a task with a repeating relaunch armed
+   (`lander relaunch --interval`), sitting beside the scheduled clock. Inherits
+   the status color via currentColor, like the clock. */
+.repeat-arrow {
+  flex-shrink: 0;
+}
+
 /* The spinner that marks a riding task, sitting beside the date where the clock
    sits for a deferred one. Border-based like .spinner, but sized to the clock
    (11px) and tinted with the riding color so the motion reads as "running". */

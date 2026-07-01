@@ -45,6 +45,32 @@ describe('taskMetadata', () => {
     })
     expect(unscheduled).not.toHaveProperty('scheduledFor')
   })
+
+  it('flags repeats only when a scheduled message carries a repeat spec', () => {
+    const base = {
+      id: 'ghi',
+      title: 'Repeating relaunch',
+      status: 'resting',
+      createdAt: '2026-06-30T00:00:00.000Z',
+      updatedAt: '2026-06-30T00:00:00.000Z',
+    }
+    const repeating = taskMetadata({
+      ...base,
+      scheduledMessages: [
+        { text: 'again', deliverAt: '2026-07-01T00:00:00.000Z', repeat: { interval: 60 } },
+      ],
+    })
+    expect(repeating.repeats).toBe(true)
+
+    // A one-shot deferred message (no repeat spec) is not a repeat.
+    const oneShot = taskMetadata({
+      ...base,
+      scheduledMessages: [{ text: 'later', deliverAt: '2026-07-01T00:00:00.000Z' }],
+    })
+    expect(oneShot).not.toHaveProperty('repeats')
+
+    expect(taskMetadata(base)).not.toHaveProperty('repeats')
+  })
 })
 
 describe('inDateRange', () => {

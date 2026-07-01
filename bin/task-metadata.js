@@ -10,7 +10,16 @@ export function taskMetadata(t) {
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
     ...(t.scheduledFor ? { scheduledFor: t.scheduledFor } : {}),
+    ...(hasRepeat(t) ? { repeats: true } : {}),
   }
+}
+
+// Whether the task has a repeating relaunch armed — any deferred message
+// carrying an --interval `repeat` spec (see the server's RepeatSpec). `lander
+// list` marks such a task so a live repeating series is visible at a glance,
+// without opening it.
+export function hasRepeat(t) {
+  return (t.scheduledMessages ?? []).some((m) => m.repeat != null)
 }
 
 // Whether a task's createdAt falls within [since, until] (each an epoch-ms

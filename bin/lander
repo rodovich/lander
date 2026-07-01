@@ -325,8 +325,11 @@ async function listTasks(args) {
   if (!meta.length) return void console.log('(no tasks)')
   for (const t of meta) {
     const sched = t.scheduledFor ? `  ⏰ ${t.scheduledFor}` : ''
+    // A clockwise arrow beside the clock marks a task with a repeating relaunch
+    // armed (see hasRepeat) — a `--interval` series still to fire.
+    const repeats = t.repeats ? '  🔁' : ''
     console.log(
-      `${t.id}  ${t.status.padEnd(7)}  ${t.createdAt}  ${t.updatedAt}  ${t.title}${sched}`,
+      `${t.id}  ${t.status.padEnd(7)}  ${t.createdAt}  ${t.updatedAt}  ${t.title}${sched}${repeats}`,
     )
   }
 }

@@ -135,6 +135,11 @@ type Task = {
   // Task ids this task is resting on (`--await`); the scheduler launches it once
   // all have landed. Present only while awaiting; may coexist with scheduledFor.
   waitingFor?: string[]
+  // Deferred messages armed on this task (`lander send/relaunch --date/--time/
+  // --await`), each firing on its own trigger. We read only whether any carries a
+  // `repeat` spec — a `--interval` relaunch — to mark the row with a clockwise
+  // arrow beside the scheduled clock.
+  scheduledMessages?: { repeat?: unknown }[]
   messages: Message[]
   events?: TaskEvent[]
   // Present only when the task wedged on a claude error (not the agent's own
@@ -2781,6 +2786,23 @@ export function App() {
                     >
                       <circle cx="8" cy="8" r="6" />
                       <path d="M8 4.5V8l2.5 1.5" />
+                    </svg>
+                  )}
+                  {task.scheduledMessages?.some((m) => m.repeat) && (
+                    <svg
+                      className="repeat-arrow"
+                      width="11"
+                      height="11"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.25"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-label="Repeats"
+                    >
+                      <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+                      <path d="M21 3v5h-5" />
                     </svg>
                   )}
                   {task.status === 'riding' && (
