@@ -3272,21 +3272,25 @@ export function App() {
                   {m.pending && (
                     <div className="message-pending">
                       <span className="spinner" aria-hidden />
-                      claude is working…
+                      {m.usage?.model
+                        ? `${m.usage.model} is working…`
+                        : 'assistant is working…'}
                     </div>
                   )}
                 </div>
                 )
               })}
-              {/* No assistant message yet but the task is riding: claude has been
-                  launched and we're waiting for its first output. */}
+              {/* No assistant message yet but the task is riding: the assistant
+                  has been launched and we're waiting for its first output. The
+                  turn's model isn't known until that output arrives, so this
+                  stays model-agnostic rather than guessing the prior turn's. */}
               {current.status === 'riding' &&
                 current.messages[current.messages.length - 1]?.role ===
                   'user' && (
                   <div className="message">
                     <div className="message-pending">
                       <span className="spinner" aria-hidden />
-                      claude is working…
+                      assistant is starting…
                     </div>
                   </div>
                 )}
