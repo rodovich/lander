@@ -177,35 +177,11 @@ export function summarizeToolResult(content: unknown): string {
   return charCapped ? text + '…' : text
 }
 
-// Pick the busiest model out of a result event's `modelUsage` map (keyed by
-// model id, each value carrying that model's `outputTokens`): the one that
-// generated the most output. Only a fallback for the turn's headline model now —
-// the caller prefers the session's driving model from the init event, because a
-// tool-heavy subagent on a cheaper model can out-emit the main agent and would
-// otherwise hijack the attribution. Used when no init event was seen (e.g. a run
-// reattached past it). Undefined when the map is absent or empty.
-function dominantModel(modelUsage: unknown): string | undefined {
-  if (!modelUsage || typeof modelUsage !== 'object') return undefined
-  let best: string | undefined
-  let bestOut = -1
-  for (const [name, mu] of Object.entries(modelUsage as Record<string, unknown>)) {
-    const out =
-      mu && typeof mu === 'object' && typeof (mu as any).outputTokens === 'number'
-        ? ((mu as any).outputTokens as number)
-        : 0
-    if (out > bestOut) {
-      bestOut = out
-      best = name
-    }
-  }
-  return best
-}
-
 // Pull the four token counts out of a raw `usage` object (an `assistant` event's
 // per-inference usage or a `result` event's cumulative totals — same field
 // names), defaulting any missing field to zero. `model` is supplied by the
-// caller: the inference's model for an assistant event, the dominant model for a
-// result event.
+// caller for an assistant event (the inference's model); a result event's total
+// carries none, since the caller stamps the session's driving model onto it.
 function parseUsage(u: Record<string, unknown>, model?: string): Usage {
   const n = (k: string) => (typeof u[k] === 'number' ? (u[k] as number) : 0)
   return {
@@ -219,7 +195,7 @@ function parseUsage(u: Record<string, unknown>, model?: string): Usage {
 
 // Add one inference's usage onto the turn's running total. Token counts sum; the
 // model is the latest inference's (turns are effectively single-model, and the
-// result event finalizes the true dominant model at turn end regardless). Cost
+// caller stamps the session's driving model over it regardless). Cost
 // sums too, staying undefined until a snapshot carries one (only the result event
 // does), so a still-streaming turn reports no cost rather than a misleading zero.
 export function addUsage(acc: Usage | undefined, next: Usage): Usage {
@@ -260,8 +236,8 @@ export function reduceStreamLine(
   // The session's driving (main-agent) model, announced by the `system`/`init`
   // event at the top of the run. The caller holds onto it and stamps it as every
   // turn's usage model, so the headline model is always the one that ran the
-  // session — not whichever model logged the most output tokens, which a
-  // tool-heavy subagent on a cheaper model can skew (see dominantModel).
+  // session — not a tool-heavy subagent on a cheaper model that happened to emit
+  // more output.
   drivingModel?: string
   // When a `rate_limit_event` reports the session limit was *rejected* (the turn
   // was refused outright, not just warned), the ISO time the limit resets —
@@ -356,9 +332,9 @@ export function reduceStreamLine(
         .filter((id: unknown): id is string => typeof id === 'string')
     if (ev.usage && typeof ev.usage === 'object') {
       // This total is authoritative: it replaces the running estimate at turn
-      // end. The model here is only a fallback — the caller stamps the session's
-      // driving model over it (dominantModel matters solely when no init was seen).
-      usage = parseUsage(ev.usage as Record<string, unknown>, dominantModel(ev.modelUsage))
+      // end. It carries no model of its own — the caller stamps the session's
+      // driving model (from the init event) onto it.
+      usage = parseUsage(ev.usage as Record<string, unknown>)
       // The turn's dollar cost across every model it touched; only the result
       // event reports it.
       if (typeof ev.total_cost_usd === 'number') usage.costUsd = ev.total_cost_usd

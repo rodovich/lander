@@ -501,7 +501,7 @@ describe('reduceStreamLine', () => {
     expect(r.steps).toEqual([])
   })
 
-  it('pulls token usage and the dominant model from a result event', () => {
+  it('pulls token usage from a result event without deriving a model', () => {
     const r = reduceStreamLine(
       JSON.stringify({
         type: 'result',
@@ -512,6 +512,8 @@ describe('reduceStreamLine', () => {
           cache_read_input_tokens: 181274,
           cache_creation_input_tokens: 21296,
         },
+        // modelUsage is present but ignored: the reducer no longer picks a
+        // busiest model. The caller stamps the session's driving model instead.
         modelUsage: {
           'claude-haiku-4-5': { outputTokens: 40 },
           'claude-opus-4-8': { outputTokens: 15336 },
@@ -524,7 +526,7 @@ describe('reduceStreamLine', () => {
       output: 15376,
       cacheRead: 181274,
       cacheCreation: 21296,
-      model: 'claude-opus-4-8',
+      model: undefined,
     })
     // A result event's total is authoritative — it replaces the running estimate.
     expect(r.usageFinal).toBe(true)
