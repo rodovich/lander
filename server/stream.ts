@@ -262,13 +262,10 @@ export function reduceStreamLine(
   let drivingModel: string | undefined
   let rateLimitResetsAt: string | undefined
   if (ev.type === 'system' && ev.subtype === 'init') {
-    // The init event names the session's configured (main-agent) model.
     if (typeof ev.model === 'string') drivingModel = ev.model
   } else if (ev.type === 'assistant' && Array.isArray(ev.message?.content)) {
     const inferenceId =
       typeof ev.message.id === 'string' ? ev.message.id : undefined
-    // Set on every block of a subagent's events; absent (claude sends null) on the
-    // main agent's. Carried onto each step so the UI can nest a subagent's trace.
     const parentToolUseId =
       typeof ev.parent_tool_use_id === 'string' ? ev.parent_tool_use_id : undefined
     for (const block of ev.message.content) {

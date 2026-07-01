@@ -1,19 +1,14 @@
 // The shared message contract for the daemon ⇄ server WebSocket link. Types
-// only: this module is
-// pure dead code today — it defines the shapes both sides will exchange once the
-// run lifecycle moves across the network, and is wired up by later steps. It must
-// not import index.ts or carry any runtime logic.
+// only: the daemon and server exchange these shapes as the run lifecycle crosses
+// the network. It must not import index.ts or carry any runtime logic.
 
 import type { Step, Usage } from './stream'
 
-// One window of the OAuth usage payload, as the server caches and serves it. A
-// duplicate of the same-named type in server/index.ts for now — this step is
-// behavior-preserving, so index.ts keeps its own copy and a later step
-// reconciles them onto this shared definition.
+// One window of the OAuth usage payload, as the server caches and serves it.
 export type UsageWindow = { utilization: number; resetsAt: string | null }
 
 // The cached usage snapshot: the session and weekly windows (either null when the
-// account API didn't report it). Mirrors `UsageBody` in server/index.ts.
+// account API didn't report it).
 export type UsageBody = { session: UsageWindow | null; weekly: UsageWindow | null }
 
 // ── Server → daemon ────────────────────────────────────────────────────────

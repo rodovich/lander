@@ -118,7 +118,7 @@ async function launchTask(rest) {
   // whichever trigger comes first.
   o.await = await resolveAwait(o.await)
   // --title sets the name directly; without it the server asks haiku. --date or
-  // --wait defers the launch (a date/time the server parses, or N minutes from
+  // --time defers the launch (a date/time the server parses, or N minutes from
   // now) and the server runs the task then.
   const task = await call(o.project, '/tasks', {
     method: 'POST',
@@ -356,9 +356,10 @@ async function viewTask(args) {
   }
 }
 
-// `lander send <id> <message|-> [--date <when> | --wait <minutes>]` — message
-// another task in this project. Without a schedule the message is delivered now
-// (queued behind any in-flight turn); --date/--wait defer delivery to that time.
+// `lander send <id> <message|-> [--date <when> | --time <minutes>] [--await <ids>]`
+// — message another task in this project. Without a schedule the message is
+// delivered now (queued behind any in-flight turn); --date/--time/--await defer
+// delivery until that trigger fires (whichever comes first when several are set).
 async function sendTask(args) {
   const o = {}
   const pos = []
@@ -472,7 +473,7 @@ function runShell(command, args) {
 }
 
 // The `lander` object handed to a flow script. Server-backed methods (launch,
-// send, view, list, status, land, wedge, rest) call the same API the CLI does;
+// send, view, list, land, wedge, rest, relaunch) call the same API the CLI does;
 // assist/shell run a local child; flow nests. Methods naming another task
 // resolve a full id or unambiguous prefix, like the CLI.
 function makeLander(inputs) {
@@ -495,7 +496,7 @@ function makeLander(inputs) {
         method: 'POST',
         body: JSON.stringify(o),
       })
-      return task.id // the new task's id
+      return task.id
     },
     async send(target, message, opts = {}) {
       if (!message?.trim()) die('lander.send: a message is required')
@@ -585,7 +586,6 @@ function makeLander(inputs) {
   }
 }
 
-// Resolve a flow's path from the server, import it, and run its default export.
 async function runFlowByName(name, inputs) {
   const { path: file } = await call(
     PROJECT,

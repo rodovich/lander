@@ -967,7 +967,7 @@ function CopyButton({
   )
 }
 
-// A clipboard button for copying a task's UUID, styled to sit beside the
+// A clipboard button for copying a task's id, styled to sit beside the
 // title's sparkle and fade in with it on hover. Flips to a checkmark after a
 // successful copy so the click registers.
 function CopyIdButton({ id }: { id: string }) {
@@ -1338,12 +1338,9 @@ export function App() {
   const [shown, setShown] = useState<string[]>([])
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
-  // Which slice of tasks the list shows — 'inbox' (active tasks, default),
-  // 'unread' (active tasks with unviewed updates), or 'archived' — chosen from
-  // the project dropdown. Persisted so the choice survives a reload.
+  // The list's task-slice filter (see TaskView), persisted so it survives a reload.
   const [view, setView] = usePersistentState<TaskView>('lander:view', 'inbox')
-  // Restrict the list to tasks updated today or this week (user's local time);
-  // 'any' imposes no time bound. Toggled from the project dropdown, persisted.
+  // The list's time-window filter (see TimeFilter), persisted so it survives a reload.
   const [timeFilter, setTimeFilter] = usePersistentState<TimeFilter>(
     'lander:timeFilter',
     'any',
@@ -1454,7 +1451,7 @@ export function App() {
   const [stickyUnread, setStickyUnread] = useState<Set<string>>(new Set())
 
   // Latest tasks readable from timer callbacks that outlive the render that
-  // scheduled them (the dwell timer below marks a task seen 3s later).
+  // scheduled them (the dwell timer below marks a task seen 2s later).
   const tasksRef = useRef(tasks)
   tasksRef.current = tasks
 
@@ -1816,8 +1813,8 @@ export function App() {
     return { tasks: merged, usage }
   }
 
-  // Load the project list once and show all projects by default. A task named
-  // in the URL is seeded as the selection so a shared/reloaded link opens on it.
+  // Load the project list once and show all projects by default. (A task named
+  // in the URL is seeded as the selection by selectedTaskId's initializer.)
   useEffect(() => {
     fetch('/api/projects')
       .then((r) => r.json())
@@ -1942,13 +1939,14 @@ export function App() {
       ? newProject
       : defaultTargetSlug
 
-  // Resolve a bare task id or short (8-char) prefix found in a message to an
+  // Resolve a bare task id or an unambiguous prefix found in a message to an
   // internal link to that task, used to turn such references into clickable
-  // links with the task's title as the text. Matches a full id exactly or a
-  // prefix that uniquely identifies one loaded task (mirroring the CLI's
-  // unambiguous-prefix rule); returns undefined otherwise so the id renders as
-  // plain text. This is purely presentational — the stored message and what's
-  // sent to the model are untouched.
+  // links with the task's title as the text. A full-length id (>= 36 chars) is
+  // matched exactly; anything shorter matches by prefix, and links only when it
+  // uniquely identifies one loaded task (mirroring the CLI's unambiguous-prefix
+  // rule). Returns undefined otherwise so the id renders as plain text. This is
+  // purely presentational — the stored message and what's sent to the model are
+  // untouched.
   const resolveTaskLink: TaskLinkResolver = (id) => {
     // A legacy/garbled reference can hand us an empty id (e.g. an old "awaiting"
     // event saved under the pre-rename shape); resolve it to no link rather than
@@ -2010,8 +2008,9 @@ export function App() {
     }
   }
 
-  // Leave edit mode (and close any tool popup) when switching tasks so neither
-  // bleeds across them.
+  // Reset per-task view state when switching tasks so none of it bleeds across
+  // them: leave title-edit mode, close any tool popup, and collapse revealed
+  // tool details and expanded turns.
   useEffect(() => {
     setEditingTitle(false)
     setOpenTool(null)
@@ -2722,8 +2721,6 @@ export function App() {
               )
             }
             const { task, index } = row
-            // The dot shows once the task has a seen marker (set on creation or
-            // backfilled) and its latest completed update is newer than it.
             const unseen = isUnread(task)
             return (
             <li

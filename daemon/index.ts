@@ -307,7 +307,7 @@ function startRun(msg: StartRunMessage): void {
     if (settled) return
     settled = true
     clearTimeout(timer)
-    flush(true) // fold the final partial line
+    flush(true)
     const doneMsg: DoneMessage = {
       type: 'done',
       runId: msg.runId,

@@ -142,9 +142,9 @@ type Task = {
   // before this existed.
   events?: TaskEvent[]
   // Follow-up prompts sent while a run was in flight, awaiting their turn.
-  // Persisted so they survive a server restart; drained one turn at a time by
-  // driveTask when the current run finishes. Absent on tasks saved before this
-  // field existed — treat undefined as empty.
+  // Persisted so they survive a server restart; drained by driveTask when the
+  // current run finishes — the whole queue joins into one turn (see driveTask).
+  // Absent on tasks saved before this field existed — treat undefined as empty.
   queued?: string[]
   // Messages addressed to this task with a deferred delivery, sent by another
   // task via `lander send --date/--time/--await`. Each fires when its trigger is
@@ -180,13 +180,13 @@ type Task = {
   // persisted: a task's location on disk (archived/ vs tasks/) is the source of
   // truth, and archiving moves the file rather than setting a field.
   archived?: boolean
-  // The id of the run (under the project's runs dir) currently being reduced
-  // onto this task, and how many bytes of that run's output log have already
-  // been folded in. Set when a turn's runner is launched, cleared when its
-  // output is fully reduced. Because the runner is a detached process that
-  // outlives this server, these let a fresh process reattach to a still-live run
-  // and resume reducing exactly where it left off. Internal — stripped from the
-  // public task (see publicTask). Absent when no run is in flight.
+  // The id of the run the daemon is streaming onto this task, and the seq of the
+  // last update folded in (the run cursor). Set when a turn is handed to the
+  // daemon, cleared when the run is fully reduced. Because the daemon outlives
+  // this server and holds the run's replay buffer, these let a fresh process
+  // reattach to a still-live run and resume reducing from the last applied seq.
+  // Internal — stripped from the public task (see publicTask). Absent when no
+  // run is in flight.
   runId?: string
   runCursor?: number
   // Set when a run wedged on a claude error (a non-zero exit that wasn't a
@@ -213,13 +213,14 @@ type Task = {
   titlePending?: boolean
   // The working directory the previous turn ended in, recorded by the Stop hook
   // (see buildClaudeArgs / `lander record-cwd`). Each turn is a fresh `claude`
-  // process the server spawns with an explicit cwd; without this it always
-  // restarts at the project root, so a directory the agent moved into during a
-  // turn — most notably a git worktree it entered (EnterWorktree) — would be
-  // lost the moment the turn ends. runTurn resumes the next turn here instead,
-  // falling back to the project root when unset or no longer present. Named for
-  // the hook's `cwd` payload (which carries no worktree-specific field); a
-  // worktree is just one kind of cwd. Absent until the first turn completes.
+  // process; without this it always restarts at the project root, so a directory
+  // the agent moved into during a turn — most notably a git worktree it entered
+  // (EnterWorktree) — would be lost the moment the turn ends. runTurn passes it
+  // to the daemon as a hint, and the daemon resolves the next turn's launch dir
+  // from it, falling back to the project root when unset or no longer present.
+  // Named for the hook's `cwd` payload (which carries no worktree-specific
+  // field); a worktree is just one kind of cwd. Absent until the first turn
+  // completes.
   cwd?: string
   // The absolute path to this session's transcript JSONL, from the same Stop
   // hook payload. Stored alongside cwd so the session file can be located
@@ -376,12 +377,8 @@ function interruptRun(_project: Project, runId: string): void {
 // daemon's to add — it owns the assistant session id (see startRun) — so it isn't
 // here. Output is stream-json so the runner can stream each event as it arrives.
 function buildClaudeArgs(task: Task, prompt: string): string[] {
-  // While the agent is in a worktree (tracked by the Enter/ExitWorktree hooks),
-  // relaunch every turn as a worktree session. This re-establishes claude's
-  // worktree state, which is per-process and lost across `--resume`, so the
-  // agent's own ExitWorktree actually exits instead of no-op'ing. `--worktree`
-  // re-enters the worktree root, which is why runTurn launches these turns from
-  // the project root: ExitWorktree returns the session to the launch directory.
+  // Relaunch each turn as a worktree session while the task is in one — see
+  // Task.worktree.
   const worktreeArgs = task.worktree ? ['--worktree', task.worktree] : []
   const allowed: string[] = ['Bash(lander:*)']
   if (task.allowEdits) allowed.push('Edit', 'Write', 'MultiEdit')
@@ -535,12 +532,9 @@ async function runTurn(
 
   const runId = randomUUID()
 
-  // The host daemon owns run execution: it holds the claude child, resolves the
-  // cwd from the project slug + hints (decision 8), reduces the stream, and is the
-  // durable buffer for replay. The server never spawns a process or touches the
-  // filesystem for a run. Wait briefly for a daemon serving this project to be
-  // connected (dev launches it with the server, so it's normally already up); if
-  // none arrives, wedge the turn with an error rather than hang.
+  // Wait briefly for a daemon serving this project to be connected (dev launches
+  // it with the server, so it's normally already up); if none arrives, wedge the
+  // turn with an error rather than hang.
   if (!(await awaitDaemonServing(project.slug))) {
     await mutateTask(file, (t) => {
       const at = new Date().toISOString()
@@ -704,11 +698,11 @@ async function reduceRunWs(
 const running = new Set<string>()
 
 // Drive a task's turns to completion: run the given opening turn, then drain
-// any messages queued onto the task while it ran — one resume turn each — until
-// the queue empties. Only one drainer runs per task at a time. We come to rest
-// at "resting" once the queue is empty, unless the agent set its own status
-// mid-run (e.g. `lander wedge` to ask for input, or `lander land`), which we
-// must not clobber.
+// any messages queued onto the task while it ran — the whole queue joins into
+// one turn (see the batch note below) — until the queue empties. Only one
+// drainer runs per task at a time. We come to rest at "resting" once the queue
+// is empty, unless the agent set its own status mid-run (e.g. `lander wedge` to
+// ask for input, or `lander land`), which we must not clobber.
 async function driveTask(project: Project, id: string): Promise<void> {
   if (running.has(id)) return
   running.add(id)
@@ -721,9 +715,6 @@ async function driveTask(project: Project, id: string): Promise<void> {
     // nothing here needs to track it.
     const existing = await readTask(project.dataDir, id)
     if (existing?.runId) {
-      // Reattach via reduceRunWs with resume: it asks the daemon (which outlived
-      // our restart) to replay from the persisted cursor, or aborts the run if
-      // the daemon no longer holds it.
       await reduceRunWs(project, id, existing.runId, { resume: true })
     }
     // Retry a name that failed to generate at creation (or on a prior wakeup).
@@ -905,8 +896,7 @@ async function launchScheduled(): Promise<void> {
       // triggers); just gate on there being anything pending.
       if (task.scheduledMessages?.length)
         await deliverScheduledMessages(project, id, now)
-      // Then launch a deferred task whose trigger has fired: its scheduled time
-      // has come, or every task it awaits has landed (whichever first).
+      // Then launch a deferred task whose trigger has fired.
       if (running.has(id)) continue
       const timeDue =
         task.scheduledFor != null && Date.parse(task.scheduledFor) <= now
@@ -1337,8 +1327,6 @@ app.post('/api/:project/tasks', async (c) => {
       // Authenticates this task's own callbacks (see Task.token).
       token: randomUUID(),
       messages: [{ role: 'user', text: message, createdAt: now }],
-      // Untitled until the first generated name amends it (setTitle), unless one
-      // was supplied up front.
       events: [createdEvent],
       // The opening message rides the same queue as follow-ups; driveTask
       // drains it (immediately, or when the scheduler launches a deferred task).
@@ -1360,8 +1348,8 @@ app.post('/api/:project/tasks', async (c) => {
     // fails, ensureTitle flags the task so the next wakeup retries.
     if (!title) void ensureTitle(project, id, rawMessage).catch(() => {})
 
-    // Kick off claude in the project directory; reply is appended when it
-    // finishes. A deferred task waits for the scheduler instead.
+    // Kick off the turn (driveTask hands it to the daemon); reply is appended
+    // when it finishes. A deferred task waits for the scheduler instead.
     if (message.trim() && !deferred) void driveTask(project, id)
 
     return c.json(publicTask(task), 201)
@@ -1878,9 +1866,9 @@ app.post('/api/:project/tasks/:id/archive', async (c) => {
   }
 })
 
-// Re-title a task from its full conversation. Unlike the background generation
-// at creation time, this blocks and returns the updated task so the UI can show
-// the new title immediately.
+// Re-title a task from its conversation (its user messages — see below). Unlike
+// the background generation at creation time, this blocks and returns the updated
+// task so the UI can show the new title immediately.
 app.post('/api/:project/tasks/:id/retitle', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
@@ -2252,17 +2240,17 @@ app.post('/api/:project/tasks/:id/unread', async (c) => {
 // stranded. Nothing in this fresh process is driving them yet (the in-memory
 // `running` set is empty), so a task can be left in one of these states:
 //
-//   - a run still in flight: it carries a runId. Its detached runner may still
-//     be alive (it outlived the server) or have finished while we were down —
+//   - a run still in flight: it carries a runId. The daemon (which outlived the
+//     server) may still hold the run, or it may have finished while we were down —
 //     either way driveTask reattaches and finishes reducing it, uninterrupted.
-//     Only if the runner is gone without having written its done marker was the
-//     run truly interrupted; that falls through to the replay handling below.
+//     Only if the daemon dropped the run past its reconnect grace was it truly
+//     interrupted; that falls through to the replay handling below.
 //   - queued messages that never got drained — resume and drain them.
-//   - interrupted mid-run with no recoverable runner: left "riding" with an
-//     empty queue, because driveTask shifts a prompt off the queue *before*
-//     running it, so a restart mid-turn loses the queue entry and the status is
-//     never reset. These would otherwise sit "riding" with a stale `pending`
-//     message forever.
+//   - interrupted mid-run with no recoverable run: left "riding" with an empty
+//     queue, because driveTask removes the whole queue *before* running the turn,
+//     so a restart mid-turn loses the queued entries and the status is never
+//     reset. These would otherwise sit "riding" with a stale `pending` message
+//     forever.
 //
 // For the interrupted cases we clear stale `pending` flags and, if nothing is
 // queued, re-supply a prompt so driveTask has a turn to run: a "Resumed at …"
