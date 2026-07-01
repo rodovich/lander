@@ -170,6 +170,28 @@ async function restTask(args) {
   console.log('resting')
 }
 
+// --interval (minutes) makes a relaunch repeat: each occurrence arms the next one
+// that many minutes later, off its actual delivery time (no drift compensation).
+// It pairs with the trigger flags — the first occurrence fires now (or at
+// --date/--time/--await), and the cadence follows. --repeat-count N (total
+// relaunches, including the first) or --repeat-until <when> bounds the series;
+// they need --interval and are mutually exclusive with each other. Shared by
+// `relaunch` and its flow method.
+function validateRepeat(o) {
+  if (o.interval == null) {
+    if (o.repeatCount != null || o.repeatUntil != null)
+      die('--repeat-count/--repeat-until require --interval')
+    return
+  }
+  if (!(Number.isFinite(o.interval) && o.interval > 0))
+    die('--interval expects a positive number of minutes')
+  if (o.repeatCount != null && o.repeatUntil != null)
+    die('--repeat-count and --repeat-until are mutually exclusive')
+  if (o.repeatCount != null && !(Number.isInteger(o.repeatCount) && o.repeatCount >= 1))
+    die('--repeat-count expects a positive integer')
+  // --repeat-until parseability is left to the server (same leniency as --date).
+}
+
 // Relaunch the current task under a fresh assistant (claude) session, keeping the
 // same task id. Takes the same trigger flags as `launch` (--date/--time/--await)
 // plus a positional message (or `-` for stdin); operates on the current TASK env
@@ -177,7 +199,9 @@ async function restTask(args) {
 // in-flight turn drains the message into the new session; with one it's deferred,
 // and the old session stays live until the trigger fires.
 //
-// --clear drops a pending scheduled relaunch (the inverse, like `rest --clear`),
+// --interval <minutes> makes it repeat, bounded by --repeat-count/--repeat-until
+// (see validateRepeat). --clear drops a pending scheduled relaunch — including a
+// repeating one's armed next occurrence — (the inverse, like `rest --clear`),
 // taking no trigger of its own; idempotent.
 async function relaunchTask(args) {
   if (!TASK) die('no current task (LANDER_TASK unset)')
@@ -188,12 +212,22 @@ async function relaunchTask(args) {
     if (a === '--date') o.date = args[++i]
     else if (a === '--time') o.time = Number(args[++i])
     else if (a === '--await') o.await = args[++i]
+    else if (a === '--interval') o.interval = Number(args[++i])
+    else if (a === '--repeat-count') o.repeatCount = Number(args[++i])
+    else if (a === '--repeat-until') o.repeatUntil = args[++i]
     else if (a === '--clear') o.clear = true
     else pos.push(a)
   }
   if (o.clear) {
-    if (o.date != null || o.time != null || o.await != null)
-      die('relaunch --clear takes no trigger (--date/--time/--await)')
+    if (
+      o.date != null ||
+      o.time != null ||
+      o.await != null ||
+      o.interval != null ||
+      o.repeatCount != null ||
+      o.repeatUntil != null
+    )
+      die('relaunch --clear takes no trigger (--date/--time/--await/--interval)')
     const res = await call(PROJECT, `/tasks/${TASK}/relaunch`, {
       method: 'POST',
       body: JSON.stringify({ clear: true }),
@@ -205,6 +239,7 @@ async function relaunchTask(args) {
   if (message === '-') message = await readStdin()
   if (!message?.trim()) die('usage: lander relaunch <message>')
   validateSchedule(o)
+  validateRepeat(o)
   o.await = await resolveAwait(o.await, { self: TASK })
   await call(PROJECT, `/tasks/${TASK}/relaunch`, {
     method: 'POST',
@@ -213,10 +248,15 @@ async function relaunchTask(args) {
       date: o.date,
       time: o.time,
       await: o.await,
+      interval: o.interval,
+      repeatCount: o.repeatCount,
+      repeatUntil: o.repeatUntil,
     }),
   })
   const scheduled = o.date != null || o.time != null || o.await != null
-  console.log(scheduled ? 'relaunch scheduled' : 'relaunching')
+  let line = scheduled ? 'relaunch scheduled' : 'relaunching'
+  if (o.interval != null) line += ` (repeating every ${o.interval}m)`
+  console.log(line)
 }
 
 // Resolve a task id from a full id or any unambiguous prefix (so an agent can
@@ -511,8 +551,17 @@ function makeLander(inputs) {
         return res.cleared
       }
       if (!message?.trim()) die('lander.relaunch: a message is required')
-      const o = { date: opts.date, time: opts.time }
+      // opts.interval (minutes) makes it repeat, bounded by opts.repeatCount
+      // (total relaunches) or opts.repeatUntil (a date) — see validateRepeat.
+      const o = {
+        date: opts.date,
+        time: opts.time,
+        interval: opts.interval,
+        repeatCount: opts.repeatCount,
+        repeatUntil: opts.repeatUntil,
+      }
       validateSchedule(o)
+      validateRepeat(o)
       o.await = await resolveAwait(opts.await, { self: TASK })
       await call(PROJECT, `/tasks/${TASK}/relaunch`, {
         method: 'POST',
@@ -521,6 +570,9 @@ function makeLander(inputs) {
           date: o.date,
           time: o.time,
           await: o.await,
+          interval: o.interval,
+          repeatCount: o.repeatCount,
+          repeatUntil: o.repeatUntil,
         }),
       })
     },
@@ -699,7 +751,8 @@ if (!run)
   die(
     `unknown command: ${cmd ?? '(none)'} — try ` +
       'land [id...] | wedge | rest (--date|--time|--await|--clear) | ' +
-      'relaunch <message> [--date|--time|--await|--clear] | ' +
+      'relaunch <message> ' +
+      '[--date|--time|--await|--interval|--repeat-count|--repeat-until|--clear] | ' +
       'launch <message> | list | view <id> | send <id> <message> | ' +
       'archive <id...> [--restore] | assist <prompt> | flow <name>',
   )

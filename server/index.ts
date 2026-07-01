@@ -43,6 +43,8 @@ import {
   armScheduledRelaunch,
   type Message,
   type TaskEvent,
+  type ScheduledMessage,
+  type RepeatSpec,
 } from './tasks'
 
 const execFileAsync = promisify(execFile)
@@ -151,17 +153,14 @@ type Task = {
   // it as a user message, queues it, and drives the task, exactly as an immediate
   // send would, then drops it. The text already carries its sender backlink.
   // Absent when none are pending.
-  scheduledMessages?: {
-    text: string
-    deliverAt?: string
-    waitFor?: string[]
-    // Set by `lander relaunch --date/--time/--await`: on delivery the scheduler
-    // seals task.sessionId and records a 'relaunched' event before appending this
-    // message, so the delivering turn mints a fresh assistant session — the
-    // deferred analog of the immediate /relaunch endpoint. The seal happens at the
-    // trigger, not at call time, so the old session stays live until then.
-    relaunch?: boolean
-  }[]
+  // `relaunch` marks a `lander relaunch --date/--time/--await` deferral: on
+  // delivery the scheduler seals task.sessionId and records a 'relaunched' event
+  // before appending this message, so the delivering turn mints a fresh assistant
+  // session — the deferred analog of the immediate /relaunch endpoint. The seal
+  // happens at the trigger, not at call time, so the old session stays live until
+  // then. `repeat` rides a `--interval` relaunch and re-arms the next occurrence
+  // on each delivery. See ScheduledMessage in tasks.ts.
+  scheduledMessages?: ScheduledMessage[]
   // ISO timestamp a scheduled task is set to launch. Set at creation via
   // `--date`/`--time`, or later via `lander rest` to re-sleep a running task;
   // the task rests until the scheduler reaches this time, which clears the
@@ -1092,6 +1091,53 @@ function resolveSchedule(body: {
   return { scheduledFor: null }
 }
 
+// Resolve the repeating-relaunch flags (`lander relaunch --interval <minutes>`
+// [`--repeat-count <n>` | `--repeat-until <when>`]) into a RepeatSpec, or null
+// when `--interval` is absent (a one-shot relaunch). `--interval` gates the rest:
+// the two bounds are meaningless without a cadence, and mutually exclusive with
+// each other. `repeatCount` is the TOTAL number of relaunches in the series
+// (including the first), so it maps to `remaining = count - 1` — the number that
+// follow the first. `repeatUntil` is a parseable cutoff (same leniency as
+// `--date`), stored as an ISO string the re-arm compares each successor against.
+function resolveRepeat(body: {
+  interval?: unknown
+  repeatCount?: unknown
+  repeatUntil?: unknown
+}): { repeat: RepeatSpec | null } | { error: string } {
+  const hasInterval = body.interval !== undefined && body.interval !== null
+  const hasCount = body.repeatCount !== undefined && body.repeatCount !== null
+  const hasUntil =
+    typeof body.repeatUntil === 'string' && body.repeatUntil.trim() !== ''
+  if (!hasInterval) {
+    if (hasCount || hasUntil)
+      return { error: '--repeat-count/--repeat-until require --interval' }
+    return { repeat: null }
+  }
+  const interval =
+    typeof body.interval === 'number' ? body.interval : Number(body.interval)
+  if (!Number.isFinite(interval) || interval <= 0)
+    return { error: 'invalid interval minutes' }
+  if (hasCount && hasUntil)
+    return { error: '--repeat-count and --repeat-until are mutually exclusive' }
+  const repeat: RepeatSpec = { interval }
+  if (hasCount) {
+    const count =
+      typeof body.repeatCount === 'number'
+        ? body.repeatCount
+        : Number(body.repeatCount)
+    if (!Number.isInteger(count) || count < 1)
+      return { error: 'invalid repeat count' }
+    repeat.remaining = count - 1
+  }
+  if (hasUntil) {
+    const when = new Date((body.repeatUntil as string).trim())
+    if (Number.isNaN(when.getTime()))
+      return { error: 'invalid repeat-until date/time' }
+    repeat.until = when.toISOString()
+  }
+  return { repeat }
+}
+
 // Validate a `--await` body field — the ids a task (or a scheduled message) is
 // to wait on. Each must be a real task in this project, so a typo can't either
 // strand the waiter or (since a missing id reads as satisfied) wake it at once.
@@ -1605,6 +1651,9 @@ app.post('/api/:project/tasks/:id/relaunch', async (c) => {
       date?: unknown
       time?: unknown
       await?: unknown
+      interval?: unknown
+      repeatCount?: unknown
+      repeatUntil?: unknown
       clear?: unknown
     }>()
 
@@ -1642,25 +1691,33 @@ app.post('/api/:project/tasks/:id/relaunch', async (c) => {
     if ('error' in sched) return c.json({ error: sched.error }, 400)
     const awaited = await resolveAwait(project, body.await)
     if ('error' in awaited) return c.json({ error: awaited.error }, 400)
+    // `--interval` (with an optional `--repeat-count`/`--repeat-until` bound) makes
+    // the relaunch repeat: each occurrence arms the next one `interval` minutes
+    // later. Absent `--interval` it's a one-shot, as before.
+    const rep = resolveRepeat(body)
+    if ('error' in rep) return c.json({ error: rep.error }, 400)
     const deliverAt = sched.scheduledFor ?? undefined
     const waitFor = awaited.waitFor.length ? awaited.waitFor : undefined
+    const repeat = rep.repeat ?? undefined
 
     const at = new Date().toISOString()
 
     if (deliverAt || waitFor) {
       // Scheduled (B): arm a relaunch-flagged scheduled message; the session is
-      // sealed by deliverScheduledMessages when the trigger fires, not now.
+      // sealed by deliverScheduledMessages when the trigger fires, not now. A
+      // repeat spec rides along and re-arms the next occurrence on each delivery.
       await mutateTask(file, (t) => {
-        armScheduledRelaunch(t, { text: rawMessage, deliverAt, waitFor }, at)
+        armScheduledRelaunch(t, { text: rawMessage, deliverAt, waitFor, repeat }, at)
       })
       const armed = await readTask(project.dataDir, id)
       if (!armed) return c.json({ error: 'task not found' }, 404)
       return c.json(publicTask(armed))
     }
 
-    // Immediate (A): seal now and queue the message for the fresh session.
+    // Immediate (A): seal now and queue the message for the fresh session. A
+    // repeat spec arms the first successor off this delivery.
     await mutateTask(file, (t) => {
-      applyRelaunch(t, rawMessage, at)
+      applyRelaunch(t, rawMessage, at, repeat)
     })
     // The normal path is a mid-turn call, where running.has(id) is already true:
     // the in-flight drainer picks up the queued message and the sealed session

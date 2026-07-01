@@ -10,8 +10,10 @@ import {
   applyRelaunch,
   applyDueMessages,
   armScheduledRelaunch,
+  nextRepeatMessage,
   type Message,
   type TaskEvent,
+  type ScheduledMessage,
 } from './tasks'
 
 const msg = (over: Partial<Message>): Message => ({
@@ -253,6 +255,7 @@ describe('applyRelaunch', () => {
     events?: TaskEvent[]
     messages: Message[]
     queued?: string[]
+    scheduledMessages?: ScheduledMessage[]
     retry?: unknown
   }
   const task = (over: Partial<RelaunchTask> = {}): RelaunchTask => ({
@@ -306,6 +309,119 @@ describe('applyRelaunch', () => {
     applyRelaunch(t, 'go', AT)
     expect('retry' in t).toBe(false)
   })
+
+  it('does not arm a successor for a one-shot (no repeat) relaunch', () => {
+    const t = task()
+    applyRelaunch(t, 'go', AT)
+    expect('scheduledMessages' in t).toBe(false)
+  })
+
+  it('arms the next occurrence off this delivery for a repeating relaunch', () => {
+    const t = task()
+    // remaining=2 → this immediate is #1 of a 3-relaunch series; the armed
+    // successor carries remaining=1 (two more, #2 and #3, follow it).
+    applyRelaunch(t, 'go', AT, { interval: 60, remaining: 2 })
+    expect(t.queued).toEqual(['go'])
+    expect(t.scheduledMessages).toEqual([
+      {
+        text: 'go',
+        deliverAt: '2026-06-01T01:00:00.000Z',
+        relaunch: true,
+        repeat: { interval: 60, remaining: 1 },
+      },
+    ])
+  })
+
+  it('arms no successor when the immediate relaunch exhausts the count', () => {
+    const t = task()
+    // remaining=0 → a 1-relaunch series; nothing follows the immediate one.
+    applyRelaunch(t, 'go', AT, { interval: 60, remaining: 0 })
+    expect('scheduledMessages' in t).toBe(false)
+  })
+
+  it('arms no successor when the interval would overshoot repeat-until', () => {
+    const t = task()
+    applyRelaunch(t, 'go', AT, { interval: 60, until: '2026-06-01T00:30:00.000Z' })
+    expect('scheduledMessages' in t).toBe(false)
+  })
+})
+
+describe('nextRepeatMessage', () => {
+  const AT = '2026-06-01T00:00:00.000Z'
+
+  it('returns null when the entry carries no repeat spec', () => {
+    expect(nextRepeatMessage({ text: 'x' }, AT)).toBeNull()
+  })
+
+  it('arms interval minutes after the actual delivery (no drift compensation)', () => {
+    const next = nextRepeatMessage(
+      { text: 'x', repeat: { interval: 60 } },
+      '2026-06-01T02:01:00.000Z',
+    )
+    // Off 2:01, not off a nominal 2:00 — the series drifts by design.
+    expect(next).toEqual({
+      text: 'x',
+      deliverAt: '2026-06-01T03:01:00.000Z',
+      relaunch: true,
+      repeat: { interval: 60 },
+    })
+  })
+
+  it('decrements remaining and preserves an until bound', () => {
+    const next = nextRepeatMessage(
+      { text: 'x', repeat: { interval: 30, remaining: 3, until: '2026-06-02T00:00:00.000Z' } },
+      AT,
+    )
+    expect(next).toMatchObject({
+      deliverAt: '2026-06-01T00:30:00.000Z',
+      repeat: { interval: 30, remaining: 2, until: '2026-06-02T00:00:00.000Z' },
+    })
+  })
+
+  it('stops (null) once no relaunches remain', () => {
+    expect(
+      nextRepeatMessage({ text: 'x', repeat: { interval: 60, remaining: 0 } }, AT),
+    ).toBeNull()
+  })
+
+  it('stops (null) once the next fire would pass the until cutoff', () => {
+    // at + 60m = 01:00, which is after the 00:45 cutoff → done.
+    expect(
+      nextRepeatMessage(
+        { text: 'x', repeat: { interval: 60, until: '2026-06-01T00:45:00.000Z' } },
+        AT,
+      ),
+    ).toBeNull()
+  })
+
+  it('arms when the next fire lands exactly on the until cutoff (inclusive)', () => {
+    const next = nextRepeatMessage(
+      { text: 'x', repeat: { interval: 60, until: '2026-06-01T01:00:00.000Z' } },
+      AT,
+    )
+    expect(next).toMatchObject({ deliverAt: '2026-06-01T01:00:00.000Z' })
+  })
+
+  it('drives a whole bounded series to completion', () => {
+    // Total 3 relaunches: the first rides remaining=2, then re-arm until dry.
+    let entry: ScheduledMessage | null = {
+      text: 'x',
+      repeat: { interval: 60, remaining: 2 },
+    }
+    const fires: string[] = []
+    let at = AT
+    while (entry) {
+      fires.push(at)
+      const nextEntry: ScheduledMessage | null = nextRepeatMessage(entry, at)
+      if (nextEntry?.deliverAt) at = nextEntry.deliverAt
+      entry = nextEntry
+    }
+    expect(fires).toEqual([
+      '2026-06-01T00:00:00.000Z',
+      '2026-06-01T01:00:00.000Z',
+      '2026-06-01T02:00:00.000Z',
+    ])
+  })
 })
 
 describe('armScheduledRelaunch', () => {
@@ -346,6 +462,27 @@ describe('armScheduledRelaunch', () => {
     ])
     expect(t.events).toEqual([
       { kind: 'relaunched', title: 'My task', createdAt: AT },
+    ])
+  })
+
+  it('carries a repeat spec onto the armed message for a repeating relaunch', () => {
+    const t = { title: 'My task' } as {
+      title: string
+      events?: TaskEvent[]
+      scheduledMessages?: ScheduledMessage[]
+    }
+    armScheduledRelaunch(
+      t,
+      { text: 'later', deliverAt: WHEN, repeat: { interval: 60, remaining: 2 } },
+      AT,
+    )
+    expect(t.scheduledMessages).toEqual([
+      {
+        text: 'later',
+        deliverAt: WHEN,
+        relaunch: true,
+        repeat: { interval: 60, remaining: 2 },
+      },
     ])
   })
 })
@@ -393,6 +530,45 @@ describe('applyDueMessages', () => {
     // The relaunch text leads so the fresh session reads it first.
     expect(t.messages.map((m) => m.text)).toEqual(['relaunch', 'ordinary'])
     expect((t as { queued?: string[] }).queued).toEqual(['relaunch', 'ordinary'])
+  })
+
+  it('re-arms the next occurrence when a repeating relaunch delivers', () => {
+    const t = {
+      sessionId: 'sess-old',
+      title: 'My task',
+      messages: [] as Message[],
+      scheduledMessages: undefined as ScheduledMessage[] | undefined,
+    }
+    applyDueMessages(
+      t,
+      [{ text: 'go', relaunch: true, repeat: { interval: 60, remaining: 2 } }],
+      AT,
+    )
+    // The delivered occurrence fired; its successor is armed one interval later
+    // with a decremented count.
+    expect(t.scheduledMessages).toEqual([
+      {
+        text: 'go',
+        deliverAt: '2026-06-01T01:00:00.000Z',
+        relaunch: true,
+        repeat: { interval: 60, remaining: 1 },
+      },
+    ])
+  })
+
+  it('does not re-arm when the repeating series has reached its bound', () => {
+    const t = {
+      sessionId: 'sess-old',
+      title: 'My task',
+      messages: [] as Message[],
+      scheduledMessages: undefined as ScheduledMessage[] | undefined,
+    }
+    applyDueMessages(
+      t,
+      [{ text: 'go', relaunch: true, repeat: { interval: 60, remaining: 0 } }],
+      AT,
+    )
+    expect(t.scheduledMessages).toBeUndefined()
   })
 })
 

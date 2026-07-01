@@ -64,6 +64,36 @@ export type TaskEvent = {
   createdAt: string
 }
 
+// A repeating-relaunch spec carried on a scheduled relaunch message (`lander
+// relaunch --interval <minutes>`): when the message delivers, the scheduler arms
+// its successor `interval` minutes later. The next fire is measured off the
+// actual delivery time, NOT the nominal schedule — no drift compensation — so a
+// series started at 1:00 with a 60m interval fires ~2:01, ~3:02, … as each
+// re-arm rides the previous delivery. The series ends at whichever bound is set:
+//   - `remaining`: relaunches still to come after the message this rides on;
+//     undefined = unbounded. Decrements by one on each re-arm, so a run of N
+//     total relaunches starts with remaining = N-1 and stops once it hits 0.
+//   - `until`: an ISO cutoff — re-arm only while the successor's fire time is at
+//     or before it. Set exclusively of `remaining` (the CLI takes one or neither).
+export type RepeatSpec = {
+  interval: number
+  remaining?: number
+  until?: string
+}
+
+// A message addressed to a task with a deferred delivery (`lander send/relaunch
+// --date/--time/--await`). Fires when its trigger is met — a time (`deliverAt`)
+// and/or a condition (`waitFor`, ids that must all land), whichever comes first.
+// `relaunch` marks a `lander relaunch` deferral (seals the session on delivery);
+// `repeat` rides a repeating relaunch and arms the next on delivery.
+export type ScheduledMessage = {
+  text: string
+  deliverAt?: string
+  waitFor?: string[]
+  relaunch?: boolean
+  repeat?: RepeatSpec
+}
+
 // Strip the secret `token` (and the server-internal run pointers) before sending
 // a task over HTTP, so the UI — and any task scraping the API — can't read
 // another task's token and impersonate it. A shallow copy: the messages/events
@@ -188,10 +218,12 @@ export function applyRelaunch(
     events?: TaskEvent[]
     messages: Message[]
     queued?: string[]
+    scheduledMessages?: ScheduledMessage[]
     retry?: unknown
   },
   message: string,
   at: string,
+  repeat?: RepeatSpec,
 ): void {
   recordStatusTransition(task, 'riding', new Date(Date.parse(at) - 1).toISOString())
   sealForRelaunch(task, at)
@@ -200,6 +232,42 @@ export function applyRelaunch(
   task.status = 'riding'
   task.updatedAt = at
   delete task.retry
+  // A repeating relaunch (`--interval`) arms its next occurrence off this
+  // (immediate) delivery; each later occurrence re-arms itself in applyDueMessages
+  // when it in turn delivers. Nothing is armed once the series' bound is reached.
+  if (repeat) {
+    const next = nextRepeatMessage({ text: message, repeat }, at)
+    if (next) (task.scheduledMessages ??= []).push(next)
+  }
+}
+
+// Build the successor of a repeating relaunch (`--interval`) that just delivered
+// at `at`, or return null when the series has reached its bound. The successor
+// fires `interval` minutes after the actual delivery (no drift compensation),
+// carries the same text, and decrements `remaining`. Shared by the immediate
+// (applyRelaunch) and scheduled (applyDueMessages) delivery paths, so every
+// occurrence — the first and each re-arm — advances the series the same way.
+export function nextRepeatMessage(
+  entry: { text: string; repeat?: RepeatSpec },
+  at: string,
+): ScheduledMessage | null {
+  const r = entry.repeat
+  if (!r) return null
+  // Count bound: stop once no relaunches remain after the one that just fired.
+  if (r.remaining != null && r.remaining <= 0) return null
+  const nextAt = new Date(Date.parse(at) + r.interval * 60_000).toISOString()
+  // Time bound: stop once the successor would fire past the cutoff.
+  if (r.until != null && Date.parse(nextAt) > Date.parse(r.until)) return null
+  return {
+    text: entry.text,
+    deliverAt: nextAt,
+    relaunch: true,
+    repeat: {
+      interval: r.interval,
+      ...(r.remaining != null ? { remaining: r.remaining - 1 } : {}),
+      ...(r.until != null ? { until: r.until } : {}),
+    },
+  }
 }
 
 // Append a batch of now-due scheduled messages and queue them for the session —
@@ -216,8 +284,9 @@ export function applyDueMessages(
     events?: TaskEvent[]
     messages: Message[]
     queued?: string[]
+    scheduledMessages?: ScheduledMessage[]
   },
-  due: { text: string; relaunch?: boolean }[],
+  due: ScheduledMessage[],
   at: string,
 ): void {
   const relaunch = due.filter((m) => m.relaunch)
@@ -228,6 +297,13 @@ export function applyDueMessages(
     task.messages.push({ role: 'user', text: m.text, createdAt: at })
     ;(task.queued ??= []).push(m.text)
   }
+  // Re-arm the next occurrence of any repeating relaunch (`--interval`) that just
+  // delivered, measured off this delivery — the deferred analog of applyRelaunch's
+  // arming. Nothing is armed once the series' count/until bound is reached.
+  for (const m of relaunch) {
+    const next = nextRepeatMessage(m, at)
+    if (next) (task.scheduledMessages ??= []).push(next)
+  }
 }
 
 // Arm a scheduled relaunch: stash a relaunch-flagged scheduled message whose own
@@ -237,14 +313,15 @@ export function applyDueMessages(
 // session stays live until the trigger fires, so pre-trigger interim messages
 // still resume it, consistent with every other scheduled wakeup. We deliberately
 // don't set task-level `scheduledFor` (that would block delivery and could
-// double-fire launchTask); the message's own trigger drives it.
+// double-fire launchTask); the message's own trigger drives it. A `repeat` spec
+// (`--interval`) rides along and re-arms the next occurrence on each delivery.
 export function armScheduledRelaunch(
   task: {
     title: string
     events?: TaskEvent[]
-    scheduledMessages?: { text: string; deliverAt?: string; waitFor?: string[]; relaunch?: boolean }[]
+    scheduledMessages?: ScheduledMessage[]
   },
-  entry: { text: string; deliverAt?: string; waitFor?: string[] },
+  entry: { text: string; deliverAt?: string; waitFor?: string[]; repeat?: RepeatSpec },
   at: string,
 ): void {
   ;(task.scheduledMessages ??= []).push({ ...entry, relaunch: true })
