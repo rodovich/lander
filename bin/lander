@@ -334,15 +334,21 @@ async function listTasks(args) {
   }
 }
 
-// `lander view <id> [--json]` — one task's status and recent conversation.
+// `lander view <id> [--tools] [--json]` — one task's status and recent
+// conversation. By default only the prose each side wrote is shown: the user's
+// prompts and the assistant's text (including text it wrote between tool calls,
+// which `m.text` — just the final block — would drop). --tools additionally
+// interleaves the tool calls the assistant made.
 async function viewTask(args) {
   let json = false
+  let tools = false
   const pos = []
   for (const a of args) {
     if (a === '--json') json = true
+    else if (a === '--tools') tools = true
     else pos.push(a)
   }
-  if (!pos[0]) die('usage: lander view <id>')
+  if (!pos[0]) die('usage: lander view <id> [--tools]')
   const id = await resolveId(pos[0])
   const task = await call(PROJECT, `/tasks/${id}`, { method: 'GET' })
   if (json) return void console.log(JSON.stringify(task, null, 2))
@@ -350,9 +356,19 @@ async function viewTask(args) {
   console.log(`id: ${task.id}`)
   if (task.scheduledFor) console.log(`scheduled: ${task.scheduledFor}`)
   console.log(`edits: ${task.allowEdits}  commits: ${task.allowCommits}`)
+  const clip = (s) => (s.length > 600 ? `${s.slice(0, 600)}…` : s)
   for (const m of task.messages.slice(-6)) {
-    const text = m.text.length > 600 ? `${m.text.slice(0, 600)}…` : m.text
-    console.log(`\n${m.role}:\n${text}`)
+    const parts = []
+    for (const s of m.steps ?? []) {
+      if (s.kind === 'text') {
+        if (s.text?.trim()) parts.push(clip(s.text))
+      } else if (tools && s.kind === 'tool_use') {
+        parts.push(`⚙ ${s.tool}${s.input ? `: ${clip(s.input)}` : ''}`)
+      }
+    }
+    // User messages (and pre-steps records) carry no steps — fall back to text.
+    const body = parts.length ? parts.join('\n\n') : clip(m.text ?? '')
+    if (body.trim()) console.log(`\n${m.role}:\n${body}`)
   }
 }
 
@@ -756,7 +772,7 @@ if (!run)
       'land [id...] | wedge | rest (--date|--time|--await|--clear) | ' +
       'relaunch <message> ' +
       '[--date|--time|--await|--interval|--repeat-count|--repeat-until|--clear] | ' +
-      'launch <message> | list | view <id> | send <id> <message> | ' +
+      'launch <message> | list | view <id> [--tools] | send <id> <message> | ' +
       'archive <id...> [--restore] | assist <prompt> | flow <name>',
   )
 run().catch((e) => die(e.message))
