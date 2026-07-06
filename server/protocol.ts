@@ -4,6 +4,8 @@
 
 import type { Step, Usage } from './stream'
 
+export type AgentKind = 'claude' | 'codex'
+
 // One window of the OAuth usage payload, as the server caches and serves it.
 export type UsageWindow = { utilization: number; resetsAt: string | null }
 
@@ -21,20 +23,23 @@ export type StartRunMessage = {
   type: 'start-run'
   runId: string
   taskId: string
+  // The provider that should run this turn. Claude is the only implemented
+  // launcher today; Codex support will add its adapter behind this field.
+  agent: AgentKind
   // The project slug; the daemon maps it to a host path.
   project: string
   // cwd hints — the recorded task.cwd and whether the run wants its worktree. The
   // daemon does the stat/fallback/worktree resolution locally.
   recordedCwd?: string
   worktree?: string
-  // The assistant session to resume, when the task already has one (a prior turn
-  // minted it — see SessionMessage). Absent on a task's first turn: the daemon
-  // mints a fresh session id, launches with `--session-id`, and reports it back
-  // for the server to persist and pass here (→ `--resume`) on later turns. This
-  // is what decouples the lander task id (a short nanoid the server owns) from
-  // the assistant session id (a uuid the daemon owns).
+  // The provider session to resume, when the task already has one (a prior turn
+  // reported it — see SessionMessage). Absent on a task's first turn. For Claude
+  // today, the daemon mints a fresh session id, launches with `--session-id`, and
+  // reports it back for the server to persist and pass here (→ `--resume`) on
+  // later turns. This decouples the lander task id (a short nanoid the server
+  // owns) from the provider session id.
   sessionId?: string
-  claudeArgs: string[]
+  agentArgs: string[]
   env: Record<string, string>
   idleTimeoutMs: number
 }
@@ -124,12 +129,12 @@ export type DoneMessage = {
   stderr: string
 }
 
-// The assistant session id the daemon minted for a task's first turn (it owns
-// session-id generation now — decision: tasks are decoupled from sessions). Sent
-// once, right after the child spawns, so the server can persist it on the task
-// and pass it back as `sessionId` (→ `--resume`) on every later turn. The daemon
-// also holds it on the run record and re-sends it on resume-from, so a reconnect
-// mid-first-turn doesn't lose it. The daemon never informs the agent of it.
+// The provider session id learned for a task's first turn. For Claude today, the
+// daemon mints it before spawning the child; future providers may report it from
+// their stream. Sent once so the server can persist it on the task and pass it
+// back as `sessionId` on every later turn. The daemon also holds it on the run
+// record and re-sends it on resume-from, so a reconnect mid-first-turn doesn't
+// lose it. The daemon never informs the agent of it.
 export type SessionMessage = {
   type: 'session'
   runId: string

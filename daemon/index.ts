@@ -1,8 +1,8 @@
-// The host daemon: owns the claude children the server used to spawn as detached
+// The host daemon: owns the agent children the server used to spawn as detached
 // `bin/lander run` runners, reduces their stream-json, and relays structured
 // updates to the server over a WebSocket.
 // It holds the project host paths (its own argv), resolves each run's cwd
-// locally, and runs claude natively — so the server can stay claude-agnostic and
+// locally, and runs the agent CLI natively — so the server can stay host-agnostic and
 // (later) move into a container. Phase 1: same host, same user, same credentials.
 //
 // Usage: node daemon/index.ts /path/to/project [/path/to/another ...]
@@ -157,8 +157,8 @@ function scheduleUsageReset(body: UsageBody): void {
 
 // Resolve a start-run's launch directory from the project slug + cwd hints — the
 // stat/fallback/worktree logic relocated from the server's runTurn (decision 8).
-// In a tracked worktree we launch from the project root and let claude's
-// `--worktree` (already in claudeArgs) re-enter it; otherwise resume in the
+// In a tracked worktree we launch from the project root and let Claude's
+// `--worktree` (already in agentArgs) re-enter it; otherwise resume in the
 // recorded dir if it still exists, falling back to the root.
 function resolveCwd(msg: StartRunMessage): string {
   const root = pathBySlug.get(msg.project)
@@ -173,7 +173,8 @@ function resolveCwd(msg: StartRunMessage): string {
   return root
 }
 
-// Spawn claude for one run, reduce its stream-json, and relay update/done. The
+// Spawn the selected agent for one run, reduce its stream, and relay update/done.
+// Claude is the only implemented agent in this behavior-preserving refactor. The
 // reduction mirrors the old reduceRun accumulation (cross-line usage sum with
 // per-inference dedup, sticky driving model / rate-limit reset), but here it runs
 // next to the child and pushes each batch instead of a file tail pulling it.
@@ -193,7 +194,18 @@ function startRun(msg: StartRunMessage): void {
     return
   }
 
-  // The daemon owns the assistant session id now (it's decoupled from the lander
+  if (msg.agent !== 'claude') {
+    send({
+      type: 'done',
+      runId: msg.runId,
+      exitCode: 1,
+      interrupted: false,
+      stderr: `unsupported agent: ${msg.agent}`,
+    })
+    return
+  }
+
+  // The daemon owns the Claude session id now (it's decoupled from the lander
   // task id). The server resumes an existing session by sending `sessionId`;
   // absent it, this is the task's first turn, so mint a fresh session id, launch
   // it with `--session-id`, and report it back (below) for the server to persist.
@@ -202,7 +214,7 @@ function startRun(msg: StartRunMessage): void {
     ? ['--resume', msg.sessionId]
     : ['--session-id', sessionId]
 
-  const child: ChildProcess = spawn('claude', [...sessionArgs, ...msg.claudeArgs], {
+  const child: ChildProcess = spawn('claude', [...sessionArgs, ...msg.agentArgs], {
     cwd,
     env: { ...process.env, ...msg.env },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -341,7 +353,7 @@ function startRun(msg: StartRunMessage): void {
     stderr += d.toString()
   })
   child.on('error', (e) => {
-    stderr += `error running claude: ${e.message}`
+    stderr += `error running assistant: ${e.message}`
     finish(1)
   })
   child.on('close', (code) => finish(code == null ? 1 : code))
@@ -350,7 +362,7 @@ function startRun(msg: StartRunMessage): void {
     child,
     buffer,
     mintedSession: msg.sessionId ? undefined : sessionId,
-    // Interrupt mirrors the old runner's SIGTERM handler: stop claude, finish
+    // Interrupt mirrors the old runner's SIGTERM handler: stop the agent, finish
     // cleanly as interrupted (the server keeps the partial reply, no crash).
     interrupt: () => {
       interrupted = true
@@ -426,7 +438,7 @@ function onMessage(raw: string): void {
   }
 }
 
-// Kill any live claude children — best effort, on our own termination — so a
+// Kill any live agent children — best effort, on our own termination — so a
 // daemon restart doesn't orphan them (decision 2 aborts in-flight turns anyway).
 function killChildren(): void {
   for (const r of runs.values()) {

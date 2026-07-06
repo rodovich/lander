@@ -1,7 +1,7 @@
 // Server side of the daemon ⇄ server WebSocket link. This module owns the
 // transport only: it accepts daemon connections, routes inbound run messages to
 // the per-run channel a reducer is draining, and lets the server push run control
-// back. The claude-specific reduction lives daemon-side; the task-mutation
+// back. The agent-specific reduction lives daemon-side; the task-mutation
 // consumer lives in index.ts (applyUpdate/applyDone). So this file stays
 // import-light — protocol types plus `ws` — and carries no task knowledge.
 

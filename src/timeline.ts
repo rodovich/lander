@@ -19,7 +19,7 @@ export type TimelineItem<M, E> =
   | { kind: 'message'; at: string; message: M; index: number }
   | { kind: 'event'; at: string; event: E }
 
-// Which messages are still queued (claude hasn't read them yet). The server
+// Which messages are still queued (the agent hasn't read them yet). The server
 // flags them on the message (publicTask, projected from its work queue); we just
 // read the flag. Callers dim these and we sink them in the timeline.
 function queuedMessageIndices(task: { messages: Msg[] }): Set<number> {
@@ -40,7 +40,7 @@ export function buildTimeline<M extends Msg, E extends Evt>(
   // Messages are rendered in array order — the server only ever appends (every
   // write is a tail push stamped with the current clock), so array position is
   // already the true chronological order and we trust it rather than re-sorting.
-  // The one reordering is the queued sink: a follow-up claude hasn't read yet
+  // The one reordering is the queued sink: a follow-up the agent hasn't read yet
   // (the trailing run of still-queued user prompts) belongs below the whole
   // conversation rather than at its enqueue time, so it's held aside here and
   // appended last.
@@ -89,7 +89,7 @@ export function buildTimeline<M extends Msg, E extends Evt>(
   }
   // Trailing events — including any that arrived while a follow-up sat queued —
   // surface before the queued prompts: a queued message's place in the
-  // conversation is fixed by when claude actually reads it, not when it was sent.
+  // conversation is fixed by when the agent actually reads it, not when it was sent.
   while (e < events.length)
     items.push({ kind: 'event', at: events[e].createdAt, event: events[e++] })
   for (const item of queued) items.push(item)

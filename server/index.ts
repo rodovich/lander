@@ -25,7 +25,7 @@ import {
   closeRunChannel,
   requestResume,
 } from './daemon'
-import type { StartRunMessage, UsageBody } from './protocol'
+import type { AgentKind, StartRunMessage, UsageBody } from './protocol'
 import {
   readTasks as readTasksStore,
   readTask as readTaskStore,
@@ -63,6 +63,7 @@ const PROJECTS = parseProjects(ROOT, process.env, process.cwd())
 const PROJECT_BY_SLUG = new Map<string, Project>(
   PROJECTS.map((p) => [p.slug, p]),
 )
+const DEFAULT_AGENT: AgentKind = 'claude'
 
 // Daemon split: runs are driven by the host
 // daemon over a WebSocket — the server holds task state, drives the queue, and
@@ -73,8 +74,8 @@ const DAEMON_TOKEN =
   process.env.LANDER_UI_TOKEN?.trim() ||
   ''
 
-// A task's id: a short, URL-safe nanoid-style token, distinct from the assistant
-// session id (a uuid the daemon mints — see Task.sessionId). Chars are drawn from
+// A task's id: a short, URL-safe nanoid-style token, distinct from the provider
+// session id (see Task.sessionId). Chars are drawn from
 // a 64-symbol alphabet, so `& 63` over random bytes is uniform. Tasks refer to
 // each other by this id; it's the filename, the URL segment, the LANDER_TASK env,
 // and the x-lander-task header.
@@ -98,11 +99,14 @@ type Task = {
   // keyed by — backfilled from the filename, see backfillIds). Always equals the
   // task's filename stem.
   id: string
-  // The assistant (claude) session id backing this task's turns, minted by the
-  // daemon on the first turn and reported back for the server to persist (see
-  // SessionMessage / reduceRunWs). Passed to the daemon each turn so it can
-  // `--resume` the same session. Decoupled from `id` so a task can later run
-  // multiple or fresh sessions. Absent until the first turn mints one.
+  // The provider used for this task. Stored so future turns resume with the same
+  // provider once multiple agents exist. Existing tasks are backfilled to Claude.
+  agent: AgentKind
+  // The provider session id backing this task's turns, reported by the daemon on
+  // the first turn and persisted by the server (see SessionMessage /
+  // reduceRunWs). Passed to the daemon each turn so it can resume the same
+  // provider session. Decoupled from `id` so a task can later run multiple or
+  // fresh sessions. Absent until the first turn reports one.
   sessionId?: string
   title: string
   status: string
@@ -135,7 +139,7 @@ type Task = {
   // on tasks saved before this field existed; backfilled on the next run.
   token?: string
   // Extra permission rules granted from the UI's "allow in task" action; passed
-  // to claude as --allowedTools on every future turn for this task. Absent on
+  // to Claude as --allowedTools on every future turn for this task. Absent on
   // tasks saved before this field existed — treat undefined as empty.
   allow?: string[]
   messages: Message[]
@@ -191,15 +195,15 @@ type Task = {
   // run is in flight.
   runId?: string
   runCursor?: number
-  // Set when a run wedged on a claude error (a non-zero exit that wasn't a
+  // Set when a run wedged on an assistant error (a non-zero exit that wasn't a
   // deliberate interrupt — see applyDone), cleared when the task next starts a
   // turn. Drives the UI's retry affordance below a wedged conversation, and
   // tells a retry how to recover. `committed` is our proxy for whether the
-  // failed turn's prompt(s) actually reached the session: true if the run had
-  // begun streaming a reply (so claude had accepted and recorded the user turn
-  // in its transcript), false if it errored before any output. A retry nudges
-  // the session to continue when committed (re-sending would duplicate the user
-  // turn) and re-sends the un-received `prompts` when not. `resetsAt` is set only
+  // failed turn's prompt(s) actually reached the provider session: true if the
+  // run had begun streaming a reply (so the agent had accepted and recorded the
+  // user turn), false if it errored before any output. A retry nudges the session
+  // to continue when committed (re-sending would duplicate the user turn) and
+  // re-sends the un-received `prompts` when not. `resetsAt` is set only
   // when the wedge was a session-limit rejection (from the run's
   // `rate_limit_event`): the ISO time the limit lifts, at which point a retry
   // schedules a wakeup for then instead of firing immediately into the same wall.
@@ -366,7 +370,7 @@ async function awaitDaemonServing(
 }
 
 // Stop a turn so a riding task can be wedged out from under the agent: ask the
-// daemon to interrupt the run. It SIGKILLs claude and emits a clean
+// daemon to interrupt the run. It SIGKILLs the child and emits a clean
 // done{interrupted:true}, which reduceRunWs folds in — finalizing whatever
 // partial reply streamed without surfacing a crash. Best effort: a run that has
 // already finished is a no-op on the daemon side.
@@ -492,14 +496,14 @@ function buildClaudeArgs(task: Task, prompt: string): string[] {
   ]
 }
 
-// Run one claude turn on the host daemon and reduce its streamed updates onto the
+// Run one agent turn on the host daemon and reduce its streamed updates onto the
 // task. The server builds the run spec and hands it to the daemon over the WS
-// (start-run); the daemon owns the claude child and the stream. Because the
+// (start-run); the daemon owns the agent child and the stream. Because the
 // daemon outlives the server, a server restart mid-turn doesn't stop the agent —
 // the fresh process reattaches over the WS and resumes from the persisted cursor
-// (see driveTask / recoverQueues). The daemon mints the assistant session on the
-// first turn and resumes it after, keyed by the `sessionId` hint below. Marks
-// "riding" and records the runId so a reattach can find it.
+// (see driveTask / recoverQueues). The daemon reports the provider session on
+// the first turn and resumes it after, keyed by the `sessionId` hint below.
+// Marks "riding" and records the runId so a reattach can find it.
 async function runTurn(
   project: Project,
   id: string,
@@ -514,12 +518,12 @@ async function runTurn(
     await mutateTask(file, (t) => {
       const msg = pendingMessage(t)
       if (msg) {
-        msg.text = `error running claude: ${message}`
+        msg.text = `error running assistant: ${message}`
         msg.pending = false
       } else {
         t.messages.push({
           role: 'assistant',
-          text: `error running claude: ${message}`,
+          text: `error running assistant: ${message}`,
           createdAt: new Date().toISOString(),
         })
       }
@@ -530,7 +534,8 @@ async function runTurn(
   // The token the in-task `lander` CLI sends back to authenticate as this task.
   // Backfilled for tasks created before tokens existed.
   const token = task.token ?? randomUUID()
-  const claudeArgs = buildClaudeArgs(task, prompt)
+  const agent = task.agent ?? DEFAULT_AGENT
+  const agentArgs = buildClaudeArgs(task, prompt)
 
   const runId = randomUUID()
 
@@ -547,8 +552,8 @@ async function runTurn(
       // latter is otherwise indistinguishable and the usual silent culprit, so
       // name the slug we wanted and the slugs the daemon actually serves.
       const text = daemonConnected()
-        ? `error running claude: a daemon is connected but does not serve this project (slug '${project.slug}'); daemon serves: ${daemonSlugs().join(', ') || '(none)'}`
-        : 'error running claude: no daemon connected for this project'
+        ? `error running assistant: a daemon is connected but does not serve this project (slug '${project.slug}'); daemon serves: ${daemonSlugs().join(', ') || '(none)'}`
+        : 'error running assistant: no daemon connected for this project'
       if (msg) {
         msg.text = text
         msg.pending = false
@@ -558,7 +563,7 @@ async function runTurn(
       recordStatusTransition(t, 'wedged', at)
       t.status = 'wedged'
       t.updatedAt = at
-      // The turn never reached claude, so nothing was committed — stash the
+      // The turn never reached the agent, so nothing was committed — stash the
       // prompt(s) so the user can just retry once a daemon is back (a transient
       // daemon outage is the expected cause).
       t.retry = { committed: false, prompts: lastTurnPrompts(t.messages) }
@@ -583,17 +588,18 @@ async function runTurn(
     type: 'start-run',
     runId,
     taskId: id,
+    agent,
     project: project.slug,
     // cwd hints — the daemon does the stat/fallback/worktree resolution locally.
     recordedCwd: task.cwd,
     worktree: task.worktree,
-    // The assistant session to resume; absent on the first turn, so the daemon
-    // mints one and reports it back (reduceRunWs persists it onto task.sessionId).
+    // The provider session to resume; absent on the first turn, so the daemon
+    // reports one back (reduceRunWs persists it onto task.sessionId).
     sessionId: task.sessionId,
-    claudeArgs,
+    agentArgs,
     env: {
       PATH: `${path.join(ROOT, 'bin')}:${process.env.PATH ?? ''}`,
-      // The base URL the daemon's claude (and the in-task CLI) use to reach this
+      // The base URL the daemon's agent (and the in-task CLI) use to reach this
       // server. Defaults to localhost; override with LANDER_PUBLIC_API when the
       // server is reached across a boundary (e.g. a container).
       LANDER_API:
@@ -613,7 +619,7 @@ async function runTurn(
 // did the reduction and the cross-line usage accumulation, so an `update` maps
 // straight onto applyUpdate (seq becomes the run cursor); `done` finalizes;
 // `crashed` (the daemon stayed gone past the reconnect grace) finalizes the task
-// as an interrupted run. Returns 'done' on completion (success or claude error)
+// as an interrupted run. Returns 'done' on completion (success or assistant error)
 // or 'crashed'. `resume` reattaches to a run already in flight (a server
 // reload, or queue recovery): it seeds the cursor from disk and asks a connected
 // daemon to replay from there — the daemon either replays its buffer or aborts a
@@ -647,7 +653,7 @@ async function reduceRunWs(
         await mutateTask(file, (t) => {
           const msg = pendingMessage(t)
           if (msg) {
-            if (!msg.text) msg.text = 'error running claude: run interrupted'
+            if (!msg.text) msg.text = 'error running assistant: run interrupted'
             msg.pending = false
             t.updatedAt = new Date().toISOString()
           }
@@ -657,7 +663,7 @@ async function reduceRunWs(
         return 'crashed'
       }
       if (ev.kind === 'session') {
-        // The daemon minted (or re-announced) this task's assistant session id.
+        // The daemon reported (or re-announced) this task's provider session id.
         // Persist it once so every later turn resumes the same session. Idempotent:
         // a replayed announcement after a reconnect finds it already set.
         await mutateTask(file, (t) => {
@@ -700,7 +706,7 @@ async function reduceRunWs(
   }
 }
 
-// Tasks with a claude run (and its queue drain) in flight, keyed by task id.
+// Tasks with an agent run (and its queue drain) in flight, keyed by task id.
 // Guards against spawning a second concurrent process on the same session: a
 // follow-up that arrives while this is set is appended to the task's `queued`
 // array and picked up by the active drainer instead.
@@ -1312,9 +1318,10 @@ app.post('/api/:project/tasks', async (c) => {
     }
     const task: Task = {
       id,
+      agent: DEFAULT_AGENT,
       title: title || '…',
       // A deferred task rests until the scheduler launches it at scheduledFor.
-      // Otherwise "riding" while claude works on the opening message (driveTask
+      // Otherwise "riding" while the agent works on the opening message (driveTask
       // flips it to "resting" when it returns), or "wedged" with no message —
       // it needs the user to supply a first prompt.
       status: deferred ? 'resting' : message.trim() ? 'riding' : 'wedged',
@@ -1322,7 +1329,7 @@ app.post('/api/:project/tasks', async (c) => {
       updatedAt: now,
       // Caught up as of creation: the opening message (and launch event) are the
       // creator's own, so they don't warrant an unseen dot. Anything that lands
-      // afterwards — claude's reply, lifecycle events — is newer than this and
+      // afterwards — the assistant reply, lifecycle events — is newer than this and
       // shows as unseen until viewed.
       seenAt: now,
       allowEdits,
@@ -1598,12 +1605,12 @@ app.post('/api/:project/tasks/:id/rest', async (c) => {
   }
 })
 
-// Relaunch the current task under a fresh assistant (claude) session, keeping the
-// same task id (`lander relaunch`). A task's claude session lives entirely in
-// `task.sessionId`, decoupled from the task id: the daemon mints a new session
-// whenever it's handed a turn with no `sessionId` (and `--resume`s the same one
+// Relaunch the current task under a fresh provider session, keeping the same
+// task id (`lander relaunch`). A task's provider session lives entirely in
+// `task.sessionId`, decoupled from the task id: the daemon starts a new session
+// whenever it's handed a turn with no `sessionId` (and resumes the same one
 // otherwise), so "relaunch under a new session" is just "clear sessionId, then
-// drive the next turn" — the session is minted lazily on the delivering turn,
+// drive the next turn" — the session is created lazily on the delivering turn,
 // never pre-allocated.
 //
 // Immediate (no trigger): seal the session now and queue `message` for the next
@@ -2026,12 +2033,11 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
   }
 })
 
-// Retry a turn that wedged on a claude error (500/429/etc). The recovery depends
+// Retry a turn that wedged on an assistant error (500/429/etc). The recovery depends
 // on whether the failed turn's prompt reached the session (recorded as
 // `retry.committed` when the run wedged): if it did, re-sending it would
-// duplicate the user turn in claude's transcript, so we nudge the session to
-// pick the orphaned turn back up with a minimal "try again" (claude's -p mode
-// needs a prompt, so a truly empty resume can't drive a turn). If it didn't, the
+// duplicate the user turn in the provider transcript, so we nudge the session to
+// pick the orphaned turn back up with a minimal "try again". If it didn't, the
 // prompt(s) never landed — re-send them. They're already in messages[] from the
 // original send, so the re-send only re-queues (no duplicate visible message);
 // the nudge does append a "try again" user message so the conversation reads.
@@ -2359,6 +2365,35 @@ async function backfillSeen(): Promise<void> {
   }
 }
 
+// One-time backfill of the task provider field introduced before Codex support:
+// existing tasks all ran through Claude, so pin them to that provider. Covers
+// archived tasks too, matching backfillIds.
+async function backfillAgents(): Promise<void> {
+  for (const project of PROJECTS) {
+    for (const dir of [project.dataDir, project.archiveDir]) {
+      let names: string[]
+      try {
+        names = await readdir(dir)
+      } catch {
+        continue
+      }
+      for (const name of names) {
+        if (!name.endsWith('.json')) continue
+        const file = path.join(dir, name)
+        try {
+          const task = JSON.parse(await readFile(file, 'utf8')) as Task
+          if (task.agent !== undefined) continue
+          await mutateTask(file, (t) => {
+            if (t.agent === undefined) t.agent = DEFAULT_AGENT
+          })
+        } catch {
+          // skip unreadable/invalid files
+        }
+      }
+    }
+  }
+}
+
 // One-time migration of the pre-rename `session` field, when a task's only
 // identity was its filename (which doubled as `session`) and "awaiting" lifecycle
 // events stored their awaited tasks as `{ session, title }`. Two fixes per file:
@@ -2451,6 +2486,7 @@ console.log(`daemon WS endpoint at ws://localhost:${port}/daemon`)
 console.log('projects:')
 for (const p of PROJECTS) console.log(`  ${p.slug}  ${p.path}`)
 void backfillIds()
+void backfillAgents()
 void backfillSeen()
 void recoverQueues()
 // Launch due scheduled tasks on boot (catching any whose time passed while the

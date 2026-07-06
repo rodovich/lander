@@ -53,7 +53,7 @@ export type ApplyUpdate = Pick<
   cursor: number
 }
 
-// The run's terminal signal: claude's exit code, whether the stop was a
+// The run's terminal signal: the agent process exit code, whether the stop was a
 // deliberate interrupt, and any captured stderr. Mirrors the wire `DoneMessage`
 // but leaves `interrupted`/`stderr` optional, since today's file producer reads
 // them from a done.json that may omit either (the inline code treated both as
@@ -114,7 +114,7 @@ export function applyUpdate(task: ApplyTask, update: ApplyUpdate): void {
 }
 
 // Finalize the run on its done marker: land the pending message, write the
-// error/interrupted text, and on a real claude error wedge the task and stash
+// error/interrupted text, and on a real assistant error wedge the task and stash
 // what a retry needs. Mutates the task in place. Does NOT refresh usage — that
 // side-effect stays in the caller. Behavior-identical to the DONE apply that
 // lived inline in reduceRun.
@@ -125,11 +125,11 @@ export function applyDone(
 ): void {
   const { at, rateLimitResetsAt } = opts
   const msg = ensurePending(task)
-  // Whether claude had begun replying before the run ended: real streamed
+  // Whether the assistant had begun replying before the run ended: real streamed
   // content (steps or text) on the pending message, captured before we
-  // overwrite an empty one with the error below. On a claude error this is
-  // our proxy for "the user's turn reached the session and was committed" —
-  // if a reply had started, claude had accepted and recorded the prompt.
+  // overwrite an empty one with the error below. On an assistant error this is
+  // our proxy for "the user's turn reached the session and was committed" — if
+  // a reply had started, the agent had accepted and recorded the prompt.
   const hadOutput = (msg.steps?.length ?? 0) > 0 || msg.text.trim().length > 0
   // A non-zero exit with no reply text is an error to surface; otherwise
   // the reduced text stands as the reply. A deliberate interrupt (the task
@@ -138,10 +138,10 @@ export function applyDone(
   if (!msg.text && done.interrupted) msg.text = '_(interrupted)_'
   else if (!msg.text && done.exitCode !== 0)
     msg.text =
-      `error running claude: exited ${done.exitCode}` +
+      `error running assistant: exited ${done.exitCode}` +
       (done.stderr?.trim() ? `\n${done.stderr.trim()}` : '')
   msg.pending = false
-  // A claude error — a non-zero exit that isn't a deliberate interrupt,
+  // An assistant error — a non-zero exit that isn't a deliberate interrupt,
   // most often an error HTTP response from the assistant — needs the
   // user's attention, so wedge the task rather than letting driveTask
   // quietly bring it to rest. We only override a still-riding task: if the

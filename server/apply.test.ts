@@ -121,7 +121,7 @@ describe('applyDone', () => {
     expect('runCursor' in t).toBe(false)
   })
 
-  it('wedges and stashes a retry on a non-zero claude error', () => {
+  it('wedges and stashes a retry on a non-zero assistant error', () => {
     const t = task()
     const at = '2026-01-01T00:05:00.000Z'
     applyDone(
@@ -131,7 +131,7 @@ describe('applyDone', () => {
     )
     const msg = t.messages[1]
     expect(msg.pending).toBe(false)
-    expect(msg.text).toBe('error running claude: exited 1\nboom')
+    expect(msg.text).toBe('error running assistant: exited 1\nboom')
     expect(t.status).toBe('wedged')
     // hadOutput is false (no reply streamed), so committed is false.
     expect(t.retry).toEqual({
@@ -159,7 +159,7 @@ describe('applyDone', () => {
     const msg = t.messages[1]
     expect(msg.pending).toBe(false)
     expect(msg.text).toBe('_(interrupted)_')
-    expect(t.status).toBe('riding') // an interrupt is not a claude error
+    expect(t.status).toBe('riding') // an interrupt is not an assistant error
     expect(t.retry).toBeUndefined()
   })
 })

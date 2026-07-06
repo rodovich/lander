@@ -16,7 +16,7 @@ import type { ServerToDaemon } from './protocol'
 
 // Integration test for the daemon ⇄ server transport's drain-handoff, driving the
 // real attachDaemonServer over real WebSockets with stand-in daemons. The logic
-// under test is purely server-side routing, so no real claude child is needed.
+// under test is purely server-side routing, so no real agent child is needed.
 //
 // The key invariant: a run is only ever resumed on the daemon that actually holds
 // it (announced via `register.runs`), and is crashed only when no connected daemon
@@ -89,8 +89,9 @@ const start = (runId: string): ServerToDaemon => ({
   type: 'start-run',
   runId,
   taskId: `task-${runId}`,
+  agent: 'claude',
   project: 'proj',
-  claudeArgs: [],
+  agentArgs: [],
   env: {},
   idleTimeoutMs: 0,
 })

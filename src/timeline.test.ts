@@ -12,7 +12,7 @@ type M = {
 type E = { kind: string; createdAt: string }
 
 const u = (id: string, createdAt: string): M => ({ role: 'user', createdAt, id })
-// A still-queued follow-up: claude hasn't read it; the server flags it.
+// A still-queued follow-up: the agent hasn't read it; the server flags it.
 const q = (id: string, createdAt: string): M => ({
   role: 'user',
   createdAt,

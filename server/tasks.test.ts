@@ -154,7 +154,7 @@ describe('lastTurnPrompts', () => {
         msg({ text: 'reply 1' }),
         msg({ role: 'user', text: 'a' }),
         msg({ role: 'user', text: 'b' }),
-        msg({ text: 'error running claude: exited 1' }),
+        msg({ text: 'error running assistant: exited 1' }),
       ]),
     ).toEqual(['a', 'b'])
   })

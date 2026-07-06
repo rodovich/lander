@@ -192,7 +192,7 @@ function validateRepeat(o) {
   // --repeat-until parseability is left to the server (same leniency as --date).
 }
 
-// Relaunch the current task under a fresh assistant (claude) session, keeping the
+// Relaunch the current task under a fresh provider session, keeping the
 // same task id. Takes the same trigger flags as `launch` (--date/--time/--await)
 // plus a positional message (or `-` for stdin); operates on the current TASK env
 // like `rest`, with no target id. Without a trigger the seal happens now and the

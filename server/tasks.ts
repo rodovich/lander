@@ -16,10 +16,10 @@ export type Message = {
   // Present on assistant turns once the run's terminal result event lands: the
   // token counts the turn consumed. The UI shows the latest in the corner.
   usage?: Usage
-  // True while claude is still producing this message; cleared when it lands.
+  // True while the assistant is still producing this message; cleared when it lands.
   pending?: boolean
   // Client-facing only: set by publicTask on a follow-up still in the task's
-  // `queued` work queue (claude hasn't read it yet) so the UI can dim it. Derived
+  // `queued` work queue (the agent hasn't read it yet) so the UI can dim it. Derived
   // from the queue at projection time, never stored — the queue is the source of
   // truth — so it's the read/unread analog of the server-owned `pending`.
   queued?: boolean
@@ -42,7 +42,7 @@ export type TaskEvent = {
     | 'unlanded'
     | 'renamed'
     // The divider `lander relaunch` records when it seals the task's assistant
-    // session so the next turn mints a fresh claude session (see sealForRelaunch).
+    // session so the next turn mints a fresh provider session (see sealForRelaunch).
     // Recorded twice for a scheduled relaunch: once at arm time carrying
     // `scheduledFor` (the pending indicator), then again at delivery without it
     // (the actual divider) — the same pattern a deferred `rest` shows as a
@@ -117,7 +117,7 @@ export function publicTask<T extends object>(
   // Project the internal work queue onto the messages it refers to, then drop the
   // queue itself. The unread follow-ups are the trailing N user messages (the
   // queue holds one entry per unread follow-up, in order), so flag those. The
-  // client renders the flag — dimming what claude hasn't read — without seeing
+  // client renders the flag — dimming what the agent hasn't read — without seeing
   // the server's queue or having to know that trailing-N rule. When nothing is
   // queued we return the messages array untouched (shared, not cloned).
   const slot = rest as { messages?: Message[] }
@@ -185,14 +185,14 @@ export function recordStatusTransition(
     })
 }
 
-// Seal a task's assistant session so its next turn mints a fresh claude session,
+// Seal a task's assistant session so its next turn mints a fresh provider session,
 // and record the 'relaunched' divider event. This is the heart of `lander
-// relaunch`: the daemon mints a new session whenever it's handed a turn with no
-// `sessionId` (it `--resume`s the same one otherwise), so deleting the field is
-// all it takes — the new session is minted lazily on the next turn that drains a
-// queued message, never pre-allocated. The old session's still-streaming turn is
-// a `--resume`, which emits no session announcement, so nothing races this clear
-// (see reduceRunWs's set-once `if (!t.sessionId)`). Touches only session + event
+// relaunch`: the daemon starts a new provider session whenever it's handed a
+// turn with no `sessionId` (it resumes the same one otherwise), so deleting the
+// field is all it takes — the new session is minted lazily on the next turn that
+// drains a queued message, never pre-allocated. The old session's still-streaming
+// turn emits no session announcement, so nothing races this clear (see
+// reduceRunWs's set-once `if (!t.sessionId)`). Touches only session + event
 // state; the caller owns the message/queue/status for the next turn.
 export function sealForRelaunch(
   task: { sessionId?: string; title: string; events?: TaskEvent[] },
@@ -207,8 +207,9 @@ export function sealForRelaunch(
 // riding. Called mid-turn of the old session in the normal path — the in-flight
 // driveTask loop drains the queued message after the current turn's `done`, and
 // because the session is sealed that turn hands the daemon no `sessionId`, so a
-// new session is minted. Revives a wedged/landed task too (records the un-wedge a
-// hair ahead so the timeline orders right), and supersedes any pending retry.
+// new provider session is minted. Revives a wedged/landed task too (records the
+// un-wedge a hair ahead so the timeline orders right), and supersedes any
+// pending retry.
 export function applyRelaunch(
   task: {
     sessionId?: string
@@ -358,7 +359,7 @@ export function pendingMessage(task: {
 }
 
 // Get the in-flight assistant message, creating it on first use. We hold off on
-// adding it until claude actually starts responding so its `createdAt` reflects
+// adding it until the assistant actually starts responding so its `createdAt` reflects
 // when the agent began — not when the turn was queued — and so the UI can show a
 // spinner under the user's message during the wait. Until then a riding task has
 // no trailing assistant message.

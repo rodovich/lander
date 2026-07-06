@@ -77,7 +77,7 @@ type Message = {
   steps?: Step[]
   usage?: TokenUsage
   pending?: boolean
-  // Set by the server (publicTask) on a follow-up claude hasn't read yet; the
+  // Set by the server (publicTask) on a follow-up the agent hasn't read yet; the
   // timeline dims it and sinks it below the conversation.
   queued?: boolean
 }
@@ -111,9 +111,10 @@ type TaskEvent = {
 
 type Task = {
   // The task's own short id (a nanoid; legacy tasks carry the uuid they were
-  // keyed by). Distinct from the assistant session that backs its turns, which
+  // keyed by). Distinct from the provider session that backs its turns, which
   // the daemon owns and the client never sees.
   id: string
+  agent: 'claude' | 'codex'
   title: string
   status: string
   createdAt: string
@@ -148,7 +149,7 @@ type Task = {
   }[]
   messages: Message[]
   events?: TaskEvent[]
-  // Present only when the task wedged on a claude error (not the agent's own
+  // Present only when the task wedged on an assistant error (not the agent's own
   // wedge): drives the retry button below the conversation. `committed` is
   // whether the failed turn's prompt reached the session — true means a retry
   // nudges the session ("Try again"), false means it re-sends the un-received
@@ -1726,7 +1727,7 @@ export function App() {
   // merged with its lifecycle events by timestamp. The ordering rules (turn
   // grouping, read-time anchoring, queued sinking, event splicing) all live in
   // buildTimeline; `queuedIndices` rides back out so the render can dim the
-  // follow-ups claude hasn't read yet. `now` anchors any in-flight turn.
+  // follow-ups the agent hasn't read yet. `now` anchors any in-flight turn.
   const { items: timeline, queuedIndices } = current
     ? buildTimeline(current, new Date().toISOString())
     : {
@@ -1935,7 +1936,7 @@ export function App() {
           if (!cancelled) setError(e.message ?? String(e))
         })
     refresh()
-    // Poll so claude replies appear once the server appends them.
+    // Poll so assistant replies appear once the server appends them.
     const timer = setInterval(refresh, 2000)
     return () => {
       cancelled = true
@@ -2149,7 +2150,7 @@ export function App() {
 
   // Changes whenever the open task's last (typically streaming) message grows,
   // even when the message count stays the same, so the effect re-pins as an
-  // assistant turn fills in. The trailing fields track the two "claude is
+  // assistant turn fills in. The trailing fields track the two "assistant is
   // working…" spinners (the per-message pending one and the standalone riding
   // one); they add and remove a row, so the timeline's height changes without
   // any message text changing and the effect must re-pin for those too.
@@ -2240,7 +2241,7 @@ export function App() {
     }
   }
 
-  // Retry a turn that wedged on a claude error. The server decides between
+  // Retry a turn that wedged on an assistant error. The server decides between
   // nudging the session and re-sending the un-received prompt(s) from the
   // task's `retry` info; here we just fire it and refresh.
   async function retryTask() {
