@@ -136,10 +136,11 @@ type Task = {
   // all have landed. Present only while awaiting; may coexist with scheduledFor.
   waitingFor?: string[]
   // Deferred messages armed on this task (`lander send/relaunch --date/--time/
-  // --await`), each firing on its own trigger. We read only whether any carries a
-  // `repeat` spec — a `--interval` relaunch — to mark the row with a clockwise
-  // arrow beside the scheduled clock.
-  scheduledMessages?: { repeat?: unknown }[]
+  // --await`), each firing on its own trigger. We read `relaunch` (a pending
+  // scheduled relaunch, shown as the scheduled clock alongside scheduledFor/
+  // waitingFor) and `repeat` (a `--interval` relaunch, shown as the clockwise
+  // arrow beside it).
+  scheduledMessages?: { relaunch?: boolean; deliverAt?: string; repeat?: unknown }[]
   messages: Message[]
   events?: TaskEvent[]
   // Present only when the task wedged on a claude error (not the agent's own
@@ -2722,6 +2723,9 @@ export function App() {
             }
             const { task, index } = row
             const unseen = isUnread(task)
+            const pendingRelaunch = task.scheduledMessages?.find(
+              (m) => m.relaunch,
+            )
             return (
             <li
               key={row.key}
@@ -2768,7 +2772,8 @@ export function App() {
                 <div className="task-time">
                   {formatTaskTime(task.updatedAt ?? task.createdAt, todayStart)}
                   {(task.scheduledFor ||
-                    (task.waitingFor && task.waitingFor.length > 0)) && (
+                    (task.waitingFor && task.waitingFor.length > 0) ||
+                    pendingRelaunch) && (
                     <svg
                       className="scheduled-clock"
                       width="11"
@@ -2779,7 +2784,11 @@ export function App() {
                       strokeWidth="1.5"
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      aria-label={task.scheduledFor ? 'Scheduled' : 'Awaiting'}
+                      aria-label={
+                        task.scheduledFor || pendingRelaunch?.deliverAt
+                          ? 'Scheduled'
+                          : 'Awaiting'
+                      }
                     >
                       <circle cx="8" cy="8" r="6" />
                       <path d="M8 4.5V8l2.5 1.5" />

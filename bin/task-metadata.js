@@ -3,15 +3,28 @@
 // conversation. Split out from bin/lander so it's importable by a test
 // without tripping the script's top-level command dispatch.
 export function taskMetadata(t) {
+  const relaunch = pendingRelaunch(t)
   return {
     id: t.id,
     title: t.title,
     status: t.status,
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
-    ...(t.scheduledFor ? { scheduledFor: t.scheduledFor } : {}),
+    ...(t.scheduledFor
+      ? { scheduledFor: t.scheduledFor }
+      : relaunch?.deliverAt
+        ? { scheduledFor: relaunch.deliverAt, relaunching: true }
+        : {}),
     ...(hasRepeat(t) ? { repeats: true } : {}),
   }
+}
+
+// A pending scheduled relaunch (`lander relaunch --date/--time/--await`) armed
+// on the task, if any — a deferred message flagged `relaunch`. Its `deliverAt`
+// (when present) drives `scheduledFor` above so a task waiting only on a
+// relaunch still shows the ⏰ in `lander list`, same as a scheduled launch/rest.
+export function pendingRelaunch(t) {
+  return (t.scheduledMessages ?? []).find((m) => m.relaunch)
 }
 
 // Whether the task has a repeating relaunch armed — any deferred message

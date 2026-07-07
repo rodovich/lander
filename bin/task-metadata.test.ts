@@ -46,6 +46,49 @@ describe('taskMetadata', () => {
     expect(unscheduled).not.toHaveProperty('scheduledFor')
   })
 
+  it('surfaces a pending scheduled relaunch as scheduledFor, flagged relaunching', () => {
+    const relaunching = taskMetadata({
+      id: 'jkl',
+      title: 'Fresh session later',
+      status: 'riding',
+      createdAt: '2026-06-30T00:00:00.000Z',
+      updatedAt: '2026-06-30T00:00:00.000Z',
+      scheduledMessages: [
+        { text: 'again', deliverAt: '2026-07-01T00:00:00.000Z', relaunch: true },
+      ],
+    })
+    expect(relaunching.scheduledFor).toBe('2026-07-01T00:00:00.000Z')
+    expect(relaunching.relaunching).toBe(true)
+
+    // A task's own scheduledFor (a launch/rest timer) takes priority over a
+    // pending relaunch's deliverAt.
+    const both = taskMetadata({
+      id: 'mno',
+      title: 'Both armed',
+      status: 'resting',
+      createdAt: '2026-06-30T00:00:00.000Z',
+      updatedAt: '2026-06-30T00:00:00.000Z',
+      scheduledFor: '2026-07-02T00:00:00.000Z',
+      scheduledMessages: [
+        { text: 'again', deliverAt: '2026-07-01T00:00:00.000Z', relaunch: true },
+      ],
+    })
+    expect(both.scheduledFor).toBe('2026-07-02T00:00:00.000Z')
+    expect(both).not.toHaveProperty('relaunching')
+
+    // A relaunch armed purely on --await (no deliverAt) has nothing to show yet.
+    const awaitOnly = taskMetadata({
+      id: 'pqr',
+      title: 'Awaiting only',
+      status: 'resting',
+      createdAt: '2026-06-30T00:00:00.000Z',
+      updatedAt: '2026-06-30T00:00:00.000Z',
+      scheduledMessages: [{ text: 'again', waitFor: ['other'], relaunch: true }],
+    })
+    expect(awaitOnly).not.toHaveProperty('scheduledFor')
+    expect(awaitOnly).not.toHaveProperty('relaunching')
+  })
+
   it('flags repeats only when a scheduled message carries a repeat spec', () => {
     const base = {
       id: 'ghi',
