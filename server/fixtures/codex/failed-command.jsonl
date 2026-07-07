@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"019f0000-0000-7000-8000-000000000003"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"/bin/zsh -lc \"sh -c 'echo codex-failed-command >&2; exit 7'\"","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_0","type":"command_execution","command":"/bin/zsh -lc \"sh -c 'echo codex-failed-command >&2; exit 7'\"","aggregated_output":"codex-failed-command\n","exit_code":7,"status":"failed"}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"Command failed with exit code `7`.\n\nstderr:\n```text\ncodex-failed-command\n```"}}
+{"type":"turn.completed","usage":{"input_tokens":24189,"cached_input_tokens":17152,"output_tokens":139,"reasoning_output_tokens":53}}

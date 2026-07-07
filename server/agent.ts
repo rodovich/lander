@@ -61,6 +61,10 @@ export type AgentLineUpdate = {
   usageFinal?: boolean
   drivingModel?: string
   rateLimitResetsAt?: string
+  // Provider-level terminal failures reported in the stream, such as Codex
+  // `turn.failed` or `error` events. The daemon folds this into the final done
+  // stderr and treats an otherwise-zero exit as failed.
+  terminalError?: string
 }
 
 export type AgentProjectGrantInput = {

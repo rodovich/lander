@@ -249,6 +249,7 @@ function startRun(msg: StartRunMessage): void {
   let usageInf: string | undefined
   let drivingModel: string | undefined
   let rateLimitResetsAt: string | undefined
+  let terminalError: string | undefined
   let sawRateLimit = false
   let buf = ''
   let stderr = ''
@@ -295,6 +296,11 @@ function startRun(msg: StartRunMessage): void {
         if (adapter.supportsUsageSnapshot) void refreshUsage()
       }
       if (r.rateLimitResetsAt) rateLimitResetsAt = r.rateLimitResetsAt
+      if (r.terminalError) {
+        if (!terminalError) terminalError = r.terminalError
+        else if (!terminalError.includes(r.terminalError))
+          terminalError += `\n${r.terminalError}`
+      }
       steps.push(...r.steps)
       if (r.finalText !== undefined) finalText = r.finalText
       if (r.blockedIds) blockedIds.push(...r.blockedIds)
@@ -336,12 +342,15 @@ function startRun(msg: StartRunMessage): void {
     settled = true
     clearTimeout(timer)
     flush(true)
+    const doneStderr = [stderr.trim(), terminalError?.trim()]
+      .filter(Boolean)
+      .join('\n')
     const doneMsg: DoneMessage = {
       type: 'done',
       runId: msg.runId,
-      exitCode,
+      exitCode: exitCode === 0 && terminalError && !interrupted ? 1 : exitCode,
       interrupted,
-      stderr: stderr.trim(),
+      stderr: doneStderr,
     }
     // Keep the run record (buffer + done) until the server acks, so a reconnect
     // can replay it; a timeout drops it if the ack is lost. Don't delete here.

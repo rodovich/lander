@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"019f0000-0000-7000-8000-000000000004"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"file_change","changes":[{"path":"/repo/codex_patch_fixture.txt","kind":"add"}],"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_0","type":"file_change","changes":[{"path":"/repo/codex_patch_fixture.txt","kind":"add"}],"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"done"}}
+{"type":"turn.completed","usage":{"input_tokens":24661,"cached_input_tokens":22272,"output_tokens":144,"reasoning_output_tokens":100}}
