@@ -89,6 +89,8 @@ describe('daemon run manager', () => {
         'exec',
         '--json',
         '--config',
+        'sandbox_workspace_write.network_access=true',
+        '--config',
         'shell_environment_policy.set.LANDER_TASK="task-1"',
         '--cd',
         '/repo',

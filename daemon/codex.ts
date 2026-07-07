@@ -67,7 +67,13 @@ function buildCodexArgs(
     configOverrides: string[]
   },
 ): string[] {
-  const configArgs = codexConfigArgs(profile, configOverrides)
+  const configArgs = codexConfigArgs(profile, [
+    ...configOverrides,
+    // `lander` self-management commands call back to the local Lander API.
+    // Codex keeps workspace-write network access off by default, so opt in per
+    // Lander-run without requiring a user profile.
+    'sandbox_workspace_write.network_access=true',
+  ])
   const envArgs = codexShellEnvArgs(landerEnv)
   const managedPrompt = promptWithTaskManagement(
     { ...task, agent: 'codex' },
