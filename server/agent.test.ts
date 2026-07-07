@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   AGENT_KINDS,
+  defaultAgentFromEnv,
   isAgentKind,
   type AgentAdapter,
   type AgentLaunchInput,
@@ -13,6 +14,14 @@ describe('agent adapter contract', () => {
     expect(isAgentKind('codex')).toBe(true)
     expect(isAgentKind('other')).toBe(false)
     expect(isAgentKind(null)).toBe(false)
+  })
+
+  it('resolves the environment default for new tasks', () => {
+    expect(defaultAgentFromEnv({})).toBe('claude')
+    expect(defaultAgentFromEnv({ LANDER_AGENT: 'claude' })).toBe('claude')
+    expect(defaultAgentFromEnv({ LANDER_AGENT: 'codex' })).toBe('codex')
+    expect(defaultAgentFromEnv({ LANDER_AGENT: ' CODEX ' })).toBe('codex')
+    expect(defaultAgentFromEnv({ LANDER_AGENT: 'other' })).toBe('claude')
   })
 
   it('keeps launch construction and line reduction behind one provider shape', () => {

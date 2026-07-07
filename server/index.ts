@@ -16,6 +16,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { applyUpdate, applyDone } from './apply'
 import type { AgentAdapter } from './agent'
+import { defaultAgentFromEnv } from './agent'
 import { createClaudeAdapter } from './claude'
 import { createCodexAdapter } from './codex'
 import {
@@ -68,7 +69,8 @@ const PROJECTS = parseProjects(ROOT, process.env, process.cwd())
 const PROJECT_BY_SLUG = new Map<string, Project>(
   PROJECTS.map((p) => [p.slug, p]),
 )
-const DEFAULT_AGENT: AgentKind = 'claude'
+const LEGACY_AGENT: AgentKind = 'claude'
+const DEFAULT_NEW_TASK_AGENT = defaultAgentFromEnv(process.env)
 const CLAUDE_ADAPTER = createClaudeAdapter({
   landerBin: LANDER_BIN,
   taskPromptTemplate: TASK_PROMPT_TEMPLATE,
@@ -428,7 +430,7 @@ async function runTurn(
   // The token the in-task `lander` CLI sends back to authenticate as this task.
   // Backfilled for tasks created before tokens existed.
   const token = task.token ?? randomUUID()
-  const agent = task.agent ?? DEFAULT_AGENT
+  const agent = task.agent ?? LEGACY_AGENT
   const adapter = agentAdapter(agent)
   const landerEnv = {
     PATH: `${LANDER_BIN_DIR}:${process.env.PATH ?? ''}`,
@@ -1224,7 +1226,7 @@ app.post('/api/:project/tasks', async (c) => {
     }
     const task: Task = {
       id,
-      agent: DEFAULT_AGENT,
+      agent: DEFAULT_NEW_TASK_AGENT,
       title: title || '…',
       // A deferred task rests until the scheduler launches it at scheduledFor.
       // Otherwise "riding" while the agent works on the opening message (driveTask
@@ -1713,7 +1715,7 @@ app.post('/api/:project/tasks/:id/worktree', async (c) => {
     const body = await c.req.json<{ worktreePath?: unknown }>()
     if (typeof body.worktreePath !== 'string' || !body.worktreePath)
       return c.json({ error: 'worktreePath is required' }, 400)
-    const worktreeAgent = existing.agent ?? DEFAULT_AGENT
+    const worktreeAgent = existing.agent ?? LEGACY_AGENT
     const adapter = agentAdapter(worktreeAgent)
     if (!adapter?.supportsWorktreeFlag)
       return c.json(
@@ -2077,7 +2079,7 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
 
     const task = await readTask(project.dataDir, id)
     if (!task) return c.json({ error: 'task not found' }, 404)
-    const grantAgent = task.agent ?? DEFAULT_AGENT
+    const grantAgent = task.agent ?? LEGACY_AGENT
     const adapter = agentAdapter(grantAgent)
 
     let warning: string | undefined
@@ -2315,7 +2317,7 @@ async function backfillAgents(): Promise<void> {
           const task = JSON.parse(await readFile(file, 'utf8')) as Task
           if (task.agent !== undefined) continue
           await mutateTask(file, (t) => {
-            if (t.agent === undefined) t.agent = DEFAULT_AGENT
+            if (t.agent === undefined) t.agent = LEGACY_AGENT
           })
         } catch {
           // skip unreadable/invalid files

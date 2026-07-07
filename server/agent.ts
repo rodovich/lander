@@ -7,6 +7,13 @@ export function isAgentKind(value: unknown): value is AgentKind {
   return typeof value === 'string' && AGENT_KINDS.includes(value as AgentKind)
 }
 
+export function defaultAgentFromEnv(env: {
+  LANDER_AGENT?: string | undefined
+}): AgentKind {
+  const value = env.LANDER_AGENT?.trim().toLowerCase()
+  return isAgentKind(value) ? value : 'claude'
+}
+
 // The task fields an adapter may need to build a launch. Keep this structural so
 // server/index.ts can pass its full Task without importing the server entrypoint
 // into provider-specific modules.
