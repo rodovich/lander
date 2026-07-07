@@ -10,26 +10,20 @@
 //        LANDER_DAEMON_TOKEN (must match the server's)
 //        LANDER_IDLE_TIMEOUT_MS (per-run idle kill, default 10m — start-run wins)
 
-import { spawn, type ChildProcess } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
 import { readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createClaudeAdapter } from '../server/claude'
-import { createCodexAdapter } from '../server/codex'
-import type { AgentAdapter } from '../server/agent'
-import { addUsage, type Usage } from '../server/stream'
+import { codexOptionsFromEnv, createCodexAdapter } from '../server/codex'
 import { projectSlug } from '../server/projects'
 import { fetchUsage, type UsageBody } from '../server/usage'
 import type {
   ServerToDaemon,
   StartRunMessage,
-  UpdateMessage,
-  DoneMessage,
-  SessionMessage,
   RegisterMessage,
   UsageMessage,
 } from '../server/protocol'
+import { createRunManager, type RunManagerMessage } from './run'
 
 // Project host paths come from argv, or PROJECT_DIRS (newline-separated, as
 // dev.mjs sets for the server) when argv is empty — so `npm run dev` can launch
@@ -67,32 +61,8 @@ const CLAUDE_ADAPTER = createClaudeAdapter({
 })
 const CODEX_ADAPTER = createCodexAdapter({
   taskPromptTemplate: TASK_PROMPT_TEMPLATE,
+  ...codexOptionsFromEnv(process.env),
 })
-
-function agentAdapter(kind: StartRunMessage['agent']): AgentAdapter | undefined {
-  if (kind === 'claude') return CLAUDE_ADAPTER
-  if (kind === 'codex') return CODEX_ADAPTER
-  return undefined
-}
-
-// One run's handle. Held from start until the server acks its `done` (or a
-// bounded timeout), so a reconnecting server can resume-from the buffer. `buffer`
-// is every update sent for the run, in seq order; `done` is set once finished.
-type Run = {
-  interrupt: () => void
-  child: ChildProcess
-  buffer: UpdateMessage[]
-  // The session id this run announced (only when it began a fresh session, i.e.
-  // the server sent no `sessionId` to resume). Re-sent ahead of the buffer on
-  // resume-from so a server that reconnected mid-first-turn still learns it.
-  mintedSession?: string
-  done?: DoneMessage
-  dropTimer?: ReturnType<typeof setTimeout>
-}
-const runs = new Map<string, Run>()
-// How long to retain a finished run's buffer waiting for the server's ack before
-// dropping it, so a lost ack can't leak the buffer forever.
-const RUN_BUFFER_TTL_MS = 120_000
 
 let ws: WebSocket | null = null
 // Set by SIGUSR1 (the dev supervisor's drain signal): finish the runs we're
@@ -102,12 +72,7 @@ let ws: WebSocket | null = null
 let draining = false
 
 function send(
-  msg:
-    | UpdateMessage
-    | DoneMessage
-    | SessionMessage
-    | RegisterMessage
-    | UsageMessage,
+  msg: RunManagerMessage | RegisterMessage | UsageMessage,
 ): void {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
 }
@@ -116,7 +81,7 @@ function send(
 // fresh daemon is the only one left. No-op until then — we keep relaying our
 // in-flight runs and honoring interrupts for them.
 function exitIfDrained(): void {
-  if (draining && runs.size === 0) {
+  if (draining && runManager.size() === 0) {
     console.log('drained; exiting for handoff')
     process.exit(0)
   }
@@ -195,230 +160,17 @@ function resolveCwd(msg: StartRunMessage): string {
   return root
 }
 
-// Spawn the selected agent for one run, reduce its stream, and relay update/done.
-// The provider adapter owns the CLI command, session start/resume args, and line
-// reducer. The daemon keeps process ownership, replay buffering, idle-kill, and
-// cross-line usage accumulation provider-neutral.
-function startRun(msg: StartRunMessage): void {
-  let cwd: string
-  try {
-    cwd = resolveCwd(msg)
-  } catch (e) {
-    // No such project here — report a clean failure so the task doesn't hang.
-    send({
-      type: 'done',
-      runId: msg.runId,
-      exitCode: 1,
-      interrupted: false,
-      stderr: e instanceof Error ? e.message : String(e),
-    })
-    return
-  }
-
-  const adapter = agentAdapter(msg.agent)
-  if (!adapter) {
-    send({
-      type: 'done',
-      runId: msg.runId,
-      exitCode: 1,
-      interrupted: false,
-      stderr: `unsupported agent: ${msg.agent}`,
-    })
-    return
-  }
-
-  const session = adapter.buildSession({
-    sessionId: msg.sessionId,
-    mintSessionId: randomUUID,
-  })
-
-  const child: ChildProcess = spawn(
-    adapter.command,
-    [...session.args, ...msg.agentArgs],
-    {
-      cwd,
-      env: { ...process.env, ...msg.env },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    },
-  )
-
-  // Tell the server the session id for a fresh run, whether the adapter minted
-  // it before spawn (Claude) or extracts it from the stream (Codex). A resume
-  // already knows its session id.
-  let announcedSession = session.announceSession ? session.sessionId : undefined
-  if (announcedSession)
-    send({ type: 'session', runId: msg.runId, sessionId: announcedSession })
-
-  // Run-scoped reduction state (carried across stdout chunks).
-  let seq = 0
-  // Every update sent, in seq order — retained so a reconnecting server can be
-  // replayed from its last-applied seq (resume-from).
-  const buffer: UpdateMessage[] = []
-  let liveUsage: Usage | undefined
-  let usageInf: string | undefined
-  let drivingModel: string | undefined
-  let rateLimitResetsAt: string | undefined
-  let terminalError: string | undefined
-  let sawRateLimit = false
-  let buf = ''
-  let stderr = ''
-  let settled = false
-  let interrupted = false
-
-  // Idle-kill: a run silent past the window is presumed stuck; any output re-arms.
-  const idleMs = msg.idleTimeoutMs || DEFAULT_IDLE_MS
-  let timer: ReturnType<typeof setTimeout>
-  const arm = () => {
-    clearTimeout(timer)
-    timer = setTimeout(() => {
-      try {
-        child.kill('SIGKILL')
-      } catch {}
-    }, idleMs)
-  }
-  arm()
-
-  // Reduce whatever complete lines are buffered and push one update for the batch.
-  // `final` flushes the trailing partial line too (mirrors reduceRun stopping at
-  // the last newline until done). One update per batch keeps the apply cadence
-  // close to the file path's per-poll batching.
-  const flush = (final: boolean): void => {
-    if (!buf) return
-    const nl = buf.lastIndexOf('\n')
-    if (nl < 0 && !final) return
-    const chunk = final ? buf : buf.slice(0, nl + 1)
-    buf = final ? '' : buf.slice(nl + 1)
-
-    const steps: UpdateMessage['steps'] = []
-    let finalText: string | undefined
-    const blockedIds: string[] = []
-    let usageChanged = false
-    for (const raw of chunk.split('\n')) {
-      const line = raw.trim()
-      if (!line) continue
-      if (!msg.sessionId && !announcedSession) {
-        const sessionId = adapter.extractSession?.(line)
-        if (sessionId) {
-          announcedSession = sessionId
-          const rec = runs.get(msg.runId)
-          if (rec) rec.mintedSession = sessionId
-          send({ type: 'session', runId: msg.runId, sessionId })
-        }
-      }
-      const r = adapter.reduceLine(line, new Date().toISOString())
-      if (r.drivingModel) drivingModel = r.drivingModel
-      const reliableReset = adapter.supportsRateLimitRetryScheduling
-        ? r.rateLimitResetsAt
-        : undefined
-      if (reliableReset && !sawRateLimit) {
-        // First session-limit rejection this run — the window just filled, a
-        // usage-moving event, so refresh now (shares the 60s floor).
-        sawRateLimit = true
-        if (adapter.supportsUsageSnapshot) void refreshUsage()
-      }
-      if (reliableReset) rateLimitResetsAt = reliableReset
-      if (r.terminalError) {
-        if (!terminalError) terminalError = r.terminalError
-        else if (!terminalError.includes(r.terminalError))
-          terminalError += `\n${r.terminalError}`
-      }
-      steps.push(...r.steps)
-      if (r.finalText !== undefined) finalText = r.finalText
-      if (r.blockedIds) blockedIds.push(...r.blockedIds)
-      if (r.usage) {
-        if (r.usageFinal) {
-          // The result event's authoritative total supersedes the estimate.
-          liveUsage = r.usage
-          usageChanged = true
-        } else if (r.usageInferenceId !== usageInf) {
-          // A new inference's usage — add it once (its content-block events
-          // repeat the same numbers under the same id).
-          usageInf = r.usageInferenceId
-          liveUsage = addUsage(liveUsage, r.usage)
-          usageChanged = true
-        }
-      }
-    }
-
-    if (steps.length || finalText !== undefined || blockedIds.length || usageChanged) {
-      const u: UpdateMessage = {
-        type: 'update',
-        runId: msg.runId,
-        seq: ++seq,
-        steps,
-        finalText,
-        blockedIds,
-        usage: usageChanged ? liveUsage : undefined,
-        usageChanged,
-        drivingModel,
-        rateLimitResetsAt,
-      }
-      buffer.push(u)
-      send(u)
-    }
-  }
-
-  const finish = (exitCode: number): void => {
-    if (settled) return
-    settled = true
-    clearTimeout(timer)
-    flush(true)
-    const doneStderr = [stderr.trim(), terminalError?.trim()]
-      .filter(Boolean)
-      .join('\n')
-    const doneMsg: DoneMessage = {
-      type: 'done',
-      runId: msg.runId,
-      exitCode: exitCode === 0 && terminalError && !interrupted ? 1 : exitCode,
-      interrupted,
-      stderr: doneStderr,
-    }
-    // Keep the run record (buffer + done) until the server acks, so a reconnect
-    // can replay it; a timeout drops it if the ack is lost. Don't delete here.
-    const rec = runs.get(msg.runId)
-    if (rec) {
-      rec.done = doneMsg
-      rec.dropTimer = setTimeout(() => {
-        runs.delete(msg.runId)
-        exitIfDrained()
-      }, RUN_BUFFER_TTL_MS)
-      rec.dropTimer.unref()
-    }
-    send(doneMsg)
-    // A turn just finished — agent activity is when usage moves, so refresh.
-    if (adapter.supportsUsageSnapshot) void refreshUsage()
-  }
-
-  child.stdout!.on('data', (d: Buffer) => {
-    arm()
-    buf += d.toString()
-    flush(false)
-  })
-  child.stderr!.on('data', (d: Buffer) => {
-    arm()
-    stderr += d.toString()
-  })
-  child.on('error', (e) => {
-    stderr += `error running assistant: ${e.message}`
-    finish(1)
-  })
-  child.on('close', (code) => finish(code == null ? 1 : code))
-
-  runs.set(msg.runId, {
-    child,
-    buffer,
-    mintedSession: announcedSession,
-    // Interrupt mirrors the old runner's SIGTERM handler: stop the agent, finish
-    // cleanly as interrupted (the server keeps the partial reply, no crash).
-    interrupt: () => {
-      interrupted = true
-      try {
-        child.kill('SIGKILL')
-      } catch {}
-      finish(0)
-    },
-  })
-}
+const runManager = createRunManager({
+  adapters: {
+    claude: CLAUDE_ADAPTER,
+    codex: CODEX_ADAPTER,
+  },
+  resolveCwd,
+  send,
+  refreshUsage,
+  defaultIdleMs: DEFAULT_IDLE_MS,
+  onEmpty: exitIfDrained,
+})
 
 function onMessage(raw: string): void {
   let msg: ServerToDaemon
@@ -442,56 +194,24 @@ function onMessage(raw: string): void {
         })
         break
       }
-      startRun(msg)
+      runManager.startRun(msg)
       break
     case 'interrupt':
-      runs.get(msg.runId)?.interrupt()
+      runManager.interrupt(msg.runId)
       break
-    case 'resume-from': {
-      const r = runs.get(msg.runId)
-      if (!r) {
-        // We no longer hold this run — we restarted (decision 2: a daemon restart
-        // aborts in-flight turns), or already dropped it after ack/timeout. Abort
-        // it so the server finalizes instead of hanging.
-        send({
-          type: 'done',
-          runId: msg.runId,
-          exitCode: 1,
-          interrupted: false,
-          stderr: 'daemon has no record of this run (restarted?); run aborted',
-        })
-        break
-      }
-      // Re-announce a minted session id first: a server that reconnected mid
-      // first-turn may not have persisted it yet, and it must land before the
-      // run's done so the next turn can resume. Idempotent on the server side.
-      if (r.mintedSession)
-        send({ type: 'session', runId: msg.runId, sessionId: r.mintedSession })
-      // Replay everything past the server's last-applied seq, then the terminal
-      // done if the run already finished. The server seq-dedups, so replaying a
-      // few it already has is harmless.
-      for (const u of r.buffer) if (u.seq > msg.seq) send(u)
-      if (r.done) send(r.done)
+    case 'resume-from':
+      runManager.resumeFrom(msg.runId, msg.seq)
       break
-    }
-    case 'ack': {
-      const r = runs.get(msg.runId)
-      if (r?.dropTimer) clearTimeout(r.dropTimer)
-      runs.delete(msg.runId)
-      exitIfDrained()
+    case 'ack':
+      runManager.ack(msg.runId)
       break
-    }
   }
 }
 
 // Kill any live agent children — best effort, on our own termination — so a
 // daemon restart doesn't orphan them (decision 2 aborts in-flight turns anyway).
 function killChildren(): void {
-  for (const r of runs.values()) {
-    try {
-      r.child.kill('SIGKILL')
-    } catch {}
-  }
+  runManager.killChildren()
 }
 process.on('SIGTERM', () => {
   killChildren()
@@ -509,7 +229,7 @@ process.on('SIGINT', () => {
 process.on('SIGUSR1', () => {
   if (draining) return
   draining = true
-  console.log(`draining ${runs.size} run(s) before handoff`)
+  console.log(`draining ${runManager.size()} run(s) before handoff`)
   exitIfDrained()
 })
 
@@ -531,7 +251,7 @@ function connect(): void {
       // its real owner — and a reconnect mid-drain reclaims our runs instead of
       // losing them to the fresh primary.
       draining,
-      runs: [...runs.keys()],
+      runs: runManager.heldRunIds(),
     })
     // Prime the server's snapshot: re-push the last one we hold (so a reconnect
     // re-fills the server cache immediately), then fetch a fresh one (the boot /

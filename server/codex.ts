@@ -5,6 +5,8 @@ import { promptWithTaskManagement } from './task-management'
 
 export type CodexAdapterOptions = {
   taskPromptTemplate: string
+  profile?: string
+  configOverrides?: string[]
 }
 
 const CODEX_SHELL_ENV = [
@@ -17,6 +19,8 @@ const CODEX_SHELL_ENV = [
 
 export function createCodexAdapter({
   taskPromptTemplate,
+  profile,
+  configOverrides = [],
 }: CodexAdapterOptions): AgentAdapter {
   return {
     kind: 'codex',
@@ -24,7 +28,11 @@ export function createCodexAdapter({
     buildLaunch({ task, prompt, cwd, landerEnv }) {
       return {
         command: 'codex',
-        args: buildCodexArgs(task, prompt, cwd, landerEnv, taskPromptTemplate),
+        args: buildCodexArgs(task, prompt, cwd, landerEnv, {
+          taskPromptTemplate,
+          profile,
+          configOverrides,
+        }),
         env: landerEnv,
       }
     },
@@ -50,8 +58,17 @@ function buildCodexArgs(
   prompt: string,
   cwd: string,
   landerEnv: Record<string, string>,
-  taskPromptTemplate: string,
+  {
+    taskPromptTemplate,
+    profile,
+    configOverrides,
+  }: {
+    taskPromptTemplate: string
+    profile?: string
+    configOverrides: string[]
+  },
 ): string[] {
+  const configArgs = codexConfigArgs(profile, configOverrides)
   const envArgs = codexShellEnvArgs(landerEnv)
   const managedPrompt = promptWithTaskManagement(
     { ...task, agent: 'codex' },
@@ -59,16 +76,50 @@ function buildCodexArgs(
     taskPromptTemplate,
   )
   if (task.sessionId)
-    return ['exec', 'resume', '--json', ...envArgs, task.sessionId, managedPrompt]
+    return [
+      'exec',
+      'resume',
+      '--json',
+      ...configArgs,
+      ...envArgs,
+      task.sessionId,
+      managedPrompt,
+    ]
   return [
     'exec',
     '--json',
+    ...configArgs,
     ...envArgs,
     '--cd',
     cwd,
     '--sandbox',
     task.allowEdits ? 'workspace-write' : 'read-only',
     managedPrompt,
+  ]
+}
+
+export function codexOptionsFromEnv(env: {
+  LANDER_CODEX_PROFILE?: string | undefined
+  LANDER_CODEX_CONFIG?: string | undefined
+}): Pick<CodexAdapterOptions, 'profile' | 'configOverrides'> {
+  const profile = env.LANDER_CODEX_PROFILE?.trim() || undefined
+  const configOverrides =
+    env.LANDER_CODEX_CONFIG?.split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean) ?? []
+  return {
+    ...(profile ? { profile } : {}),
+    ...(configOverrides.length ? { configOverrides } : {}),
+  }
+}
+
+function codexConfigArgs(
+  profile: string | undefined,
+  configOverrides: string[],
+): string[] {
+  return [
+    ...(profile ? ['--profile', profile] : []),
+    ...configOverrides.flatMap((entry) => ['--config', entry]),
   ]
 }
 

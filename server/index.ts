@@ -18,7 +18,7 @@ import { applyUpdate, applyDone } from './apply'
 import type { AgentAdapter } from './agent'
 import { defaultAgentFromEnv } from './agent'
 import { createClaudeAdapter } from './claude'
-import { createCodexAdapter } from './codex'
+import { codexOptionsFromEnv, createCodexAdapter } from './codex'
 import {
   attachDaemonServer,
   daemonConnected,
@@ -77,6 +77,7 @@ const CLAUDE_ADAPTER = createClaudeAdapter({
 })
 const CODEX_ADAPTER = createCodexAdapter({
   taskPromptTemplate: TASK_PROMPT_TEMPLATE,
+  ...codexOptionsFromEnv(process.env),
 })
 
 function agentAdapter(kind: AgentKind): AgentAdapter | undefined {
@@ -893,7 +894,7 @@ async function resolvePrincipal(req: {
   return { kind: 'anon' }
 }
 
-const app = new Hono()
+export const app = new Hono()
 
 // Current Claude subscription usage: the 5-hour session window and the 7-day
 // weekly window, each as { utilization (0-100), resetsAt }. Mirrors what the
@@ -2378,72 +2379,75 @@ async function backfillIds(): Promise<void> {
 }
 
 const port = Number(process.env.PORT ?? 6181)
-const server = serve({ fetch: app.fetch, port })
-console.log(`api listening on http://localhost:${port}`)
+if (process.env.NODE_ENV !== 'test' && process.env.VITEST !== 'true') {
+  const server = serve({ fetch: app.fetch, port })
+  console.log(`api listening on http://localhost:${port}`)
 
-// Accept the host daemon's WebSocket and route runs to it. The server's
-// @hono/node-server serve() returns a Node http.Server, which we hand to the WS
-// layer to handle the /daemon upgrade. The daemon owns usage end to end (decision
-// 6): each pushed snapshot lands straight in the cache the tasks poll embeds and
-// the daemon's connect-time push primes it.
-attachDaemonServer(server as unknown as import('node:http').Server, {
-  token: DAEMON_TOKEN,
-  // Warn at register time about a slug mismatch between how the daemon was
-  // launched and the projects this server serves — the usual silent cause of a
-  // task wedging with "daemon does not serve this project". A project we serve
-  // that the daemon doesn't is the one that breaks tasks (missing); a slug the
-  // daemon serves that we don't is harmless launch-arg drift (extra), logged for
-  // symmetry. Both point back at the PROJECT_DIRS the two sides were launched with.
-  onRegister: (slugs) => {
-    const served = new Set(slugs)
-    const configured = new Set(PROJECTS.map((p) => p.slug))
-    const missing = PROJECTS.map((p) => p.slug).filter((s) => !served.has(s))
-    const extra = slugs.filter((s) => !configured.has(s))
-    if (missing.length)
-      console.warn(
-        `daemon does NOT serve ${missing.length} configured project(s): ` +
-          `${missing.join(', ')} — tasks for these will wedge. ` +
-          `Launch the daemon with the same project dirs as the server.`,
-      )
-    if (extra.length)
-      console.warn(
-        `daemon serves ${extra.length} project(s) this server doesn't: ` +
-          `${extra.join(', ')} — launch-arg drift, harmless.`,
-      )
-  },
-  onUsage: (body) => {
-    usageCache = { at: Date.now(), body }
-  },
-})
-console.log(`daemon WS endpoint at ws://localhost:${port}/daemon`)
-console.log('projects:')
-for (const p of PROJECTS) console.log(`  ${p.slug}  ${p.path}`)
-void backfillIds()
-void backfillAgents()
-void backfillSeen()
-void recoverQueues()
-// Launch due scheduled tasks on boot (catching any whose time passed while the
-// server was down), then sweep every 15s to launch each as it comes due.
-void launchScheduled()
-const scheduler = setInterval(() => void launchScheduled(), 15_000)
-
-// Shut down cleanly when the watcher restarts us (or on Ctrl-C): stop the
-// scheduler and let the HTTP server finish the requests already in flight before
-// exiting, so a reload doesn't drop a write mid-flight. In-flight runs need no
-// special handling — they live in the daemon, which outlives the server; the
-// fresh process reattaches over the WS and resumes each from the persisted cursor
-// (resume-from). A timeout forces the exit if a connection refuses to close.
-let shuttingDown = false
-function shutdown(): void {
-  if (shuttingDown) return
-  shuttingDown = true
-  clearInterval(scheduler)
-  const force = setTimeout(() => process.exit(0), 3_000)
-  force.unref()
-  server.close(() => {
-    clearTimeout(force)
-    process.exit(0)
+  // Accept the host daemon's WebSocket and route runs to it. The server's
+  // @hono/node-server serve() returns a Node http.Server, which we hand to the WS
+  // layer to handle the /daemon upgrade. The daemon owns usage end to end
+  // (decision 6): each pushed snapshot lands straight in the cache the tasks poll
+  // embeds and the daemon's connect-time push primes it.
+  attachDaemonServer(server as unknown as import('node:http').Server, {
+    token: DAEMON_TOKEN,
+    // Warn at register time about a slug mismatch between how the daemon was
+    // launched and the projects this server serves — the usual silent cause of a
+    // task wedging with "daemon does not serve this project". A project we serve
+    // that the daemon doesn't is the one that breaks tasks (missing); a slug the
+    // daemon serves that we don't is harmless launch-arg drift (extra), logged for
+    // symmetry. Both point back at the PROJECT_DIRS the two sides were launched with.
+    onRegister: (slugs) => {
+      const served = new Set(slugs)
+      const configured = new Set(PROJECTS.map((p) => p.slug))
+      const missing = PROJECTS.map((p) => p.slug).filter((s) => !served.has(s))
+      const extra = slugs.filter((s) => !configured.has(s))
+      if (missing.length)
+        console.warn(
+          `daemon does NOT serve ${missing.length} configured project(s): ` +
+            `${missing.join(', ')} — tasks for these will wedge. ` +
+            `Launch the daemon with the same project dirs as the server.`,
+        )
+      if (extra.length)
+        console.warn(
+          `daemon serves ${extra.length} project(s) this server doesn't: ` +
+            `${extra.join(', ')} — launch-arg drift, harmless.`,
+        )
+    },
+    onUsage: (body) => {
+      usageCache = { at: Date.now(), body }
+    },
   })
+  console.log(`daemon WS endpoint at ws://localhost:${port}/daemon`)
+  console.log('projects:')
+  for (const p of PROJECTS) console.log(`  ${p.slug}  ${p.path}`)
+  void backfillIds()
+  void backfillAgents()
+  void backfillSeen()
+  void recoverQueues()
+  // Launch due scheduled tasks on boot (catching any whose time passed while the
+  // server was down), then sweep every 15s to launch each as it comes due.
+  void launchScheduled()
+  const scheduler = setInterval(() => void launchScheduled(), 15_000)
+
+  // Shut down cleanly when the watcher restarts us (or on Ctrl-C): stop the
+  // scheduler and let the HTTP server finish the requests already in flight
+  // before exiting, so a reload doesn't drop a write mid-flight. In-flight runs
+  // need no special handling — they live in the daemon, which outlives the
+  // server; the fresh process reattaches over the WS and resumes each from the
+  // persisted cursor (resume-from). A timeout forces the exit if a connection
+  // refuses to close.
+  let shuttingDown = false
+  function shutdown(): void {
+    if (shuttingDown) return
+    shuttingDown = true
+    clearInterval(scheduler)
+    const force = setTimeout(() => process.exit(0), 3_000)
+    force.unref()
+    server.close(() => {
+      clearTimeout(force)
+      process.exit(0)
+    })
+  }
+  process.on('SIGTERM', shutdown)
+  process.on('SIGINT', shutdown)
 }
-process.on('SIGTERM', shutdown)
-process.on('SIGINT', shutdown)

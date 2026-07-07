@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
+  codexOptionsFromEnv,
   createCodexAdapter,
   extractCodexSession,
   reduceCodexStreamLine,
@@ -163,6 +164,60 @@ describe('Codex adapter reducer', () => {
         'This Codex turn runs with the read-only sandbox. Task allow rules and commit-only grants are stored by Lander but do not affect Codex runs yet',
       ),
     ])
+  })
+
+  it('adds optional Codex profile and config flags before per-run env config', () => {
+    const configured = createCodexAdapter({
+      taskPromptTemplate: TASK_PROMPT_TEMPLATE,
+      profile: 'lander-codex',
+      configOverrides: ['model="gpt-5-codex"', 'approval_policy="never"'],
+    })
+    const launch = configured.buildLaunch({
+      task: {
+        allowEdits: true,
+        allowCommits: false,
+      },
+      prompt: 'use configured codex',
+      root: '/repo',
+      cwd: '/repo',
+      landerEnv: { LANDER_TASK: 'task-1' },
+    })
+
+    expect(launch.args).toEqual([
+      'exec',
+      '--json',
+      '--profile',
+      'lander-codex',
+      '--config',
+      'model="gpt-5-codex"',
+      '--config',
+      'approval_policy="never"',
+      '--config',
+      'shell_environment_policy.set.LANDER_TASK="task-1"',
+      '--cd',
+      '/repo',
+      '--sandbox',
+      'workspace-write',
+      managedPrompt(
+        'use configured codex',
+        'This Codex turn runs with the workspace-write sandbox for file edits. Task allow rules and commit-only grants are stored by Lander but do not affect Codex runs yet',
+      ),
+    ])
+  })
+
+  it('parses optional Codex profile and config overrides from env', () => {
+    expect(
+      codexOptionsFromEnv({
+        LANDER_CODEX_PROFILE: ' lander-codex ',
+        LANDER_CODEX_CONFIG: '\nmodel="gpt-5-codex"\n approval_policy="never" \n',
+      }),
+    ).toEqual({
+      profile: 'lander-codex',
+      configOverrides: ['model="gpt-5-codex"', 'approval_policy="never"'],
+    })
+    expect(codexOptionsFromEnv({ LANDER_CODEX_PROFILE: ' ', LANDER_CODEX_CONFIG: '\n' })).toEqual(
+      {},
+    )
   })
 
   it('does not pre-mint Codex sessions in the daemon session prelude', () => {
