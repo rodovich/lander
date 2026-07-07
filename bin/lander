@@ -447,19 +447,32 @@ async function landTask(args) {
 }
 
 // --- assist ----------------------------------------------------------------
-// Run a one-shot `claude -p` session and return its reply. The prompt comes
+// Run a provider-backed one-shot session and return its reply. The prompt comes
 // first; any further args are appended on their own line as the material to act
 // on, so `lander assist "summarize:" "$(cat notes)"` sends the prompt then the
-// notes. A non-zero exit from claude aborts. Shared by the `lander assist` CLI
+// notes. A non-zero exit from the provider aborts. Shared by the `lander assist` CLI
 // command and the `lander.assist()` flow API.
-function runClaude(prompt, args) {
-  const text = args.length ? `${prompt}\n${args.join('')}` : prompt
+function assistAgentFromEnv(env) {
+  const value = env.LANDER_AGENT?.trim().toLowerCase()
+  return value === 'codex' ? 'codex' : 'claude'
+}
+
+function assistLaunch(agent, text) {
+  if (agent === 'codex') return { command: 'codex', args: ['exec', text] }
   // `--` so a prompt starting with a hyphen is taken as the positional prompt
   // rather than parsed as an option by claude's CLI.
-  const r = spawnSync('claude', ['-p', '--', text], { encoding: 'utf8' })
+  return { command: 'claude', args: ['-p', '--', text] }
+}
+
+function runAssist(prompt, args) {
+  const text = args.length ? `${prompt}\n${args.join('')}` : prompt
+  const launch = assistLaunch(assistAgentFromEnv(process.env), text)
+  const r = spawnSync(launch.command, launch.args, { encoding: 'utf8' })
   if (r.error) die(`assist: ${r.error.message}`)
   if (r.status !== 0)
-    die(`assist: ${(r.stderr || '').trim() || `claude exited ${r.status}`}`)
+    die(
+      `assist: ${(r.stderr || '').trim() || `${launch.command} exited ${r.status}`}`,
+    )
   return r.stdout ?? ''
 }
 
@@ -467,7 +480,7 @@ function runClaude(prompt, args) {
 async function assist(args) {
   const [prompt, ...rest] = args
   if (!prompt) die('usage: lander assist <prompt> [text …]')
-  process.stdout.write(runClaude(prompt, rest))
+  process.stdout.write(runAssist(prompt, rest))
 }
 
 // --- flows -----------------------------------------------------------------
@@ -596,7 +609,7 @@ function makeLander(inputs) {
         }),
       })
     },
-    assist: (prompt, ...args) => runClaude(prompt, args).trim(),
+    assist: (prompt, ...args) => runAssist(prompt, args).trim(),
     shell: (command, ...args) => runShell(command, args).trim(),
     flow: (name, inputs = {}) => runFlowByName(name, inputs),
   }
