@@ -189,10 +189,11 @@ type TaskView = 'inbox' | 'unread' | 'archived'
 function usePersistentState<T>(
   key: string,
   initial: T,
+  store: Storage = localStorage,
 ): [T, Dispatch<SetStateAction<T>>] {
   const [value, setValue] = useState<T>(() => {
     try {
-      const raw = localStorage.getItem(key)
+      const raw = store.getItem(key)
       return raw != null ? (JSON.parse(raw) as T) : initial
     } catch {
       return initial
@@ -200,12 +201,25 @@ function usePersistentState<T>(
   })
   useEffect(() => {
     try {
-      localStorage.setItem(key, JSON.stringify(value))
+      store.setItem(key, JSON.stringify(value))
     } catch {
       // storage unavailable — the value simply won't persist
     }
   }, [key, value])
   return [value, setValue]
+}
+
+// Like usePersistentState but backed by sessionStorage, which is scoped to a
+// single tab: the value survives a hot reload or refresh within that tab, yet
+// two tabs keep independent values (and each is dropped when its tab closes).
+// Used for view state a user reasonably expects to differ per tab — the list
+// filters and the per-tab drafts they're composing — rather than a global
+// preference, which stays on localStorage so it holds everywhere at once.
+function useSessionState<T>(
+  key: string,
+  initial: T,
+): [T, Dispatch<SetStateAction<T>>] {
+  return usePersistentState(key, initial, sessionStorage)
 }
 
 function formatTimestamp(iso: string): string {
@@ -1335,14 +1349,17 @@ export function App() {
   const [projects, setProjects] = useState<Project[]>([])
   // The project dropdown acts as a filter: `shown` holds the slugs whose tasks
   // are merged into the list. It is always either a single project or every
-  // project ("show all"); see showOnly/showAll below.
-  const [shown, setShown] = useState<string[]>([])
+  // project ("show all"); see showOnly/showAll below. Session-scoped so it
+  // survives a reload but stays per-tab; reconciled against the live project
+  // list once it loads (see the /api/projects effect).
+  const [shown, setShown] = useSessionState<string[]>('lander:shown', [])
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
-  // The list's task-slice filter (see TaskView), persisted so it survives a reload.
-  const [view, setView] = usePersistentState<TaskView>('lander:view', 'inbox')
-  // The list's time-window filter (see TimeFilter), persisted so it survives a reload.
-  const [timeFilter, setTimeFilter] = usePersistentState<TimeFilter>(
+  // The list's task-slice filter (see TaskView), session-scoped so it survives
+  // a reload but can differ per tab.
+  const [view, setView] = useSessionState<TaskView>('lander:view', 'inbox')
+  // The list's time-window filter (see TimeFilter), session-scoped alongside view.
+  const [timeFilter, setTimeFilter] = useSessionState<TimeFilter>(
     'lander:timeFilter',
     'any',
   )
@@ -1352,24 +1369,28 @@ export function App() {
     () => taskIdFromPath() || null,
   )
   const [error, setError] = useState<string | null>(null)
-  const [filter, setFilter] = useState('')
+  // The list search box, session-scoped alongside the other list filters.
+  const [filter, setFilter] = useSessionState('lander:filter', '')
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   // The new-task form's draft fields persist across reloads so a half-composed
   // task — its message and its edit/commit/project choices — isn't lost to a
-  // hot reload or refresh.
-  const [message, setMessage] = usePersistentState('lander:draft:newTask', '')
-  const [newAllowEdits, setNewAllowEdits] = usePersistentState(
+  // hot reload or refresh. Session-scoped: two tabs composing different tasks
+  // keep independent drafts (localStorage would let them clobber each other,
+  // and since these fields drive the submission, a shared newProject could
+  // even send a task to the wrong project).
+  const [message, setMessage] = useSessionState('lander:draft:newTask', '')
+  const [newAllowEdits, setNewAllowEdits] = useSessionState(
     'lander:draft:newAllowEdits',
     true,
   )
-  const [newAllowCommits, setNewAllowCommits] = usePersistentState(
+  const [newAllowCommits, setNewAllowCommits] = useSessionState(
     'lander:draft:newAllowCommits',
     false,
   )
   // Explicit project override for the new-task form; empty means "follow the
   // default" (targetSlug below).
-  const [newProject, setNewProject] = usePersistentState(
+  const [newProject, setNewProject] = useSessionState(
     'lander:draft:newProject',
     '',
   )
@@ -1383,8 +1404,9 @@ export function App() {
 
   // Each task keeps its own draft and in-flight state, keyed by id, so you
   // can start a reply in one task, switch away, and come back to finish it; the
-  // drafts persist across reloads alongside the new-task message.
-  const [replies, setReplies] = usePersistentState<Record<string, string>>(
+  // drafts persist across reloads alongside the new-task message and, like it,
+  // are session-scoped so two tabs don't clobber each other's reply drafts.
+  const [replies, setReplies] = useSessionState<Record<string, string>>(
     'lander:draft:replies',
     {},
   )
@@ -1817,14 +1839,21 @@ export function App() {
     return { tasks: merged, usage }
   }
 
-  // Load the project list once and show all projects by default. (A task named
-  // in the URL is seeded as the selection by selectedTaskId's initializer.)
+  // Load the project list once. Reconcile the session-restored project filter
+  // against it — keeping the picked slugs that still exist, and falling back to
+  // "show all" only when nothing valid was restored (first visit, or every
+  // picked project has since gone away). (A task named in the URL is seeded as
+  // the selection by selectedTaskId's initializer.)
   useEffect(() => {
     fetch('/api/projects')
       .then((r) => r.json())
       .then((list: Project[]) => {
         setProjects(list)
-        setShown(list.map((p) => p.slug))
+        const all = list.map((p) => p.slug)
+        setShown((prev) => {
+          const valid = prev.filter((s) => all.includes(s))
+          return valid.length > 0 ? valid : all
+        })
       })
       .catch(() => {})
   }, [])
