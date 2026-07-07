@@ -1776,6 +1776,9 @@ export function App() {
       setShown(projects.map((p) => p.slug))
     } else {
       setShown([slug])
+      // Picking a specific project also targets new tasks at it. Showing all
+      // projects or changing the time/status filter leaves this untouched.
+      setNewProject(slug)
     }
     setMenuOpen(false)
   }
