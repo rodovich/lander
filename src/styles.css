@@ -821,6 +821,11 @@ body {
   background: var(--bg-tinted);
 }
 
+.usage-unsupported {
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .usage-windows {
   display: flex;
   gap: 16px;

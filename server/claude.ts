@@ -41,8 +41,10 @@ export function createClaudeAdapter({
     persistProjectGrant: persistClaudeProjectGrant,
     hookStrategy: 'inline-launch',
     supportsProjectGrants: true,
+    supportsTaskAllowRules: true,
     supportsWorktreeFlag: true,
     supportsUsageSnapshot: true,
+    supportsRateLimitRetryScheduling: true,
   }
 }
 

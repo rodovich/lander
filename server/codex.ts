@@ -38,8 +38,10 @@ export function createCodexAdapter({
     extractSession: extractCodexSession,
     hookStrategy: 'project-config',
     supportsProjectGrants: false,
+    supportsTaskAllowRules: false,
     supportsWorktreeFlag: false,
     supportsUsageSnapshot: false,
+    supportsRateLimitRetryScheduling: false,
   }
 }
 
@@ -51,7 +53,11 @@ function buildCodexArgs(
   taskPromptTemplate: string,
 ): string[] {
   const envArgs = codexShellEnvArgs(landerEnv)
-  const managedPrompt = promptWithTaskManagement(task, prompt, taskPromptTemplate)
+  const managedPrompt = promptWithTaskManagement(
+    { ...task, agent: 'codex' },
+    prompt,
+    taskPromptTemplate,
+  )
   if (task.sessionId)
     return ['exec', 'resume', '--json', ...envArgs, task.sessionId, managedPrompt]
   return [

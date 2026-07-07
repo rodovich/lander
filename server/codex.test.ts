@@ -55,8 +55,10 @@ describe('Codex adapter reducer', () => {
     expect(adapter.command).toBe('codex')
     expect(adapter.hookStrategy).toBe('project-config')
     expect(adapter.supportsProjectGrants).toBe(false)
+    expect(adapter.supportsTaskAllowRules).toBe(false)
     expect(adapter.supportsWorktreeFlag).toBe(false)
     expect(adapter.supportsUsageSnapshot).toBe(false)
+    expect(adapter.supportsRateLimitRetryScheduling).toBe(false)
   })
 
   it('builds first-turn Codex exec args with conservative sandboxing', () => {
@@ -104,7 +106,7 @@ describe('Codex adapter reducer', () => {
       'read-only',
       managedPrompt(
         'hello codex',
-        'You currently have permission for git commits, and can forward that to a spawned task',
+        'This Codex turn runs with the read-only sandbox. Task allow rules and commit-only grants are stored by Lander but do not affect Codex runs yet',
       ),
     ])
     expect(launch.args).not.toContain('--skip-git-repo-check')
@@ -131,7 +133,7 @@ describe('Codex adapter reducer', () => {
       'workspace-write',
       managedPrompt(
         'edit files',
-        'You currently have permission for editing files and git commits, and can forward that to a spawned task',
+        'This Codex turn runs with the workspace-write sandbox for file edits. Task allow rules and commit-only grants are stored by Lander but do not affect Codex runs yet',
       ),
     ])
   })
@@ -158,7 +160,7 @@ describe('Codex adapter reducer', () => {
       '019f0000-0000-7000-8000-000000000001',
       managedPrompt(
         'follow up',
-        'You currently have no edit or commit permissions, so a spawned task cannot be granted them either',
+        'This Codex turn runs with the read-only sandbox. Task allow rules and commit-only grants are stored by Lander but do not affect Codex runs yet',
       ),
     ])
   })

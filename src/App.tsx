@@ -457,7 +457,19 @@ function UsageBar({
 // 5-hour session window and the 7-day weekly window, each a small progress bar
 // with its reset time. The snapshot rides in on every tasks poll (the server
 // owns when to refresh it from upstream), so this is purely presentational.
-function UsageSummary({ usage }: { usage: Usage | null }) {
+function UsageSummary({
+  usage,
+  agent,
+}: {
+  usage: Usage | null
+  agent?: Task['agent']
+}) {
+  if (agent === 'codex')
+    return (
+      <div className="usage-summary usage-unsupported">
+        Codex subscription usage unsupported
+      </div>
+    )
   // Stay quiet until we have something to show; a missing token or endpoint
   // error leaves usage null, which shouldn't clutter the sidebar.
   if (!usage || (!usage.session && !usage.weekly)) return null
@@ -497,12 +509,14 @@ function UsageSummary({ usage }: { usage: Usage | null }) {
 function ToolPopup({
   step,
   status,
+  agent,
   allowable,
   anchor,
   onAllow,
 }: {
   step: Step
   status: ToolStatus
+  agent: Task['agent']
   // Whether to offer the allow buttons. True when the call was refused at the
   // permission gate, or it errored before the turn's permission_denials list
   // arrived (so we can't yet tell a refusal from a plain failure — offer the
@@ -522,6 +536,7 @@ function ToolPopup({
   // error "failed". A clean or still-running call shows just its rule.
   const label =
     status === 'blocked' ? 'blocked' : status === 'failed' ? 'failed' : ''
+  const codex = agent === 'codex'
   return (
     <div
       className="tool-popup"
@@ -540,11 +555,27 @@ function ToolPopup({
       />
       {allowable && (
         <div className="tool-popup-actions">
-          <button type="button" onClick={() => onAllow(rule, 'task')}>
-            allow in task
+          <button
+            type="button"
+            title={
+              codex
+                ? 'Saved for parity; Codex runs do not honor task allow rules yet'
+                : undefined
+            }
+            onClick={() => onAllow(rule, 'task')}
+          >
+            {codex ? 'save rule' : 'allow in task'}
           </button>
-          <button type="button" onClick={() => onAllow(rule, 'project')}>
-            allow in project
+          <button
+            type="button"
+            title={
+              codex
+                ? 'Project grants are not supported for Codex tasks yet'
+                : undefined
+            }
+            onClick={() => onAllow(rule, 'project')}
+          >
+            {codex ? 'project unsupported' : 'allow in project'}
           </button>
         </div>
       )}
@@ -651,6 +682,7 @@ function ToolStep({
   onAllow,
   detailOpen,
   onToggleDetail,
+  agent,
   subSteps,
 }: {
   step: Step
@@ -666,6 +698,7 @@ function ToolStep({
   // `all` is set when the user option/shift-clicked, asking to toggle every
   // detail in the message rather than just this one.
   onToggleDetail: (all: boolean) => void
+  agent: Task['agent']
   // A subagent-spawning call (Agent/Explore) gets its subagent's whole activity
   // trace as its revealable detail, pre-rendered by the caller. Absent otherwise.
   subSteps?: React.ReactNode
@@ -760,6 +793,7 @@ function ToolStep({
         <ToolPopup
           step={step}
           status={status}
+          agent={agent}
           allowable={allowable}
           anchor={anchor}
           onAllow={onAllow}
@@ -783,6 +817,7 @@ function Step({
   detailOpen,
   onToggleDetail,
   linkTask,
+  agent,
   subSteps,
 }: {
   step: Step
@@ -796,6 +831,7 @@ function Step({
   detailOpen: boolean
   onToggleDetail: (all: boolean) => void
   linkTask: TaskLinkResolver
+  agent: Task['agent']
   // A subagent spawner's nested trace, pre-rendered by the caller; passed through
   // to ToolStep as the chip's revealable detail.
   subSteps?: React.ReactNode
@@ -813,6 +849,7 @@ function Step({
         onAllow={onAllow}
         detailOpen={detailOpen}
         onToggleDetail={onToggleDetail}
+        agent={agent}
         subSteps={subSteps}
       />
     )
@@ -2284,6 +2321,7 @@ export function App() {
       })
       const body = await r.json()
       if (!r.ok) throw new Error(body.error ?? r.statusText)
+      if (typeof body.warning === 'string') setError(body.warning)
       if (scope === 'task') setTasks((await loadShownTasks(shown)).tasks)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -2932,7 +2970,7 @@ export function App() {
           </button>
         </form>
 
-        <UsageSummary usage={usage} />
+        <UsageSummary usage={usage} agent={current?.agent} />
       </div>
 
       <div className="detail">
@@ -3219,6 +3257,7 @@ export function App() {
                               onToggleDetail={(all) =>
                                 toggleDetail(key, all ? detailKeys : [key])
                               }
+                              agent={current.agent}
                               linkTask={resolveTaskLink}
                               subSteps={subSteps}
                             />
@@ -3420,6 +3459,18 @@ export function App() {
                   // re-read of cached context — reported separately.
                   const uncached = u.input + u.cacheCreation
                   const scope = usageTotal ? 'total' : 'turn'
+                  const costText =
+                    u.costUsd !== undefined
+                      ? `$${u.costUsd.toFixed(4)}`
+                      : current.agent === 'codex'
+                        ? 'unavailable for Codex'
+                        : '… (available when the turn lands)'
+                  const costBadge =
+                    u.costUsd !== undefined
+                      ? formatCost(u.costUsd)
+                      : current.agent === 'codex'
+                        ? 'n/a'
+                        : '$…'
                   return (
                     <div className="token-usage">
                       {u.model && (
@@ -3436,23 +3487,16 @@ export function App() {
                           `(+ ${u.cacheCreation.toLocaleString()} written to cache)\n` +
                           `cache read ${u.cacheRead.toLocaleString()}\n` +
                           `output ${u.output.toLocaleString()}\n` +
-                          `cost ${
-                            u.costUsd !== undefined
-                              ? `$${u.costUsd.toFixed(4)}`
-                              : '… (available when the turn lands)'
-                          }`
+                          `cost ${costText}`
                         }
                       >
                         <span className="token-scope">{scope}</span>
                         <span>in {formatTokens(uncached)}</span>
                         <span>cache {formatTokens(u.cacheRead)}</span>
                         <span>out {formatTokens(u.output)}</span>
-                        {/* Cost only arrives with the turn's result event, so an
-                            active turn has none yet — show a placeholder that
-                            fills in when the turn lands, rather than nothing. */}
-                        <span className="token-cost">
-                          {u.costUsd !== undefined ? formatCost(u.costUsd) : '$…'}
-                        </span>
+                        {/* Claude cost arrives with the turn's result event; Codex
+                            currently reports token usage without account cost. */}
+                        <span className="token-cost">{costBadge}</span>
                       </button>
                     </div>
                   )

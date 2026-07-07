@@ -83,6 +83,22 @@ function agentAdapter(kind: AgentKind): AgentAdapter | undefined {
   return undefined
 }
 
+function agentLabel(kind: AgentKind): string {
+  return kind === 'codex' ? 'Codex' : 'Claude'
+}
+
+function unsupportedProjectGrantMessage(kind: AgentKind): string {
+  if (kind === 'codex')
+    return 'Project permission grants are not supported for Codex tasks yet.'
+  return `Project permission grants are not supported for ${agentLabel(kind)} tasks.`
+}
+
+function unsupportedTaskAllowWarning(kind: AgentKind): string | undefined {
+  if (kind === 'codex')
+    return 'Task allow rules are saved for Codex tasks but do not affect Codex runs yet.'
+  return undefined
+}
+
 // Daemon split: runs are driven by the host
 // daemon over a WebSocket — the server holds task state, drives the queue, and
 // serves the API/UI, but never spawns a process, touches a pid, or parses
@@ -492,7 +508,7 @@ async function runTurn(
     project: project.slug,
     // cwd hints — the daemon does the stat/fallback/worktree resolution locally.
     recordedCwd: task.cwd,
-    worktree: task.worktree,
+    worktree: adapter?.supportsWorktreeFlag ? task.worktree : undefined,
     // The provider session to resume; absent on the first turn, so the daemon
     // reports one back (reduceRunWs persists it onto task.sessionId).
     sessionId: task.sessionId,
@@ -1683,7 +1699,8 @@ app.post('/api/:project/tasks/:id/worktree', async (c) => {
     const id = c.req.param('id')
     if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
     const file = path.join(project.dataDir, `${id}.json`)
-    if (!(await readTask(project.dataDir, id)))
+    const existing = await readTask(project.dataDir, id)
+    if (!existing)
       return c.json({ error: 'task not found' }, 404)
 
     const principal = await resolvePrincipal(c.req)
@@ -1696,6 +1713,17 @@ app.post('/api/:project/tasks/:id/worktree', async (c) => {
     const body = await c.req.json<{ worktreePath?: unknown }>()
     if (typeof body.worktreePath !== 'string' || !body.worktreePath)
       return c.json({ error: 'worktreePath is required' }, 400)
+    const worktreeAgent = existing.agent ?? DEFAULT_AGENT
+    const adapter = agentAdapter(worktreeAgent)
+    if (!adapter?.supportsWorktreeFlag)
+      return c.json(
+        {
+          error:
+            `Worktrees are not supported for ${agentLabel(worktreeAgent)} tasks yet; ` +
+            `${agentLabel(worktreeAgent)} tasks resume from their recorded cwd.`,
+        },
+        400,
+      )
     const name = worktreeName(project.path, body.worktreePath)
     if (!name) return c.json({ error: 'not a worktree of this project' }, 400)
 
@@ -2047,13 +2075,16 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
     const scope = body.scope === 'project' ? 'project' : 'task'
     if (!rule) return c.json({ error: 'rule is required' }, 400)
 
+    const task = await readTask(project.dataDir, id)
+    if (!task) return c.json({ error: 'task not found' }, 404)
+    const grantAgent = task.agent ?? DEFAULT_AGENT
+    const adapter = agentAdapter(grantAgent)
+
+    let warning: string | undefined
     if (scope === 'project') {
-      const task = await readTask(project.dataDir, id)
-      const grantAgent = task?.agent ?? DEFAULT_AGENT
-      const adapter = agentAdapter(grantAgent)
       if (!adapter?.supportsProjectGrants || !adapter.persistProjectGrant)
         return c.json(
-          { error: `project grants are not supported for ${grantAgent} tasks` },
+          { error: unsupportedProjectGrantMessage(grantAgent) },
           400,
         )
       await adapter.persistProjectGrant({ projectPath: project.path, rule })
@@ -2066,8 +2097,10 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
       } catch {
         return c.json({ error: 'task not found' }, 404)
       }
+      if (!adapter?.supportsTaskAllowRules)
+        warning = unsupportedTaskAllowWarning(grantAgent)
     }
-    return c.json({ ok: true, rule, scope })
+    return c.json({ ok: true, rule, scope, ...(warning ? { warning } : {}) })
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }

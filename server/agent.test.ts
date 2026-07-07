@@ -40,8 +40,10 @@ describe('agent adapter contract', () => {
       },
       hookStrategy: 'inline-launch',
       supportsProjectGrants: true,
+      supportsTaskAllowRules: true,
       supportsWorktreeFlag: true,
       supportsUsageSnapshot: true,
+      supportsRateLimitRetryScheduling: true,
     }
 
     const launch = adapter.buildLaunch({

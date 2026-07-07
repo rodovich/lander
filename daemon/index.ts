@@ -307,13 +307,16 @@ function startRun(msg: StartRunMessage): void {
       }
       const r = adapter.reduceLine(line, new Date().toISOString())
       if (r.drivingModel) drivingModel = r.drivingModel
-      if (r.rateLimitResetsAt && !sawRateLimit) {
+      const reliableReset = adapter.supportsRateLimitRetryScheduling
+        ? r.rateLimitResetsAt
+        : undefined
+      if (reliableReset && !sawRateLimit) {
         // First session-limit rejection this run — the window just filled, a
         // usage-moving event, so refresh now (shares the 60s floor).
         sawRateLimit = true
         if (adapter.supportsUsageSnapshot) void refreshUsage()
       }
-      if (r.rateLimitResetsAt) rateLimitResetsAt = r.rateLimitResetsAt
+      if (reliableReset) rateLimitResetsAt = reliableReset
       if (r.terminalError) {
         if (!terminalError) terminalError = r.terminalError
         else if (!terminalError.includes(r.terminalError))

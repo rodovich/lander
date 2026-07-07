@@ -15,6 +15,8 @@ export type AgentTaskView = {
   sessionId?: string
   allowEdits: boolean
   allowCommits: boolean
+  // Extra task-scoped tool rules. Adapters that do not support per-run allow
+  // rules may persist these for parity without claiming they affect execution.
   allow?: string[]
   worktree?: string
 }
@@ -87,6 +89,8 @@ export type AgentAdapter = {
   persistProjectGrant?(input: AgentProjectGrantInput): Promise<void>
   hookStrategy: AgentHookStrategy
   supportsProjectGrants: boolean
+  supportsTaskAllowRules: boolean
   supportsWorktreeFlag: boolean
   supportsUsageSnapshot: boolean
+  supportsRateLimitRetryScheduling: boolean
 }
