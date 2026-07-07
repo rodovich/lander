@@ -2451,6 +2451,12 @@ export function App() {
   // spans so the name can carry heavier weight than the suffixes (see CSS).
   const filterSuffixes = [timeLabel, viewLabel].filter(Boolean)
 
+  // Keep the page title in sync with the project-select label text.
+  const filterLabel = [filterBase, ...filterSuffixes].filter(Boolean).join(' • ')
+  useEffect(() => {
+    document.title = filterLabel || 'lander'
+  }, [filterLabel])
+
   return (
     <div className="layout">
       <div className="sidebar">
