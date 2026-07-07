@@ -1,4 +1,4 @@
-import type { AgentAdapter, AgentLineUpdate } from './agent'
+import type { AgentAdapter, AgentLineUpdate, AgentTaskView } from './agent'
 import type { Usage } from './stream'
 import { summarizeToolResult, toolRule } from './stream'
 
@@ -6,11 +6,18 @@ export function createCodexAdapter(): AgentAdapter {
   return {
     kind: 'codex',
     command: 'codex',
-    buildLaunch() {
-      throw new Error('Codex launch semantics are not implemented yet')
+    buildLaunch({ task, prompt, cwd, landerEnv }) {
+      return {
+        command: 'codex',
+        args: buildCodexArgs(task, prompt, cwd),
+        env: landerEnv,
+      }
     },
     buildSession() {
-      throw new Error('Codex launch semantics are not implemented yet')
+      return {
+        args: [],
+        announceSession: false,
+      }
     },
     reduceLine: reduceCodexStreamLine,
     extractSession: extractCodexSession,
@@ -19,6 +26,23 @@ export function createCodexAdapter(): AgentAdapter {
     supportsWorktreeFlag: false,
     supportsUsageSnapshot: false,
   }
+}
+
+function buildCodexArgs(
+  task: AgentTaskView,
+  prompt: string,
+  cwd: string,
+): string[] {
+  if (task.sessionId) return ['exec', 'resume', '--json', task.sessionId, prompt]
+  return [
+    'exec',
+    '--json',
+    '--cd',
+    cwd,
+    '--sandbox',
+    task.allowEdits ? 'workspace-write' : 'read-only',
+    prompt,
+  ]
 }
 
 export function extractCodexSession(line: string): string | undefined {

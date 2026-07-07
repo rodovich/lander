@@ -48,7 +48,7 @@ export type AgentSessionInput = {
 
 export type AgentSessionLaunch = {
   args: string[]
-  sessionId: string
+  sessionId?: string
   announceSession: boolean
 }
 

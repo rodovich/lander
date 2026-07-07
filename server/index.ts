@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { applyUpdate, applyDone } from './apply'
 import type { AgentAdapter } from './agent'
 import { createClaudeAdapter } from './claude'
+import { createCodexAdapter } from './codex'
 import {
   attachDaemonServer,
   daemonConnected,
@@ -72,9 +73,12 @@ const CLAUDE_ADAPTER = createClaudeAdapter({
   landerBin: LANDER_BIN,
   taskPromptTemplate: TASK_PROMPT_TEMPLATE,
 })
+const CODEX_ADAPTER = createCodexAdapter()
 
 function agentAdapter(kind: AgentKind): AgentAdapter | undefined {
-  return kind === 'claude' ? CLAUDE_ADAPTER : undefined
+  if (kind === 'claude') return CLAUDE_ADAPTER
+  if (kind === 'codex') return CODEX_ADAPTER
+  return undefined
 }
 
 // Daemon split: runs are driven by the host

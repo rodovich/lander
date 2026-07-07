@@ -16,6 +16,7 @@ import { readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createClaudeAdapter } from '../server/claude'
+import { createCodexAdapter } from '../server/codex'
 import type { AgentAdapter } from '../server/agent'
 import { addUsage, type Usage } from '../server/stream'
 import { projectSlug } from '../server/projects'
@@ -63,9 +64,12 @@ const CLAUDE_ADAPTER = createClaudeAdapter({
     'utf8',
   ).trim(),
 })
+const CODEX_ADAPTER = createCodexAdapter()
 
 function agentAdapter(kind: StartRunMessage['agent']): AgentAdapter | undefined {
-  return kind === 'claude' ? CLAUDE_ADAPTER : undefined
+  if (kind === 'claude') return CLAUDE_ADAPTER
+  if (kind === 'codex') return CODEX_ADAPTER
+  return undefined
 }
 
 // One run's handle. Held from start until the server acks its `done` (or a
@@ -75,8 +79,8 @@ type Run = {
   interrupt: () => void
   child: ChildProcess
   buffer: UpdateMessage[]
-  // The session id this run minted (only when it began a fresh session, i.e. the
-  // server sent no `sessionId` to resume). Re-sent ahead of the buffer on
+  // The session id this run announced (only when it began a fresh session, i.e.
+  // the server sent no `sessionId` to resume). Re-sent ahead of the buffer on
   // resume-from so a server that reconnected mid-first-turn still learns it.
   mintedSession?: string
   done?: DoneMessage
@@ -235,10 +239,12 @@ function startRun(msg: StartRunMessage): void {
     },
   )
 
-  // Tell the server the session we minted, so it persists it on the task and
-  // resumes it next turn. Only for a fresh session — a resume already knows it.
-  if (session.announceSession)
-    send({ type: 'session', runId: msg.runId, sessionId: session.sessionId })
+  // Tell the server the session id for a fresh run, whether the adapter minted
+  // it before spawn (Claude) or extracts it from the stream (Codex). A resume
+  // already knows its session id.
+  let announcedSession = session.announceSession ? session.sessionId : undefined
+  if (announcedSession)
+    send({ type: 'session', runId: msg.runId, sessionId: announcedSession })
 
   // Run-scoped reduction state (carried across stdout chunks).
   let seq = 0
@@ -287,6 +293,15 @@ function startRun(msg: StartRunMessage): void {
     for (const raw of chunk.split('\n')) {
       const line = raw.trim()
       if (!line) continue
+      if (!msg.sessionId && !announcedSession) {
+        const sessionId = adapter.extractSession?.(line)
+        if (sessionId) {
+          announcedSession = sessionId
+          const rec = runs.get(msg.runId)
+          if (rec) rec.mintedSession = sessionId
+          send({ type: 'session', runId: msg.runId, sessionId })
+        }
+      }
       const r = adapter.reduceLine(line, new Date().toISOString())
       if (r.drivingModel) drivingModel = r.drivingModel
       if (r.rateLimitResetsAt && !sawRateLimit) {
@@ -386,7 +401,7 @@ function startRun(msg: StartRunMessage): void {
   runs.set(msg.runId, {
     child,
     buffer,
-    mintedSession: session.announceSession ? session.sessionId : undefined,
+    mintedSession: announcedSession,
     // Interrupt mirrors the old runner's SIGTERM handler: stop the agent, finish
     // cleanly as interrupted (the server keeps the partial reply, no crash).
     interrupt: () => {

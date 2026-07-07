@@ -43,13 +43,105 @@ function lastDefined<T>(values: (T | undefined)[]): T | undefined {
 }
 
 describe('Codex adapter reducer', () => {
-  it('exposes Codex as a reducer-only adapter for this step', () => {
+  it('exposes Codex adapter capabilities', () => {
     expect(adapter.kind).toBe('codex')
     expect(adapter.command).toBe('codex')
     expect(adapter.hookStrategy).toBe('project-config')
     expect(adapter.supportsProjectGrants).toBe(false)
     expect(adapter.supportsWorktreeFlag).toBe(false)
     expect(adapter.supportsUsageSnapshot).toBe(false)
+  })
+
+  it('builds first-turn Codex exec args with conservative sandboxing', () => {
+    const launch = adapter.buildLaunch({
+      task: {
+        allowEdits: false,
+        allowCommits: true,
+      },
+      prompt: 'hello codex',
+      root: '/repo',
+      cwd: '/repo/subdir',
+      landerEnv: { LANDER_TASK: 'task-1' },
+    })
+
+    expect(launch.command).toBe('codex')
+    expect(launch.env).toEqual({ LANDER_TASK: 'task-1' })
+    expect(launch.args).toEqual([
+      'exec',
+      '--json',
+      '--cd',
+      '/repo/subdir',
+      '--sandbox',
+      'read-only',
+      'hello codex',
+    ])
+    expect(launch.args).not.toContain('--skip-git-repo-check')
+  })
+
+  it('maps editable first-turn Codex tasks to workspace-write', () => {
+    const launch = adapter.buildLaunch({
+      task: {
+        allowEdits: true,
+        allowCommits: true,
+      },
+      prompt: 'edit files',
+      root: '/repo',
+      cwd: '/repo',
+      landerEnv: {},
+    })
+
+    expect(launch.args).toEqual([
+      'exec',
+      '--json',
+      '--cd',
+      '/repo',
+      '--sandbox',
+      'workspace-write',
+      'edit files',
+    ])
+  })
+
+  it('builds Codex resume args from the provider session id', () => {
+    const launch = adapter.buildLaunch({
+      task: {
+        sessionId: '019f0000-0000-7000-8000-000000000001',
+        allowEdits: false,
+        allowCommits: false,
+      },
+      prompt: 'follow up',
+      root: '/repo',
+      cwd: '/repo',
+      landerEnv: { LANDER_TASK: 'task-1' },
+    })
+
+    expect(launch.args).toEqual([
+      'exec',
+      'resume',
+      '--json',
+      '019f0000-0000-7000-8000-000000000001',
+      'follow up',
+    ])
+  })
+
+  it('does not pre-mint Codex sessions in the daemon session prelude', () => {
+    expect(
+      adapter.buildSession({
+        sessionId: 'existing-thread',
+        mintSessionId: () => 'minted',
+      }),
+    ).toEqual({
+      args: [],
+      announceSession: false,
+    })
+
+    expect(
+      adapter.buildSession({
+        mintSessionId: () => 'minted',
+      }),
+    ).toEqual({
+      args: [],
+      announceSession: false,
+    })
   })
 
   it('returns no steps for invalid JSON', () => {
