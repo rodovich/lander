@@ -41,6 +41,17 @@ export type AgentLaunch = {
   sessionId?: string
 }
 
+export type AgentSessionInput = {
+  sessionId?: string
+  mintSessionId: () => string
+}
+
+export type AgentSessionLaunch = {
+  args: string[]
+  sessionId: string
+  announceSession: boolean
+}
+
 export type AgentLineUpdate = {
   steps: Step[]
   finalText?: string
@@ -64,7 +75,9 @@ export type AgentHookStrategy =
 
 export type AgentAdapter = {
   kind: AgentKind
+  command: string
   buildLaunch(input: AgentLaunchInput): AgentLaunch
+  buildSession(input: AgentSessionInput): AgentSessionLaunch
   reduceLine(line: string, at: string): AgentLineUpdate
   extractSession?(line: string): string | undefined
   persistProjectGrant?(input: AgentProjectGrantInput): Promise<void>

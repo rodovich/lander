@@ -15,6 +15,8 @@ import { promisify } from 'node:util'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { applyUpdate, applyDone } from './apply'
+import type { AgentAdapter } from './agent'
+import { createClaudeAdapter } from './claude'
 import {
   attachDaemonServer,
   daemonConnected,
@@ -52,6 +54,8 @@ import {
 const execFileAsync = promisify(execFile)
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const LANDER_BIN_DIR = path.join(ROOT, 'bin')
+const LANDER_BIN = path.join(LANDER_BIN_DIR, 'lander')
 
 // `{{forwardable}}` is substituted per-task with the agent's edit/commit grant.
 const TASK_PROMPT_TEMPLATE = readFileSync(
@@ -64,6 +68,14 @@ const PROJECT_BY_SLUG = new Map<string, Project>(
   PROJECTS.map((p) => [p.slug, p]),
 )
 const DEFAULT_AGENT: AgentKind = 'claude'
+const CLAUDE_ADAPTER = createClaudeAdapter({
+  landerBin: LANDER_BIN,
+  taskPromptTemplate: TASK_PROMPT_TEMPLATE,
+})
+
+function agentAdapter(kind: AgentKind): AgentAdapter | undefined {
+  return kind === 'claude' ? CLAUDE_ADAPTER : undefined
+}
 
 // Daemon split: runs are driven by the host
 // daemon over a WebSocket — the server holds task state, drives the queue, and
@@ -218,7 +230,7 @@ type Task = {
   // chosen name. Absent on tasks that were named on the first try.
   titlePending?: boolean
   // The working directory the previous turn ended in, recorded by the Stop hook
-  // (see buildClaudeArgs / `lander record-cwd`). Each turn is a fresh `claude`
+  // (see ClaudeAdapter / `lander record-cwd`). Each turn is a fresh `claude`
   // process; without this it always restarts at the project root, so a directory
   // the agent moved into during a turn — most notably a git worktree it entered
   // (EnterWorktree) — would be lost the moment the turn ends. runTurn passes it
@@ -332,28 +344,6 @@ async function ensureTitle(
   }).catch(() => {})
 }
 
-// Append a permission rule to a project's .claude/settings.local.json — the
-// gitignored per-user overrides file the CLI already reads — creating the file
-// and directory as needed. Deduped so repeated grants don't pile up.
-async function addProjectAllow(projectPath: string, rule: string): Promise<void> {
-  const dir = path.join(projectPath, '.claude')
-  const file = path.join(dir, 'settings.local.json')
-  let settings: Record<string, any> = {}
-  try {
-    const parsed = JSON.parse(await readFile(file, 'utf8'))
-    if (parsed && typeof parsed === 'object') settings = parsed
-  } catch {
-    // missing or invalid — start fresh
-  }
-  const perms = (settings.permissions ??= {})
-  const allow: string[] = Array.isArray(perms.allow)
-    ? perms.allow
-    : (perms.allow = [])
-  if (!allow.includes(rule)) allow.push(rule)
-  await mkdir(dir, { recursive: true })
-  await writeFile(file, JSON.stringify(settings, null, 2) + '\n')
-}
-
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 // Wait (up to timeoutMs) for a daemon serving this project's slug to be
@@ -376,124 +366,6 @@ async function awaitDaemonServing(
 // already finished is a no-op on the daemon side.
 function interruptRun(_project: Project, runId: string): void {
   sendToDaemon({ type: 'interrupt', runId })
-}
-
-// Build the argv for one claude turn from the task's permissions and the prompt.
-// The session flag (`--session-id` on a fresh session, `--resume` after) is the
-// daemon's to add — it owns the assistant session id (see startRun) — so it isn't
-// here. Output is stream-json so the runner can stream each event as it arrives.
-function buildClaudeArgs(task: Task, prompt: string): string[] {
-  // Relaunch each turn as a worktree session while the task is in one — see
-  // Task.worktree.
-  const worktreeArgs = task.worktree ? ['--worktree', task.worktree] : []
-  const allowed: string[] = ['Bash(lander:*)']
-  if (task.allowEdits) allowed.push('Edit', 'Write', 'MultiEdit')
-  if (task.allowCommits) allowed.push('Bash(git:*)')
-  if (task.allow?.length) allowed.push(...task.allow)
-  // Pass each rule as its own argument (the flag is variadic) rather than one
-  // space-joined string: a rule like `Bash(sed -n '1,5p':*)` contains spaces,
-  // and joining leaves claude to re-split on them, which mangles the rule and
-  // silently drops it. Separate argv entries keep each rule intact.
-  const editArgs = allowed.length ? ['--allowedTools', ...allowed] : []
-
-  // Tell the agent what edit/commit permissions it holds, so it knows what it
-  // is allowed to forward to a task it spawns. A task can only pass on access
-  // it has itself.
-  const held = [
-    task.allowEdits && 'editing files',
-    task.allowCommits && 'git commits',
-  ].filter(Boolean) as string[]
-  const forwardable = held.length
-    ? `You currently have permission for ${held.join(' and ')}, and can ` +
-      'forward that to a spawned task'
-    : 'You currently have no edit or commit permissions, so a spawned task ' +
-      'cannot be granted them either'
-
-  // A PreToolUse hook on Bash that, when the agent runs a command with
-  // run_in_background set, attaches an advisory: a backgrounded job is a child of
-  // this turn's claude, reaped at turn end, and lander never consumes its
-  // completion — so it can't wake the task and just leaks. The note points at
-  // `lander rest`/`lander launch` for work that must persist. It's advisory only
-  // (additionalContext, no permissionDecision), so it never changes whether the
-  // command is allowed — run_in_background grants nothing the foreground wouldn't.
-  // Passed per-turn via --settings rather than the project settings file, so it
-  // scopes to lander-driven runs; the hook command (`lander bash-guard`) is run by
-  // claude's hook runner, not the agent's Bash tool, so it doesn't touch the
-  // Bash(lander:*) pre-approval.
-  const hookSettings = JSON.stringify({
-    hooks: {
-      PreToolUse: [
-        {
-          matcher: 'Bash',
-          hooks: [
-            {
-              type: 'command',
-              command: `${path.join(ROOT, 'bin', 'lander')} bash-guard`,
-            },
-          ],
-        },
-      ],
-      // Track the worktree the agent moves into or out of, so later turns can
-      // relaunch as a real worktree session (`--worktree`) and the agent's own
-      // ExitWorktree works across resumes — see Task.worktree. EnterWorktree's
-      // payload carries the new worktree's `worktreePath`, which `record-worktree`
-      // forwards; `clear-worktree` drops the reference on exit. Both best-effort.
-      PostToolUse: [
-        {
-          matcher: 'EnterWorktree',
-          hooks: [
-            {
-              type: 'command',
-              command: `${path.join(ROOT, 'bin', 'lander')} record-worktree`,
-            },
-          ],
-        },
-        {
-          matcher: 'ExitWorktree',
-          hooks: [
-            {
-              type: 'command',
-              command: `${path.join(ROOT, 'bin', 'lander')} clear-worktree`,
-            },
-          ],
-        },
-      ],
-      // At the end of every turn, persist the session's working directory (and
-      // transcript path) onto the task, so the next turn resumes where this one
-      // left off rather than back at the project root — see Task.cwd. The Stop
-      // hook's payload carries `cwd`/`transcript_path`; `record-cwd` forwards
-      // them. Best-effort: it never blocks the turn from ending.
-      Stop: [
-        {
-          hooks: [
-            {
-              type: 'command',
-              command: `${path.join(ROOT, 'bin', 'lander')} record-cwd`,
-            },
-          ],
-        },
-      ],
-    },
-  })
-
-  return [
-    ...worktreeArgs,
-    ...editArgs,
-    '--settings',
-    hookSettings,
-    '--append-system-prompt',
-    TASK_PROMPT_TEMPLATE.replace('{{forwardable}}', forwardable),
-    '--output-format',
-    'stream-json',
-    '--verbose',
-    '-p',
-    // `--` terminates option parsing so a prompt beginning with a hyphen is
-    // taken as the positional prompt, not mis-read by claude's CLI as a flag
-    // ("error: unknown option"). The prompt is the last argument, so nothing
-    // after it needs option parsing anyway.
-    '--',
-    prompt,
-  ]
 }
 
 // Run one agent turn on the host daemon and reduce its streamed updates onto the
@@ -535,7 +407,29 @@ async function runTurn(
   // Backfilled for tasks created before tokens existed.
   const token = task.token ?? randomUUID()
   const agent = task.agent ?? DEFAULT_AGENT
-  const agentArgs = buildClaudeArgs(task, prompt)
+  const adapter = agentAdapter(agent)
+  const landerEnv = {
+    PATH: `${LANDER_BIN_DIR}:${process.env.PATH ?? ''}`,
+    // The base URL the daemon's agent (and the in-task CLI) use to reach this
+    // server. Defaults to localhost; override with LANDER_PUBLIC_API when the
+    // server is reached across a boundary (e.g. a container).
+    LANDER_API:
+      process.env.LANDER_PUBLIC_API?.trim() || `http://localhost:${port}`,
+    LANDER_PROJECT: project.slug,
+    LANDER_TASK: id,
+    LANDER_TOKEN: token,
+  }
+  const launch = adapter?.buildLaunch({
+    task,
+    prompt,
+    root: project.path,
+    cwd: task.cwd ?? project.path,
+    landerEnv,
+  }) ?? {
+    command: agent,
+    args: [],
+    env: landerEnv,
+  }
 
   const runId = randomUUID()
 
@@ -596,18 +490,8 @@ async function runTurn(
     // The provider session to resume; absent on the first turn, so the daemon
     // reports one back (reduceRunWs persists it onto task.sessionId).
     sessionId: task.sessionId,
-    agentArgs,
-    env: {
-      PATH: `${path.join(ROOT, 'bin')}:${process.env.PATH ?? ''}`,
-      // The base URL the daemon's agent (and the in-task CLI) use to reach this
-      // server. Defaults to localhost; override with LANDER_PUBLIC_API when the
-      // server is reached across a boundary (e.g. a container).
-      LANDER_API:
-        process.env.LANDER_PUBLIC_API?.trim() || `http://localhost:${port}`,
-      LANDER_PROJECT: project.slug,
-      LANDER_TASK: id,
-      LANDER_TOKEN: token,
-    },
+    agentArgs: launch.args,
+    env: launch.env ?? landerEnv,
     idleTimeoutMs: 10 * 60_000,
   }
   sendToDaemon(start)
@@ -1781,7 +1665,7 @@ app.post('/api/:project/tasks/:id/cwd', async (c) => {
 
 // The git worktree the agent is currently in, tracked by the Enter/ExitWorktree
 // PostToolUse hooks (`lander record-worktree` / `clear-worktree`) so every turn
-// can relaunch as a real worktree session — see Task.worktree and buildClaudeArgs.
+// can relaunch as a real worktree session — see Task.worktree and ClaudeAdapter.
 // POST records it from EnterWorktree's reported `worktreePath` (only a path under
 // this project's worktrees dir is accepted, so a stray path can't strand turns
 // behind a bogus flag); DELETE clears it on exit. Like /cwd, only the task itself
@@ -2158,7 +2042,15 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
     if (!rule) return c.json({ error: 'rule is required' }, 400)
 
     if (scope === 'project') {
-      await addProjectAllow(project.path, rule)
+      const task = await readTask(project.dataDir, id)
+      const grantAgent = task?.agent ?? DEFAULT_AGENT
+      const adapter = agentAdapter(grantAgent)
+      if (!adapter?.supportsProjectGrants || !adapter.persistProjectGrant)
+        return c.json(
+          { error: `project grants are not supported for ${grantAgent} tasks` },
+          400,
+        )
+      await adapter.persistProjectGrant({ projectPath: project.path, rule })
     } else {
       try {
         await mutateTask(file, (t) => {

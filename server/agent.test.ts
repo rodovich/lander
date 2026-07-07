@@ -18,12 +18,21 @@ describe('agent adapter contract', () => {
   it('keeps launch construction and line reduction behind one provider shape', () => {
     const adapter: AgentAdapter = {
       kind: 'claude',
+      command: 'claude',
       buildLaunch(input: AgentLaunchInput) {
         return {
           command: 'claude',
           args: ['-p', input.prompt],
           env: input.landerEnv,
           sessionId: input.task.sessionId,
+        }
+      },
+      buildSession({ sessionId, mintSessionId }) {
+        const resolved = sessionId ?? mintSessionId()
+        return {
+          args: sessionId ? ['--resume', sessionId] : ['--session-id', resolved],
+          sessionId: resolved,
+          announceSession: sessionId === undefined,
         }
       },
       reduceLine(_line, at) {

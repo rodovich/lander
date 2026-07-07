@@ -12,9 +12,12 @@
 
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { statSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
-import { reduceStreamLine, addUsage, type Usage } from '../server/stream'
+import { fileURLToPath } from 'node:url'
+import { createClaudeAdapter } from '../server/claude'
+import type { AgentAdapter } from '../server/agent'
+import { addUsage, type Usage } from '../server/stream'
 import { projectSlug } from '../server/projects'
 import { fetchUsage, type UsageBody } from '../server/usage'
 import type {
@@ -52,6 +55,18 @@ for (const p of projectDirs) pathBySlug.set(projectSlug(p), p)
 const WS_URL = process.env.LANDER_WS?.trim() || 'ws://localhost:6181/daemon'
 const TOKEN = process.env.LANDER_DAEMON_TOKEN?.trim() || ''
 const DEFAULT_IDLE_MS = Number(process.env.LANDER_IDLE_TIMEOUT_MS ?? 10 * 60_000)
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const CLAUDE_ADAPTER = createClaudeAdapter({
+  landerBin: path.join(ROOT, 'bin', 'lander'),
+  taskPromptTemplate: readFileSync(
+    path.join(ROOT, 'server', 'task-prompt.md'),
+    'utf8',
+  ).trim(),
+})
+
+function agentAdapter(kind: StartRunMessage['agent']): AgentAdapter | undefined {
+  return kind === 'claude' ? CLAUDE_ADAPTER : undefined
+}
 
 // One run's handle. Held from start until the server acks its `done` (or a
 // bounded timeout), so a reconnecting server can resume-from the buffer. `buffer`
@@ -174,10 +189,9 @@ function resolveCwd(msg: StartRunMessage): string {
 }
 
 // Spawn the selected agent for one run, reduce its stream, and relay update/done.
-// Claude is the only implemented agent in this behavior-preserving refactor. The
-// reduction mirrors the old reduceRun accumulation (cross-line usage sum with
-// per-inference dedup, sticky driving model / rate-limit reset), but here it runs
-// next to the child and pushes each batch instead of a file tail pulling it.
+// The provider adapter owns the CLI command, session start/resume args, and line
+// reducer. The daemon keeps process ownership, replay buffering, idle-kill, and
+// cross-line usage accumulation provider-neutral.
 function startRun(msg: StartRunMessage): void {
   let cwd: string
   try {
@@ -194,7 +208,8 @@ function startRun(msg: StartRunMessage): void {
     return
   }
 
-  if (msg.agent !== 'claude') {
+  const adapter = agentAdapter(msg.agent)
+  if (!adapter) {
     send({
       type: 'done',
       runId: msg.runId,
@@ -205,24 +220,25 @@ function startRun(msg: StartRunMessage): void {
     return
   }
 
-  // The daemon owns the Claude session id now (it's decoupled from the lander
-  // task id). The server resumes an existing session by sending `sessionId`;
-  // absent it, this is the task's first turn, so mint a fresh session id, launch
-  // it with `--session-id`, and report it back (below) for the server to persist.
-  const sessionId = msg.sessionId ?? randomUUID()
-  const sessionArgs = msg.sessionId
-    ? ['--resume', msg.sessionId]
-    : ['--session-id', sessionId]
-
-  const child: ChildProcess = spawn('claude', [...sessionArgs, ...msg.agentArgs], {
-    cwd,
-    env: { ...process.env, ...msg.env },
-    stdio: ['ignore', 'pipe', 'pipe'],
+  const session = adapter.buildSession({
+    sessionId: msg.sessionId,
+    mintSessionId: randomUUID,
   })
+
+  const child: ChildProcess = spawn(
+    adapter.command,
+    [...session.args, ...msg.agentArgs],
+    {
+      cwd,
+      env: { ...process.env, ...msg.env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  )
 
   // Tell the server the session we minted, so it persists it on the task and
   // resumes it next turn. Only for a fresh session — a resume already knows it.
-  if (!msg.sessionId) send({ type: 'session', runId: msg.runId, sessionId })
+  if (session.announceSession)
+    send({ type: 'session', runId: msg.runId, sessionId: session.sessionId })
 
   // Run-scoped reduction state (carried across stdout chunks).
   let seq = 0
@@ -270,13 +286,13 @@ function startRun(msg: StartRunMessage): void {
     for (const raw of chunk.split('\n')) {
       const line = raw.trim()
       if (!line) continue
-      const r = reduceStreamLine(line, new Date().toISOString())
+      const r = adapter.reduceLine(line, new Date().toISOString())
       if (r.drivingModel) drivingModel = r.drivingModel
       if (r.rateLimitResetsAt && !sawRateLimit) {
         // First session-limit rejection this run — the window just filled, a
         // usage-moving event, so refresh now (shares the 60s floor).
         sawRateLimit = true
-        void refreshUsage()
+        if (adapter.supportsUsageSnapshot) void refreshUsage()
       }
       if (r.rateLimitResetsAt) rateLimitResetsAt = r.rateLimitResetsAt
       steps.push(...r.steps)
@@ -340,7 +356,7 @@ function startRun(msg: StartRunMessage): void {
     }
     send(doneMsg)
     // A turn just finished — agent activity is when usage moves, so refresh.
-    void refreshUsage()
+    if (adapter.supportsUsageSnapshot) void refreshUsage()
   }
 
   child.stdout!.on('data', (d: Buffer) => {
@@ -361,7 +377,7 @@ function startRun(msg: StartRunMessage): void {
   runs.set(msg.runId, {
     child,
     buffer,
-    mintedSession: msg.sessionId ? undefined : sessionId,
+    mintedSession: session.announceSession ? session.sessionId : undefined,
     // Interrupt mirrors the old runner's SIGTERM handler: stop the agent, finish
     // cleanly as interrupted (the server keeps the partial reply, no crash).
     interrupt: () => {
@@ -490,8 +506,10 @@ function connect(): void {
     // Prime the server's snapshot: re-push the last one we hold (so a reconnect
     // re-fills the server cache immediately), then fetch a fresh one (the boot /
     // connect trigger; the TTL floor collapses a redundant fetch).
-    pushUsage()
-    void refreshUsage()
+    if (CLAUDE_ADAPTER.supportsUsageSnapshot) {
+      pushUsage()
+      void refreshUsage()
+    }
   })
   sock.addEventListener('message', (ev) => onMessage(String(ev.data)))
   sock.addEventListener('close', () => {

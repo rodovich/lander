@@ -628,10 +628,10 @@ async function runFlow(args) {
 
 // --- bash-guard (PreToolUse hook) ------------------------------------------
 // Wired in by the server as a PreToolUse hook on the Bash tool (see
-// buildClaudeArgs). claude pipes the tool call as JSON on stdin; when the agent
-// runs a Bash command with run_in_background set, we attach an advisory note
-// explaining that the job won't outlive the turn — it's a child of this turn's
-// claude, reaped when the turn ends, and lander never consumes its completion,
+// ClaudeAdapter hook settings). claude pipes the tool call as JSON on stdin;
+// when the agent runs a Bash command with run_in_background set, we attach an
+// advisory note explaining that the job won't outlive the turn — it's a child of
+// this turn's claude, reaped when the turn ends, and lander never consumes its completion,
 // so it can't wake the task ("you'll be notified when it completes" only holds
 // in interactive mode, not lander's turn-based one). The note steers toward the
 // mechanisms that do persist: `lander rest` to wait, `lander launch` for parallel
@@ -670,7 +670,7 @@ async function bashGuard() {
 }
 
 // --- record-cwd (Stop hook) ------------------------------------------------
-// Wired in by the server as a Stop hook (see buildClaudeArgs). At the end of
+// Wired in by the server as a Stop hook (see ClaudeAdapter). At the end of
 // each turn claude pipes the session state as JSON on stdin —
 // { cwd, transcript_path, session_id, ... } — and we persist cwd and
 // transcript_path onto the task. Without this, every turn re-spawns claude at
@@ -701,7 +701,7 @@ async function recordCwd() {
 
 // --- record-worktree / clear-worktree (PostToolUse hooks) ------------------
 // Wired in by the server as PostToolUse hooks on EnterWorktree / ExitWorktree
-// (see buildClaudeArgs). claude pipes the tool call and its result as JSON on
+// (see ClaudeAdapter). claude pipes the tool call and its result as JSON on
 // stdin. On EnterWorktree we forward the new worktree's root path (the result's
 // `worktreePath`, falling back to the post-entry `cwd`) so the server tracks it
 // and relaunches later turns with `--worktree <name>` — what makes the agent's
