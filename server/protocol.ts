@@ -3,8 +3,9 @@
 // the network. It must not import index.ts or carry any runtime logic.
 
 import type { Step, Usage } from './stream'
+import type { AgentKind } from './agent'
 
-export type AgentKind = 'claude' | 'codex'
+export type { AgentKind } from './agent'
 
 // One window of the OAuth usage payload, as the server caches and serves it.
 export type UsageWindow = { utilization: number; resetsAt: string | null }
