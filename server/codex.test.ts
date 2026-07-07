@@ -15,7 +15,10 @@ const FIXTURES = path.join(
   'codex',
 )
 
-const adapter = createCodexAdapter()
+const TASK_PROMPT_TEMPLATE = 'Task prompt: {{forwardable}}.'
+const adapter = createCodexAdapter({
+  taskPromptTemplate: TASK_PROMPT_TEMPLATE,
+})
 
 function fixtureLines(name: string): string[] {
   return readFileSync(path.join(FIXTURES, name), 'utf8').trim().split('\n')
@@ -42,6 +45,10 @@ function lastDefined<T>(values: (T | undefined)[]): T | undefined {
   return values.filter((v): v is T => v !== undefined).at(-1)
 }
 
+function managedPrompt(prompt: string, forwardable: string): string {
+  return `Task prompt: ${forwardable}.\n\n${prompt}`
+}
+
 describe('Codex adapter reducer', () => {
   it('exposes Codex adapter capabilities', () => {
     expect(adapter.kind).toBe('codex')
@@ -61,19 +68,44 @@ describe('Codex adapter reducer', () => {
       prompt: 'hello codex',
       root: '/repo',
       cwd: '/repo/subdir',
-      landerEnv: { LANDER_TASK: 'task-1' },
+      landerEnv: {
+        PATH: '/repo/bin:/usr/bin',
+        LANDER_API: 'http://localhost:6181',
+        LANDER_PROJECT: 'proj',
+        LANDER_TASK: 'task-1',
+        LANDER_TOKEN: 'secret-token',
+      },
     })
 
     expect(launch.command).toBe('codex')
-    expect(launch.env).toEqual({ LANDER_TASK: 'task-1' })
+    expect(launch.env).toEqual({
+      PATH: '/repo/bin:/usr/bin',
+      LANDER_API: 'http://localhost:6181',
+      LANDER_PROJECT: 'proj',
+      LANDER_TASK: 'task-1',
+      LANDER_TOKEN: 'secret-token',
+    })
     expect(launch.args).toEqual([
       'exec',
       '--json',
+      '--config',
+      'shell_environment_policy.set.PATH="/repo/bin:/usr/bin"',
+      '--config',
+      'shell_environment_policy.set.LANDER_API="http://localhost:6181"',
+      '--config',
+      'shell_environment_policy.set.LANDER_PROJECT="proj"',
+      '--config',
+      'shell_environment_policy.set.LANDER_TASK="task-1"',
+      '--config',
+      'shell_environment_policy.set.LANDER_TOKEN="secret-token"',
       '--cd',
       '/repo/subdir',
       '--sandbox',
       'read-only',
-      'hello codex',
+      managedPrompt(
+        'hello codex',
+        'You currently have permission for git commits, and can forward that to a spawned task',
+      ),
     ])
     expect(launch.args).not.toContain('--skip-git-repo-check')
   })
@@ -97,7 +129,10 @@ describe('Codex adapter reducer', () => {
       '/repo',
       '--sandbox',
       'workspace-write',
-      'edit files',
+      managedPrompt(
+        'edit files',
+        'You currently have permission for editing files and git commits, and can forward that to a spawned task',
+      ),
     ])
   })
 
@@ -118,8 +153,13 @@ describe('Codex adapter reducer', () => {
       'exec',
       'resume',
       '--json',
+      '--config',
+      'shell_environment_policy.set.LANDER_TASK="task-1"',
       '019f0000-0000-7000-8000-000000000001',
-      'follow up',
+      managedPrompt(
+        'follow up',
+        'You currently have no edit or commit permissions, so a spawned task cannot be granted them either',
+      ),
     ])
   })
 

@@ -57,14 +57,17 @@ const WS_URL = process.env.LANDER_WS?.trim() || 'ws://localhost:6181/daemon'
 const TOKEN = process.env.LANDER_DAEMON_TOKEN?.trim() || ''
 const DEFAULT_IDLE_MS = Number(process.env.LANDER_IDLE_TIMEOUT_MS ?? 10 * 60_000)
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const TASK_PROMPT_TEMPLATE = readFileSync(
+  path.join(ROOT, 'server', 'task-prompt.md'),
+  'utf8',
+).trim()
 const CLAUDE_ADAPTER = createClaudeAdapter({
   landerBin: path.join(ROOT, 'bin', 'lander'),
-  taskPromptTemplate: readFileSync(
-    path.join(ROOT, 'server', 'task-prompt.md'),
-    'utf8',
-  ).trim(),
+  taskPromptTemplate: TASK_PROMPT_TEMPLATE,
 })
-const CODEX_ADAPTER = createCodexAdapter()
+const CODEX_ADAPTER = createCodexAdapter({
+  taskPromptTemplate: TASK_PROMPT_TEMPLATE,
+})
 
 function agentAdapter(kind: StartRunMessage['agent']): AgentAdapter | undefined {
   if (kind === 'claude') return CLAUDE_ADAPTER

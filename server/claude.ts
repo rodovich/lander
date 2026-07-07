@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { AgentAdapter, AgentTaskView } from './agent'
 import { reduceStreamLine } from './stream'
+import { taskManagementPrompt } from './task-management'
 
 export type ClaudeAdapterOptions = {
   landerBin: string
@@ -63,16 +64,6 @@ function buildClaudeArgs(
   if (task.allow?.length) allowed.push(...task.allow)
   const editArgs = allowed.length ? ['--allowedTools', ...allowed] : []
 
-  const held = [
-    task.allowEdits && 'editing files',
-    task.allowCommits && 'git commits',
-  ].filter(Boolean) as string[]
-  const forwardable = held.length
-    ? `You currently have permission for ${held.join(' and ')}, and can ` +
-      'forward that to a spawned task'
-    : 'You currently have no edit or commit permissions, so a spawned task ' +
-      'cannot be granted them either'
-
   const hookSettings = JSON.stringify({
     hooks: {
       PreToolUse: [
@@ -125,7 +116,7 @@ function buildClaudeArgs(
     '--settings',
     hookSettings,
     '--append-system-prompt',
-    taskPromptTemplate.replace('{{forwardable}}', forwardable),
+    taskManagementPrompt(task, taskPromptTemplate),
     '--output-format',
     'stream-json',
     '--verbose',

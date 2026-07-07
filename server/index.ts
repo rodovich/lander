@@ -73,7 +73,9 @@ const CLAUDE_ADAPTER = createClaudeAdapter({
   landerBin: LANDER_BIN,
   taskPromptTemplate: TASK_PROMPT_TEMPLATE,
 })
-const CODEX_ADAPTER = createCodexAdapter()
+const CODEX_ADAPTER = createCodexAdapter({
+  taskPromptTemplate: TASK_PROMPT_TEMPLATE,
+})
 
 function agentAdapter(kind: AgentKind): AgentAdapter | undefined {
   if (kind === 'claude') return CLAUDE_ADAPTER

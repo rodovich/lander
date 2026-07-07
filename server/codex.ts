@@ -1,15 +1,30 @@
 import type { AgentAdapter, AgentLineUpdate, AgentTaskView } from './agent'
 import type { Usage } from './stream'
 import { summarizeToolResult, toolRule } from './stream'
+import { promptWithTaskManagement } from './task-management'
 
-export function createCodexAdapter(): AgentAdapter {
+export type CodexAdapterOptions = {
+  taskPromptTemplate: string
+}
+
+const CODEX_SHELL_ENV = [
+  'PATH',
+  'LANDER_API',
+  'LANDER_PROJECT',
+  'LANDER_TASK',
+  'LANDER_TOKEN',
+] as const
+
+export function createCodexAdapter({
+  taskPromptTemplate,
+}: CodexAdapterOptions): AgentAdapter {
   return {
     kind: 'codex',
     command: 'codex',
     buildLaunch({ task, prompt, cwd, landerEnv }) {
       return {
         command: 'codex',
-        args: buildCodexArgs(task, prompt, cwd),
+        args: buildCodexArgs(task, prompt, cwd, landerEnv, taskPromptTemplate),
         env: landerEnv,
       }
     },
@@ -32,17 +47,35 @@ function buildCodexArgs(
   task: AgentTaskView,
   prompt: string,
   cwd: string,
+  landerEnv: Record<string, string>,
+  taskPromptTemplate: string,
 ): string[] {
-  if (task.sessionId) return ['exec', 'resume', '--json', task.sessionId, prompt]
+  const envArgs = codexShellEnvArgs(landerEnv)
+  const managedPrompt = promptWithTaskManagement(task, prompt, taskPromptTemplate)
+  if (task.sessionId)
+    return ['exec', 'resume', '--json', ...envArgs, task.sessionId, managedPrompt]
   return [
     'exec',
     '--json',
+    ...envArgs,
     '--cd',
     cwd,
     '--sandbox',
     task.allowEdits ? 'workspace-write' : 'read-only',
-    prompt,
+    managedPrompt,
   ]
+}
+
+function codexShellEnvArgs(landerEnv: Record<string, string>): string[] {
+  return CODEX_SHELL_ENV.flatMap((key) => {
+    const value = landerEnv[key]
+    if (value === undefined) return []
+    return ['--config', `shell_environment_policy.set.${key}=${tomlString(value)}`]
+  })
+}
+
+function tomlString(value: string): string {
+  return JSON.stringify(value)
 }
 
 export function extractCodexSession(line: string): string | undefined {
