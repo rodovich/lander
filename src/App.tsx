@@ -140,7 +140,12 @@ type Task = {
   // scheduled relaunch, shown as the scheduled clock alongside scheduledFor/
   // waitingFor) and `repeat` (a `--interval` relaunch, shown as the clockwise
   // arrow beside it).
-  scheduledMessages?: { relaunch?: boolean; deliverAt?: string; repeat?: unknown }[]
+  scheduledMessages?: {
+    relaunch?: boolean
+    deliverAt?: string
+    waitFor?: string[]
+    repeat?: unknown
+  }[]
   messages: Message[]
   events?: TaskEvent[]
   // Present only when the task wedged on a claude error (not the agent's own
@@ -2761,9 +2766,12 @@ export function App() {
             }
             const { task, index } = row
             const unseen = isUnread(task)
-            const pendingRelaunch = task.scheduledMessages?.find(
-              (m) => m.relaunch,
-            )
+            // Any armed scheduled message — a deferred relaunch, a plain deferred
+            // send (`lander send --date/--time/--await`), or a repeating relaunch —
+            // shows the clock. Earlier this keyed only off relaunch-flagged
+            // messages, so a plain deferred send (deliverAt/waitFor, no relaunch
+            // flag) armed no indicator at all.
+            const pendingScheduled = task.scheduledMessages?.[0]
             return (
             <li
               key={row.key}
@@ -2811,7 +2819,7 @@ export function App() {
                   {formatTaskTime(task.updatedAt ?? task.createdAt, todayStart)}
                   {(task.scheduledFor ||
                     (task.waitingFor && task.waitingFor.length > 0) ||
-                    pendingRelaunch) && (
+                    pendingScheduled) && (
                     <svg
                       className="scheduled-clock"
                       width="11"
@@ -2823,7 +2831,7 @@ export function App() {
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       aria-label={
-                        task.scheduledFor || pendingRelaunch?.deliverAt
+                        task.scheduledFor || pendingScheduled?.deliverAt
                           ? 'Scheduled'
                           : 'Awaiting'
                       }
