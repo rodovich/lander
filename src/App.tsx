@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
+import { agentDisplayName, formatAgentModelName } from './agentDisplay'
 import { Markdown } from './markdown'
 import type { TaskLinkResolver } from './markdown'
 import { buildTimeline } from './timeline'
@@ -328,6 +329,10 @@ function formatTokens(n: number): string {
 function formatCost(n: number): string {
   if (n < 100) return `$${n.toFixed(2)}`
   return `$${Math.round(n).toLocaleString()}`
+}
+
+function taskAgentModelName(agent: Task['agent'], model?: string): string {
+  return formatAgentModelName(agentDisplayName(agent), model)
 }
 
 // The token usage of the task's most recent turn that reported any — the last
@@ -2192,7 +2197,7 @@ export function App() {
 
   // Changes whenever the open task's last (typically streaming) message grows,
   // even when the message count stays the same, so the effect re-pins as an
-  // assistant turn fills in. The trailing fields track the two "assistant is
+  // assistant turn fills in. The trailing fields track the two agent-working
   // working…" spinners (the per-message pending one and the standalone riding
   // one); they add and remove a row, so the timeline's height changes without
   // any message text changing and the effect must re-pin for those too.
@@ -3377,9 +3382,7 @@ export function App() {
                   {m.pending && (
                     <div className="message-pending">
                       <span className="spinner" aria-hidden />
-                      {m.usage?.model
-                        ? `${m.usage.model} is working…`
-                        : 'assistant is working…'}
+                      {`${taskAgentModelName(current.agent, m.usage?.model)} is working…`}
                     </div>
                   )}
                 </div>
@@ -3395,7 +3398,7 @@ export function App() {
                   <div className="message">
                     <div className="message-pending">
                       <span className="spinner" aria-hidden />
-                      assistant is starting…
+                      {`${taskAgentModelName(current.agent)} is starting…`}
                     </div>
                   </div>
                 )}
@@ -3486,9 +3489,9 @@ export function App() {
                         : '$…'
                   return (
                     <div className="token-usage">
-                      {u.model && (
-                        <span className="token-model">{u.model}</span>
-                      )}
+                      <span className="token-model">
+                        {taskAgentModelName(current.agent, u.model)}
+                      </span>
                       <button
                         type="button"
                         className="token-stats"
