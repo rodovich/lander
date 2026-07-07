@@ -75,29 +75,26 @@ describe('server task provider behavior', () => {
     expect(await res.json()).toMatchObject({ id: task.id, agent: 'codex' })
   })
 
-  it('fails visibly for unsupported Codex project grants and worktrees', async () => {
-    const task = await createTask('Unsupported Codex affordances')
+  it('delegates project grants to the daemon and records worktrees neutrally', async () => {
+    const task = await createTask('Neutral Codex affordances')
 
     const grant = await post(`/api/${slug}/tasks/${task.id}/allow`, {
       scope: 'project',
       rule: 'Bash(npm test)',
     })
-    expect(grant.status).toBe(400)
+    expect(grant.status).toBe(503)
     expect(await grant.json()).toEqual({
-      error: 'Project permission grants are not supported for Codex tasks yet.',
+      error: 'no daemon connected for this project',
     })
 
     const worktree = await post(`/api/${slug}/tasks/${task.id}/worktree`, {
       worktreePath: path.join(projectDir, '.claude', 'worktrees', 'feat'),
     })
-    expect(worktree.status).toBe(400)
-    expect(await worktree.json()).toEqual({
-      error:
-        'Worktrees are not supported for Codex tasks yet; Codex tasks resume from their recorded cwd.',
-    })
+    expect(worktree.status).toBe(200)
+    expect(await worktree.json()).toMatchObject({ id: task.id, worktree: 'feat' })
   })
 
-  it('stores Codex task allow rules with an explicit unsupported warning', async () => {
+  it('stores task allow rules without provider-specific interpretation', async () => {
     const task = await createTask('Codex task allow rule')
 
     const res = await post(`/api/${slug}/tasks/${task.id}/allow`, {
@@ -109,8 +106,6 @@ describe('server task provider behavior', () => {
       ok: true,
       rule: 'Bash(npm test)',
       scope: 'task',
-      warning:
-        'Task allow rules are saved for Codex tasks but do not affect Codex runs yet.',
     })
     const raw = JSON.parse(
       await readFile(path.join(tasksDir, `${task.id}.json`), 'utf8'),
@@ -118,7 +113,7 @@ describe('server task provider behavior', () => {
     expect(raw.allow).toEqual(['Bash(npm test)'])
   })
 
-  it('treats legacy tasks without agent as Claude for project grants', async () => {
+  it('treats legacy tasks without agent as Claude when delegating project grants', async () => {
     await mkdir(tasksDir, { recursive: true })
     await writeFile(
       path.join(tasksDir, 'legacy-task.json'),
@@ -142,18 +137,9 @@ describe('server task provider behavior', () => {
       scope: 'project',
       rule: 'Bash(npm test)',
     })
-    expect(res.status).toBe(200)
+    expect(res.status).toBe(503)
     expect(await res.json()).toEqual({
-      ok: true,
-      rule: 'Bash(npm test)',
-      scope: 'project',
+      error: 'no daemon connected for this project',
     })
-    const settings = JSON.parse(
-      await readFile(
-        path.join(projectDir, '.claude', 'settings.local.json'),
-        'utf8',
-      ),
-    )
-    expect(settings.permissions.allow).toEqual(['Bash(npm test)'])
   })
 })

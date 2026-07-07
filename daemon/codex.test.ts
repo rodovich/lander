@@ -11,7 +11,7 @@ import {
 
 const AT = '2026-01-01T00:00:00.000Z'
 const FIXTURES = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'server'),
   'fixtures',
   'codex',
 )
@@ -80,7 +80,6 @@ describe('Codex adapter reducer', () => {
       },
     })
 
-    expect(launch.command).toBe('codex')
     expect(launch.env).toEqual({
       PATH: '/repo/bin:/usr/bin',
       LANDER_API: 'http://localhost:6181',

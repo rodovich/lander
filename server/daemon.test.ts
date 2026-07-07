@@ -8,6 +8,7 @@ import {
   openRunChannel,
   closeRunChannel,
   requestResume,
+  requestProjectGrant,
   daemonConnected,
   daemonServes,
 } from './daemon'
@@ -91,7 +92,11 @@ const start = (runId: string): ServerToDaemon => ({
   taskId: `task-${runId}`,
   agent: 'claude',
   project: 'proj',
-  agentArgs: [],
+  prompt: 'prompt',
+  task: {
+    allowEdits: false,
+    allowCommits: false,
+  },
   env: {},
   idleTimeoutMs: 0,
 })
@@ -209,6 +214,43 @@ describe('daemon transport handoff', () => {
     closeRunChannel('r3')
     await a2.close()
     await b.close()
+    await waitFor(() => !daemonConnected())
+  })
+
+  it('routes project grant requests to the primary daemon and resolves its result', async () => {
+    const d = await connectDaemon(port)
+    d.register()
+    await waitFor(() => daemonServes('proj'))
+
+    const result = requestProjectGrant({
+      project: 'proj',
+      agent: 'codex',
+      rule: 'Bash(npm test)',
+      timeoutMs: 1000,
+    })
+    await waitFor(() => d.received.some((m) => m.type === 'project-grant'))
+    const req = d.received.find((m) => m.type === 'project-grant')
+    expect(req).toMatchObject({
+      type: 'project-grant',
+      project: 'proj',
+      agent: 'codex',
+      rule: 'Bash(npm test)',
+    })
+    d.send({
+      type: 'project-grant-result',
+      requestId: req && 'requestId' in req ? req.requestId : '',
+      ok: false,
+      error: 'unsupported',
+      status: 400,
+    })
+
+    await expect(result).resolves.toEqual({
+      ok: false,
+      error: 'unsupported',
+      status: 400,
+    })
+
+    await d.close()
     await waitFor(() => !daemonConnected())
   })
 })

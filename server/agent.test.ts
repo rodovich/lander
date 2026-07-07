@@ -3,8 +3,6 @@ import {
   AGENT_KINDS,
   defaultAgentFromEnv,
   isAgentKind,
-  type AgentAdapter,
-  type AgentLaunchInput,
 } from './agent'
 
 describe('agent adapter contract', () => {
@@ -22,63 +20,5 @@ describe('agent adapter contract', () => {
     expect(defaultAgentFromEnv({ LANDER_AGENT: 'codex' })).toBe('codex')
     expect(defaultAgentFromEnv({ LANDER_AGENT: ' CODEX ' })).toBe('codex')
     expect(defaultAgentFromEnv({ LANDER_AGENT: 'other' })).toBe('claude')
-  })
-
-  it('keeps launch construction and line reduction behind one provider shape', () => {
-    const adapter: AgentAdapter = {
-      kind: 'claude',
-      command: 'claude',
-      buildLaunch(input: AgentLaunchInput) {
-        return {
-          command: 'claude',
-          args: ['-p', input.prompt],
-          env: input.landerEnv,
-          sessionId: input.task.sessionId,
-        }
-      },
-      buildSession({ sessionId, mintSessionId }) {
-        const resolved = sessionId ?? mintSessionId()
-        return {
-          args: sessionId ? ['--resume', sessionId] : ['--session-id', resolved],
-          sessionId: resolved,
-          announceSession: sessionId === undefined,
-        }
-      },
-      reduceLine(_line, at) {
-        return { steps: [{ kind: 'text', text: 'ok', createdAt: at }] }
-      },
-      hookStrategy: 'inline-launch',
-      supportsProjectGrants: true,
-      supportsTaskAllowRules: true,
-      supportsWorktreeFlag: true,
-      supportsUsageSnapshot: true,
-      supportsRateLimitRetryScheduling: true,
-    }
-
-    const launch = adapter.buildLaunch({
-      task: {
-        sessionId: 's1',
-        allowEdits: false,
-        allowCommits: false,
-      },
-      prompt: 'hello',
-      root: '/repo',
-      cwd: '/repo',
-      landerEnv: { LANDER_TASK: 't1' },
-    })
-
-    expect(launch).toEqual({
-      command: 'claude',
-      args: ['-p', 'hello'],
-      env: { LANDER_TASK: 't1' },
-      sessionId: 's1',
-    })
-    expect(adapter.reduceLine('{}', '2026-01-01T00:00:00.000Z').steps).toEqual([
-      {
-        kind: 'text',
-        text: 'ok',
-        createdAt: '2026-01-01T00:00:00.000Z',
-      },
-    ])
   })
 })

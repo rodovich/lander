@@ -30,7 +30,6 @@ describe('Claude adapter', () => {
       landerEnv: { LANDER_TASK: 'task-1' },
     })
 
-    expect(launch.command).toBe('claude')
     expect(launch.env).toEqual({ LANDER_TASK: 'task-1' })
     expect(launch.args.slice(0, 9)).toEqual([
       '--worktree',

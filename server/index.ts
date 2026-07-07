@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { serve } from '@hono/node-server'
 import { randomBytes, randomUUID } from 'node:crypto'
 import {
@@ -9,16 +10,12 @@ import {
   rename,
   stat,
 } from 'node:fs/promises'
-import { readFileSync } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { applyUpdate, applyDone } from './apply'
-import type { AgentAdapter } from './agent'
 import { defaultAgentFromEnv, isAgentKind } from './agent'
-import { createClaudeAdapter } from './claude'
-import { codexOptionsFromEnv, createCodexAdapter } from './codex'
 import {
   attachDaemonServer,
   daemonConnected,
@@ -28,6 +25,7 @@ import {
   openRunChannel,
   closeRunChannel,
   requestResume,
+  requestProjectGrant,
 } from './daemon'
 import type { AgentKind, StartRunMessage, UsageBody } from './protocol'
 import {
@@ -57,13 +55,6 @@ const execFileAsync = promisify(execFile)
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const LANDER_BIN_DIR = path.join(ROOT, 'bin')
-const LANDER_BIN = path.join(LANDER_BIN_DIR, 'lander')
-
-// `{{forwardable}}` is substituted per-task with the agent's edit/commit grant.
-const TASK_PROMPT_TEMPLATE = readFileSync(
-  path.join(path.dirname(fileURLToPath(import.meta.url)), 'task-prompt.md'),
-  'utf8',
-).trim()
 
 const PROJECTS = parseProjects(ROOT, process.env, process.cwd())
 const PROJECT_BY_SLUG = new Map<string, Project>(
@@ -71,36 +62,6 @@ const PROJECT_BY_SLUG = new Map<string, Project>(
 )
 const LEGACY_AGENT: AgentKind = 'claude'
 const DEFAULT_NEW_TASK_AGENT = defaultAgentFromEnv(process.env)
-const CLAUDE_ADAPTER = createClaudeAdapter({
-  landerBin: LANDER_BIN,
-  taskPromptTemplate: TASK_PROMPT_TEMPLATE,
-})
-const CODEX_ADAPTER = createCodexAdapter({
-  taskPromptTemplate: TASK_PROMPT_TEMPLATE,
-  ...codexOptionsFromEnv(process.env),
-})
-
-function agentAdapter(kind: AgentKind): AgentAdapter | undefined {
-  if (kind === 'claude') return CLAUDE_ADAPTER
-  if (kind === 'codex') return CODEX_ADAPTER
-  return undefined
-}
-
-function agentLabel(kind: AgentKind): string {
-  return kind === 'codex' ? 'Codex' : 'Claude'
-}
-
-function unsupportedProjectGrantMessage(kind: AgentKind): string {
-  if (kind === 'codex')
-    return 'Project permission grants are not supported for Codex tasks yet.'
-  return `Project permission grants are not supported for ${agentLabel(kind)} tasks.`
-}
-
-function unsupportedTaskAllowWarning(kind: AgentKind): string | undefined {
-  if (kind === 'codex')
-    return 'Task allow rules are saved for Codex tasks but do not affect Codex runs yet.'
-  return undefined
-}
 
 // Daemon split: runs are driven by the host
 // daemon over a WebSocket — the server holds task state, drives the queue, and
@@ -270,15 +231,12 @@ type Task = {
   // directly rather than re-deriving it from the launch directory. Absent until
   // the first turn completes.
   transcriptPath?: string
-  // The name of the git worktree the agent is currently working in, set by the
-  // EnterWorktree PostToolUse hook (`lander record-worktree`) and cleared by the
-  // ExitWorktree one (`lander clear-worktree`). While set, every turn relaunches
-  // claude with `--worktree <name>` so the session is a real worktree session:
-  // claude's worktree state is per-process and doesn't survive `--resume`, so
-  // without re-entering each turn a resumed turn merely *runs in* the worktree dir
-  // (via Task.cwd) and the agent's own ExitWorktree no-ops. Re-entering also makes
-  // runTurn launch from the project root, so a clean exit lands back there rather
-  // than inside the departed worktree. Absent when the task isn't in a worktree.
+  // The name of the git worktree the agent is currently working in, set by a
+  // provider hook such as Claude's EnterWorktree PostToolUse hook
+  // (`lander record-worktree`) and cleared by the matching exit hook
+  // (`lander clear-worktree`). While set, the daemon gives providers with real
+  // worktree support their worktree flag; providers without it resume from
+  // Task.cwd. Absent when the task isn't in a worktree.
   worktree?: string
 }
 
@@ -394,12 +352,13 @@ function interruptRun(_project: Project, runId: string): void {
 }
 
 // Run one agent turn on the host daemon and reduce its streamed updates onto the
-// task. The server builds the run spec and hands it to the daemon over the WS
-// (start-run); the daemon owns the agent child and the stream. Because the
-// daemon outlives the server, a server restart mid-turn doesn't stop the agent —
-// the fresh process reattaches over the WS and resumes from the persisted cursor
-// (see driveTask / recoverQueues). The daemon reports the provider session on
-// the first turn and resumes it after, keyed by the `sessionId` hint below.
+// task. The server hands a provider-neutral run intent to the daemon over the WS
+// (start-run); the daemon owns provider argv, the agent child, and the stream.
+// Because the daemon outlives the server, a server restart mid-turn doesn't stop
+// the agent — the fresh process reattaches over the WS and resumes from the
+// persisted cursor (see driveTask / recoverQueues). The daemon reports the
+// provider session on the first turn and resumes it after, keyed by the
+// `sessionId` hint below.
 // Marks "riding" and records the runId so a reattach can find it.
 async function runTurn(
   project: Project,
@@ -432,7 +391,6 @@ async function runTurn(
   // Backfilled for tasks created before tokens existed.
   const token = task.token ?? randomUUID()
   const agent = task.agent ?? LEGACY_AGENT
-  const adapter = agentAdapter(agent)
   const landerEnv = {
     PATH: `${LANDER_BIN_DIR}:${process.env.PATH ?? ''}`,
     // The base URL the daemon's agent (and the in-task CLI) use to reach this
@@ -443,17 +401,6 @@ async function runTurn(
     LANDER_PROJECT: project.slug,
     LANDER_TASK: id,
     LANDER_TOKEN: token,
-  }
-  const launch = adapter?.buildLaunch({
-    task,
-    prompt,
-    root: project.path,
-    cwd: task.cwd ?? project.path,
-    landerEnv,
-  }) ?? {
-    command: agent,
-    args: [],
-    env: landerEnv,
   }
 
   const runId = randomUUID()
@@ -511,12 +458,17 @@ async function runTurn(
     project: project.slug,
     // cwd hints — the daemon does the stat/fallback/worktree resolution locally.
     recordedCwd: task.cwd,
-    worktree: adapter?.supportsWorktreeFlag ? task.worktree : undefined,
+    prompt,
+    task: {
+      allowEdits: task.allowEdits,
+      allowCommits: task.allowCommits,
+      allow: task.allow,
+      worktree: task.worktree,
+    },
     // The provider session to resume; absent on the first turn, so the daemon
     // reports one back (reduceRunWs persists it onto task.sessionId).
     sessionId: task.sessionId,
-    agentArgs: launch.args,
-    env: launch.env ?? landerEnv,
+    env: landerEnv,
     idleTimeoutMs: 10 * 60_000,
   }
   sendToDaemon(start)
@@ -1690,9 +1642,10 @@ app.post('/api/:project/tasks/:id/cwd', async (c) => {
   }
 })
 
-// The git worktree the agent is currently in, tracked by the Enter/ExitWorktree
-// PostToolUse hooks (`lander record-worktree` / `clear-worktree`) so every turn
-// can relaunch as a real worktree session — see Task.worktree and ClaudeAdapter.
+// The git worktree the agent is currently in, tracked by provider hooks such as
+// Claude's Enter/ExitWorktree PostToolUse hooks (`lander record-worktree` /
+// `clear-worktree`) so every turn can relaunch with the right daemon-side
+// worktree behavior.
 // POST records it from EnterWorktree's reported `worktreePath` (only a path under
 // this project's worktrees dir is accepted, so a stray path can't strand turns
 // behind a bogus flag); DELETE clears it on exit. Like /cwd, only the task itself
@@ -1718,17 +1671,6 @@ app.post('/api/:project/tasks/:id/worktree', async (c) => {
     const body = await c.req.json<{ worktreePath?: unknown }>()
     if (typeof body.worktreePath !== 'string' || !body.worktreePath)
       return c.json({ error: 'worktreePath is required' }, 400)
-    const worktreeAgent = existing.agent ?? LEGACY_AGENT
-    const adapter = agentAdapter(worktreeAgent)
-    if (!adapter?.supportsWorktreeFlag)
-      return c.json(
-        {
-          error:
-            `Worktrees are not supported for ${agentLabel(worktreeAgent)} tasks yet; ` +
-            `${agentLabel(worktreeAgent)} tasks resume from their recorded cwd.`,
-        },
-        400,
-      )
     const name = worktreeName(project.path, body.worktreePath)
     if (!name) return c.json({ error: 'not a worktree of this project' }, 400)
 
@@ -2058,9 +2000,8 @@ app.post('/api/:project/tasks/:id/retry', async (c) => {
 })
 
 // Grant a permission rule the agent was blocked on. scope "task" appends it to
-// this task's `allow` list (fed to --allowedTools on future turns); scope
-// "project" writes it to the project's .claude/settings.local.json so every
-// task in the project inherits it. The rule comes from the popup's textarea, so
+// this task's `allow` list; scope "project" asks the daemon to persist it in the
+// provider-specific project config. The rule comes from the popup's textarea, so
 // the user may have edited it before granting.
 app.post('/api/:project/tasks/:id/allow', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
@@ -2083,16 +2024,18 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
     const task = await readTask(project.dataDir, id)
     if (!task) return c.json({ error: 'task not found' }, 404)
     const grantAgent = task.agent ?? LEGACY_AGENT
-    const adapter = agentAdapter(grantAgent)
 
-    let warning: string | undefined
     if (scope === 'project') {
-      if (!adapter?.supportsProjectGrants || !adapter.persistProjectGrant)
+      const result = await requestProjectGrant({
+        project: project.slug,
+        agent: grantAgent,
+        rule,
+      })
+      if (!result.ok)
         return c.json(
-          { error: unsupportedProjectGrantMessage(grantAgent) },
-          400,
+          { error: result.error ?? 'project grant failed' },
+          (result.status ?? 500) as ContentfulStatusCode,
         )
-      await adapter.persistProjectGrant({ projectPath: project.path, rule })
     } else {
       try {
         await mutateTask(file, (t) => {
@@ -2102,10 +2045,8 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
       } catch {
         return c.json({ error: 'task not found' }, 404)
       }
-      if (!adapter?.supportsTaskAllowRules)
-        warning = unsupportedTaskAllowWarning(grantAgent)
     }
-    return c.json({ ok: true, rule, scope, ...(warning ? { warning } : {}) })
+    return c.json({ ok: true, rule, scope })
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }

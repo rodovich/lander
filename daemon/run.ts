@@ -4,7 +4,7 @@ import {
   type SpawnOptions,
 } from 'node:child_process'
 import { randomUUID as nodeRandomUUID } from 'node:crypto'
-import type { AgentAdapter } from '../server/agent'
+import type { AgentAdapter } from './agent'
 import type { AgentKind } from '../server/protocol'
 import type {
   DoneMessage,
@@ -43,7 +43,10 @@ type Run = {
 
 export type RunManagerOptions = {
   adapters: Partial<Record<AgentKind, AgentAdapter>>
-  resolveCwd: (msg: StartRunMessage) => string
+  resolveRunPaths: (
+    msg: StartRunMessage,
+    adapter: AgentAdapter,
+  ) => { root: string; cwd: string }
   send: (msg: RunManagerMessage) => void
   refreshUsage?: () => void | Promise<void>
   defaultIdleMs?: number
@@ -59,7 +62,7 @@ const DEFAULT_RUN_BUFFER_TTL_MS = 120_000
 
 export function createRunManager({
   adapters,
-  resolveCwd,
+  resolveRunPaths,
   send,
   refreshUsage = () => {},
   defaultIdleMs = DEFAULT_IDLE_MS,
@@ -81,18 +84,6 @@ export function createRunManager({
   }
 
   function startRun(msg: StartRunMessage): void {
-    let cwd: string
-    try {
-      cwd = resolveCwd(msg)
-    } catch (e) {
-      done(
-        msg.runId,
-        1,
-        e instanceof Error ? e.message : String(e),
-      )
-      return
-    }
-
     const adapter = adapters[msg.agent]
     if (!adapter) {
       done(msg.runId, 1, `unsupported agent: ${msg.agent}`)
@@ -100,17 +91,39 @@ export function createRunManager({
     }
     const activeAdapter = adapter
 
+    let root: string
+    let cwd: string
+    try {
+      const paths = resolveRunPaths(msg, activeAdapter)
+      root = paths.root
+      cwd = paths.cwd
+    } catch (e) {
+      done(msg.runId, 1, e instanceof Error ? e.message : String(e))
+      return
+    }
+
     const session = activeAdapter.buildSession({
       sessionId: msg.sessionId,
       mintSessionId,
     })
+    const launch = activeAdapter.buildLaunch({
+      task: {
+        ...msg.task,
+        agent: msg.agent,
+        sessionId: msg.sessionId,
+      },
+      prompt: msg.prompt,
+      root,
+      cwd,
+      landerEnv: msg.env,
+    })
 
     const child: ChildProcess = spawn(
       activeAdapter.command,
-      [...session.args, ...msg.agentArgs],
+      [...session.args, ...launch.args],
       {
         cwd,
-        env: { ...process.env, ...msg.env },
+        env: { ...process.env, ...(launch.env ?? msg.env) },
         stdio: ['ignore', 'pipe', 'pipe'],
       },
     )

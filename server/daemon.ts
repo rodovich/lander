@@ -6,6 +6,7 @@
 // import-light — protocol types plus `ws` — and carries no task knowledge.
 
 import type { IncomingMessage, Server as HttpServer } from 'node:http'
+import { randomUUID } from 'node:crypto'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type {
   DaemonToServer,
@@ -14,6 +15,7 @@ import type {
   DoneMessage,
   SessionMessage,
   UsageBody,
+  AgentKind,
 } from './protocol'
 
 // One run's inbound events, delivered in order to the reducer awaiting them. The
@@ -72,6 +74,13 @@ const daemons = new Set<WebSocket>()
 const runOwner = new Map<string, WebSocket>()
 const registeredSlugs = new Set<string>()
 const channels = new Map<string, RunChannel>()
+const grantRequests = new Map<
+  string,
+  {
+    resolve: (result: ProjectGrantResponse) => void
+    timer: ReturnType<typeof setTimeout>
+  }
+>()
 // Armed while some open run has no live owning daemon (its daemon dropped, or we
 // just reloaded and it hasn't re-announced yet); on expiry those still-unowned
 // runs are crashed. Reconciled — armed and cleared — by reconcileGrace.
@@ -116,12 +125,57 @@ export function sendToDaemon(msg: ServerToDaemon): boolean {
   if (msg.type === 'start-run') {
     target = primary
     if (target) runOwner.set(msg.runId, target)
+  } else if (msg.type === 'project-grant') {
+    target = primary
   } else {
     target = runOwner.get(msg.runId) ?? primary
   }
   if (!target) return false
   target.send(JSON.stringify(msg))
   return true
+}
+
+export type ProjectGrantResponse = {
+  ok: boolean
+  error?: string
+  status?: number
+}
+
+export function requestProjectGrant(input: {
+  project: string
+  agent: AgentKind
+  rule: string
+  timeoutMs?: number
+}): Promise<ProjectGrantResponse> {
+  const requestId = randomUUID()
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      grantRequests.delete(requestId)
+      resolve({
+        ok: false,
+        error: 'daemon did not answer project grant request',
+        status: 504,
+      })
+    }, input.timeoutMs ?? 15_000)
+    timer.unref?.()
+    grantRequests.set(requestId, { resolve, timer })
+    const sent = sendToDaemon({
+      type: 'project-grant',
+      requestId,
+      project: input.project,
+      agent: input.agent,
+      rule: input.rule,
+    })
+    if (!sent) {
+      clearTimeout(timer)
+      grantRequests.delete(requestId)
+      resolve({
+        ok: false,
+        error: 'no daemon connected for this project',
+        status: 503,
+      })
+    }
+  })
 }
 
 // Open run-ids that no currently-connected daemon owns — candidates to crash once
@@ -267,6 +321,18 @@ export function attachDaemonServer(
         case 'session':
           channels.get(msg.runId)?.push({ kind: msg.type, msg } as RunEvent)
           break
+        case 'project-grant-result': {
+          const pending = grantRequests.get(msg.requestId)
+          if (!pending) break
+          clearTimeout(pending.timer)
+          grantRequests.delete(msg.requestId)
+          pending.resolve({
+            ok: msg.ok,
+            error: msg.error,
+            status: msg.status,
+          })
+          break
+        }
         case 'usage':
           opts.onUsage?.({ session: msg.session, weekly: msg.weekly })
           break

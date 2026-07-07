@@ -1,6 +1,6 @@
 import type { AgentAdapter, AgentLineUpdate, AgentTaskView } from './agent'
-import type { Usage } from './stream'
-import { summarizeToolResult, toolRule } from './stream'
+import type { Usage } from '../server/stream'
+import { summarizeToolResult, toolRule } from '../server/stream'
 import { promptWithTaskManagement } from './task-management'
 
 export type CodexAdapterOptions = {
@@ -27,7 +27,6 @@ export function createCodexAdapter({
     command: 'codex',
     buildLaunch({ task, prompt, cwd, landerEnv }) {
       return {
-        command: 'codex',
         args: buildCodexArgs(task, prompt, cwd, landerEnv, {
           taskPromptTemplate,
           profile,

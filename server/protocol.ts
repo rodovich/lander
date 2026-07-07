@@ -24,15 +24,22 @@ export type StartRunMessage = {
   type: 'start-run'
   runId: string
   taskId: string
-  // The provider that should run this turn. Claude is the only implemented
-  // launcher today; Codex support will add its adapter behind this field.
+  // The provider that should run this turn. The server chooses and persists the
+  // provider; the daemon translates the neutral task fields below into provider
+  // CLI args.
   agent: AgentKind
   // The project slug; the daemon maps it to a host path.
   project: string
   // cwd hints — the recorded task.cwd and whether the run wants its worktree. The
   // daemon does the stat/fallback/worktree resolution locally.
   recordedCwd?: string
-  worktree?: string
+  prompt: string
+  task: {
+    allowEdits: boolean
+    allowCommits: boolean
+    allow?: string[]
+    worktree?: string
+  }
   // The provider session to resume, when the task already has one (a prior turn
   // reported it — see SessionMessage). Absent on a task's first turn. For Claude
   // today, the daemon mints a fresh session id, launches with `--session-id`, and
@@ -40,9 +47,18 @@ export type StartRunMessage = {
   // later turns. This decouples the lander task id (a short nanoid the server
   // owns) from the provider session id.
   sessionId?: string
-  agentArgs: string[]
   env: Record<string, string>
   idleTimeoutMs: number
+}
+
+// Persist a project-wide permission rule through the daemon because provider
+// config lives with the host project path and provider CLI semantics.
+export type ProjectGrantMessage = {
+  type: 'project-grant'
+  requestId: string
+  project: string
+  agent: AgentKind
+  rule: string
 }
 
 // Interrupt a run now (a human wedged the task); the daemon SIGKILLs the child
@@ -72,6 +88,7 @@ export type AckMessage = {
 
 export type ServerToDaemon =
   | StartRunMessage
+  | ProjectGrantMessage
   | InterruptMessage
   | ResumeFromMessage
   | AckMessage
@@ -142,6 +159,14 @@ export type SessionMessage = {
   sessionId: string
 }
 
+export type ProjectGrantResultMessage = {
+  type: 'project-grant-result'
+  requestId: string
+  ok: boolean
+  error?: string
+  status?: number
+}
+
 // A fresh usage snapshot, pushed whenever the daemon refreshes (per-turn, on the
 // reset timer, at boot). Not tied to any run; the server caches and serves it
 // verbatim. Carries the same `UsageBody` shape (session + weekly windows).
@@ -156,4 +181,5 @@ export type DaemonToServer =
   | UpdateMessage
   | DoneMessage
   | SessionMessage
+  | ProjectGrantResultMessage
   | UsageMessage

@@ -13,8 +13,9 @@
 import { readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createClaudeAdapter } from '../server/claude'
-import { codexOptionsFromEnv, createCodexAdapter } from '../server/codex'
+import type { AgentAdapter } from './agent'
+import { createClaudeAdapter } from './claude'
+import { codexOptionsFromEnv, createCodexAdapter } from './codex'
 import { projectSlug } from '../server/projects'
 import { fetchUsage, type UsageBody } from '../server/usage'
 import type {
@@ -22,6 +23,8 @@ import type {
   StartRunMessage,
   RegisterMessage,
   UsageMessage,
+  ProjectGrantResultMessage,
+  AgentKind,
 } from '../server/protocol'
 import { createRunManager, type RunManagerMessage } from './run'
 
@@ -63,6 +66,10 @@ const CODEX_ADAPTER = createCodexAdapter({
   taskPromptTemplate: TASK_PROMPT_TEMPLATE,
   ...codexOptionsFromEnv(process.env),
 })
+const ADAPTERS = {
+  claude: CLAUDE_ADAPTER,
+  codex: CODEX_ADAPTER,
+} satisfies Record<AgentKind, AgentAdapter>
 
 let ws: WebSocket | null = null
 // Set by SIGUSR1 (the dev supervisor's drain signal): finish the runs we're
@@ -72,7 +79,11 @@ let ws: WebSocket | null = null
 let draining = false
 
 function send(
-  msg: RunManagerMessage | RegisterMessage | UsageMessage,
+  msg:
+    | RunManagerMessage
+    | RegisterMessage
+    | UsageMessage
+    | ProjectGrantResultMessage,
 ): void {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
 }
@@ -142,30 +153,31 @@ function scheduleUsageReset(body: UsageBody): void {
   usageResetTimer.unref()
 }
 
-// Resolve a start-run's launch directory from the project slug + cwd hints — the
-// stat/fallback/worktree logic relocated from the server's runTurn (decision 8).
-// In a tracked worktree we launch from the project root and let Claude's
-// `--worktree` (already in agentArgs) re-enter it; otherwise resume in the
-// recorded dir if it still exists, falling back to the root.
-function resolveCwd(msg: StartRunMessage): string {
+// Resolve a start-run's launch directories from the project slug + cwd hints.
+// Providers with a real worktree flag launch from the project root and re-enter
+// the worktree through argv; providers without one resume from the recorded cwd.
+function resolveRunPaths(
+  msg: StartRunMessage,
+  adapter: AgentAdapter,
+): { root: string; cwd: string } {
   const root = pathBySlug.get(msg.project)
   if (!root) throw new Error(`daemon serves no project for slug ${msg.project}`)
-  if (!msg.worktree && msg.recordedCwd && msg.recordedCwd !== root) {
+  if (adapter.supportsWorktreeFlag && msg.task.worktree)
+    return { root, cwd: root }
+  if (msg.recordedCwd && msg.recordedCwd !== root) {
     try {
-      if (statSync(msg.recordedCwd).isDirectory()) return msg.recordedCwd
+      if (statSync(msg.recordedCwd).isDirectory())
+        return { root, cwd: msg.recordedCwd }
     } catch {
       // recorded dir is gone — fall back to the project root
     }
   }
-  return root
+  return { root, cwd: root }
 }
 
 const runManager = createRunManager({
-  adapters: {
-    claude: CLAUDE_ADAPTER,
-    codex: CODEX_ADAPTER,
-  },
-  resolveCwd,
+  adapters: ADAPTERS,
+  resolveRunPaths,
   send,
   refreshUsage,
   defaultIdleMs: DEFAULT_IDLE_MS,
@@ -196,6 +208,52 @@ function onMessage(raw: string): void {
       }
       runManager.startRun(msg)
       break
+    case 'project-grant': {
+      const projectPath = pathBySlug.get(msg.project)
+      const adapter = ADAPTERS[msg.agent]
+      if (!projectPath) {
+        send({
+          type: 'project-grant-result',
+          requestId: msg.requestId,
+          ok: false,
+          error: `daemon serves no project for slug ${msg.project}`,
+          status: 404,
+        })
+        break
+      }
+      if (!adapter.supportsProjectGrants || !adapter.persistProjectGrant) {
+        send({
+          type: 'project-grant-result',
+          requestId: msg.requestId,
+          ok: false,
+          error:
+            msg.agent === 'codex'
+              ? 'Project permission grants are not supported for Codex tasks yet.'
+              : `Project permission grants are not supported for ${msg.agent} tasks.`,
+          status: 400,
+        })
+        break
+      }
+      adapter
+        .persistProjectGrant({ projectPath, rule: msg.rule })
+        .then(() =>
+          send({
+            type: 'project-grant-result',
+            requestId: msg.requestId,
+            ok: true,
+          }),
+        )
+        .catch((e) =>
+          send({
+            type: 'project-grant-result',
+            requestId: msg.requestId,
+            ok: false,
+            error: e instanceof Error ? e.message : String(e),
+            status: 500,
+          }),
+        )
+      break
+    }
     case 'interrupt':
       runManager.interrupt(msg.runId)
       break

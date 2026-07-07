@@ -1,8 +1,8 @@
 import { EventEmitter } from 'node:events'
 import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import { describe, expect, it, vi } from 'vitest'
-import { createClaudeAdapter } from '../server/claude'
-import { createCodexAdapter } from '../server/codex'
+import { createClaudeAdapter } from './claude'
+import { createCodexAdapter } from './codex'
 import type { StartRunMessage } from '../server/protocol'
 import type { RunManagerMessage } from './run'
 import { createRunManager } from './run'
@@ -31,7 +31,11 @@ function makeStart(over: Partial<StartRunMessage> = {}): StartRunMessage {
     taskId: 'task-1',
     agent: 'codex',
     project: 'proj',
-    agentArgs: ['exec', '--json', 'prompt'],
+    prompt: 'prompt',
+    task: {
+      allowEdits: false,
+      allowCommits: false,
+    },
     env: { LANDER_TASK: 'task-1' },
     idleTimeoutMs: 60_000,
     ...over,
@@ -56,7 +60,7 @@ function harness() {
         taskPromptTemplate: 'Prompt: {{forwardable}}.',
       }),
     },
-    resolveCwd: () => '/repo',
+    resolveRunPaths: () => ({ root: '/repo', cwd: '/repo' }),
     send: (msg) => messages.push(msg),
     refreshUsage: () => {},
     spawn,
@@ -70,23 +74,48 @@ describe('daemon run manager', () => {
   it('spawns the selected provider binary with provider session args', () => {
     const h = harness()
 
-    h.manager.startRun(makeStart({ agent: 'codex', agentArgs: ['exec', '--json', 'codex prompt'] }))
+    h.manager.startRun(makeStart({ agent: 'codex', prompt: 'codex prompt' }))
     h.manager.startRun(
       makeStart({
         runId: 'run-2',
         agent: 'claude',
-        agentArgs: ['-p', '--', 'claude prompt'],
+        prompt: 'claude prompt',
       }),
     )
 
     expect(h.spawns[0]).toMatchObject({
       command: 'codex',
-      args: ['exec', '--json', 'codex prompt'],
+      args: [
+        'exec',
+        '--json',
+        '--config',
+        'shell_environment_policy.set.LANDER_TASK="task-1"',
+        '--cd',
+        '/repo',
+        '--sandbox',
+        'read-only',
+        'Prompt: This Codex turn runs with the read-only sandbox. Task allow rules and commit-only grants are stored by Lander but do not affect Codex runs yet.\n\ncodex prompt',
+      ],
       options: { cwd: '/repo' },
     })
     expect(h.spawns[1]).toMatchObject({
       command: 'claude',
-      args: ['--session-id', 'minted-session', '-p', '--', 'claude prompt'],
+      args: [
+        '--session-id',
+        'minted-session',
+        '--allowedTools',
+        'Bash(lander:*)',
+        '--settings',
+        expect.any(String),
+        '--append-system-prompt',
+        'Prompt: You currently have no edit or commit permissions, so a spawned task cannot be granted them either.',
+        '--output-format',
+        'stream-json',
+        '--verbose',
+        '-p',
+        '--',
+        'claude prompt',
+      ],
       options: { cwd: '/repo' },
     })
     expect(h.messages).toContainEqual({

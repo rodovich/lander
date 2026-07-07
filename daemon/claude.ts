@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { AgentAdapter, AgentTaskView } from './agent'
-import { reduceStreamLine } from './stream'
+import { reduceStreamLine } from '../server/stream'
 import { taskManagementPrompt } from './task-management'
 
 export type ClaudeAdapterOptions = {
@@ -18,7 +18,6 @@ export function createClaudeAdapter({
     command: 'claude',
     buildLaunch({ task, prompt, landerEnv }) {
       return {
-        command: 'claude',
         args: buildClaudeArgs(task, prompt, { landerBin, taskPromptTemplate }),
         env: landerEnv,
       }
