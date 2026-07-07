@@ -16,7 +16,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { applyUpdate, applyDone } from './apply'
 import type { AgentAdapter } from './agent'
-import { defaultAgentFromEnv } from './agent'
+import { defaultAgentFromEnv, isAgentKind } from './agent'
 import { createClaudeAdapter } from './claude'
 import { codexOptionsFromEnv, createCodexAdapter } from './codex'
 import {
@@ -1141,11 +1141,13 @@ app.post('/api/:project/tasks', async (c) => {
       date?: unknown
       time?: unknown
       await?: unknown
+      agent?: unknown
       allowEdits?: unknown
       allowCommits?: unknown
     }>()
     const title = typeof body.title === 'string' ? body.title.trim() : ''
     const rawMessage = typeof body.message === 'string' ? body.message : ''
+    const agent = isAgentKind(body.agent) ? body.agent : DEFAULT_NEW_TASK_AGENT
     const allowEdits = body.allowEdits === true
     const allowCommits = body.allowCommits === true
     if (!title && !rawMessage.trim())
@@ -1227,7 +1229,7 @@ app.post('/api/:project/tasks', async (c) => {
     }
     const task: Task = {
       id,
-      agent: DEFAULT_NEW_TASK_AGENT,
+      agent,
       title: title || '…',
       // A deferred task rests until the scheduler launches it at scheduledFor.
       // Otherwise "riding" while the agent works on the opening message (driveTask

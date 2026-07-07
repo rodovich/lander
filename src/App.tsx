@@ -1417,11 +1417,11 @@ export function App() {
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   // The new-task form's draft fields persist across reloads so a half-composed
-  // task — its message and its edit/commit/project choices — isn't lost to a
-  // hot reload or refresh. Session-scoped: two tabs composing different tasks
-  // keep independent drafts (localStorage would let them clobber each other,
-  // and since these fields drive the submission, a shared newProject could
-  // even send a task to the wrong project).
+  // task — its message and its agent/edit/commit/project choices — isn't lost
+  // to a hot reload or refresh. Session-scoped: two tabs composing different
+  // tasks keep independent drafts (localStorage would let them clobber each
+  // other, and since these fields drive the submission, a shared newProject
+  // could even send a task to the wrong project).
   const [message, setMessage] = useSessionState('lander:draft:newTask', '')
   const [newAllowEdits, setNewAllowEdits] = useSessionState(
     'lander:draft:newAllowEdits',
@@ -1430,6 +1430,10 @@ export function App() {
   const [newAllowCommits, setNewAllowCommits] = useSessionState(
     'lander:draft:newAllowCommits',
     false,
+  )
+  const [newTaskAgent, setNewTaskAgent] = useSessionState<Task['agent']>(
+    'lander:draft:newAgent',
+    'claude',
   )
   // Explicit project override for the new-task form; empty means "follow the
   // default" (targetSlug below).
@@ -2065,6 +2069,7 @@ export function App() {
         headers: uiHeaders(),
         body: JSON.stringify({
           message,
+          agent: newTaskAgent,
           allowEdits: newAllowEdits,
           allowCommits: newAllowCommits,
         }),
@@ -2923,6 +2928,14 @@ export function App() {
         <form className="new-task" onSubmit={onSubmit}>
           <div className="new-task-head">
             <h2>New task</h2>
+            <select
+              className="new-task-agent"
+              value={newTaskAgent}
+              onChange={(e) => setNewTaskAgent(e.target.value as Task['agent'])}
+            >
+              <option value="claude">Claude</option>
+              <option value="codex">Codex</option>
+            </select>
             {projects.length > 1 && (
               <select
                 className="new-task-project"
