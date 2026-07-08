@@ -2420,6 +2420,29 @@ console.log(`api listening on http://localhost:${port}`)
 // the daemon's connect-time push primes it.
 attachDaemonServer(server as unknown as import('node:http').Server, {
   token: DAEMON_TOKEN,
+  // Warn at register time about a slug mismatch between how the daemon was
+  // launched and the projects this server serves — the usual silent cause of a
+  // task wedging with "daemon does not serve this project". A project we serve
+  // that the daemon doesn't is the one that breaks tasks (missing); a slug the
+  // daemon serves that we don't is harmless launch-arg drift (extra), logged for
+  // symmetry. Both point back at the PROJECT_DIRS the two sides were launched with.
+  onRegister: (slugs) => {
+    const served = new Set(slugs)
+    const configured = new Set(PROJECTS.map((p) => p.slug))
+    const missing = PROJECTS.map((p) => p.slug).filter((s) => !served.has(s))
+    const extra = slugs.filter((s) => !configured.has(s))
+    if (missing.length)
+      console.warn(
+        `daemon does NOT serve ${missing.length} configured project(s): ` +
+          `${missing.join(', ')} — tasks for these will wedge. ` +
+          `Launch the daemon with the same project dirs as the server.`,
+      )
+    if (extra.length)
+      console.warn(
+        `daemon serves ${extra.length} project(s) this server doesn't: ` +
+          `${extra.join(', ')} — launch-arg drift, harmless.`,
+      )
+  },
   onUsage: (body) => {
     usageCache = { at: Date.now(), body }
   },
