@@ -200,6 +200,15 @@ export function attachDaemonServer(
     const url = new URL(req.url ?? '', 'http://localhost')
     if (url.pathname !== '/daemon') return // not ours — leave it for others
     if (url.searchParams.get('token') !== opts.token) {
+      // A token mismatch otherwise fails silently — the daemon just retries the
+      // upgrade every second forever and no task can start. Log it so a desynced
+      // LANDER_DAEMON_TOKEN (e.g. a manually restarted server, a stale data/
+      // .ui-token) is visible rather than an invisible reconnect loop.
+      console.warn(
+        'daemon upgrade rejected (401): token mismatch — the daemon and server ' +
+          'disagree on LANDER_DAEMON_TOKEN; the daemon will retry in a loop until ' +
+          'they match.',
+      )
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
       socket.destroy()
       return
