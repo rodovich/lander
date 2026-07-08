@@ -52,9 +52,17 @@ export function createClaudeAdapter({
         env: landerEnv,
       }
     },
-    buildTurnContext({ task, cwd }) {
+    buildTurnContext({ task, root, cwd }) {
       const parts = [`${forwardableAccess(task)}.`]
-      const git = readGitContext(cwd)
+      // A worktree Claude task launches from the project root (resolveRunPaths
+      // hands cwd=root, since Claude re-enters the worktree via --worktree) — so
+      // read the snapshot from the worktree itself, not root, or the block would
+      // describe the wrong branch and dirty tree. The worktree lives at the same
+      // <root>/.claude/worktrees/<name> path `--worktree <name>` re-enters.
+      const gitCwd = task.worktree
+        ? path.join(root, '.claude', 'worktrees', task.worktree)
+        : cwd
+      const git = readGitContext(gitCwd)
       if (git) parts.push(git)
       return [
         '<task-context>',

@@ -182,6 +182,47 @@ describe('Claude adapter', () => {
     expect(gitContext(dir)).toBeUndefined()
   })
 
+  it('snapshots the worktree, not root, for a worktree task', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'lander-wt-'))
+    tempDirs.push(root)
+    const git = (cwd: string, ...args: string[]) =>
+      execFileSync(
+        'git',
+        ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args],
+        { cwd, stdio: ['ignore', 'pipe', 'ignore'] },
+      )
+    git(root, 'init', '-b', 'main')
+    await writeFile(path.join(root, 'a.txt'), 'a')
+    git(root, 'add', 'a.txt')
+    git(root, 'commit', '-m', 'root commit')
+    // The worktree lives where `--worktree <name>` re-enters it, on its own
+    // branch with its own dirty file.
+    const wtPath = path.join(root, '.claude', 'worktrees', 'feature')
+    git(root, 'worktree', 'add', '-b', 'feature', wtPath)
+    await writeFile(path.join(wtPath, 'wt-only.txt'), 'x')
+
+    // A worktree Claude task launches from root (resolveRunPaths → cwd=root),
+    // yet the block must describe the worktree the agent actually edits.
+    const realGit = createClaudeAdapter({
+      landerBin: '/repo/bin/lander',
+      taskPromptTemplate: 'Prompt: {{forwardable}}.',
+    })
+    const context = realGit.buildTurnContext?.({
+      task: { allowEdits: true, allowCommits: true, worktree: 'feature' },
+      root,
+      cwd: root,
+    })
+    expect(context).toContain('Current branch: feature')
+    expect(context).toContain('?? wt-only.txt')
+    expect(context).not.toContain('Current branch: main')
+
+    // Guard the divergence the fix relies on: reading root (the launch cwd)
+    // would report the wrong branch and miss the worktree's dirt.
+    const rootSnapshot = gitContext(root)
+    expect(rootSnapshot).toContain('Current branch: main')
+    expect(rootSnapshot).not.toContain('wt-only.txt')
+  })
+
   it('persists project grants in Claude settings.local.json', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'lander-claude-'))
     tempDirs.push(dir)

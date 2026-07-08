@@ -10,7 +10,7 @@
 //        LANDER_DAEMON_TOKEN (must match the server's)
 //        LANDER_IDLE_TIMEOUT_MS (per-run idle kill, default 10m — start-run wins)
 
-import { readFileSync, statSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { AgentAdapter } from './agent'
@@ -27,6 +27,7 @@ import type {
   AgentKind,
 } from '../server/protocol'
 import { createRunManager, type RunManagerMessage } from './run'
+import { resolveRunCwd } from './paths'
 
 // Project host paths come from argv, or PROJECT_DIRS (newline-separated, as
 // dev.mjs sets for the server) when argv is empty — so `npm run dev` can launch
@@ -154,25 +155,14 @@ function scheduleUsageReset(body: UsageBody): void {
 }
 
 // Resolve a start-run's launch directories from the project slug + cwd hints.
-// Providers with a real worktree flag launch from the project root and re-enter
-// the worktree through argv; providers without one resume from the recorded cwd.
+// The cwd rule (worktree flag vs recorded cwd) lives in resolveRunCwd.
 function resolveRunPaths(
   msg: StartRunMessage,
   adapter: AgentAdapter,
 ): { root: string; cwd: string } {
   const root = pathBySlug.get(msg.project)
   if (!root) throw new Error(`daemon serves no project for slug ${msg.project}`)
-  if (adapter.supportsWorktreeFlag && msg.task.worktree)
-    return { root, cwd: root }
-  if (msg.recordedCwd && msg.recordedCwd !== root) {
-    try {
-      if (statSync(msg.recordedCwd).isDirectory())
-        return { root, cwd: msg.recordedCwd }
-    } catch {
-      // recorded dir is gone — fall back to the project root
-    }
-  }
-  return { root, cwd: root }
+  return { root, cwd: resolveRunCwd(msg, adapter, root) }
 }
 
 const runManager = createRunManager({
