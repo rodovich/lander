@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment, memo, useCallback, useEffect, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { agentDisplayName, formatAgentModelName } from './agentDisplay'
 import { Markdown } from './markdown'
@@ -6,6 +6,7 @@ import type { TaskLinkResolver } from './markdown'
 import { buildTimeline } from './timeline'
 import type { TimelineItem } from './timeline'
 import { planTurnCollapse } from './turnCollapse'
+import { tick, timed } from './perf'
 
 // Request headers that mark a call as coming from the human's browser. The
 // server gates permission-granting endpoints (creating a task with edit/commit
@@ -1033,7 +1034,12 @@ function CopyButton({
   )
 }
 
-function MessageText({
+// Memoized because it renders a whole message's markdown (a 287KB user message
+// in the worst case) and would otherwise re-parse + re-render on every App
+// re-render — the 2s poll, streaming updates to *other* messages, and every
+// scroll/tab-focus state flip. With `linkTask` kept referentially stable (see
+// resolveTaskLink's useCallback), an unchanged `text` now skips all of that work.
+const MessageText = memo(function MessageText({
   text,
   linkTask,
 }: {
@@ -1049,7 +1055,7 @@ function MessageText({
       <CopyButton text={text} />
     </div>
   )
-}
+})
 
 // A clipboard button for copying a task's id, styled to sit beside the
 // title's sparkle and fade in with it on hover. Flips to a checkmark after a
@@ -1404,6 +1410,11 @@ function SectionActionsMenu({
 }
 
 export function App() {
+  // Opt-in profiling (see perf.ts): count every App render. The whole
+  // conversation re-renders on each one — the 2s poll, streaming updates, and
+  // every scroll/tab-focus state change all trip it — so a high count against a
+  // little interaction is itself a finding.
+  tick('App.render')
   const [tasks, setTasks] = useState<TaskWithProject[]>([])
   // Active + archived tasks across shown projects, used only to resolve
   // task-id mentions to links. The displayed `tasks` list holds just the
@@ -1796,7 +1807,11 @@ export function App() {
   // buildTimeline; `queuedIndices` rides back out so the render can dim the
   // follow-ups the agent hasn't read yet. `now` anchors any in-flight turn.
   const { items: timeline, queuedIndices } = current
-    ? buildTimeline(current, new Date().toISOString())
+    ? timed(
+        'buildTimeline',
+        () => buildTimeline(current, new Date().toISOString()),
+        `${current.messages.length} msgs`,
+      )
     : {
         items: [] as TimelineItem<Message, TaskEvent>[],
         queuedIndices: new Set<number>(),
@@ -2053,24 +2068,32 @@ export function App() {
   // rule). Returns undefined otherwise so the id renders as plain text. This is
   // purely presentational — the stored message and what's sent to the model are
   // untouched.
-  const resolveTaskLink: TaskLinkResolver = (id) => {
-    // A legacy/garbled reference can hand us an empty id (e.g. an old "awaiting"
-    // event saved under the pre-rename shape); resolve it to no link rather than
-    // throwing and taking down the whole task view.
-    if (!id) return undefined
-    const needle = id.toLowerCase()
-    const matches =
-      needle.length >= 36
-        ? linkTasks.filter((t) => t.id?.toLowerCase() === needle)
-        : linkTasks.filter((t) => t.id?.toLowerCase().startsWith(needle))
-    if (matches.length !== 1) return undefined
-    const t = matches[0]
-    return {
-      href: `/${t.projectSlug}/${t.id}`,
-      title: t.title,
-      status: t.status,
-    }
-  }
+  // Referentially stable across renders (only the linkTasks list, refreshed on
+  // its own slow 10s poll, is a dependency) so the memoized MessageText/Markdown
+  // can skip re-rendering when a message's text is unchanged. Without this the
+  // resolver would be a fresh closure every render, busting that memoization and
+  // forcing the 287KB message to re-parse on every poll/scroll/focus tick.
+  const resolveTaskLink = useCallback<TaskLinkResolver>(
+    (id) => {
+      // A legacy/garbled reference can hand us an empty id (e.g. an old
+      // "awaiting" event saved under the pre-rename shape); resolve it to no link
+      // rather than throwing and taking down the whole task view.
+      if (!id) return undefined
+      const needle = id.toLowerCase()
+      const matches =
+        needle.length >= 36
+          ? linkTasks.filter((t) => t.id?.toLowerCase() === needle)
+          : linkTasks.filter((t) => t.id?.toLowerCase().startsWith(needle))
+      if (matches.length !== 1) return undefined
+      const t = matches[0]
+      return {
+        href: `/${t.projectSlug}/${t.id}`,
+        title: t.title,
+        status: t.status,
+      }
+    },
+    [linkTasks],
+  )
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -2209,6 +2232,11 @@ export function App() {
   const prevSelectedRef = useRef<string | null>(null)
 
   function onMessagesScroll() {
+    // Fires on every scroll frame; setAtBottom below re-renders the whole App
+    // (and thus re-parses/re-renders every message's markdown) each time the
+    // at-bottom boolean flips. Counted so the profile shows scroll-driven render
+    // churn separately from poll/stream churn.
+    tick('scroll.event')
     const el = messagesRef.current
     if (!el) return
     const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < 32

@@ -1,4 +1,5 @@
-import { Fragment, useState, type ReactNode } from 'react'
+import { Fragment, memo, useState, type ReactNode } from 'react'
+import { timed } from './perf'
 
 // A deliberately small, safe Markdown renderer. It returns React elements
 // (never HTML strings / dangerouslySetInnerHTML), so React escapes all text
@@ -477,12 +478,25 @@ function renderBlocks(
   })
 }
 
-export function Markdown({
+// Memoized so an unchanged (text, linkTask) pair reuses the prior render instead
+// of re-parsing and re-building the element tree. This is what makes the long
+// user message stop re-rendering on unrelated App updates (poll/scroll/focus);
+// it relies on callers passing a referentially stable linkTask (see App's
+// resolveTaskLink). Still profiled (opt-in; see perf.ts) so a genuine re-render —
+// or a caller that busts the memo — shows up in `landerPerf.report()`, timing
+// the block split and the inline-span pass separately.
+export const Markdown = memo(function Markdown({
   text,
   linkTask,
 }: {
   text: string
   linkTask?: TaskLinkResolver
 }): JSX.Element {
-  return <>{renderBlocks(parseBlocks(text), 'b', linkTask)}</>
-}
+  const detail = `${text.length}c${linkTask ? ' +linkTask' : ''}`
+  const blocks = timed('markdown.parse', () => parseBlocks(text), detail)
+  return timed(
+    'markdown.render',
+    () => <>{renderBlocks(blocks, 'b', linkTask)}</>,
+    detail,
+  )
+})

@@ -8,7 +8,8 @@
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "bench:markdown": "tsx bench/markdown-bench.tsx"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
