@@ -5,6 +5,7 @@ import { Markdown } from './markdown'
 import type { TaskLinkResolver } from './markdown'
 import { buildTimeline } from './timeline'
 import type { TimelineItem } from './timeline'
+import { planTurnCollapse } from './turnCollapse'
 
 // Request headers that mark a call as coming from the human's browser. The
 // server gates permission-granting endpoints (creating a task with edit/commit
@@ -1505,10 +1506,10 @@ export function App() {
     })
   }
 
-  // Assistant turns (other than the most recent) collapse their middle stretch
-  // of inference steps behind a disclosure; this holds the message indices the
-  // viewer has expanded. It's cleared on task switch, so each task opens with its
-  // history folded down again.
+  // Assistant turns (other than the most recent) collapse their middle stretch of
+  // message steps behind a disclosure; this holds the message indices the viewer
+  // has expanded. It's cleared on task switch, so each task opens with its history
+  // folded down again.
   const [expandedTurns, setExpandedTurns] = useState<Set<number>>(new Set())
 
   function toggleTurn(messageIndex: number) {
@@ -3208,12 +3209,11 @@ export function App() {
                         }
                         // The main trace omits subagent steps entirely — they're
                         // folded under their spawning chip — so their inference ids
-                        // never open a main-trace group nor feed its copy buttons.
-                        const groups = groupByInference(
-                          m.steps
-                            .map((_, j) => j)
-                            .filter((j) => !m.steps![j].parentToolUseId),
-                        )
+                        // never open a main-trace group nor feed collapse/copy
+                        // controls.
+                        const mainIdxs = m.steps
+                          .map((_, j) => j)
+                          .filter((j) => !m.steps![j].parentToolUseId)
                         const renderStep = (j: number) => {
                           const s = m.steps![j]
                           const key = `${i}:${j}`
@@ -3292,70 +3292,67 @@ export function App() {
                             />
                           )
                         }
+                        const renderStepList = (
+                          idxs: number[],
+                          initialSep = false,
+                          keyPrefix = 'steps',
+                        ) =>
+                          groupByInference(idxs).map((groupIdxs, k) => (
+                            <Fragment
+                              key={`${keyPrefix}-${k}-${groupIdxs[0] ?? 'empty'}`}
+                            >
+                              {(initialSep || k > 0) && (
+                                <hr className="turn-sep" />
+                              )}
+                              <div className="inference">
+                                {groupIdxs.map(renderStep)}
+                              </div>
+                            </Fragment>
+                          ))
                         // A subagent's folded trace, grouped into its own turns the
                         // same way the main trace is — ruled apart by a turn-sep so
                         // its inferences read as distinct turns. Mutually recursive
                         // with renderStep (a nested subagent nests in turn).
                         const renderSubSteps = (childIdxs: number[]) =>
-                          groupByInference(childIdxs).map((idxs, k) => (
-                            <Fragment key={k}>
-                              {k > 0 && <hr className="turn-sep" />}
-                              <div className="inference">
-                                {idxs.map(renderStep)}
-                              </div>
-                            </Fragment>
-                          ))
-                        const groupTexts = groups.map((idxs) =>
-                          idxs
-                            .map((j) => m.steps![j])
-                            .filter((s) => s.kind === 'text' && s.text)
-                            .map((s) => s.text)
-                            .join('\n\n'),
-                        )
-                        const renderGroup = (g: number, showSep = g > 0) => (
-                          <Fragment key={g}>
-                            {showSep && <hr className="turn-sep" />}
-                            <div className="inference">
-                              {groups[g].map(renderStep)}
-                            </div>
-                          </Fragment>
-                        )
-                        // Assistant turns fold down: the first inference step
-                        // stays, the step with the most text and everything after
-                        // it stays, and the run between them collapses into a
-                        // disclosure. The first step only stays if it has prose of
-                        // its own — a textless opener (just tool calls) folds in
-                        // with the rest. A turn still being written renders in full
-                        // (its shape isn't settled yet), as does any turn too
-                        // short to have a gap.
-                        const longestIdx = groupTexts.reduce(
-                          (best, t, g) =>
-                            t.length > groupTexts[best].length ? g : best,
-                          0,
-                        )
-                        const showFirst = groupTexts[0].length > 0
-                        const hiddenStart = showFirst ? 1 : 0
-                        const hidden = groups.slice(hiddenStart, longestIdx)
+                          renderStepList(
+                            childIdxs,
+                            false,
+                            `sub-${childIdxs[0] ?? 'empty'}`,
+                          )
+                        // Assistant turns fold down by assistant text messages,
+                        // independent of inference boundaries: keep an opening text
+                        // message only when it comes before tool calls, keep the
+                        // longest text message and everything after it, and collapse
+                        // the flat step range between them. A turn still being
+                        // written renders in full (its shape isn't settled yet), as
+                        // does any turn too short to have a gap.
+                        const collapse = planTurnCollapse(m.steps!, mainIdxs)
                         const folds =
                           m.role === 'assistant' &&
                           !m.pending &&
-                          hidden.length > 0
-                        if (!folds) return groups.map((_, g) => renderGroup(g))
-                        const toolCount = hidden
-                          .flat()
+                          collapse.hidden.length > 0
+                        if (!folds) return renderStepList(mainIdxs)
+                        const toolCount = collapse.hidden
                           .filter((j) => m.steps![j].kind === 'tool_use').length
                         const open = expandedTurns.has(i)
                         return (
                           <>
-                            {showFirst && renderGroup(0)}
-                            {showFirst && <hr className="turn-sep" />}
+                            {collapse.visibleBefore.length > 0 &&
+                              renderStepList(
+                                collapse.visibleBefore,
+                                false,
+                                'before',
+                              )}
+                            {collapse.visibleBefore.length > 0 && (
+                              <hr className="turn-sep" />
+                            )}
                             <Collapsible
                               open={open}
                               onToggle={() => toggleTurn(i)}
                               label={
                                 <span className="collapsible-label">
-                                  {hidden.length} step
-                                  {hidden.length === 1 ? '' : 's'}
+                                  {collapse.hidden.length} step
+                                  {collapse.hidden.length === 1 ? '' : 's'}
                                   {toolCount > 0 &&
                                     `, ${toolCount} tool${
                                       toolCount === 1 ? '' : 's'
@@ -3364,13 +3361,17 @@ export function App() {
                                 </span>
                               }
                             >
-                              {hidden.map((_, k) =>
-                                renderGroup(k + hiddenStart, k > 0),
+                              {renderStepList(
+                                collapse.hidden,
+                                false,
+                                'hidden',
                               )}
                             </Collapsible>
-                            {groups
-                              .slice(longestIdx)
-                              .map((_, k) => renderGroup(k + longestIdx))}
+                            {renderStepList(
+                              collapse.visibleAfter,
+                              true,
+                              'after',
+                            )}
                           </>
                         )
                       })()}
