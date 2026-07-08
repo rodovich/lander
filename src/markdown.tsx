@@ -32,20 +32,21 @@ function renderInline(
   linkTask?: TaskLinkResolver,
 ): ReactNode[] {
   const nodes: ReactNode[] = []
-  let remaining = text
   let key = 0
 
-  // Ordered by precedence: code first so its contents aren't reparsed.
+  // Ordered by precedence: code first so its contents aren't reparsed. Every
+  // regex is global so the scan below can resume from a saved lastIndex instead
+  // of re-matching the whole tail each step — see the loop's cache comment.
   const patterns: {
     re: RegExp
     render: (m: RegExpMatchArray, k: string) => ReactNode
   }[] = [
     {
-      re: /`([^`]+)`/,
+      re: /`([^`]+)`/g,
       render: (m, k) => <code key={k}>{m[1]}</code>,
     },
     {
-      re: /\[([^\]]+)\]\(([^)\s]+)\)/,
+      re: /\[([^\]]+)\]\(([^)\s]+)\)/g,
       render: (m, k) => {
         const href = safeHref(m[2])
         if (!href) return <Fragment key={k}>{m[0]}</Fragment>
@@ -64,13 +65,13 @@ function renderInline(
       // (e.g. **bold *italic* bold**) is kept inside the bold and reparsed by the
       // recursive renderInline below, rather than splitting the "**" off as
       // literal text.
-      re: /\*\*([\s\S]+?)\*\*|(?<![\p{L}\p{N}])__([^_]+)__(?![\p{L}\p{N}])/u,
+      re: /\*\*([\s\S]+?)\*\*|(?<![\p{L}\p{N}])__([^_]+)__(?![\p{L}\p{N}])/gu,
       render: (m, k) => (
         <strong key={k}>{renderInline(m[1] ?? m[2], k, linkTask)}</strong>
       ),
     },
     {
-      re: /\*([^*]+)\*|(?<![\p{L}\p{N}])_([^_]+)_(?![\p{L}\p{N}])/u,
+      re: /\*([^*]+)\*|(?<![\p{L}\p{N}])_([^_]+)_(?![\p{L}\p{N}])/gu,
       render: (m, k) => (
         <em key={k}>{renderInline(m[1] ?? m[2], k, linkTask)}</em>
       ),
@@ -79,7 +80,7 @@ function renderInline(
       // Bare URLs. The greedy body plus a non-punctuation final char keeps
       // trailing punctuation (".", ")", etc.) out of the link. Markdown links
       // win over this since their "[" sits at an earlier index.
-      re: /(?:https?:\/\/|www\.)[^\s]*[^\s.,;:!?)\]}'"]/i,
+      re: /(?:https?:\/\/|www\.)[^\s]*[^\s.,;:!?)\]}'"]/gi,
       render: (m, k) => {
         const raw = m[0]
         const href = safeHref(raw.startsWith('www.') ? `https://${raw}` : raw)
@@ -107,7 +108,7 @@ function renderInline(
   // lifecycle-event task links, so it navigates within the app.
   if (linkTask) {
     patterns.push({
-      re: /(?<![0-9A-Za-z_-])(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9A-Za-z_-]{8,21})(?![0-9A-Za-z_-])/i,
+      re: /(?<![0-9A-Za-z_-])(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9A-Za-z_-]{8,21})(?![0-9A-Za-z_-])/gi,
       render: (m, k) => {
         const link = linkTask(m[0])
         if (!link) return <Fragment key={k}>{m[0]}</Fragment>
@@ -125,23 +126,43 @@ function renderInline(
     })
   }
 
-  while (remaining) {
-    let best: { index: number; match: RegExpMatchArray; render: (m: RegExpMatchArray, k: string) => ReactNode } | null =
-      null
-    for (const p of patterns) {
-      const m = remaining.match(p.re)
-      if (m && m.index !== undefined && (!best || m.index < best.index)) {
-        best = { index: m.index, match: m, render: p.render }
+  // Forward scan with a per-pattern cache. `cursor` is where the next span
+  // starts; each pattern's soonest match at/after `cursor` is cached and only
+  // re-searched once the cursor passes it. Because a global regex's `.exec`
+  // resumes from `lastIndex`, each pattern scans the text at most once overall —
+  // making this O(n) rather than the O(n^2) of re-matching the whole tail every
+  // step (which froze the UI on a very long message with many matches, e.g. a
+  // pasted log where nearly every word trips the task-mention pattern).
+  const cache: (RegExpExecArray | null | undefined)[] = patterns.map(
+    () => undefined,
+  )
+  let cursor = 0
+  let literalFrom = 0
+  while (cursor < text.length) {
+    let best: RegExpExecArray | null = null
+    let bestPat = -1
+    for (let pi = 0; pi < patterns.length; pi++) {
+      let m = cache[pi]
+      // Refresh a pattern whose cached match is stale (never searched, or now
+      // behind the cursor because a chosen span consumed past it).
+      if (m === undefined || (m !== null && m.index < cursor)) {
+        patterns[pi].re.lastIndex = cursor
+        m = patterns[pi].re.exec(text)
+        cache[pi] = m
+      }
+      // Earliest wins; ties break by pattern order (precedence), so use `<`.
+      if (m && (best === null || m.index < best.index)) {
+        best = m
+        bestPat = pi
       }
     }
-    if (!best) {
-      nodes.push(remaining)
-      break
-    }
-    if (best.index > 0) nodes.push(remaining.slice(0, best.index))
-    nodes.push(best.render(best.match, `${keyPrefix}-i${key++}`))
-    remaining = remaining.slice(best.index + best.match[0].length)
+    if (!best) break
+    if (best.index > literalFrom) nodes.push(text.slice(literalFrom, best.index))
+    nodes.push(patterns[bestPat].render(best, `${keyPrefix}-i${key++}`))
+    cursor = best.index + best[0].length
+    literalFrom = cursor
   }
+  if (literalFrom < text.length) nodes.push(text.slice(literalFrom))
 
   return nodes
 }

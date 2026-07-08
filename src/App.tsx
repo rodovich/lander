@@ -2068,32 +2068,36 @@ export function App() {
   // rule). Returns undefined otherwise so the id renders as plain text. This is
   // purely presentational — the stored message and what's sent to the model are
   // untouched.
-  // Referentially stable across renders (only the linkTasks list, refreshed on
-  // its own slow 10s poll, is a dependency) so the memoized MessageText/Markdown
-  // can skip re-rendering when a message's text is unchanged. Without this the
-  // resolver would be a fresh closure every render, busting that memoization and
-  // forcing the 287KB message to re-parse on every poll/scroll/focus tick.
-  const resolveTaskLink = useCallback<TaskLinkResolver>(
-    (id) => {
-      // A legacy/garbled reference can hand us an empty id (e.g. an old
-      // "awaiting" event saved under the pre-rename shape); resolve it to no link
-      // rather than throwing and taking down the whole task view.
-      if (!id) return undefined
-      const needle = id.toLowerCase()
-      const matches =
-        needle.length >= 36
-          ? linkTasks.filter((t) => t.id?.toLowerCase() === needle)
-          : linkTasks.filter((t) => t.id?.toLowerCase().startsWith(needle))
-      if (matches.length !== 1) return undefined
-      const t = matches[0]
-      return {
-        href: `/${t.projectSlug}/${t.id}`,
-        title: t.title,
-        status: t.status,
-      }
-    },
-    [linkTasks],
-  )
+  // Permanently stable identity (empty deps), reading the latest linkTasks
+  // through a ref, so the memoized MessageText/Markdown never re-render on an
+  // unchanged message text. A plain useCallback keyed on linkTasks would still
+  // bust every 10s when that list's own poll hands back a fresh array reference —
+  // forcing the 287KB message to re-parse (~800ms of scheduler work) on that
+  // cycle. The trade-off is a task-mention link inside an already-rendered
+  // message won't update until the message re-renders for another reason;
+  // acceptable, since a message's set of resolvable mentions is effectively fixed
+  // once shown.
+  const linkTasksRef = useRef(linkTasks)
+  linkTasksRef.current = linkTasks
+  const resolveTaskLink = useCallback<TaskLinkResolver>((id) => {
+    // A legacy/garbled reference can hand us an empty id (e.g. an old "awaiting"
+    // event saved under the pre-rename shape); resolve it to no link rather than
+    // throwing and taking down the whole task view.
+    if (!id) return undefined
+    const linkTasks = linkTasksRef.current
+    const needle = id.toLowerCase()
+    const matches =
+      needle.length >= 36
+        ? linkTasks.filter((t) => t.id?.toLowerCase() === needle)
+        : linkTasks.filter((t) => t.id?.toLowerCase().startsWith(needle))
+    if (matches.length !== 1) return undefined
+    const t = matches[0]
+    return {
+      href: `/${t.projectSlug}/${t.id}`,
+      title: t.title,
+      status: t.status,
+    }
+  }, [])
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()

@@ -234,6 +234,50 @@ describe('Markdown rendering', () => {
   it('renders an empty string to empty output', () => {
     expect(render('')).toBe('')
   })
+
+  it('renders many adjacent inline spans in order (forward-scan cache)', () => {
+    const html = render('`a` **b** *c* `d` [e](https://x.com) tail')
+    expect(html).toBe(
+      '<p><code>a</code> <strong>b</strong> <em>c</em> <code>d</code> ' +
+        '<a href="https://x.com" target="_blank" rel="noopener noreferrer">e</a>' +
+        ' tail</p>',
+    )
+  })
+
+  it('keeps literal runs between and around matches intact', () => {
+    expect(render('before `x` middle `y` after')).toContain(
+      'before <code>x</code> middle <code>y</code> after',
+    )
+    // A lone match at the very start, with a trailing literal, and vice versa.
+    expect(render('`x` tail')).toContain('<p><code>x</code> tail</p>')
+    expect(render('head `x`')).toContain('<p>head <code>x</code></p>')
+  })
+
+  it('handles a long run of matches without altering output (perf-path)', () => {
+    // Exercises the per-pattern cache over many matches — the scenario that was
+    // O(n^2). Output must be identical to the naive per-token expansion.
+    const html = render(Array.from({ length: 50 }, () => '`c`').join(' '))
+    expect(html).toBe(
+      '<p>' + Array.from({ length: 50 }, () => '<code>c</code>').join(' ') + '</p>',
+    )
+  })
+
+  it('renders a ~280KB message quickly (O(n) inline scan regression guard)', () => {
+    // A pasted log dump: many 8+ char tokens, each of which trips the
+    // task-mention pattern. Under the old O(n^2) tail-rescan this took seconds
+    // (~800ms of scheduler work per re-render in the UI); the forward scan makes
+    // it linear. A resolver is supplied so the task-mention pattern is active —
+    // the worst case. The bound is deliberately loose (linear render is single-
+    // digit ms here) so it flags only a genuine complexity regression.
+    const line =
+      'at resolveBaseSync (file:///Users/x/node_modules/tsx/register.mjs:2:8745)'
+    const text = Array.from({ length: 3500 }, () => line).join('\n')
+    expect(text.length).toBeGreaterThan(250_000)
+    const t0 = performance.now()
+    renderToStaticMarkup(<Markdown text={text} linkTask={() => undefined} />)
+    const ms = performance.now() - t0
+    expect(ms).toBeLessThan(1500)
+  })
 })
 
 describe('task-mention linking', () => {
