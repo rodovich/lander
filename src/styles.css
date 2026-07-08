@@ -780,6 +780,10 @@ body {
   padding: 12px 16px 16px;
   border-top: 1px solid var(--border);
   background: var(--bg-tinted);
+  /* Height is driven by the drag handle above (inline style); hold it firm so
+     the task list, not this form, absorbs the sidebar column's slack. */
+  flex: none;
+  min-height: 0;
 }
 
 .new-task h2 {
@@ -799,6 +803,14 @@ body {
   background: var(--bg);
   color: var(--fg);
   resize: vertical;
+}
+
+/* The message textarea fills the resizable form; the handle above resizes it,
+   so it flexes to fill the leftover height and drops its own resize grip. */
+.new-task textarea {
+  flex: 1;
+  min-height: 0;
+  resize: none;
 }
 
 .new-task input:focus,
@@ -1768,6 +1780,44 @@ body {
   cursor: default;
 }
 
+/* The drag handle straddling the boundary above a resizable panel. Negative
+   margins let it overlay the 1px divider and a few pixels either side as a grab
+   target without adding any net height to the flex column. A purple bar lights
+   up for the duration of a drag. */
+.resize-handle {
+  flex: none;
+  height: 9px;
+  margin-top: -5px;
+  margin-bottom: -4px;
+  position: relative;
+  z-index: 5;
+  cursor: row-resize;
+}
+
+.resize-handle::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4px;
+  height: 1px;
+  background: transparent;
+  transition: background 0.1s;
+}
+
+.resize-handle-active::before {
+  top: 3px;
+  height: 3px;
+  background: var(--riding);
+}
+
+/* While a handle is being dragged, keep the resize cursor everywhere and stop
+   the pointer from selecting text as it sweeps over the panes. */
+body.resizing-row {
+  cursor: row-resize;
+  user-select: none;
+}
+
 .composer-bar {
   display: flex;
   flex-direction: column;
@@ -1778,6 +1828,10 @@ body {
   /* Overlap the last message's bottom rule by 1px so a fully-scrolled
      overflowing conversation shows a single border here, not a double one. */
   margin-top: -1px;
+  /* Height is driven by the drag handle above (inline style); hold it firm so
+     the message timeline, not this bar, absorbs the flex column's slack. */
+  flex: none;
+  min-height: 0;
 }
 
 .composer {
@@ -1788,7 +1842,11 @@ body {
   border-radius: 6px;
   background: var(--bg);
   color: var(--fg);
-  resize: vertical;
+  /* The textarea fills the resizable bar; the handle above resizes it, so it
+     drops its own resize grip. */
+  flex: 1;
+  min-height: 0;
+  resize: none;
 }
 
 .composer:focus {

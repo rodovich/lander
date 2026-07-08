@@ -1417,6 +1417,62 @@ function SectionActionsMenu({
   )
 }
 
+// A draggable divider that sits just above the panel it resizes (the reply
+// composer, the new-task form). Dragging up grows that panel and shrinks the
+// scrollable region above it; dragging down does the reverse. The panel's
+// height is clamped to [min, container − reserveTop] so neither the panel nor
+// the region above it can be dragged shut. It measures its own flex container
+// (its parent) at drag start, so it needs no ref threaded down.
+function ResizeHandle({
+  height,
+  setHeight,
+  min,
+  reserveTop,
+  label,
+}: {
+  height: number
+  setHeight: Dispatch<SetStateAction<number>>
+  min: number
+  reserveTop: number
+  label: string
+}) {
+  function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (e.button !== 0) return
+    e.preventDefault()
+    const el = e.currentTarget
+    const containerH =
+      el.parentElement?.getBoundingClientRect().height ?? Infinity
+    const max = Math.max(min, containerH - reserveTop)
+    const startY = e.clientY
+    const startH = height
+    function onMove(ev: PointerEvent) {
+      // Dragging up (clientY decreases) grows the panel below the handle.
+      const next = startH + (startY - ev.clientY)
+      setHeight(Math.round(Math.max(min, Math.min(max, next))))
+    }
+    function onUp() {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      el.classList.remove('resize-handle-active')
+      document.body.classList.remove('resizing-row')
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    el.classList.add('resize-handle-active')
+    document.body.classList.add('resizing-row')
+  }
+
+  return (
+    <div
+      className="resize-handle"
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label={label}
+      onPointerDown={onPointerDown}
+    />
+  )
+}
+
 export function App() {
   // Opt-in profiling (see perf.ts): count every App render. The whole
   // conversation re-renders on each one — the 2s poll, streaming updates, and
@@ -1491,6 +1547,18 @@ export function App() {
   const [usageTotal, setUsageTotal] = usePersistentState(
     'lander:usageTotal',
     false,
+  )
+  // Heights of the two resizable bottom panels, dragged via the handle above
+  // each and persisted globally so the sizing sticks across tabs and reloads.
+  // The scrollable region above each (the message timeline, the task list)
+  // absorbs the difference.
+  const [composerHeight, setComposerHeight] = usePersistentState(
+    'lander:size:composer',
+    150,
+  )
+  const [newTaskHeight, setNewTaskHeight] = usePersistentState(
+    'lander:size:newTask',
+    220,
   )
   const [submitting, setSubmitting] = useState(false)
 
@@ -3008,7 +3076,18 @@ export function App() {
           })}
         </ul>
 
-        <form className="new-task" onSubmit={onSubmit}>
+        <ResizeHandle
+          height={newTaskHeight}
+          setHeight={setNewTaskHeight}
+          min={150}
+          reserveTop={160}
+          label="Resize new task area"
+        />
+        <form
+          className="new-task"
+          onSubmit={onSubmit}
+          style={{ height: newTaskHeight }}
+        >
           <div className="new-task-head">
             <h2>New task</h2>
             <select
@@ -3495,7 +3574,14 @@ export function App() {
                 </div>
               )}
             </div>
-            <div className="composer-bar">
+            <ResizeHandle
+              height={composerHeight}
+              setHeight={setComposerHeight}
+              min={96}
+              reserveTop={200}
+              label="Resize reply area"
+            />
+            <div className="composer-bar" style={{ height: composerHeight }}>
               <textarea
                 ref={composerRef}
                 className="composer"
