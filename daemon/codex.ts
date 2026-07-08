@@ -9,12 +9,9 @@ export type CodexAdapterOptions = {
   configOverrides?: string[]
 }
 
-const CODEX_SHELL_ENV = [
+const CODEX_SHELL_ENV_INCLUDE_ONLY = [
   'PATH',
-  'LANDER_API',
-  'LANDER_PROJECT',
-  'LANDER_TASK',
-  'LANDER_TOKEN',
+  'LANDER_*',
 ] as const
 
 export function createCodexAdapter({
@@ -27,7 +24,7 @@ export function createCodexAdapter({
     command: 'codex',
     buildLaunch({ task, prompt, cwd, landerEnv }) {
       return {
-        args: buildCodexArgs(task, prompt, cwd, landerEnv, {
+        args: buildCodexArgs(task, prompt, cwd, {
           taskPromptTemplate,
           profile,
           configOverrides,
@@ -56,7 +53,6 @@ function buildCodexArgs(
   task: AgentTaskView,
   prompt: string,
   cwd: string,
-  landerEnv: Record<string, string>,
   {
     taskPromptTemplate,
     profile,
@@ -74,8 +70,8 @@ function buildCodexArgs(
     // Codex keeps workspace-write network access off by default, so opt in per
     // Lander-run without requiring a user profile.
     'sandbox_workspace_write.network_access=true',
+    ...codexShellEnvConfigOverrides(),
   ]
-  const envArgs = codexShellEnvArgs(landerEnv)
   const managedPrompt = promptWithTaskManagement(
     { ...task, agent: 'codex' },
     prompt,
@@ -90,7 +86,6 @@ function buildCodexArgs(
         ...configOverridesWithLanderDefaults,
         `sandbox_mode=${tomlString(sandboxMode)}`,
       ]),
-      ...envArgs,
       task.sessionId,
       managedPrompt,
     ]
@@ -99,7 +94,6 @@ function buildCodexArgs(
     'exec',
     '--json',
     ...configArgs,
-    ...envArgs,
     '--cd',
     cwd,
     '--sandbox',
@@ -133,16 +127,21 @@ function codexConfigArgs(
   ]
 }
 
-function codexShellEnvArgs(landerEnv: Record<string, string>): string[] {
-  return CODEX_SHELL_ENV.flatMap((key) => {
-    const value = landerEnv[key]
-    if (value === undefined) return []
-    return ['--config', `shell_environment_policy.set.${key}=${tomlString(value)}`]
-  })
+function codexShellEnvConfigOverrides(): string[] {
+  // Let Lander vars flow from the child process env so LANDER_TOKEN stays out of argv.
+  return [
+    'shell_environment_policy.inherit=all',
+    'shell_environment_policy.ignore_default_excludes=true',
+    `shell_environment_policy.include_only=${tomlArray(CODEX_SHELL_ENV_INCLUDE_ONLY)}`,
+  ]
 }
 
 function tomlString(value: string): string {
   return JSON.stringify(value)
+}
+
+function tomlArray(values: readonly string[]): string {
+  return `[${values.map(tomlString).join(',')}]`
 }
 
 export function extractCodexSession(line: string): string | undefined {
