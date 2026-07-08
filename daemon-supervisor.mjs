@@ -15,6 +15,11 @@ export function createSupervisor({
   crashWindowMs = 3_000,
   respawnBackoffMs = 1_000,
   respawnBackoffMaxMs = 10_000,
+  // After this many consecutive fast crashes, stop logging plain "respawning"
+  // lines and escalate: the daemon can't boot, so the stack is running daemon-less
+  // and no task can start. Web/api keep running, so without a distinct signal this
+  // failure is invisible.
+  crashLoopThreshold = 3,
   now = Date.now,
   setTimer = setTimeout,
   clearTimer = clearTimeout,
@@ -40,10 +45,21 @@ export function createSupervisor({
       // exiting right after startup, so a daemon that can't boot doesn't spin.
       crashes = now() - startedAt < crashWindowMs ? crashes + 1 : 0
       const delay = Math.min(crashes * respawnBackoffMs, respawnBackoffMaxMs)
-      log(
-        `daemon exited (code ${code}, signal ${signal ?? 'none'}); ` +
-          `respawning${delay ? ` in ${delay}ms` : ''}`,
-      )
+      if (crashes >= crashLoopThreshold)
+        // Escalated: repeated fast exits mean the daemon can't boot at all, not a
+        // one-off crash. Say the stack is degraded — tasks can't start — so this
+        // isn't lost among identical respawn lines behind a still-running web/api.
+        log(
+          `daemon CRASH LOOP: exited within ${crashWindowMs}ms of startup ` +
+            `${crashes} times in a row (code ${code}, signal ${signal ?? 'none'}); ` +
+            `the stack is running with NO daemon and tasks cannot start until it ` +
+            `boots. Fix the boot error logged above; retrying in ${delay}ms.`,
+        )
+      else
+        log(
+          `daemon exited (code ${code}, signal ${signal ?? 'none'}); ` +
+            `respawning${delay ? ` in ${delay}ms` : ''}`,
+        )
       // Guard on `current === null`: a reload() may have spawned a fresh daemon in
       // the backoff window, in which case we must not spawn a second.
       const timer = setTimer(() => {

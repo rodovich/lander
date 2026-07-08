@@ -47,6 +47,7 @@ function makeHarness() {
     return child
   }
 
+  const logs: string[] = []
   const sup = createSupervisor({
     spawn,
     now: () => nowMs,
@@ -55,10 +56,12 @@ function makeHarness() {
     crashWindowMs: 3_000,
     respawnBackoffMs: 1_000,
     respawnBackoffMaxMs: 10_000,
+    crashLoopThreshold: 3,
     maxDrainMs: 900_000,
+    log: (m: string) => logs.push(m),
   })
 
-  return { sup, spawned, advance }
+  return { sup, spawned, advance, logs }
 }
 
 describe('daemon supervisor', () => {
@@ -117,6 +120,19 @@ describe('daemon supervisor', () => {
     ;(sup.current as FakeChild).exit(1) // ran 5s ≥ window → crashes reset, delay=0
     advance(0)
     expect(spawned).toHaveLength(4) // immediate respawn
+  })
+
+  it('escalates to a crash-loop warning after consecutive fast crashes', () => {
+    const { sup, logs, advance } = makeHarness()
+    sup.spawnDaemon() // d0 startedAt=0
+    ;(sup.current as FakeChild).exit(1) // t=0 → crashes=1, plain respawn line
+    advance(1_000)
+    ;(sup.current as FakeChild).exit(1) // t=1000 → crashes=2, plain respawn line
+    advance(2_000)
+    // First two crashes stay below the threshold: no escalation yet.
+    expect(logs.some((l) => l.includes('CRASH LOOP'))).toBe(false)
+    ;(sup.current as FakeChild).exit(1) // t=3000 → crashes=3 → escalates
+    expect(logs.some((l) => l.includes('CRASH LOOP'))).toBe(true)
   })
 
   it('a reload during the backoff window does not double-spawn', () => {
