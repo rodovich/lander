@@ -85,6 +85,13 @@ export function daemonServes(slug: string): boolean {
   return registeredSlugs.has(slug)
 }
 
+// The slugs the connected primary daemon currently serves. Empty when no daemon
+// is connected (or a connected one registered none). Used to explain a wedge:
+// "daemon connected but not serving <slug> — it serves [...]" vs "no daemon at all".
+export function daemonSlugs(): string[] {
+  return [...registeredSlugs]
+}
+
 // Open the channel a reducer drains for one run. The WS handler routes this
 // run's `update`/`done` here by runId; closeRunChannel tears it down when the
 // reducer returns.

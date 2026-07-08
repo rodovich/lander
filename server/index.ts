@@ -17,7 +17,9 @@ import { fileURLToPath } from 'node:url'
 import { applyUpdate, applyDone } from './apply'
 import {
   attachDaemonServer,
+  daemonConnected,
   daemonServes,
+  daemonSlugs,
   sendToDaemon,
   openRunChannel,
   closeRunChannel,
@@ -539,7 +541,14 @@ async function runTurn(
     await mutateTask(file, (t) => {
       const at = new Date().toISOString()
       const msg = pendingMessage(t)
-      const text = 'error running claude: no daemon connected for this project'
+      // Distinguish the two ways this fails: no daemon at all vs. a daemon that
+      // is connected but doesn't serve this project's slug (a path/slug mismatch
+      // between how the daemon was launched and how the task is keyed). The
+      // latter is otherwise indistinguishable and the usual silent culprit, so
+      // name the slug we wanted and the slugs the daemon actually serves.
+      const text = daemonConnected()
+        ? `error running claude: a daemon is connected but does not serve this project (slug '${project.slug}'); daemon serves: ${daemonSlugs().join(', ') || '(none)'}`
+        : 'error running claude: no daemon connected for this project'
       if (msg) {
         msg.text = text
         msg.pending = false
