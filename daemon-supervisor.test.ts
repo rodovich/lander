@@ -135,6 +135,21 @@ describe('daemon supervisor', () => {
     expect(logs.some((l) => l.includes('CRASH LOOP'))).toBe(true)
   })
 
+  it('a reload clears crash-loop backoff state (an applied fix recovers cleanly)', () => {
+    const { sup, logs, advance } = makeHarness()
+    sup.spawnDaemon() // d0 startedAt=0
+    ;(sup.current as FakeChild).exit(1) // t=0 → crashes=1
+    advance(1_000)
+    ;(sup.current as FakeChild).exit(1) // t=1000 → crashes=2
+    advance(2_000) // d2 spawned
+    expect(sup.crashes).toBe(2)
+    sup.reload() // fix applied: drains d2, spawns fresh, crash state cleared
+    expect(sup.crashes).toBe(0)
+    ;(sup.current as FakeChild).exit(1) // counts from a clean slate, not 3
+    expect(sup.crashes).toBe(1)
+    expect(logs.some((l) => l.includes('CRASH LOOP'))).toBe(false)
+  })
+
   it('a reload during the backoff window does not double-spawn', () => {
     const { sup, spawned, advance } = makeHarness()
     sup.spawnDaemon()

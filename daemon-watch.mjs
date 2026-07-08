@@ -23,16 +23,27 @@ import { createSupervisor } from './daemon-supervisor.mjs'
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
 const ENTRY = 'daemon/index.ts'
-// The daemon's import graph we reload on — the entry plus the server modules it
-// imports (mirrors what `tsx watch` tracked transitively). Editing other server
-// files reloads the server (tsx watch server/index.ts), not the daemon.
-const WATCHED = [
-  ENTRY,
+// The daemon reloads on any change to its own code — the whole daemon/ tree — plus
+// the server modules it imports. Watching daemon/ wholesale (rather than a hand-
+// maintained file list) is deliberate: the old list named only daemon/index.ts and
+// a few server files, so the daemon-local modules it imports (agent/claude/codex/
+// run) went unwatched. Editing one — including to FIX a boot-time parse/import
+// error — didn't trigger a reload, so the supervisor sat in its crash-backoff
+// re-running the stale code instead of picking the fix up at once. Everything under
+// daemon/ is a daemon dependency by construction, so this can't miss one again.
+const DAEMON_DIR = 'daemon'
+// Server modules imported by daemon/index.ts (keep in sync with its ../server/*
+// imports). Editing these also restarts the api via `tsx watch server/index.ts`;
+// here they additionally hand the daemon off, since it imports them too.
+const WATCHED_SERVER_FILES = [
   'server/stream.ts',
   'server/projects.ts',
   'server/usage.ts',
   'server/protocol.ts',
 ]
+
+// A daemon-source change is any non-test .ts file under daemon/.
+const isDaemonSource = (name) => name.endsWith('.ts') && !name.endsWith('.test.ts')
 
 const sup = createSupervisor({
   spawn: () => spawn('tsx', [ENTRY], { cwd: ROOT, stdio: 'inherit', env: process.env }),
@@ -42,23 +53,38 @@ const sup = createSupervisor({
   log: (m) => console.error(m),
 })
 
-// Watch parent dirs (robust to editors that replace a file's inode on save) and
-// filter to the watched basenames. Debounced so a burst of writes triggers one
+// Debounced so a burst of writes (or a recursive-watch fan-out) triggers one
 // handoff.
-const byDir = new Map()
-for (const rel of WATCHED) {
+let debounce = null
+const scheduleReload = () => {
+  clearTimeout(debounce)
+  debounce = setTimeout(() => sup.reload(), 200)
+}
+
+// Watch the daemon's own directory wholesale (recursive, so a future subdir is
+// covered too). Any non-test .ts edit here — index or an imported adapter —
+// reloads the daemon.
+try {
+  watch(path.join(ROOT, DAEMON_DIR), { recursive: true }, (_event, filename) => {
+    if (filename && isDaemonSource(path.basename(filename))) scheduleReload()
+  })
+} catch {
+  // a missing dir just isn't watched
+}
+
+// Watch the specific server files the daemon imports, by parent dir + basename
+// (robust to editors that replace a file's inode on save).
+const serverByDir = new Map()
+for (const rel of WATCHED_SERVER_FILES) {
   const abs = path.join(ROOT, rel)
   const dir = path.dirname(abs)
-  if (!byDir.has(dir)) byDir.set(dir, new Set())
-  byDir.get(dir).add(path.basename(abs))
+  if (!serverByDir.has(dir)) serverByDir.set(dir, new Set())
+  serverByDir.get(dir).add(path.basename(abs))
 }
-let debounce = null
-for (const [dir, bases] of byDir) {
+for (const [dir, bases] of serverByDir) {
   try {
     watch(dir, (_event, filename) => {
-      if (!filename || !bases.has(path.basename(filename))) return
-      clearTimeout(debounce)
-      debounce = setTimeout(() => sup.reload(), 200)
+      if (filename && bases.has(path.basename(filename))) scheduleReload()
     })
   } catch {
     // a missing dir just isn't watched

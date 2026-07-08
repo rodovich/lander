@@ -72,6 +72,11 @@ export function createSupervisor({
   }
 
   function reload() {
+    // A deliberate reload (a source edit) is a fresh start, not part of any crash
+    // loop — clear the crash-backoff state so applying a fix recovers immediately
+    // and cleanly, rather than inheriting the escalated backoff/warning left by the
+    // boot errors that preceded it.
+    crashes = 0
     const old = current
     if (old) {
       // Hand off: drain the old daemon (it exits once its runs finish) and spawn a
