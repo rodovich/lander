@@ -3381,58 +3381,66 @@ export function App() {
                             `sub-${childIdxs[0] ?? 'empty'}`,
                           )
                         // Assistant turns fold down by assistant text messages,
-                        // independent of inference boundaries: keep an opening text
-                        // message only when it comes before tool calls, keep the
-                        // longest text message and everything after it, and collapse
-                        // the flat step range between them. A turn still being
-                        // written renders in full (its shape isn't settled yet), as
-                        // does any turn too short to have a gap.
+                        // independent of inference boundaries: keep the opening
+                        // prose before the first tool, the longest text sequence,
+                        // and the last text sequence, and collapse each flat step
+                        // range between them (see planTurnCollapse). A turn still
+                        // being written renders in full (its shape isn't settled
+                        // yet), as does any turn too short to have a gap.
                         const collapse = planTurnCollapse(m.steps!, mainIdxs)
                         const folds =
                           m.role === 'assistant' &&
                           !m.pending &&
-                          collapse.hidden.length > 0
+                          collapse.segments.some((seg) => seg.hidden)
                         if (!folds) return renderStepList(mainIdxs)
-                        const toolCount = collapse.hidden
-                          .filter((j) => m.steps![j].kind === 'tool_use').length
                         const open = expandedTurns.has(i)
                         return (
                           <>
-                            {collapse.visibleBefore.length > 0 &&
-                              renderStepList(
-                                collapse.visibleBefore,
-                                false,
-                                'before',
-                              )}
-                            {collapse.visibleBefore.length > 0 && (
-                              <hr className="turn-sep" />
-                            )}
-                            <Collapsible
-                              open={open}
-                              onToggle={() => toggleTurn(i)}
-                              label={
-                                <span className="collapsible-label">
-                                  {collapse.hidden.length} step
-                                  {collapse.hidden.length === 1 ? '' : 's'}
-                                  {toolCount > 0 &&
-                                    `, ${toolCount} tool${
-                                      toolCount === 1 ? '' : 's'
-                                    }`}
-                                  …
-                                </span>
-                              }
-                            >
-                              {renderStepList(
-                                collapse.hidden,
-                                false,
-                                'hidden',
-                              )}
-                            </Collapsible>
-                            {renderStepList(
-                              collapse.visibleAfter,
-                              true,
-                              'after',
-                            )}
+                            {collapse.segments.map((seg, si) => {
+                              const sep = si > 0 && (
+                                <hr className="turn-sep" />
+                              )
+                              if (!seg.hidden)
+                                return (
+                                  <Fragment key={`seg-${si}`}>
+                                    {sep}
+                                    {renderStepList(
+                                      seg.indices,
+                                      false,
+                                      `seg-${si}`,
+                                    )}
+                                  </Fragment>
+                                )
+                              const toolCount = seg.indices.filter(
+                                (j) => m.steps![j].kind === 'tool_use',
+                              ).length
+                              return (
+                                <Fragment key={`seg-${si}`}>
+                                  {sep}
+                                  <Collapsible
+                                    open={open}
+                                    onToggle={() => toggleTurn(i)}
+                                    label={
+                                      <span className="collapsible-label">
+                                        {seg.indices.length} step
+                                        {seg.indices.length === 1 ? '' : 's'}
+                                        {toolCount > 0 &&
+                                          `, ${toolCount} tool${
+                                            toolCount === 1 ? '' : 's'
+                                          }`}
+                                        …
+                                      </span>
+                                    }
+                                  >
+                                    {renderStepList(
+                                      seg.indices,
+                                      false,
+                                      `hidden-${si}`,
+                                    )}
+                                  </Collapsible>
+                                </Fragment>
+                              )
+                            })}
                           </>
                         )
                       })()}
