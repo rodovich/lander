@@ -47,6 +47,13 @@ export type StartRunMessage = {
   // later turns. This decouples the lander task id (a short nanoid the server
   // owns) from the provider session id.
   sessionId?: string
+  // The dynamic per-turn context block (git snapshot, live grants — see the
+  // adapter's buildTurnContext) most recently delivered to this provider
+  // session, as the server recorded it from a TurnContextMessage. The daemon
+  // regenerates the block each turn and appends it to the prompt only when it
+  // differs from this. Absent on a fresh session (first turn, or after a
+  // relaunch sealed the old one), so the new session always gets the full block.
+  turnContext?: string
   env: Record<string, string>
   idleTimeoutMs: number
 }
@@ -159,6 +166,18 @@ export type SessionMessage = {
   sessionId: string
 }
 
+// The dynamic context block the daemon appended to this run's outgoing prompt
+// (it differed from StartRunMessage.turnContext, or the session was fresh). The
+// server records it as task.turnContext — separate from the user message text,
+// so the UI never renders it — making it the baseline the next turn's block is
+// compared against. Not sent when the block was unchanged and so not appended.
+// Like `session`, it's re-sent on resume-from so a server restart can't lose it.
+export type TurnContextMessage = {
+  type: 'turn-context'
+  runId: string
+  context: string
+}
+
 export type ProjectGrantResultMessage = {
   type: 'project-grant-result'
   requestId: string
@@ -181,5 +200,6 @@ export type DaemonToServer =
   | UpdateMessage
   | DoneMessage
   | SessionMessage
+  | TurnContextMessage
   | ProjectGrantResultMessage
   | UsageMessage

@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
-import { createClaudeAdapter } from './claude'
+import { createClaudeAdapter, gitContext } from './claude'
 
 const adapter = createClaudeAdapter({
   landerBin: '/repo/bin/lander',
   taskPromptTemplate: 'Prompt: {{forwardable}}.',
+  readGitContext: (cwd) => `Git status as of this message:\n\ncwd ${cwd}`,
 })
 
 const tempDirs: string[] = []
@@ -66,9 +68,47 @@ describe('Claude adapter', () => {
     )
 
     const systemPrompt = launch.args[launch.args.indexOf('--append-system-prompt') + 1]
+    // The appended prompt is static across turns: the live grants moved to the
+    // task-context block, leaving a fixed pointer in the {{forwardable}} slot.
     expect(systemPrompt).toContain(
+      'Prompt: Your own current grants — which cap what you can forward — are ' +
+        'stated in the task-context block in the conversation.',
+    )
+    // The kept git tips, minus the sign-off conventions that
+    // includeGitInstructions:false removed along with the status snapshot.
+    expect(systemPrompt).toContain('# Git')
+    expect(systemPrompt).toContain('gh')
+    expect(systemPrompt).not.toContain('Co-Authored-By')
+    expect(settings.includeGitInstructions).toBe(false)
+  })
+
+  it('builds the per-turn context block from grants and the git snapshot', () => {
+    const context = adapter.buildTurnContext?.({
+      task: { allowEdits: true, allowCommits: true },
+      root: '/repo',
+      cwd: '/repo/worktree',
+    })
+    expect(context).toContain('<task-context>')
+    expect(context).toContain(
       'You currently have permission for editing files and git commits',
     )
+    expect(context).toContain('cwd /repo/worktree')
+    expect(context).toContain('</task-context>')
+  })
+
+  it('degrades the context block to just the grants outside a git repo', () => {
+    const noGit = createClaudeAdapter({
+      landerBin: '/repo/bin/lander',
+      taskPromptTemplate: 'Prompt: {{forwardable}}.',
+      readGitContext: () => undefined,
+    })
+    const context = noGit.buildTurnContext?.({
+      task: { allowEdits: false, allowCommits: false },
+      root: '/repo',
+      cwd: '/repo',
+    })
+    expect(context).toContain('You currently have no edit or commit permissions')
+    expect(context).not.toContain('Git status')
   })
 
   it('builds Claude start and resume session arguments', () => {
@@ -113,6 +153,33 @@ describe('Claude adapter', () => {
       ],
       finalText: 'hello',
     })
+  })
+
+  it('reads a real git snapshot: branch, status, recent commits', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'lander-git-'))
+    tempDirs.push(dir)
+    const git = (...args: string[]) =>
+      execFileSync(
+        'git',
+        ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args],
+        { cwd: dir, stdio: ['ignore', 'pipe', 'ignore'] },
+      )
+    git('init', '-b', 'work')
+    await writeFile(path.join(dir, 'a.txt'), 'a')
+    git('add', 'a.txt')
+    git('commit', '-m', 'first commit')
+    await writeFile(path.join(dir, 'b.txt'), 'b')
+
+    const snapshot = gitContext(dir)
+    expect(snapshot).toContain('Current branch: work')
+    expect(snapshot).toContain('?? b.txt')
+    expect(snapshot).toContain('first commit')
+  })
+
+  it('returns no git snapshot outside a repository', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'lander-nogit-'))
+    tempDirs.push(dir)
+    expect(gitContext(dir)).toBeUndefined()
   })
 
   it('persists project grants in Claude settings.local.json', async () => {

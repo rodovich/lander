@@ -195,10 +195,18 @@ export function recordStatusTransition(
 // reduceRunWs's set-once `if (!t.sessionId)`). Touches only session + event
 // state; the caller owns the message/queue/status for the next turn.
 export function sealForRelaunch(
-  task: { sessionId?: string; title: string; events?: TaskEvent[] },
+  task: {
+    sessionId?: string
+    turnContext?: string
+    title: string
+    events?: TaskEvent[]
+  },
   at: string,
 ): void {
   delete task.sessionId
+  // The recorded context baseline belongs to the sealed session; drop it so the
+  // fresh session's first turn gets the full dynamic context block again.
+  delete task.turnContext
   ;(task.events ??= []).push({ kind: 'relaunched', title: task.title, createdAt: at })
 }
 

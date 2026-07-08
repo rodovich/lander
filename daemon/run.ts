@@ -10,11 +10,16 @@ import type {
   DoneMessage,
   SessionMessage,
   StartRunMessage,
+  TurnContextMessage,
   UpdateMessage,
 } from '../server/protocol'
 import { addUsage, type Usage } from '../server/stream'
 
-export type RunManagerMessage = UpdateMessage | DoneMessage | SessionMessage
+export type RunManagerMessage =
+  | UpdateMessage
+  | DoneMessage
+  | SessionMessage
+  | TurnContextMessage
 
 export type RunManager = {
   startRun: (msg: StartRunMessage) => void
@@ -37,6 +42,10 @@ type Run = {
   child: ChildProcess
   buffer: UpdateMessage[]
   mintedSession?: string
+  // The dynamic context block appended to this run's prompt (when it changed),
+  // re-sent on resume-from — like mintedSession — so a server restart between
+  // the announcement and its receipt can't lose the record.
+  sentContext?: string
   done?: DoneMessage
   dropTimer?: ReturnType<typeof setTimeout>
 }
@@ -106,13 +115,21 @@ export function createRunManager({
       sessionId: msg.sessionId,
       mintSessionId,
     })
+    const taskView = {
+      ...msg.task,
+      agent: msg.agent,
+      sessionId: msg.sessionId,
+    }
+    // Regenerate the dynamic context block and append it to the outgoing user
+    // message when it differs from what the session last received (always, on a
+    // fresh session — the server sends no turnContext then). Announced below so
+    // the server records the new baseline.
+    const context = activeAdapter.buildTurnContext?.({ task: taskView, root, cwd })
+    const sentContext =
+      context && context !== msg.turnContext ? context : undefined
     const launch = activeAdapter.buildLaunch({
-      task: {
-        ...msg.task,
-        agent: msg.agent,
-        sessionId: msg.sessionId,
-      },
-      prompt: msg.prompt,
+      task: taskView,
+      prompt: sentContext ? `${msg.prompt}\n\n${sentContext}` : msg.prompt,
       root,
       cwd,
       landerEnv: msg.env,
@@ -131,6 +148,8 @@ export function createRunManager({
     let announcedSession = session.announceSession ? session.sessionId : undefined
     if (announcedSession)
       send({ type: 'session', runId: msg.runId, sessionId: announcedSession })
+    if (sentContext)
+      send({ type: 'turn-context', runId: msg.runId, context: sentContext })
 
     let seq = 0
     const buffer: UpdateMessage[] = []
@@ -160,6 +179,7 @@ export function createRunManager({
       child,
       buffer,
       mintedSession: announcedSession,
+      sentContext,
       interrupt: () => {
         interrupted = true
         try {
@@ -303,6 +323,8 @@ export function createRunManager({
     }
     if (run.mintedSession)
       send({ type: 'session', runId, sessionId: run.mintedSession })
+    if (run.sentContext)
+      send({ type: 'turn-context', runId, context: run.sentContext })
     for (const update of run.buffer) if (update.seq > seq) send(update)
     if (run.done) send(run.done)
   }

@@ -55,6 +55,7 @@ function harness() {
       claude: createClaudeAdapter({
         landerBin: '/repo/bin/lander',
         taskPromptTemplate: 'Prompt: {{forwardable}}.',
+        readGitContext: () => 'Git status as of this message:\n\non branch test',
       }),
       codex: createCodexAdapter({
         taskPromptTemplate: 'Prompt: {{forwardable}}.',
@@ -104,6 +105,17 @@ describe('daemon run manager', () => {
       ],
       options: { cwd: '/repo' },
     })
+    const claudeContext = [
+      '<task-context>',
+      "Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.",
+      '',
+      'You currently have no edit or commit permissions, so a spawned task cannot be granted them either.',
+      '',
+      'Git status as of this message:',
+      '',
+      'on branch test',
+      '</task-context>',
+    ].join('\n')
     expect(h.spawns[1]).toMatchObject({
       command: 'claude',
       args: [
@@ -114,13 +126,17 @@ describe('daemon run manager', () => {
         '--settings',
         expect.any(String),
         '--append-system-prompt',
-        'Prompt: You currently have no edit or commit permissions, so a spawned task cannot be granted them either.',
+        'Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.\n\n' +
+          '# Git\n' +
+          '- Interactive flags (`-i`, e.g. `git rebase -i`, `git add -i`) are not supported in this environment.\n' +
+          '- Use the `gh` CLI for GitHub operations (PRs, issues, API).\n' +
+          '- Commit or push only when the user asks. If on the default branch, branch first.',
         '--output-format',
         'stream-json',
         '--verbose',
         '-p',
         '--',
-        'claude prompt',
+        `claude prompt\n\n${claudeContext}`,
       ],
       options: { cwd: '/repo' },
     })
@@ -128,6 +144,67 @@ describe('daemon run manager', () => {
       type: 'session',
       runId: 'run-2',
       sessionId: 'minted-session',
+    })
+    // The appended block is announced so the server records it as the baseline
+    // for the next turn's changed-comparison.
+    expect(h.messages).toContainEqual({
+      type: 'turn-context',
+      runId: 'run-2',
+      context: claudeContext,
+    })
+    // Codex has no context builder: its prompt is untouched and nothing announced.
+    expect(
+      h.messages.find((m) => m.type === 'turn-context' && m.runId === 'run-1'),
+    ).toBeUndefined()
+  })
+
+  it('omits an unchanged turn context and appends a changed one', () => {
+    const h = harness()
+
+    // Resume with the baseline matching what the adapter regenerates: the
+    // prompt goes out bare and no turn-context is announced.
+    h.manager.startRun(
+      makeStart({
+        agent: 'claude',
+        prompt: 'follow-up',
+        sessionId: 'sess-1',
+      }),
+    )
+    const unchanged = h.spawns[0].args.at(-1)!
+    expect(unchanged.startsWith('follow-up\n\n<task-context>')).toBe(true)
+    const context = unchanged.slice('follow-up\n\n'.length)
+
+    h.manager.startRun(
+      makeStart({
+        runId: 'run-2',
+        agent: 'claude',
+        prompt: 'follow-up',
+        sessionId: 'sess-1',
+        turnContext: context,
+      }),
+    )
+    expect(h.spawns[1].args.at(-1)).toBe('follow-up')
+    expect(
+      h.messages.find((m) => m.type === 'turn-context' && m.runId === 'run-2'),
+    ).toBeUndefined()
+
+    // A stale baseline (the grants changed) re-appends and re-announces.
+    h.manager.startRun(
+      makeStart({
+        runId: 'run-3',
+        agent: 'claude',
+        prompt: 'follow-up',
+        sessionId: 'sess-1',
+        turnContext: context,
+        task: { allowEdits: true, allowCommits: false },
+      }),
+    )
+    const changed = h.spawns[2].args.at(-1)!
+    expect(changed).toContain('You currently have permission for editing files')
+    expect(h.messages).toContainEqual({
+      type: 'turn-context',
+      runId: 'run-3',
+      context: changed.slice('follow-up\n\n'.length),
     })
   })
 
@@ -216,6 +293,16 @@ describe('daemon run manager', () => {
         stderr: 'daemon has no record of this run (restarted?); run aborted',
       },
     ])
+  })
+
+  it('re-sends the turn context on resume-from, like the minted session', () => {
+    const h = harness()
+    h.manager.startRun(makeStart({ agent: 'claude' }))
+    h.messages.length = 0
+
+    h.manager.resumeFrom('run-1', 0)
+
+    expect(h.messages.map((m) => m.type)).toEqual(['session', 'turn-context'])
   })
 
   it('reports child spawn errors as failed done messages', () => {

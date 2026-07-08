@@ -249,6 +249,7 @@ describe('applyRelaunch', () => {
   const AT = '2026-06-01T00:00:00.000Z'
   type RelaunchTask = {
     sessionId?: string
+    turnContext?: string
     status: string
     title: string
     updatedAt?: string
@@ -284,6 +285,14 @@ describe('applyRelaunch', () => {
     expect(t.queued).toEqual(['go again'])
     expect(t.status).toBe('riding')
     expect(t.updatedAt).toBe(AT)
+  })
+
+  it('drops the recorded turn-context baseline with the sealed session', () => {
+    const t = task({ turnContext: '<task-context>old</task-context>' })
+    applyRelaunch(t, 'go again', AT)
+    // The baseline belonged to the sealed session; the fresh one must receive
+    // the full dynamic context block on its first turn.
+    expect('turnContext' in t).toBe(false)
   })
 
   it('a relaunch with no session yet just opens a fresh one (harmless)', () => {

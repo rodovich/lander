@@ -217,6 +217,16 @@ type Task = {
   // manual rename clears it too, so a later retry never overrides the user's
   // chosen name. Absent on tasks that were named on the first try.
   titlePending?: boolean
+  // The dynamic per-turn context block (git snapshot, live permission grants —
+  // see the adapter's buildTurnContext) most recently delivered to this task's
+  // provider session, as the daemon announced it (turn-context message). Kept
+  // separate from the user messages so the UI never renders it; its job is to be
+  // the baseline the daemon compares the next turn's freshly built block
+  // against, appending (and re-announcing) only on change. Cleared alongside
+  // sessionId by sealForRelaunch — a fresh session must get the full block
+  // again. Absent for providers without a context builder (Codex) and on tasks
+  // saved before this field existed.
+  turnContext?: string
   // The working directory the previous turn ended in, recorded by the Stop hook
   // (see ClaudeAdapter / `lander record-cwd`). Each turn is a fresh `claude`
   // process; without this it always restarts at the project root, so a directory
@@ -470,6 +480,9 @@ async function runTurn(
     // The provider session to resume; absent on the first turn, so the daemon
     // reports one back (reduceRunWs persists it onto task.sessionId).
     sessionId: task.sessionId,
+    // The context baseline rides only with a session to resume: a fresh session
+    // (first turn, or post-relaunch) must always receive the full block.
+    turnContext: task.sessionId ? task.turnContext : undefined,
     env: landerEnv,
     idleTimeoutMs: 10 * 60_000,
   }
@@ -531,6 +544,15 @@ async function reduceRunWs(
         // a replayed announcement after a reconnect finds it already set.
         await mutateTask(file, (t) => {
           if (!t.sessionId) t.sessionId = ev.msg.sessionId
+        }).catch(() => {})
+        continue
+      }
+      if (ev.kind === 'turn-context') {
+        // The daemon appended a fresh dynamic context block to this turn's
+        // prompt; record it as the baseline the next turn's block is compared
+        // against. Idempotent: a resume-from replay re-sends the same block.
+        await mutateTask(file, (t) => {
+          t.turnContext = ev.msg.context
         }).catch(() => {})
         continue
       }

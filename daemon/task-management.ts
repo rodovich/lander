@@ -1,10 +1,23 @@
 import type { AgentTaskView } from './agent'
 
+// Fill the task prompt template's {{forwardable}} slot with the given sentence.
+// The two adapters diverge on what goes there: Codex interpolates the live
+// grants (its whole template rides the user message each turn, so it's always
+// fresh); Claude substitutes a static pointer and delivers the live grants via
+// the per-turn task-context block instead, keeping its --append-system-prompt
+// byte-stable across turns for prompt-cache reuse.
+export function fillTaskPrompt(
+  taskPromptTemplate: string,
+  forwardable: string,
+): string {
+  return taskPromptTemplate.replace('{{forwardable}}', forwardable)
+}
+
 export function taskManagementPrompt(
   task: AgentTaskView,
   taskPromptTemplate: string,
 ): string {
-  return taskPromptTemplate.replace('{{forwardable}}', forwardableAccess(task))
+  return fillTaskPrompt(taskPromptTemplate, forwardableAccess(task))
 }
 
 export function promptWithTaskManagement(
@@ -15,7 +28,7 @@ export function promptWithTaskManagement(
   return `${taskManagementPrompt(task, taskPromptTemplate)}\n\n${prompt}`
 }
 
-function forwardableAccess(task: AgentTaskView): string {
+export function forwardableAccess(task: AgentTaskView): string {
   if (task.agent === 'codex') {
     const sandbox = task.allowEdits
       ? 'workspace-write sandbox for file edits'
