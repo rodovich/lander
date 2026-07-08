@@ -2068,36 +2068,37 @@ export function App() {
   // rule). Returns undefined otherwise so the id renders as plain text. This is
   // purely presentational — the stored message and what's sent to the model are
   // untouched.
-  // Permanently stable identity (empty deps), reading the latest linkTasks
-  // through a ref, so the memoized MessageText/Markdown never re-render on an
-  // unchanged message text. A plain useCallback keyed on linkTasks would still
-  // bust every 10s when that list's own poll hands back a fresh array reference —
-  // forcing the 287KB message to re-parse (~800ms of scheduler work) on that
-  // cycle. The trade-off is a task-mention link inside an already-rendered
-  // message won't update until the message re-renders for another reason;
-  // acceptable, since a message's set of resolvable mentions is effectively fixed
-  // once shown.
-  const linkTasksRef = useRef(linkTasks)
-  linkTasksRef.current = linkTasks
-  const resolveTaskLink = useCallback<TaskLinkResolver>((id) => {
-    // A legacy/garbled reference can hand us an empty id (e.g. an old "awaiting"
-    // event saved under the pre-rename shape); resolve it to no link rather than
-    // throwing and taking down the whole task view.
-    if (!id) return undefined
-    const linkTasks = linkTasksRef.current
-    const needle = id.toLowerCase()
-    const matches =
-      needle.length >= 36
-        ? linkTasks.filter((t) => t.id?.toLowerCase() === needle)
-        : linkTasks.filter((t) => t.id?.toLowerCase().startsWith(needle))
-    if (matches.length !== 1) return undefined
-    const t = matches[0]
-    return {
-      href: `/${t.projectSlug}/${t.id}`,
-      title: t.title,
-      status: t.status,
-    }
-  }, [])
+  // Keyed on linkTasks so the resolver is a fresh identity whenever that list
+  // changes — which is what lets the memoized MessageText/Markdown re-render to
+  // pick up newly-resolvable mentions. It must NOT be permanently stabilized (via
+  // a ref): a message renders on first paint while linkTasks is still loading, so
+  // a frozen resolver would leave every id as literal text forever, never
+  // re-rendering once the list arrives. Between linkTasks refreshes (its own slow
+  // 10s poll) the identity holds, so the frequent 2s task poll still skips the
+  // re-parse. The remaining cost — a re-render when linkTasks does change — is now
+  // cheap because renderInline is O(n) (see markdown.tsx); it was the O(n^2) scan,
+  // not this re-render, that caused the ~800ms freeze.
+  const resolveTaskLink = useCallback<TaskLinkResolver>(
+    (id) => {
+      // A legacy/garbled reference can hand us an empty id (e.g. an old
+      // "awaiting" event saved under the pre-rename shape); resolve it to no link
+      // rather than throwing and taking down the whole task view.
+      if (!id) return undefined
+      const needle = id.toLowerCase()
+      const matches =
+        needle.length >= 36
+          ? linkTasks.filter((t) => t.id?.toLowerCase() === needle)
+          : linkTasks.filter((t) => t.id?.toLowerCase().startsWith(needle))
+      if (matches.length !== 1) return undefined
+      const t = matches[0]
+      return {
+        href: `/${t.projectSlug}/${t.id}`,
+        title: t.title,
+        status: t.status,
+      }
+    },
+    [linkTasks],
+  )
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
