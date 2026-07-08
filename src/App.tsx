@@ -1,4 +1,12 @@
-import { Fragment, memo, useCallback, useEffect, useRef, useState } from 'react'
+import {
+  Fragment,
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { agentDisplayName, formatAgentModelName } from './agentDisplay'
 import { Markdown } from './markdown'
@@ -2068,16 +2076,38 @@ export function App() {
   // rule). Returns undefined otherwise so the id renders as plain text. This is
   // purely presentational — the stored message and what's sent to the model are
   // untouched.
-  // Keyed on linkTasks so the resolver is a fresh identity whenever that list
-  // changes — which is what lets the memoized MessageText/Markdown re-render to
-  // pick up newly-resolvable mentions. It must NOT be permanently stabilized (via
-  // a ref): a message renders on first paint while linkTasks is still loading, so
-  // a frozen resolver would leave every id as literal text forever, never
-  // re-rendering once the list arrives. Between linkTasks refreshes (its own slow
-  // 10s poll) the identity holds, so the frequent 2s task poll still skips the
-  // re-parse. The remaining cost — a re-render when linkTasks does change — is now
-  // cheap because renderInline is O(n) (see markdown.tsx); it was the O(n^2) scan,
-  // not this re-render, that caused the ~800ms freeze.
+  // A content-stable index for mention resolution. linkTasks gets a fresh array
+  // every 10s poll even when nothing relevant changed, and each open message
+  // calls the resolver once per id-shaped token (thousands, on a pasted log). So
+  // we depend on a *signature* of only the fields resolution reads (id, slug,
+  // title, status) rather than the array reference: `linkIndex` — and therefore
+  // `resolveTaskLink`'s identity and the memoized messages that use it — changes
+  // only when a mention could actually resolve differently, not on every poll.
+  // The precomputed lowercased ids and link objects also keep each resolver call
+  // cheap.
+  const linkSig = linkTasks
+    .map((t) => `${t.id}\t${t.projectSlug}\t${t.title}\t${t.status}`)
+    .join('\n')
+  const linkIndex = useMemo(
+    () =>
+      linkTasks.map((t) => ({
+        id: (t.id ?? '').toLowerCase(),
+        link: { href: `/${t.projectSlug}/${t.id}`, title: t.title, status: t.status },
+      })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [linkSig],
+  )
+
+  // Resolve a bare task id or an unambiguous prefix found in a message to an
+  // internal link to that task, used to turn such references into clickable
+  // links with the task's title as the text. A full-length id (>= 36 chars) is
+  // matched exactly; anything shorter matches by prefix, and links only when it
+  // uniquely identifies one loaded task (mirroring the CLI's unambiguous-prefix
+  // rule). Returns undefined otherwise so the id renders as plain text. This is
+  // purely presentational — the stored message and what's sent to the model are
+  // untouched. Keyed on linkIndex (see above) so it re-renders messages exactly
+  // when resolution could change — including the first-load transition from an
+  // empty list, without which ids would stay literal forever.
   const resolveTaskLink = useCallback<TaskLinkResolver>(
     (id) => {
       // A legacy/garbled reference can hand us an empty id (e.g. an old
@@ -2087,17 +2117,11 @@ export function App() {
       const needle = id.toLowerCase()
       const matches =
         needle.length >= 36
-          ? linkTasks.filter((t) => t.id?.toLowerCase() === needle)
-          : linkTasks.filter((t) => t.id?.toLowerCase().startsWith(needle))
-      if (matches.length !== 1) return undefined
-      const t = matches[0]
-      return {
-        href: `/${t.projectSlug}/${t.id}`,
-        title: t.title,
-        status: t.status,
-      }
+          ? linkIndex.filter((e) => e.id === needle)
+          : linkIndex.filter((e) => e.id.startsWith(needle))
+      return matches.length === 1 ? matches[0].link : undefined
     },
-    [linkTasks],
+    [linkIndex],
   )
 
   function onSubmit(e: React.FormEvent) {

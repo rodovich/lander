@@ -40,6 +40,13 @@ function renderInline(
   const patterns: {
     re: RegExp
     render: (m: RegExpMatchArray, k: string) => ReactNode
+    // Optional gate: a match the predicate rejects is skipped during scanning as
+    // if it never matched, so it neither renders nor splits the surrounding
+    // literal text into extra nodes. Used by the task-mention pattern so the vast
+    // majority of 8+ char tokens (ordinary words that name no task) stay part of
+    // one contiguous text node instead of becoming tens of thousands of
+    // Fragments — the dominant render/DOM cost on a long pasted log.
+    accept?: (m: RegExpMatchArray) => boolean
   }[] = [
     {
       re: /`([^`]+)`/g,
@@ -109,6 +116,9 @@ function renderInline(
   if (linkTask) {
     patterns.push({
       re: /(?<![0-9A-Za-z_-])(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9A-Za-z_-]{8,21})(?![0-9A-Za-z_-])/gi,
+      // Only a candidate that resolves to a real task is treated as a match; the
+      // rest fall through to literal text without splitting the run (see accept).
+      accept: (m) => linkTask(m[0]) !== undefined,
       render: (m, k) => {
         const link = linkTask(m[0])
         if (!link) return <Fragment key={k}>{m[0]}</Fragment>
@@ -146,8 +156,16 @@ function renderInline(
       // Refresh a pattern whose cached match is stale (never searched, or now
       // behind the cursor because a chosen span consumed past it).
       if (m === undefined || (m !== null && m.index < cursor)) {
-        patterns[pi].re.lastIndex = cursor
-        m = patterns[pi].re.exec(text)
+        const { re, accept } = patterns[pi]
+        re.lastIndex = cursor
+        m = re.exec(text)
+        // Skip matches the pattern rejects (e.g. a token that names no task),
+        // advancing past each so the scan resumes after it — the rejected span
+        // stays literal rather than becoming its own node.
+        while (m && accept && !accept(m)) {
+          re.lastIndex = m.index + m[0].length
+          m = re.exec(text)
+        }
         cache[pi] = m
       }
       // Earliest wins; ties break by pattern order (precedence), so use `<`.

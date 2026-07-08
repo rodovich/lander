@@ -331,6 +331,20 @@ describe('task-mention linking', () => {
     expect(html).toContain('<em>')
     expect(html).toContain(`href="/proj/${FULL}"`)
   })
+
+  it('links the one real id among many non-resolving candidates', () => {
+    // Every word here is an 8+ char id-shaped token that the resolver rejects,
+    // except the real short id — exercising the scan's skip-past-rejected path.
+    const html = render(
+      'resolveBaseSync moduleResolve defaultResolve abcd1234 finalizeResolution nextStep',
+    )
+    expect(html).toContain(`href="/proj/${FULL}"`)
+    expect(html).toContain('>Fix the parser</a>')
+    // The rejected tokens stay literal (no anchors for them).
+    expect(html).toContain('resolveBaseSync')
+    expect(html).toContain('finalizeResolution')
+    expect((html.match(/<a /g) ?? []).length).toBe(1)
+  })
 })
 
 describe('task-mention linking — nanoid ids', () => {
