@@ -152,13 +152,12 @@ describe('Codex adapter reducer', () => {
       },
       prompt: 'follow up',
       root: '/repo',
-      cwd: '/repo',
+      cwd: '/repo/subdir',
       landerEnv: { LANDER_TASK: 'task-1' },
     })
 
     expect(launch.args).toEqual([
       'exec',
-      'resume',
       '--json',
       '--config',
       'sandbox_workspace_write.network_access=true',
@@ -170,6 +169,9 @@ describe('Codex adapter reducer', () => {
       'shell_environment_policy.include_only=["PATH","LANDER_*"]',
       '--config',
       'sandbox_mode="read-only"',
+      '--cd',
+      '/repo/subdir',
+      'resume',
       '019f0000-0000-7000-8000-000000000001',
       managedPrompt(
         'follow up',
@@ -193,7 +195,6 @@ describe('Codex adapter reducer', () => {
 
     expect(launch.args).toEqual([
       'exec',
-      'resume',
       '--json',
       '--config',
       'sandbox_workspace_write.network_access=true',
@@ -205,9 +206,60 @@ describe('Codex adapter reducer', () => {
       'shell_environment_policy.include_only=["PATH","LANDER_*"]',
       '--config',
       'sandbox_mode="workspace-write"',
+      '--cd',
+      '/repo',
+      'resume',
       '019f0000-0000-7000-8000-000000000001',
       managedPrompt(
         'follow up with edits',
+        'This Codex turn runs with the workspace-write sandbox for file edits. Task allow rules and commit-only grants are stored by Lander but do not affect Codex runs yet',
+      ),
+    ])
+  })
+
+  it('adds optional Codex profile and config flags before resume', () => {
+    const configured = createCodexAdapter({
+      taskPromptTemplate: TASK_PROMPT_TEMPLATE,
+      profile: 'lander-codex',
+      configOverrides: ['model="gpt-5-codex"', 'approval_policy="never"'],
+    })
+    const launch = configured.buildLaunch({
+      task: {
+        sessionId: '019f0000-0000-7000-8000-000000000001',
+        allowEdits: true,
+        allowCommits: false,
+      },
+      prompt: 'configured follow up',
+      root: '/repo',
+      cwd: '/repo/subdir',
+      landerEnv: { LANDER_TASK: 'task-1' },
+    })
+
+    expect(launch.args).toEqual([
+      'exec',
+      '--json',
+      '--profile',
+      'lander-codex',
+      '--config',
+      'model="gpt-5-codex"',
+      '--config',
+      'approval_policy="never"',
+      '--config',
+      'sandbox_workspace_write.network_access=true',
+      '--config',
+      'shell_environment_policy.inherit=all',
+      '--config',
+      'shell_environment_policy.ignore_default_excludes=true',
+      '--config',
+      'shell_environment_policy.include_only=["PATH","LANDER_*"]',
+      '--config',
+      'sandbox_mode="workspace-write"',
+      '--cd',
+      '/repo/subdir',
+      'resume',
+      '019f0000-0000-7000-8000-000000000001',
+      managedPrompt(
+        'configured follow up',
         'This Codex turn runs with the workspace-write sandbox for file edits. Task allow rules and commit-only grants are stored by Lander but do not affect Codex runs yet',
       ),
     ])

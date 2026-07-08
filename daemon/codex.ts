@@ -78,12 +78,14 @@ function buildCodexArgs(
   if (task.sessionId)
     return [
       'exec',
-      'resume',
       '--json',
       ...codexConfigArgs(profile, [
         ...configOverridesWithLanderDefaults,
         `sandbox_mode=${tomlString(sandboxMode)}`,
       ]),
+      '--cd',
+      cwd,
+      'resume',
       task.sessionId,
       managedPrompt,
     ]
