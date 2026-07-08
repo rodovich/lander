@@ -862,11 +862,7 @@ function Step({
   if (step.kind === 'tool_result') {
     return step.text ? <div className="step-result">{step.text}</div> : null
   }
-  return (
-    <div className="message-text">
-      <Markdown text={step.text ?? ''} linkTask={linkTask} />
-    </div>
-  )
+  return <MessageText text={step.text ?? ''} linkTask={linkTask} />
 }
 
 // How each lifecycle event verb reads in the timeline.
@@ -970,14 +966,16 @@ function StatusTransition({
   )
 }
 
-// A clipboard button shown in a message's top-right corner. Briefly flips to a
+// A clipboard button shown beside a rendered text block. Briefly flips to a
 // checkmark after a successful copy so the click registers.
 function CopyButton({
   text,
-  className = 'message-copy',
+  className = 'message-text-copy',
+  title = 'Copy message text',
 }: {
   text: string
   className?: string
+  title?: string
 }) {
   const [copied, setCopied] = useState(false)
   const copy = async () => {
@@ -994,8 +992,8 @@ function CopyButton({
       type="button"
       className={className}
       onClick={copy}
-      title="Copy message"
-      aria-label={copied ? 'Copied' : 'Copy message'}
+      title={title}
+      aria-label={copied ? 'Copied' : title}
     >
       {copied ? (
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -1027,6 +1025,24 @@ function CopyButton({
         </svg>
       )}
     </button>
+  )
+}
+
+function MessageText({
+  text,
+  linkTask,
+}: {
+  text: string
+  linkTask: TaskLinkResolver
+}) {
+  if (!text) return null
+  return (
+    <div className="message-text-wrap">
+      <div className="message-text">
+        <Markdown text={text} linkTask={linkTask} />
+      </div>
+      <CopyButton text={text} />
+    </div>
   )
 }
 
@@ -3111,11 +3127,6 @@ export function App() {
                     <span className="message-time">
                       {formatTimestamp(m.createdAt)}
                     </span>
-                    {/* A turn's steps carry per-inference copy buttons, so the
-                        head button is only for plain text messages. */}
-                    {m.text && !(m.steps && m.steps.length > 0) && (
-                      <CopyButton text={m.text} />
-                    )}
                   </div>
                   {/* Streamed assistant turns render their live activity trace;
                       user and legacy messages just render their text. */}
@@ -3294,8 +3305,6 @@ export function App() {
                               </div>
                             </Fragment>
                           ))
-                        // Each inference's copyable text: its text blocks, in
-                        // order, joined as they read.
                         const groupTexts = groups.map((idxs) =>
                           idxs
                             .map((j) => m.steps![j])
@@ -3307,12 +3316,6 @@ export function App() {
                           <Fragment key={g}>
                             {showSep && <hr className="turn-sep" />}
                             <div className="inference">
-                              {groupTexts[g] && (
-                                <CopyButton
-                                  text={groupTexts[g]}
-                                  className="inference-copy"
-                                />
-                              )}
                               {groups[g].map(renderStep)}
                             </div>
                           </Fragment>
@@ -3373,11 +3376,7 @@ export function App() {
                       })()}
                     </div>
                   ) : (
-                    m.text && (
-                      <div className="message-text">
-                        <Markdown text={m.text} linkTask={resolveTaskLink} />
-                      </div>
-                    )
+                    <MessageText text={m.text} linkTask={resolveTaskLink} />
                   )}
                   {m.pending && (
                     <div className="message-pending">

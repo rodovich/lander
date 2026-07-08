@@ -1057,8 +1057,18 @@ body {
   align-items: baseline;
 }
 
-.message-copy {
-  margin-left: auto;
+.message-text-wrap {
+  position: relative;
+}
+
+.message-text-wrap .message-text {
+  padding-right: 28px;
+}
+
+.message-text-copy {
+  position: absolute;
+  top: 0;
+  right: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1072,12 +1082,12 @@ body {
   transition: opacity 0.15s, color 0.15s, background 0.15s;
 }
 
-.message:hover .message-copy,
-.message-copy:focus-visible {
+.message-text-wrap:hover .message-text-copy,
+.message-text-copy:focus-visible {
   opacity: 1;
 }
 
-.message-copy:hover {
+.message-text-copy:hover {
   color: var(--riding);
   background: var(--selected);
 }
@@ -1177,8 +1187,8 @@ body {
   overflow-wrap: anywhere;
 }
 
-/* Clipboard button in a code block's top-right corner, matching .message-copy.
-   Padded right so wrapped code never runs under the button. */
+/* Clipboard button in a code block's top-right corner, matching
+   .message-text-copy. Padded right so wrapped code never runs under the button. */
 .message-text pre.code-block {
   padding-right: 36px;
 }
@@ -1200,7 +1210,6 @@ body {
   transition: opacity 0.15s, color 0.15s, background 0.15s;
 }
 
-.message:hover .code-copy,
 .code-block:hover .code-copy,
 .code-copy:focus-visible {
   opacity: 1;
@@ -1460,42 +1469,12 @@ body {
   border-top: 1px solid var(--border-secondary);
 }
 
-/* One model inference's steps. Anchors its copy button and keeps the same gap
-   between its steps that .steps gives between inferences. */
+/* One model inference's steps, keeping the same gap between its steps that
+   .steps gives between inferences. */
 .inference {
-  position: relative;
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-
-/* Copy button in an inference's top-right corner, matching .message-copy but
-   anchored over the steps rather than living in a head row. */
-.inference-copy {
-  position: absolute;
-  top: 0;
-  right: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px;
-  border: none;
-  background: var(--bg);
-  color: var(--muted);
-  cursor: pointer;
-  border-radius: 4px;
-  opacity: 0;
-  transition: opacity 0.15s, color 0.15s, background 0.15s;
-}
-
-.inference:hover .inference-copy,
-.inference-copy:focus-visible {
-  opacity: 1;
-}
-
-.inference-copy:hover {
-  color: var(--riding);
-  background: var(--bg-tinted);
 }
 
 /* A disclosure: the triangle's row, with revealed content dropping below it.
