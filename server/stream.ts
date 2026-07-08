@@ -74,6 +74,22 @@ export type Usage = {
   cacheCreation: number
   model?: string
   costUsd?: number
+  // Why the turn's prompt cache missed, when the API reported one (Claude's
+  // assistant events carry `message.diagnostics.cache_miss_reason`): the reason
+  // type (e.g. `system_changed`, `tools_changed`, `previous_message_not_found`)
+  // and the tokens that had to be re-processed instead of read from cache. Taken
+  // from the turn's first main-agent inference that reports one — the
+  // resume-boundary miss, the interesting one — and kept through the result
+  // event's authoritative replacement (see the run manager). Subagent inferences
+  // are ignored: they run separate prompts whose first inference always misses.
+  // Absent when the turn hit cache cleanly, and for providers that don't report
+  // it (Codex).
+  cacheMiss?: CacheMiss
+}
+
+export type CacheMiss = {
+  reason: string
+  missedTokens: number
 }
 
 // Reduce a tool call's input to a one-line summary for the activity chip. Picks
@@ -210,6 +226,11 @@ export function addUsage(acc: Usage | undefined, next: Usage): Usage {
       acc.costUsd === undefined && next.costUsd === undefined
         ? undefined
         : (acc.costUsd ?? 0) + (next.costUsd ?? 0),
+    // The first reported miss wins: it's the turn-start (resume-boundary) miss,
+    // which is the one that tells the caching story for the turn.
+    ...(acc.cacheMiss ?? next.cacheMiss
+      ? { cacheMiss: acc.cacheMiss ?? next.cacheMiss }
+      : {}),
   }
 }
 
@@ -301,6 +322,19 @@ export function reduceStreamLine(
         typeof ev.message.model === 'string' ? ev.message.model : undefined
       usage = parseUsage(ev.message.usage as Record<string, unknown>, model)
       usageInferenceId = inferenceId
+      // The API's cache diagnostics ride the same event. Only the main agent's
+      // count — a subagent runs its own prompt, whose first inference always
+      // misses and would drown out the session's signal.
+      const miss = ev.message.diagnostics?.cache_miss_reason
+      if (!parentToolUseId && miss && typeof miss.type === 'string') {
+        usage.cacheMiss = {
+          reason: miss.type,
+          missedTokens:
+            typeof miss.cache_missed_input_tokens === 'number'
+              ? miss.cache_missed_input_tokens
+              : 0,
+        }
+      }
     }
   } else if (ev.type === 'user' && Array.isArray(ev.message?.content)) {
     // A subagent's own tool results come back as user events tagged with its

@@ -295,6 +295,45 @@ describe('daemon run manager', () => {
     ])
   })
 
+  it('keeps the streamed cache miss on the result event usage replacement', () => {
+    const h = harness()
+    h.manager.startRun(makeStart({ agent: 'claude' }))
+    const child = h.spawns[0].child
+
+    child.stdout.emit(
+      'data',
+      Buffer.concat([
+        line({
+          type: 'assistant',
+          message: {
+            id: 'msg_1',
+            content: [{ type: 'text', text: 'hi' }],
+            usage: { input_tokens: 2, output_tokens: 3 },
+            diagnostics: {
+              cache_miss_reason: {
+                type: 'system_changed',
+                cache_missed_input_tokens: 48815,
+              },
+            },
+          },
+        }),
+        line({
+          type: 'result',
+          result: 'hi',
+          usage: { input_tokens: 2, output_tokens: 3, cache_read_input_tokens: 10 },
+        }),
+      ]),
+    )
+    child.emit('close', 0)
+
+    const updates = h.messages.filter((m) => m.type === 'update')
+    const final = updates.at(-1)!
+    expect(final.usage).toMatchObject({
+      cacheRead: 10,
+      cacheMiss: { reason: 'system_changed', missedTokens: 48815 },
+    })
+  })
+
   it('re-sends the turn context on resume-from, like the minted session', () => {
     const h = harness()
     h.manager.startRun(makeStart({ agent: 'claude' }))

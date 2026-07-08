@@ -233,7 +233,11 @@ export function createRunManager({
         if (r.blockedIds) blockedIds.push(...r.blockedIds)
         if (r.usage) {
           if (r.usageFinal) {
-            liveUsage = r.usage
+            // The result event's total is authoritative for the counts but
+            // carries no diagnostics — keep the streamed cache-miss record.
+            liveUsage = liveUsage?.cacheMiss
+              ? { ...r.usage, cacheMiss: liveUsage.cacheMiss }
+              : r.usage
             usageChanged = true
           } else if (r.usageInferenceId !== usageInf) {
             usageInf = r.usageInferenceId

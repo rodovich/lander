@@ -584,6 +584,67 @@ describe('reduceStreamLine', () => {
     expect(r.usageFinal).toBeUndefined()
   })
 
+  it('pulls the cache-miss diagnostic from a main-agent assistant event', () => {
+    const r = reduceStreamLine(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          id: 'msg_abc',
+          model: 'claude-opus-4-8',
+          content: [{ type: 'text', text: 'hi' }],
+          usage: { input_tokens: 2, output_tokens: 3 },
+          diagnostics: {
+            cache_miss_reason: {
+              type: 'system_changed',
+              cache_missed_input_tokens: 48815,
+            },
+          },
+        },
+      }),
+      AT,
+    )
+    expect(r.usage?.cacheMiss).toEqual({
+      reason: 'system_changed',
+      missedTokens: 48815,
+    })
+  })
+
+  it('ignores a subagent inference cache-miss diagnostic', () => {
+    // A subagent runs its own (fresh) prompt, so its first inference always
+    // misses — recording it would drown out the session's own signal.
+    const r = reduceStreamLine(
+      JSON.stringify({
+        type: 'assistant',
+        parent_tool_use_id: 'toolu_parent',
+        message: {
+          id: 'msg_sub',
+          content: [{ type: 'text', text: 'hi' }],
+          usage: { input_tokens: 2, output_tokens: 3 },
+          diagnostics: {
+            cache_miss_reason: { type: 'new_prompt', cache_missed_input_tokens: 9 },
+          },
+        },
+      }),
+      AT,
+    )
+    expect(r.usage?.cacheMiss).toBeUndefined()
+  })
+
+  it('leaves cacheMiss absent when the event carries no diagnostics', () => {
+    const r = reduceStreamLine(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          id: 'msg_abc',
+          content: [{ type: 'text', text: 'hi' }],
+          usage: { input_tokens: 2, output_tokens: 3 },
+        },
+      }),
+      AT,
+    )
+    expect(r.usage?.cacheMiss).toBeUndefined()
+  })
+
   it('reports the driving model from a system/init event', () => {
     const r = reduceStreamLine(
       JSON.stringify({ type: 'system', subtype: 'init', model: 'claude-opus-4-8' }),
@@ -686,6 +747,21 @@ describe('addUsage', () => {
       0.5,
     )
     expect(addUsage(u(10, 2), { ...u(3, 4), costUsd: 0.4 }).costUsd).toBe(0.4)
+  })
+
+  it('keeps the first cache miss across later snapshots', () => {
+    const miss = { reason: 'system_changed', missedTokens: 100 }
+    const later = { reason: 'tools_changed', missedTokens: 5 }
+    // The turn-start miss is the story; a later inference's can't displace it.
+    expect(
+      addUsage({ ...u(10, 2), cacheMiss: miss }, { ...u(3, 4), cacheMiss: later })
+        .cacheMiss,
+    ).toEqual(miss)
+    // …but a first miss arriving mid-turn is still recorded.
+    expect(addUsage(u(10, 2), { ...u(3, 4), cacheMiss: later }).cacheMiss).toEqual(
+      later,
+    )
+    expect(addUsage(u(10, 2), u(3, 4)).cacheMiss).toBeUndefined()
   })
 
   it('defaults missing usage fields to zero and leaves model undefined', () => {

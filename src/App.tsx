@@ -70,6 +70,10 @@ type TokenUsage = {
   cacheCreation: number
   model?: string
   costUsd?: number
+  // Why the turn's prompt cache missed, when the API reported one: the reason
+  // type and the tokens re-processed instead of read from cache. Shown in the
+  // turn-scope tooltip; absent on a clean cache hit and for Codex turns.
+  cacheMiss?: { reason: string; missedTokens: number }
 }
 
 type Message = {
@@ -3502,6 +3506,12 @@ export function App() {
                           `uncached input ${u.input.toLocaleString()} ` +
                           `(+ ${u.cacheCreation.toLocaleString()} written to cache)\n` +
                           `cache read ${u.cacheRead.toLocaleString()}\n` +
+                          // The turn's cache-miss diagnostic, when the API
+                          // reported one (per-turn only; misses don't sum).
+                          (!usageTotal && u.cacheMiss
+                            ? `cache miss: ${u.cacheMiss.reason.replaceAll('_', ' ')} ` +
+                              `(${u.cacheMiss.missedTokens.toLocaleString()} tokens missed)\n`
+                            : '') +
                           `output ${u.output.toLocaleString()}\n` +
                           `cost ${costText}`
                         }
