@@ -51,11 +51,6 @@ export type AgentProjectGrantInput = {
   rule: string
 }
 
-export type AgentHookStrategy =
-  | 'inline-launch'
-  | 'project-config'
-  | 'unsupported'
-
 export type AgentAdapter = {
   kind: AgentKind
   command: string
@@ -64,9 +59,7 @@ export type AgentAdapter = {
   reduceLine(line: string, at: string): AgentLineUpdate
   extractSession?(line: string): string | undefined
   persistProjectGrant?(input: AgentProjectGrantInput): Promise<void>
-  hookStrategy: AgentHookStrategy
   supportsProjectGrants: boolean
-  supportsTaskAllowRules: boolean
   supportsWorktreeFlag: boolean
   supportsUsageSnapshot: boolean
   supportsRateLimitRetryScheduling: boolean

@@ -54,9 +54,7 @@ describe('Codex adapter reducer', () => {
   it('exposes Codex adapter capabilities', () => {
     expect(adapter.kind).toBe('codex')
     expect(adapter.command).toBe('codex')
-    expect(adapter.hookStrategy).toBe('project-config')
     expect(adapter.supportsProjectGrants).toBe(false)
-    expect(adapter.supportsTaskAllowRules).toBe(false)
     expect(adapter.supportsWorktreeFlag).toBe(false)
     expect(adapter.supportsUsageSnapshot).toBe(false)
     expect(adapter.supportsRateLimitRetryScheduling).toBe(false)

@@ -23,9 +23,7 @@ describe('daemon agent adapter contract', () => {
       reduceLine(_line, at) {
         return { steps: [{ kind: 'text', text: 'ok', createdAt: at }] }
       },
-      hookStrategy: 'inline-launch',
       supportsProjectGrants: true,
-      supportsTaskAllowRules: true,
       supportsWorktreeFlag: true,
       supportsUsageSnapshot: true,
       supportsRateLimitRetryScheduling: true,

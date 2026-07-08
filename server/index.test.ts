@@ -94,7 +94,7 @@ describe('server task provider behavior', () => {
     expect(await worktree.json()).toMatchObject({ id: task.id, worktree: 'feat' })
   })
 
-  it('stores task allow rules without provider-specific interpretation', async () => {
+  it('stores Codex task allow rules with an unsupported warning', async () => {
     const task = await createTask('Codex task allow rule')
 
     const res = await post(`/api/${slug}/tasks/${task.id}/allow`, {
@@ -106,6 +106,7 @@ describe('server task provider behavior', () => {
       ok: true,
       rule: 'Bash(npm test)',
       scope: 'task',
+      warning: 'Saved for parity; Codex runs do not honor task allow rules yet',
     })
     const raw = JSON.parse(
       await readFile(path.join(tasksDir, `${task.id}.json`), 'utf8'),

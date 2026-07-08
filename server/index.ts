@@ -62,6 +62,8 @@ const PROJECT_BY_SLUG = new Map<string, Project>(
 )
 const LEGACY_AGENT: AgentKind = 'claude'
 const DEFAULT_NEW_TASK_AGENT = defaultAgentFromEnv(process.env)
+const CODEX_TASK_ALLOW_WARNING =
+  'Saved for parity; Codex runs do not honor task allow rules yet'
 
 // Daemon split: runs are driven by the host
 // daemon over a WebSocket — the server holds task state, drives the queue, and
@@ -2025,6 +2027,7 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
     if (!task) return c.json({ error: 'task not found' }, 404)
     const grantAgent = task.agent ?? LEGACY_AGENT
 
+    let warning: string | undefined
     if (scope === 'project') {
       const result = await requestProjectGrant({
         project: project.slug,
@@ -2045,8 +2048,9 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
       } catch {
         return c.json({ error: 'task not found' }, 404)
       }
+      if (grantAgent === 'codex') warning = CODEX_TASK_ALLOW_WARNING
     }
-    return c.json({ ok: true, rule, scope })
+    return c.json({ ok: true, rule, scope, ...(warning ? { warning } : {}) })
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
