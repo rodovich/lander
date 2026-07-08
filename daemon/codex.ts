@@ -67,13 +67,14 @@ function buildCodexArgs(
     configOverrides: string[]
   },
 ): string[] {
-  const configArgs = codexConfigArgs(profile, [
+  const sandboxMode = task.allowEdits ? 'workspace-write' : 'read-only'
+  const configOverridesWithLanderDefaults = [
     ...configOverrides,
     // `lander` self-management commands call back to the local Lander API.
     // Codex keeps workspace-write network access off by default, so opt in per
     // Lander-run without requiring a user profile.
     'sandbox_workspace_write.network_access=true',
-  ])
+  ]
   const envArgs = codexShellEnvArgs(landerEnv)
   const managedPrompt = promptWithTaskManagement(
     { ...task, agent: 'codex' },
@@ -85,11 +86,15 @@ function buildCodexArgs(
       'exec',
       'resume',
       '--json',
-      ...configArgs,
+      ...codexConfigArgs(profile, [
+        ...configOverridesWithLanderDefaults,
+        `sandbox_mode=${tomlString(sandboxMode)}`,
+      ]),
       ...envArgs,
       task.sessionId,
       managedPrompt,
     ]
+  const configArgs = codexConfigArgs(profile, configOverridesWithLanderDefaults)
   return [
     'exec',
     '--json',
@@ -98,7 +103,7 @@ function buildCodexArgs(
     '--cd',
     cwd,
     '--sandbox',
-    task.allowEdits ? 'workspace-write' : 'read-only',
+    sandboxMode,
     managedPrompt,
   ]
 }

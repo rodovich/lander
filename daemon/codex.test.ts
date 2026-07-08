@@ -162,11 +162,42 @@ describe('Codex adapter reducer', () => {
       '--config',
       'sandbox_workspace_write.network_access=true',
       '--config',
+      'sandbox_mode="read-only"',
+      '--config',
       'shell_environment_policy.set.LANDER_TASK="task-1"',
       '019f0000-0000-7000-8000-000000000001',
       managedPrompt(
         'follow up',
         'This Codex turn runs with the read-only sandbox. Task allow rules and commit-only grants are stored by Lander but do not affect Codex runs yet',
+      ),
+    ])
+  })
+
+  it('maps editable Codex resume tasks to workspace-write config', () => {
+    const launch = adapter.buildLaunch({
+      task: {
+        sessionId: '019f0000-0000-7000-8000-000000000001',
+        allowEdits: true,
+        allowCommits: false,
+      },
+      prompt: 'follow up with edits',
+      root: '/repo',
+      cwd: '/repo',
+      landerEnv: {},
+    })
+
+    expect(launch.args).toEqual([
+      'exec',
+      'resume',
+      '--json',
+      '--config',
+      'sandbox_workspace_write.network_access=true',
+      '--config',
+      'sandbox_mode="workspace-write"',
+      '019f0000-0000-7000-8000-000000000001',
+      managedPrompt(
+        'follow up with edits',
+        'This Codex turn runs with the workspace-write sandbox for file edits. Task allow rules and commit-only grants are stored by Lander but do not affect Codex runs yet',
       ),
     ])
   })
