@@ -174,6 +174,7 @@ function resolveRunPaths(
 
 // Root under which each task's materialized attachment blobs live (cached across
 // turns). Overridable for tests/containers; defaults to the OS temp dir.
+// (Claude reads attached images from here via the adapter's --add-dir grant.)
 const FILES_ROOT = process.env.LANDER_FILES_ROOT?.trim() || defaultFilesRoot()
 
 // Fetch an attachment's bytes from the server's authed download endpoint,

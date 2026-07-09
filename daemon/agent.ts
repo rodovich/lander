@@ -20,6 +20,12 @@ export type AgentLaunchInput<TTask extends AgentTaskView = AgentTaskView> = {
   // child; others ignore them (Claude reads the path from the manifest). Empty
   // when the turn has no images.
   images?: string[]
+  // The task's materialized attachment store dir, set only when it exists (the
+  // task has attachments from this or an earlier turn). Claude adds it as a Read
+  // workspace root (--add-dir) so it can open an attached image sitting outside
+  // the task cwd; Codex ignores it (it gets pixels via --image). Absent for tasks
+  // with no attachments.
+  filesDir?: string
 }
 
 export type AgentLaunch = {

@@ -3,6 +3,7 @@ import {
   type ChildProcess,
   type SpawnOptions,
 } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { randomUUID as nodeRandomUUID } from 'node:crypto'
 import type { AgentAdapter } from './agent'
 import type { AgentKind } from '../server/protocol'
@@ -204,6 +205,10 @@ export function createRunManager({
       cwd,
       landerEnv,
       images: materialized?.images ?? [],
+      // Give the adapter the store dir only when it actually exists (materialized
+      // this turn or on an earlier one), so Claude's --add-dir points somewhere
+      // real and images stay readable across turns, not just the attaching one.
+      filesDir: filesDir && existsSync(filesDir) ? filesDir : undefined,
     })
 
     const child: ChildProcess = spawn(

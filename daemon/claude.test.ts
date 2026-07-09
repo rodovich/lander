@@ -83,6 +83,33 @@ describe('Claude adapter', () => {
     expect(settings.includeGitInstructions).toBe(false)
   })
 
+  it('adds the files dir as a Read workspace root when one exists', () => {
+    const launch = adapter.buildLaunch({
+      task: { allowEdits: false },
+      prompt: 'look at this',
+      root: '/repo',
+      cwd: '/repo',
+      landerEnv: { LANDER_TASK: 't', LANDER_FILES_DIR: '/files/proj/t' },
+      images: ['/files/proj/t/img1'],
+      filesDir: '/files/proj/t',
+    })
+    // --add-dir lets Read open the image under LANDER_FILES_DIR (outside cwd).
+    const i = launch.args.indexOf('--add-dir')
+    expect(i).toBeGreaterThanOrEqual(0)
+    expect(launch.args[i + 1]).toBe('/files/proj/t')
+  })
+
+  it('omits --add-dir when the task has no attachment store', () => {
+    const launch = adapter.buildLaunch({
+      task: { allowEdits: false },
+      prompt: 'no files',
+      root: '/repo',
+      cwd: '/repo',
+      landerEnv: { LANDER_TASK: 't' },
+    })
+    expect(launch.args).not.toContain('--add-dir')
+  })
+
   it('builds the per-turn context block from grants and the git snapshot', () => {
     const context = adapter.buildTurnContext?.({
       task: { allowEdits: true },

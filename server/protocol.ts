@@ -1,6 +1,8 @@
 // The shared message contract for the daemon ⇄ server WebSocket link. Types
 // only: the daemon and server exchange these shapes as the run lifecycle crosses
 // the network. It must not import index.ts or carry any runtime logic.
+//
+// (AttachmentRef below carries a turn's attachments to the daemon.)
 
 import type { Step, Usage } from './stream'
 import type { AgentKind } from './agent'

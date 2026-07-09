@@ -46,9 +46,20 @@ export function createClaudeAdapter({
   return {
     kind: 'claude',
     command: 'claude',
-    buildLaunch({ task, prompt, landerEnv }) {
+    buildLaunch({ task, prompt, landerEnv, filesDir }) {
       return {
-        args: buildClaudeArgs(task, prompt, { landerBin, taskPromptTemplate }),
+        args: buildClaudeArgs(task, prompt, {
+          landerBin,
+          taskPromptTemplate,
+          // Claude reads an attached image by its local path, but that path is
+          // under LANDER_FILES_DIR — outside the task's working dir — so Read is
+          // denied without a grant (and lander runs non-interactively, so no
+          // approval prompt). Add the store dir as an extra workspace root so Read
+          // can open it. Scoped to that one dir (no broader disk access), and set
+          // by the run manager only when the dir exists — so an image stays
+          // readable on any later turn, not just the one that attached it.
+          filesDir,
+        }),
         env: landerEnv,
       }
     },
@@ -105,12 +116,18 @@ function buildClaudeArgs(
   {
     landerBin,
     taskPromptTemplate,
+    filesDir,
   }: {
     landerBin: string
     taskPromptTemplate: string
+    filesDir?: string
   },
 ): string[] {
   const worktreeArgs = task.worktree ? ['--worktree', task.worktree] : []
+  // Extra workspace root for the materialized attachment store, so Read can open
+  // an attached image sitting outside the task's cwd (see buildLaunch). Only set
+  // when the turn has images.
+  const filesDirArgs = filesDir ? ['--add-dir', filesDir] : []
   // Edit access is the only grant Lander injects into --allowedTools; git and
   // other Bash follow the project's normal .claude permissions (settings.json /
   // settings.local.json) plus any per-task allow rules below.
@@ -171,6 +188,7 @@ function buildClaudeArgs(
   return [
     ...worktreeArgs,
     ...editArgs,
+    ...filesDirArgs,
     '--settings',
     hookSettings,
     '--append-system-prompt',
