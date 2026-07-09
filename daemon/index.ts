@@ -28,6 +28,13 @@ import type {
 } from '../server/protocol'
 import { createRunManager, type RunManagerMessage } from './run'
 import { resolveRunCwd } from './paths'
+import {
+  materializeAttachments,
+  taskFilesDir,
+  defaultFilesRoot,
+  type MaterializedFiles,
+} from './attachments'
+import type { AttachmentRef } from '../server/protocol'
 
 // Project host paths come from argv, or PROJECT_DIRS (newline-separated, as
 // dev.mjs sets for the server) when argv is empty — so `npm run dev` can launch
@@ -165,10 +172,55 @@ function resolveRunPaths(
   return { root, cwd: resolveRunCwd(msg, adapter, root) }
 }
 
+// Root under which each task's materialized attachment blobs live (cached across
+// turns). Overridable for tests/containers; defaults to the OS temp dir.
+const FILES_ROOT = process.env.LANDER_FILES_ROOT?.trim() || defaultFilesRoot()
+
+// Fetch an attachment's bytes from the server's authed download endpoint,
+// authenticating as the task (the same LANDER_TOKEN/headers the in-task CLI
+// sends). The run's env carries the API base and identity.
+async function fetchAttachmentBytes(
+  env: Record<string, string>,
+  ref: AttachmentRef,
+): Promise<Uint8Array> {
+  const api = env.LANDER_API
+  const project = env.LANDER_PROJECT
+  if (!api || !project)
+    throw new Error('run env lacks LANDER_API/LANDER_PROJECT for attachment fetch')
+  const headers: Record<string, string> = {}
+  if (env.LANDER_TASK) headers['x-lander-task'] = env.LANDER_TASK
+  headers['x-lander-project'] = project
+  if (env.LANDER_TOKEN) headers['x-lander-token'] = env.LANDER_TOKEN
+  const res = await fetch(
+    `${api}/api/${project}/attachments/${encodeURIComponent(ref.id)}`,
+    { headers },
+  )
+  if (!res.ok)
+    throw new Error(`attachment ${ref.id}: ${res.status} ${res.statusText}`)
+  return new Uint8Array(await res.arrayBuffer())
+}
+
+// Materialize a run's attachments into its per-task files dir and build the
+// prompt manifest. Bound to the start message's project/task and env identity.
+async function materialize(
+  msg: StartRunMessage,
+  { visionNative }: { visionNative: boolean },
+): Promise<MaterializedFiles | undefined> {
+  if (!msg.attachments?.length) return undefined
+  const filesDir = taskFilesDir(FILES_ROOT, msg.project, msg.taskId)
+  return materializeAttachments({
+    filesDir,
+    attachments: msg.attachments,
+    fetchBytes: (ref) => fetchAttachmentBytes(msg.env, ref),
+    visionNative,
+  })
+}
+
 const runManager = createRunManager({
   adapters: ADAPTERS,
   resolveRunPaths,
   send,
+  materialize,
   refreshUsage,
   defaultIdleMs: DEFAULT_IDLE_MS,
   onEmpty: exitIfDrained,

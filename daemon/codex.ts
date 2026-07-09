@@ -22,12 +22,13 @@ export function createCodexAdapter({
   return {
     kind: 'codex',
     command: 'codex',
-    buildLaunch({ task, prompt, cwd, landerEnv }) {
+    buildLaunch({ task, prompt, cwd, landerEnv, images }) {
       return {
         args: buildCodexArgs(task, prompt, cwd, {
           taskPromptTemplate,
           profile,
           configOverrides,
+          images: images ?? [],
         }),
         env: landerEnv,
       }
@@ -44,6 +45,7 @@ export function createCodexAdapter({
     supportsWorktreeFlag: false,
     supportsUsageSnapshot: false,
     supportsRateLimitRetryScheduling: false,
+    attachesImagesToVision: true,
   }
 }
 
@@ -55,10 +57,12 @@ function buildCodexArgs(
     taskPromptTemplate,
     profile,
     configOverrides,
+    images,
   }: {
     taskPromptTemplate: string
     profile?: string
     configOverrides: string[]
+    images: string[]
   },
 ): string[] {
   const sandboxMode = task.allowEdits ? 'workspace-write' : 'read-only'
@@ -75,6 +79,11 @@ function buildCodexArgs(
     prompt,
     taskPromptTemplate,
   )
+  // One `-i <path>` per image (the repeatable short form). Placement differs by
+  // path: `resume` parses a trailing prompt fine, so the flags go before it; a
+  // fresh `exec`'s variadic `--image` would swallow the positional prompt, so
+  // the flags go AFTER the prompt there (confirmed Codex v0.143.0).
+  const imageArgs = images.flatMap((p) => ['-i', p])
   if (task.sessionId)
     return [
       'exec',
@@ -87,6 +96,7 @@ function buildCodexArgs(
       cwd,
       'resume',
       task.sessionId,
+      ...imageArgs,
       managedPrompt,
     ]
   const configArgs = codexConfigArgs(profile, configOverridesWithLanderDefaults)
@@ -99,6 +109,7 @@ function buildCodexArgs(
     '--sandbox',
     sandboxMode,
     managedPrompt,
+    ...imageArgs,
   ]
 }
 

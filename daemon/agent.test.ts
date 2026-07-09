@@ -27,6 +27,7 @@ describe('daemon agent adapter contract', () => {
       supportsWorktreeFlag: true,
       supportsUsageSnapshot: true,
       supportsRateLimitRetryScheduling: true,
+      attachesImagesToVision: false,
     }
 
     const launch = adapter.buildLaunch({

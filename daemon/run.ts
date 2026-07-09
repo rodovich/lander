@@ -14,6 +14,7 @@ import type {
   UpdateMessage,
 } from '../server/protocol'
 import { addUsage, type Usage } from '../server/stream'
+import type { MaterializedFiles } from './attachments'
 
 export type RunManagerMessage =
   | UpdateMessage
@@ -57,6 +58,13 @@ export type RunManagerOptions = {
     adapter: AgentAdapter,
   ) => { root: string; cwd: string }
   send: (msg: RunManagerMessage) => void
+  // Materialize a run's attachments into a per-task LANDER_FILES_DIR and build the
+  // prompt manifest block before spawn. Called only when the start message carries
+  // attachments; returns undefined (or is absent) when there's nothing to do.
+  materialize?: (
+    msg: StartRunMessage,
+    opts: { visionNative: boolean },
+  ) => Promise<MaterializedFiles | undefined>
   refreshUsage?: () => void | Promise<void>
   defaultIdleMs?: number
   runBufferTtlMs?: number
@@ -73,6 +81,7 @@ export function createRunManager({
   adapters,
   resolveRunPaths,
   send,
+  materialize,
   refreshUsage = () => {},
   defaultIdleMs = DEFAULT_IDLE_MS,
   runBufferTtlMs = DEFAULT_RUN_BUFFER_TTL_MS,
@@ -82,6 +91,10 @@ export function createRunManager({
   onEmpty = () => {},
 }: RunManagerOptions): RunManager {
   const runs = new Map<string, Run>()
+  // Runs interrupted during the async pre-spawn window (attachment
+  // materialization) — before a Run record exists to interrupt. Spawn checks this
+  // and aborts cleanly instead of starting a child a human already wedged.
+  const preSpawnInterrupts = new Set<string>()
 
   function done(
     runId: string,
@@ -111,6 +124,42 @@ export function createRunManager({
       return
     }
 
+    // The common case — no attachments — spawns synchronously. Only a turn that
+    // carries attachments takes the async detour to materialize them (fetch
+    // bytes, write LANDER_FILES_DIR, build the manifest block) before spawning.
+    if (!(msg.attachments?.length && materialize)) {
+      spawnRun(msg, activeAdapter, root, cwd, undefined)
+      return
+    }
+    materialize(msg, { visionNative: activeAdapter.attachesImagesToVision }).then(
+      (materialized) => spawnRun(msg, activeAdapter, root, cwd, materialized),
+      (e) => {
+        preSpawnInterrupts.delete(msg.runId)
+        done(
+          msg.runId,
+          1,
+          `failed to materialize attachments: ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        )
+      },
+    )
+  }
+
+  function spawnRun(
+    msg: StartRunMessage,
+    activeAdapter: AgentAdapter,
+    root: string,
+    cwd: string,
+    materialized: MaterializedFiles | undefined,
+  ): void {
+    // A human wedged the task while we were materializing — before a Run record
+    // existed to interrupt. Abort cleanly instead of spawning a child they killed.
+    if (preSpawnInterrupts.delete(msg.runId)) {
+      done(msg.runId, 0, '', true)
+      return
+    }
+
     const session = activeAdapter.buildSession({
       sessionId: msg.sessionId,
       mintSessionId,
@@ -127,12 +176,23 @@ export function createRunManager({
     const context = activeAdapter.buildTurnContext?.({ task: taskView, root, cwd })
     const sentContext =
       context && context !== msg.turnContext ? context : undefined
+    // Append the attachment manifest (this turn's files) and the dynamic context
+    // block to the user prompt — both ride at the cache-friendly end, after the
+    // user's own text. Expose LANDER_FILES_DIR so `lander file cat/ls` can read
+    // the materialized store, and hand image paths to the vision channel.
+    const promptParts = [msg.prompt]
+    if (materialized?.manifestBlock) promptParts.push(materialized.manifestBlock)
+    if (sentContext) promptParts.push(sentContext)
+    const landerEnv = materialized
+      ? { ...msg.env, LANDER_FILES_DIR: materialized.filesDir }
+      : msg.env
     const launch = activeAdapter.buildLaunch({
       task: taskView,
-      prompt: sentContext ? `${msg.prompt}\n\n${sentContext}` : msg.prompt,
+      prompt: promptParts.join('\n\n'),
       root,
       cwd,
-      landerEnv: msg.env,
+      landerEnv,
+      images: materialized?.images ?? [],
     })
 
     const child: ChildProcess = spawn(
@@ -312,7 +372,11 @@ export function createRunManager({
   }
 
   function interrupt(runId: string): void {
-    runs.get(runId)?.interrupt()
+    const run = runs.get(runId)
+    if (run) run.interrupt()
+    // No Run record yet: the run is still materializing attachments pre-spawn.
+    // Remember the interrupt so spawnRun aborts instead of launching the child.
+    else preSpawnInterrupts.add(runId)
   }
 
   function resumeFrom(runId: string, seq: number): void {

@@ -93,6 +93,9 @@ export function createClaudeAdapter({
     supportsWorktreeFlag: true,
     supportsUsageSnapshot: true,
     supportsRateLimitRetryScheduling: true,
+    // Claude has no vision flag on the CLI: it Reads an image by its local path
+    // (rendered visually), which the daemon lists in the manifest block.
+    attachesImagesToVision: false,
   }
 }
 

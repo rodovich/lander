@@ -359,4 +359,92 @@ describe('daemon run manager', () => {
       },
     ])
   })
+
+  it('materializes attachments, injects LANDER_FILES_DIR, and passes image paths to Codex', async () => {
+    const messages: RunManagerMessage[] = []
+    const spawns: SpawnCall[] = []
+    const spawn = (command: string, args: string[], options: SpawnOptions) => {
+      const child = new FakeChild()
+      spawns.push({ command, args, options, child })
+      return child as unknown as ChildProcess
+    }
+    const manager = createRunManager({
+      adapters: {
+        codex: createCodexAdapter({ taskPromptTemplate: 'Prompt: {{forwardable}}.' }),
+      },
+      resolveRunPaths: () => ({ root: '/repo', cwd: '/repo' }),
+      send: (msg) => messages.push(msg),
+      materialize: async () => ({
+        filesDir: '/files/proj/task-1',
+        images: ['/files/proj/task-1/img1'],
+        manifestBlock: '<task-attachments>\n…\n</task-attachments>',
+      }),
+      spawn,
+      now: () => '2026-01-01T00:00:00.000Z',
+    })
+
+    manager.startRun(
+      makeStart({
+        agent: 'codex',
+        prompt: 'look',
+        attachments: [{ id: 'img1', name: 'p.png', mime: 'image/png', size: 2 }],
+      }),
+    )
+    // Materialization is async: nothing spawns on the same tick.
+    expect(spawns).toHaveLength(0)
+    await vi.waitFor(() => expect(spawns).toHaveLength(1))
+
+    const [call] = spawns
+    // Fresh exec places `-i <path>` after the positional prompt.
+    const prompt = call.args[call.args.indexOf('-i') - 1]
+    expect(prompt).toContain('look')
+    expect(prompt).toContain('<task-attachments>')
+    expect(call.args.slice(-2)).toEqual(['-i', '/files/proj/task-1/img1'])
+    // The child env exposes the materialized files dir for `lander file cat/ls`.
+    expect((call.options.env as Record<string, string>).LANDER_FILES_DIR).toBe(
+      '/files/proj/task-1',
+    )
+  })
+
+  it('aborts a run interrupted while its attachments were still materializing', async () => {
+    const messages: RunManagerMessage[] = []
+    const spawns: SpawnCall[] = []
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const manager = createRunManager({
+      adapters: {
+        codex: createCodexAdapter({ taskPromptTemplate: 'Prompt: {{forwardable}}.' }),
+      },
+      resolveRunPaths: () => ({ root: '/repo', cwd: '/repo' }),
+      send: (msg) => messages.push(msg),
+      materialize: async () => {
+        await gate
+        return { filesDir: '/files', images: [], manifestBlock: '' }
+      },
+      spawn: (command, args, options) => {
+        spawns.push({ command, args, options, child: new FakeChild() })
+        return new FakeChild() as unknown as ChildProcess
+      },
+      now: () => '2026-01-01T00:00:00.000Z',
+    })
+
+    manager.startRun(
+      makeStart({
+        agent: 'codex',
+        attachments: [{ id: 'a', name: 'a', mime: 'text/plain', size: 1 }],
+      }),
+    )
+    manager.interrupt('run-1')
+    release()
+    await vi.waitFor(() =>
+      expect(messages).toContainEqual({
+        type: 'done',
+        runId: 'run-1',
+        exitCode: 0,
+        interrupted: true,
+        stderr: '',
+      }),
+    )
+    expect(spawns).toHaveLength(0)
+  })
 })

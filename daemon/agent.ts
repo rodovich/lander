@@ -15,6 +15,11 @@ export type AgentLaunchInput<TTask extends AgentTaskView = AgentTaskView> = {
   root: string
   cwd: string
   landerEnv: Record<string, string>
+  // Absolute local paths of this turn's image attachments, materialized by the
+  // daemon. Providers with a native vision flag (Codex --image) pass them to the
+  // child; others ignore them (Claude reads the path from the manifest). Empty
+  // when the turn has no images.
+  images?: string[]
 }
 
 export type AgentLaunch = {
@@ -77,4 +82,9 @@ export type AgentAdapter = {
   supportsWorktreeFlag: boolean
   supportsUsageSnapshot: boolean
   supportsRateLimitRetryScheduling: boolean
+  // Whether the provider delivers image attachments to its vision itself, given
+  // their paths in buildLaunch (Codex --image). False when the agent must Read
+  // the path instead (Claude) — the daemon then words the manifest block to say
+  // so. Drives only the block wording; every provider still gets the paths.
+  attachesImagesToVision: boolean
 }
