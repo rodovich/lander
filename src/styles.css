@@ -835,6 +835,126 @@ body {
   cursor: default;
 }
 
+/* New-task action row: paperclip on the left, Launch on the right. */
+.composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.new-task .launch-btn {
+  margin-left: auto;
+  padding: 6px 12px;
+}
+
+/* Paperclip attach control, shared by the new-task form and the reply composer.
+   The nested selectors outrank the broad `.new-task button` rule. */
+.attach {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.attach .attach-input {
+  display: none;
+}
+.attach .attach-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-weight: 400;
+  cursor: pointer;
+}
+.attach .attach-btn:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--bg);
+}
+.attach .attach-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.attach .attach-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.attach .attach-names {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
+.attach .attach-clear {
+  padding: 0 2px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.attach .attach-clear:hover:not(:disabled) {
+  color: var(--fg);
+}
+
+/* Attachment chips shown beside a user message's text. */
+.message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.attachment-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 240px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.attachment-chip:hover {
+  border-color: var(--riding);
+}
+.attachment-thumb {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex: none;
+}
+.attachment-chip-icon {
+  font-size: 20px;
+  line-height: 1;
+  flex: none;
+}
+.attachment-chip-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.attachment-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attachment-chip-size {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .usage-summary {
   display: flex;
   flex-direction: column;

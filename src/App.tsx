@@ -30,6 +30,196 @@ const uiHeaders = (): Record<string, string> => {
   }
 }
 
+// Upload attachments to a project's durable store, returning their ids to thread
+// into a task-create / message POST. Multipart, so we send only the UI token
+// header (the browser sets the multipart content-type + boundary itself).
+async function uploadAttachments(slug: string, files: File[]): Promise<string[]> {
+  if (!files.length) return []
+  const token = import.meta.env.VITE_LANDER_UI_TOKEN
+  const fd = new FormData()
+  for (const f of files) fd.append('file', f)
+  const r = await fetch(`/api/${slug}/attachments`, {
+    method: 'POST',
+    headers: token ? { 'x-lander-ui-token': token } : {},
+    body: fd,
+  })
+  const body = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(body.error ?? r.statusText)
+  return (body.attachments ?? []).map((a: { id: string }) => a.id)
+}
+
+// The paperclip control shown below a composer: opens the file browser, then
+// shows the picked filename (single) or "N files" with an ✕ to clear. Holds its
+// own hidden <input type=file>; the parent owns the File[] state and uploads on
+// submit. Disabled while its composer is busy.
+function AttachButton({
+  files,
+  onAdd,
+  onClear,
+  disabled,
+}: {
+  files: File[]
+  onAdd: (picked: File[]) => void
+  onClear: () => void
+  disabled?: boolean
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  return (
+    <span className="attach">
+      <button
+        type="button"
+        className="attach-btn"
+        title="Attach files"
+        aria-label="Attach files"
+        disabled={disabled}
+        onClick={() => inputRef.current?.click()}
+      >
+        <PaperclipIcon />
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        className="attach-input"
+        onChange={(e) => {
+          const picked = Array.from(e.target.files ?? [])
+          if (picked.length) onAdd(picked)
+          // Reset so re-picking the same file still fires onChange.
+          e.target.value = ''
+        }}
+      />
+      {files.length > 0 && (
+        <span className="attach-info">
+          <span className="attach-names" title={files.map((f) => f.name).join(', ')}>
+            {files.length === 1 ? files[0].name : `${files.length} files`}
+          </span>
+          <button
+            type="button"
+            className="attach-clear"
+            title="Clear attachments"
+            aria-label="Clear attachments"
+            disabled={disabled}
+            onClick={onClear}
+          >
+            ✕
+          </button>
+        </span>
+      )}
+    </span>
+  )
+}
+
+function PaperclipIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M21.44 11.05l-9.19 9.19a5 5 0 0 1-7.07-7.07l9.19-9.19a3 3 0 0 1 4.24 4.24l-9.2 9.19a1 1 0 0 1-1.41-1.41l8.49-8.49"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+// The attachments a user message carried, rendered as chips beside — never inside
+// — the message text (the prompt manifest the agent sees is generated separately
+// by the daemon and never stored in Message.text). Images additionally show a
+// thumbnail; clicking any chip downloads the original.
+function MessageAttachments({
+  attachments,
+  slug,
+}: {
+  attachments: Attachment[]
+  slug: string
+}) {
+  return (
+    <div className="message-attachments">
+      {attachments.map((a) => (
+        <AttachmentChip key={a.id} attachment={a} slug={slug} />
+      ))}
+    </div>
+  )
+}
+
+function AttachmentChip({
+  attachment,
+  slug,
+}: {
+  attachment: Attachment
+  slug: string
+}) {
+  const isImage = attachment.mime.startsWith('image/')
+  const [thumb, setThumb] = useState<string | null>(null)
+
+  // The download endpoint wants the UI token, which a bare <img src> can't send,
+  // so fetch the bytes with the header and hand back a blob URL. Used for the
+  // image thumbnail and revoked on unmount.
+  async function fetchBlob(): Promise<Blob | null> {
+    const token = import.meta.env.VITE_LANDER_UI_TOKEN
+    const r = await fetch(`/api/${slug}/attachments/${attachment.id}`, {
+      headers: token ? { 'x-lander-ui-token': token } : {},
+    })
+    return r.ok ? r.blob() : null
+  }
+
+  useEffect(() => {
+    if (!isImage) return
+    let url: string | null = null
+    let cancelled = false
+    void fetchBlob().then((b) => {
+      if (b && !cancelled) {
+        url = URL.createObjectURL(b)
+        setThumb(url)
+      }
+    })
+    return () => {
+      cancelled = true
+      if (url) URL.revokeObjectURL(url)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attachment.id, slug, isImage])
+
+  async function download() {
+    const b = await fetchBlob()
+    if (!b) return
+    const url = URL.createObjectURL(b)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = attachment.name
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  return (
+    <button
+      type="button"
+      className={`attachment-chip${isImage ? ' attachment-chip-image' : ''}`}
+      onClick={() => void download()}
+      title={`${attachment.name} — ${formatBytes(attachment.size)} (click to download)`}
+    >
+      {isImage && thumb ? (
+        <img className="attachment-thumb" src={thumb} alt={attachment.name} />
+      ) : (
+        <span className="attachment-chip-icon" aria-hidden>
+          {isImage ? '🖼' : '📄'}
+        </span>
+      )}
+      <span className="attachment-chip-meta">
+        <span className="attachment-chip-name">{attachment.name}</span>
+        <span className="attachment-chip-size">{formatBytes(attachment.size)}</span>
+      </span>
+    </button>
+  )
+}
+
 type Step = {
   kind: 'text' | 'tool_use' | 'tool_result'
   text?: string
@@ -95,7 +285,12 @@ type Message = {
   // Set by the server (publicTask) on a follow-up the agent hasn't read yet; the
   // timeline dims it and sinks it below the conversation.
   queued?: boolean
+  // Files/images attached to a user message (refs only). Rendered as chips beside
+  // the message text — never inlined into the text/markdown.
+  attachments?: Attachment[]
 }
+
+type Attachment = { id: string; name: string; mime: string; size: number }
 
 // A lifecycle event interleaved with messages in the conversation timeline: the
 // task's launch, a rename, or a crossing into/out of the wedged (needs the
@@ -1664,6 +1859,13 @@ export function App() {
   const [retryingBy, setRetryingBy] = useState<Record<string, boolean>>({})
   const composerRef = useRef<HTMLTextAreaElement>(null)
 
+  // Files attached to the new-task message and to per-task replies, held as File
+  // objects (not session-persisted — File isn't serializable) and uploaded to the
+  // durable store on submit. The paperclip <AttachButton> below each composer owns
+  // its own hidden file input.
+  const [newFiles, setNewFiles] = useState<File[]>([])
+  const [replyFiles, setReplyFiles] = useState<Record<string, File[]>>({})
+
   // The tool chip whose grant popup is open, keyed "<messageIndex>:<stepIndex>".
   // Only one is open at a time; null means none.
   const [openTool, setOpenTool] = useState<string | null>(null)
@@ -2300,6 +2502,7 @@ export function App() {
     setSubmitting(true)
     setError(null)
     try {
+      const attachments = await uploadAttachments(targetSlug, newFiles)
       const r = await fetch(`/api/${targetSlug}/tasks`, {
         method: 'POST',
         headers: uiHeaders(),
@@ -2312,6 +2515,7 @@ export function App() {
           // produced by a spawner declining to forward edits, and the human
           // can grant edits from the task header.
           allowEdits: true,
+          ...(attachments.length ? { attachments } : {}),
         }),
       })
       const body = await r.json()
@@ -2320,6 +2524,7 @@ export function App() {
       setTasks((await loadShownTasks(shown)).tasks)
       selectTask(created.id, targetSlug)
       setMessage('')
+      setNewFiles([])
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -2507,14 +2712,19 @@ export function App() {
     setSendingBy((prev) => ({ ...prev, [id]: true }))
     setError(null)
     try {
+      const attachments = await uploadAttachments(proj, replyFiles[id] ?? [])
       const r = await fetch(`/api/${proj}/tasks/${id}/messages`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ message: draft }),
+        headers: uiHeaders(),
+        body: JSON.stringify({
+          message: draft,
+          ...(attachments.length ? { attachments } : {}),
+        }),
       })
       const body = await r.json()
       if (!r.ok) throw new Error(body.error ?? r.statusText)
       setReplies((prev) => ({ ...prev, [id]: '' }))
+      setReplyFiles((prev) => ({ ...prev, [id]: [] }))
       setTasks((await loadShownTasks(shown)).tasks)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -3188,12 +3398,21 @@ export function App() {
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={onMessageKeyDown}
           />
-          <button
-            type="submit"
-            disabled={submitting || !message.trim()}
-          >
-            {submitting ? 'Launching…' : 'Launch task'}
-          </button>
+          <div className="composer-actions">
+            <AttachButton
+              files={newFiles}
+              onAdd={(picked) => setNewFiles((prev) => [...prev, ...picked])}
+              onClear={() => setNewFiles([])}
+              disabled={submitting}
+            />
+            <button
+              type="submit"
+              className="launch-btn"
+              disabled={submitting || !message.trim()}
+            >
+              {submitting ? 'Launching…' : 'Launch'}
+            </button>
+          </div>
         </form>
 
         <UsageSummary usage={usage} agent={current?.agent} />
@@ -3583,6 +3802,12 @@ export function App() {
                   ) : (
                     <MessageText text={m.text} linkTask={resolveTaskLink} />
                   )}
+                  {m.attachments && m.attachments.length > 0 && (
+                    <MessageAttachments
+                      attachments={m.attachments}
+                      slug={current.projectSlug}
+                    />
+                  )}
                   {m.pending && (
                     <div className="message-pending">
                       <span className="spinner" aria-hidden />
@@ -3658,6 +3883,21 @@ export function App() {
                 onKeyDown={onReplyKeyDown}
               />
               <div className="allow-row">
+                {!current.archived && (
+                  <AttachButton
+                    files={replyFiles[current.id] ?? []}
+                    onAdd={(picked) =>
+                      setReplyFiles((prev) => ({
+                        ...prev,
+                        [current.id]: [...(prev[current.id] ?? []), ...picked],
+                      }))
+                    }
+                    onClear={() =>
+                      setReplyFiles((prev) => ({ ...prev, [current.id]: [] }))
+                    }
+                    disabled={sendingBy[current.id] ?? false}
+                  />
+                )}
                 {(() => {
                   const u = usageTotal
                     ? totalUsage(current)
