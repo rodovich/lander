@@ -50,7 +50,7 @@ All task routes are scoped by the project slug, which selects the host working d
 
 Flat JSON files, one per task, no database. Tasks live under `./data/<normalized-project-path>/tasks/<uuid>.json`, where the project path is slugified (e.g. `/Users/me/code/app` → `Users-me-code-app`). This namespaces tasks per target project. The task `id` belongs to Lander; the provider session id is stored separately as `sessionId` after the daemon reports it. The task carries the `runId` and `runCursor` of any run currently in flight so a reloaded server can reattach to the daemon's live replay buffer. Also alongside is `archived/`: archiving a task **moves** its `<uuid>.json` there, which is how an archived task drops out of the list and out of the scheduler/recovery sweeps (both scan only `tasks/`) — its location on disk is the sole source of truth for the archived state, so nothing is written into the file itself.
 
-Claude turns build `--allowedTools` from `Bash(lander:*)` (always), `Edit`/`Write`/`MultiEdit` (if `allowEdits`), `Bash(git:*)` (if `allowCommits`), and the task's `allow` list (rules granted via the "allow in task" popup). Project-scoped Claude grants instead land in the project's `.claude/settings.local.json`, which the CLI reads on its own. Codex turns map edit access to `read-only` or `workspace-write` sandboxing; task allow rules and commit-only grants are stored by Lander but do not affect Codex runs yet.
+Claude turns build `--allowedTools` from `Bash(lander:*)` (always), `Edit`/`Write`/`MultiEdit` (if `allowEdits`), and the task's `allow` list (rules granted via the "allow in task" popup). Edit access is the only permission Lander injects; git and every other Bash command follow the project's normal `.claude` settings (`settings.json` / `settings.local.json`) plus per-task allow rules — anything unlisted is denied in headless mode. To let tasks run git in a project, add a rule like `Bash(git:*)` to that project's `.claude/settings.json`. Project-scoped Claude grants (the "allow in project" popup) land in `.claude/settings.local.json`, which the CLI reads on its own. Codex turns map edit access to `read-only` or `workspace-write` sandboxing; task allow rules are stored by Lander but do not affect Codex runs yet, and Codex has no separate git gate — a workspace-write turn can run git as an ordinary shell command.
 
 ### Restart & hot reload
 
@@ -79,7 +79,7 @@ A task's agent can call back into lander to manage itself. When the daemon launc
 
 With no trigger flag, `send` delivers immediately, queued behind any in-flight turn. With `--date`/`--time`/`--await` (same semantics as `launch`/`rest`) it stashes the message on the recipient as a scheduled message that fires when its time arrives or every awaited task has landed, whichever comes first. A task may only message tasks in its own project.
 
-`lander launch` reads the message from the argument, or from stdin if it's `-`, and accepts `--project <slug>`, `--title <title>`, `--date <when>` / `--time <minutes>` / `--await <ids>`, `--edits`, and `--commits`. `--title` names the task directly instead of using the auto-titler. Deferred launches are created resting and the scheduler wakes them when their trigger fires; a resting scheduled task also gets a **Launch** item in its row's kebab menu (see [Frontend](#frontend-srcapptsx)) to run it early. `--edits`/`--commits` are inherit-only: a child may be granted edit/commit access only if the spawning task already has it.
+`lander launch` reads the message from the argument, or from stdin if it's `-`, and accepts `--project <slug>`, `--title <title>`, `--date <when>` / `--time <minutes>` / `--await <ids>`, and `--edits`. `--title` names the task directly instead of using the auto-titler. Deferred launches are created resting and the scheduler wakes them when their trigger fires; a resting scheduled task also gets a **Launch** item in its row's kebab menu (see [Frontend](#frontend-srcapptsx)) to run it early. A spawned task is read-only unless `--edits` is passed, and `--edits` is inherit-only: a child may be granted edit access only if the spawning task already has it. (Git isn't a Lander grant — it's governed by the project's `.claude` settings.) A human can later grant edits to a read-only task from the crossed-out-pencil menu in the task header.
 
 `lander rest` takes the same `--date`/`--time`/`--await` flags (at least one required) to re-sleep a running task: it flips to resting with a scheduled or awaiting event and, when the scheduler wakes it, resumes with a generated "Resumed at …" message. `lander rest --clear` disarms pending wakeup triggers without touching status or rewriting history. The CLI is a zero-dependency Node script that talks to the local HTTP API, so the server stays the single source of truth; actual agent subprocesses are launched by the daemon, not by the CLI.
 
@@ -92,8 +92,8 @@ Every request to the local API is unauthenticated by default, so the server dist
 
 Concretely, the server enforces:
 
-- `POST /tasks` with `allowEdits`/`allowCommits` — the human may set either; a task may set only those it holds (else `403`); an unidentified caller may set neither.
-- `PATCH /tasks/:id` of `allowEdits`/`allowCommits` — human only (a task `403`s, so it can't self-escalate). Status/title stay open so the CLI's `land`/`status` keep working.
+- `POST /tasks` with `allowEdits` — the human may grant it; a task may grant it only if it holds edits itself (else `403`); an unidentified caller may not. The UI always launches human-started tasks with `allowEdits: true`.
+- `PATCH /tasks/:id` of `allowEdits` — human only (a task `403`s, so it can't self-escalate). Status/title stay open so the CLI's `land`/`status` keep working.
 - `POST /tasks/:id/allow` — human only.
 
 This is best-effort for a single-user local tool: a fully adversarial task running as the same user could still read `data/.ui-token` off disk. It blocks the realistic failure mode — an agent escalating itself or a child via the documented API — not a determined local attacker.
@@ -116,7 +116,7 @@ The server only **resolves** the script's path (`GET /api/:project/flows/:name`,
 | Method | Backed by |
 |--------|-----------|
 | `lander.inputs` | the `--key value` flags, as an object |
-| `await lander.launch(message, { project, title, date, time, await, edits, commits })` | `POST /tasks`; returns the new task's id |
+| `await lander.launch(message, { project, title, date, time, await, edits })` | `POST /tasks`; returns the new task's id |
 | `await lander.send(target, message, { date, time, await })` | message another task (id or unambiguous prefix) |
 | `await lander.view(target)` | returns the **parsed task object** (`.status`, `.title`, `.messages`, …) — not text to re-parse |
 | `await lander.list({ status })` | the project's tasks as an array |

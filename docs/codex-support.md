@@ -72,10 +72,12 @@ Codex support is useful for basic task execution and resume, but it is not at
 Claude feature parity.
 
 Permission grants are coarse. Lander maps edit access to Codex sandbox modes, but
-Codex runs do not honor task allow rules, `Bash(git:*)` commit-only grants, or
-Claude-style per-tool `--allowedTools`. The UI stores Codex task rules for
-future parity and returns a warning, but those rules do not change Codex argv or
-runtime behavior.
+Codex runs do not honor task allow rules or Claude-style per-tool
+`--allowedTools`. The UI stores Codex task rules for future parity and returns a
+warning, but those rules do not change Codex argv or runtime behavior. There is
+also no separate git gate on Codex: `read-only` blocks all writes, while
+`workspace-write` (edit access) lets a turn run git as an ordinary shell command
+— it can't be narrowed the way a Claude project's `.claude` settings narrow git.
 
 Project permission grants are unsupported for Codex. A project-scope grant for a
 Codex task is routed to the daemon, and the Codex adapter reports that project

@@ -1858,18 +1858,11 @@ body.resizing-row {
   opacity: 0.6;
 }
 
+/* Holds the per-turn token-usage readout below the reply composer; the usage
+   pushes itself to the right with margin-left:auto. */
 .allow-row {
   display: flex;
   gap: 20px;
-}
-
-.allow-edits {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  cursor: pointer;
-  user-select: none;
 }
 
 .token-usage {

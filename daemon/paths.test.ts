@@ -14,7 +14,7 @@ function start(over: Partial<StartRunMessage> = {}): StartRunMessage {
     agent: 'claude',
     project: 'proj',
     prompt: 'p',
-    task: { allowEdits: false, allowCommits: false },
+    task: { allowEdits: false },
     env: {},
     idleTimeoutMs: 60_000,
     ...over,
@@ -26,7 +26,7 @@ const yes = () => true
 describe('resolveRunCwd', () => {
   it('keeps a worktree-flag provider at root so it re-enters via --worktree', () => {
     const msg = start({
-      task: { allowEdits: false, allowCommits: false, worktree: 'feature' },
+      task: { allowEdits: false, worktree: 'feature' },
       recordedCwd: '/repo/.claude/worktrees/feature',
     })
     // Even with a recorded worktree cwd, Claude launches from root — the reason

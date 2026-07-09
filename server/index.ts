@@ -123,7 +123,6 @@ type Task = {
   // and backfilled at startup for tasks saved before this field existed.
   seenAt?: string
   allowEdits: boolean
-  allowCommits: boolean
   // The id of the task that spawned this one (`lander launch`), or absent
   // for tasks a human started from the UI. Records provenance — the same
   // relationship the opening message's "Launched by" backlink shows in prose —
@@ -473,7 +472,6 @@ async function runTurn(
     prompt,
     task: {
       allowEdits: task.allowEdits,
-      allowCommits: task.allowCommits,
       allow: task.allow,
       worktree: task.worktree,
     },
@@ -1119,13 +1117,11 @@ app.post('/api/:project/tasks', async (c) => {
       await?: unknown
       agent?: unknown
       allowEdits?: unknown
-      allowCommits?: unknown
     }>()
     const title = typeof body.title === 'string' ? body.title.trim() : ''
     const rawMessage = typeof body.message === 'string' ? body.message : ''
     const agent = isAgentKind(body.agent) ? body.agent : DEFAULT_NEW_TASK_AGENT
     const allowEdits = body.allowEdits === true
-    const allowCommits = body.allowCommits === true
     if (!title && !rawMessage.trim())
       return c.json({ error: 'title or message is required' }, 400)
 
@@ -1149,25 +1145,20 @@ app.post('/api/:project/tasks', async (c) => {
     // task spawned this one, supplies the backlink we prepend to the message.
     const principal = await resolvePrincipal(c.req)
 
-    // Granting a spawned task edit/commit access requires a caller that holds
-    // it. The human (UI token) may grant anything; an authenticated task may
-    // only pass on perms it has itself — so a task can't spawn a child more
+    // Granting a spawned task edit access requires a caller that holds it. The
+    // human (UI token) may grant it freely; an authenticated task may only pass
+    // on edit access it has itself — so a task can't spawn a child more
     // privileged than itself; an unidentified caller may grant nothing.
-    if (allowEdits || allowCommits) {
+    if (allowEdits) {
       if (principal.kind === 'task') {
-        if (allowEdits && !principal.task.allowEdits)
+        if (!principal.task.allowEdits)
           return c.json(
             { error: 'spawning task lacks edit permission to pass on' },
             403,
           )
-        if (allowCommits && !principal.task.allowCommits)
-          return c.json(
-            { error: 'spawning task lacks commit permission to pass on' },
-            403,
-          )
       } else if (principal.kind !== 'ui') {
         return c.json(
-          { error: 'not authorized to grant edit/commit permissions' },
+          { error: 'not authorized to grant edit permission' },
           403,
         )
       }
@@ -1220,7 +1211,6 @@ app.post('/api/:project/tasks', async (c) => {
       // shows as unseen until viewed.
       seenAt: now,
       allowEdits,
-      allowCommits,
       // Provenance: when another task spawned this one, remember which, so it can
       // later land what it launched (see the PATCH land gate). A UI-started task
       // has no spawner.
@@ -1280,7 +1270,6 @@ app.patch('/api/:project/tasks/:id', async (c) => {
     const body = await c.req.json<{
       title?: unknown
       allowEdits?: unknown
-      allowCommits?: unknown
       status?: unknown
     }>()
 
@@ -1288,17 +1277,13 @@ app.patch('/api/:project/tasks/:id', async (c) => {
     // decide whether a wedge should interrupt a live run.
     const principal = await resolvePrincipal(c.req)
 
-    // Changing a task's own edit/commit grant is a privilege escalation, so
-    // only the human (UI token) may do it — otherwise a task could PATCH itself
-    // to gain access it was never given. Title and status stay open: the CLI's
+    // Changing a task's own edit grant is a privilege escalation, so only the
+    // human (UI token) may do it — otherwise a task could PATCH itself to gain
+    // access it was never given. Title and status stay open: the CLI's
     // `lander land`/`wedge`/`rest` set status, and renames are harmless.
-    if (
-      (typeof body.allowEdits === 'boolean' ||
-        typeof body.allowCommits === 'boolean') &&
-      principal.kind !== 'ui'
-    )
+    if (typeof body.allowEdits === 'boolean' && principal.kind !== 'ui')
       return c.json(
-        { error: 'only the UI may change a task’s edit/commit permissions' },
+        { error: 'only the UI may change a task’s edit permission' },
         403,
       )
 
@@ -1355,8 +1340,6 @@ app.patch('/api/:project/tasks/:id', async (c) => {
         t.title = next
       }
       if (typeof body.allowEdits === 'boolean') t.allowEdits = body.allowEdits
-      if (typeof body.allowCommits === 'boolean')
-        t.allowCommits = body.allowCommits
       if (typeof body.status === 'string') {
         const at = new Date().toISOString()
         recordStatusTransition(t, body.status, at)

@@ -140,7 +140,6 @@ type Task = {
   // before this field existed, until the server backfills it.
   seenAt?: string
   allowEdits: boolean
-  allowCommits: boolean
   // Set on tasks the server reads from the archive dir (when the list is
   // fetched with ?archived=1). Marks the row and swaps the kebab's Archive item
   // for Restore. Absent on active tasks.
@@ -1120,6 +1119,105 @@ function CopyIdButton({ id }: { id: string }) {
   )
 }
 
+// The read-only affordance in the detail header: a crossed-out pencil shown
+// only while a task lacks edit permission (a spawner declined to forward it).
+// Its lone menu item grants edits via the same UI-only PATCH the old checkbox
+// used; once granted the parent stops rendering this, so the icon disappears.
+// Mirrors TaskActionsMenu's fixed-anchor popup so the header can't clip it.
+function ReadOnlyMenu({ onAllowEdits }: { onAllowEdits: () => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const itemRef = useRef<HTMLButtonElement>(null)
+  const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(
+    null,
+  )
+
+  useEffect(() => {
+    if (!open) {
+      setAnchor(null)
+      return
+    }
+    const place = () => {
+      const r = buttonRef.current?.getBoundingClientRect()
+      if (r) setAnchor({ top: r.bottom + 4, left: r.left })
+    }
+    place()
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [open])
+
+  // Focus the lone item once the popup is placed, so Enter/Escape land somewhere.
+  useEffect(() => {
+    if (open && anchor) itemRef.current?.focus()
+  }, [open, anchor])
+
+  return (
+    <div className="task-menu" ref={ref}>
+      <button
+        ref={buttonRef}
+        type="button"
+        className="edit-title-button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Read-only — click to allow edits"
+        aria-label="Read-only — click to allow edits"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <svg
+          width="15"
+          height="15"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+        >
+          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+          {/* The slash that reads the pencil as disabled/read-only. */}
+          <line x1="3" y1="3" x2="21" y2="21" />
+        </svg>
+      </button>
+      {open && anchor && (
+        <div
+          className="task-menu-popup"
+          role="menu"
+          style={{ top: anchor.top, left: anchor.left }}
+        >
+          <button
+            ref={itemRef}
+            type="button"
+            role="menuitem"
+            className="task-menu-item"
+            onClick={() => {
+              setOpen(false)
+              onAllowEdits()
+            }}
+          >
+            Allow edits
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // The status actions a task's kebab menu can fire, mirroring the buttons the
 // detail header used to carry, plus archive/restore.
 type TaskAction =
@@ -1518,20 +1616,12 @@ export function App() {
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   // The new-task form's draft fields persist across reloads so a half-composed
-  // task — its message and its agent/edit/commit/project choices — isn't lost
-  // to a hot reload or refresh. Session-scoped: two tabs composing different
-  // tasks keep independent drafts (localStorage would let them clobber each
-  // other, and since these fields drive the submission, a shared newProject
-  // could even send a task to the wrong project).
+  // task — its message and its agent/project choices — isn't lost to a hot
+  // reload or refresh. Session-scoped: two tabs composing different tasks keep
+  // independent drafts (localStorage would let them clobber each other, and
+  // since these fields drive the submission, a shared newProject could even
+  // send a task to the wrong project).
   const [message, setMessage] = useSessionState('lander:draft:newTask', '')
-  const [newAllowEdits, setNewAllowEdits] = useSessionState(
-    'lander:draft:newAllowEdits',
-    true,
-  )
-  const [newAllowCommits, setNewAllowCommits] = useSessionState(
-    'lander:draft:newAllowCommits',
-    false,
-  )
   const [newTaskAgent, setNewTaskAgent] = useSessionState<Task['agent']>(
     'lander:draft:newAgent',
     'claude',
@@ -2216,8 +2306,12 @@ export function App() {
         body: JSON.stringify({
           message,
           agent: newTaskAgent,
-          allowEdits: newAllowEdits,
-          allowCommits: newAllowCommits,
+          // Human-launched tasks always get edit access; git and other Bash
+          // are governed by the project's .claude permissions (Claude) or the
+          // workspace-write sandbox (Codex). A read-only task is only ever
+          // produced by a spawner declining to forward edits, and the human
+          // can grant edits from the task header.
+          allowEdits: true,
         }),
       })
       const body = await r.json()
@@ -2226,8 +2320,6 @@ export function App() {
       setTasks((await loadShownTasks(shown)).tasks)
       selectTask(created.id, targetSlug)
       setMessage('')
-      // Edits default on for the next task; commits stay as the user left them.
-      setNewAllowEdits(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -2497,29 +2589,6 @@ export function App() {
         method: 'PATCH',
         headers: uiHeaders(),
         body: JSON.stringify({ allowEdits: checked }),
-      })
-      if (!r.ok) {
-        const body = await r.json()
-        throw new Error(body.error ?? r.statusText)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    }
-  }
-
-  async function setAllowCommits(checked: boolean) {
-    if (!current) return
-    const id = current.id
-    const proj = current.projectSlug
-    // Optimistic; the PATCH persists it and polling will reconcile.
-    setTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, allowCommits: checked } : t)),
-    )
-    try {
-      const r = await fetch(`/api/${proj}/tasks/${id}`, {
-        method: 'PATCH',
-        headers: uiHeaders(),
-        body: JSON.stringify({ allowCommits: checked }),
       })
       if (!r.ok) {
         const body = await r.json()
@@ -3119,24 +3188,6 @@ export function App() {
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={onMessageKeyDown}
           />
-          <div className="allow-row">
-            <label className="allow-edits">
-              <input
-                type="checkbox"
-                checked={newAllowEdits}
-                onChange={(e) => setNewAllowEdits(e.target.checked)}
-              />
-              allow edits
-            </label>
-            <label className="allow-edits">
-              <input
-                type="checkbox"
-                checked={newAllowCommits}
-                onChange={(e) => setNewAllowCommits(e.target.checked)}
-              />
-              allow commits
-            </label>
-          </div>
           <button
             type="submit"
             disabled={submitting || !message.trim()}
@@ -3203,6 +3254,11 @@ export function App() {
                     </svg>
                   </button>
                   <CopyIdButton id={current.id} />
+                  {!current.allowEdits && !current.archived && (
+                    <ReadOnlyMenu
+                      onAllowEdits={() => void setAllowEdits(true)}
+                    />
+                  )}
                   <TaskActionsMenu
                     task={current}
                     onAction={(action) => {
@@ -3602,24 +3658,6 @@ export function App() {
                 onKeyDown={onReplyKeyDown}
               />
               <div className="allow-row">
-                <label className="allow-edits">
-                  <input
-                    type="checkbox"
-                    checked={current.allowEdits}
-                    disabled={!!current.archived}
-                    onChange={(e) => void setAllowEdits(e.target.checked)}
-                  />
-                  allow edits
-                </label>
-                <label className="allow-edits">
-                  <input
-                    type="checkbox"
-                    checked={current.allowCommits}
-                    disabled={!!current.archived}
-                    onChange={(e) => void setAllowCommits(e.target.checked)}
-                  />
-                  allow commits
-                </label>
                 {(() => {
                   const u = usageTotal
                     ? totalUsage(current)

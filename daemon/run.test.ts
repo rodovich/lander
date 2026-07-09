@@ -34,7 +34,6 @@ function makeStart(over: Partial<StartRunMessage> = {}): StartRunMessage {
     prompt: 'prompt',
     task: {
       allowEdits: false,
-      allowCommits: false,
     },
     env: { LANDER_TASK: 'task-1' },
     idleTimeoutMs: 60_000,
@@ -101,7 +100,7 @@ describe('daemon run manager', () => {
         '/repo',
         '--sandbox',
         'read-only',
-        'Prompt: This Codex turn runs with the read-only sandbox. Task allow rules and commit-only grants are stored by Lander but do not affect Codex runs yet.\n\ncodex prompt',
+        'Prompt: This Codex turn runs with the read-only sandbox. Task allow rules are stored by Lander but do not affect Codex runs yet.\n\ncodex prompt',
       ],
       options: { cwd: '/repo' },
     })
@@ -109,7 +108,7 @@ describe('daemon run manager', () => {
       '<task-context>',
       "Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.",
       '',
-      'You currently have no edit or commit permissions, so a spawned task cannot be granted them either.',
+      'You currently have no edit permission, so a spawned task cannot be granted it either.',
       '',
       'Git status as of this message:',
       '',
@@ -196,7 +195,7 @@ describe('daemon run manager', () => {
         prompt: 'follow-up',
         sessionId: 'sess-1',
         turnContext: context,
-        task: { allowEdits: true, allowCommits: false },
+        task: { allowEdits: true },
       }),
     )
     const changed = h.spawns[2].args.at(-1)!

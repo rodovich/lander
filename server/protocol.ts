@@ -36,7 +36,6 @@ export type StartRunMessage = {
   prompt: string
   task: {
     allowEdits: boolean
-    allowCommits: boolean
     allow?: string[]
     worktree?: string
   }

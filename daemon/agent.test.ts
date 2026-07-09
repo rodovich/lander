@@ -33,7 +33,6 @@ describe('daemon agent adapter contract', () => {
       task: {
         sessionId: 's1',
         allowEdits: false,
-        allowCommits: false,
       },
       prompt: 'hello',
       root: '/repo',

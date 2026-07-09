@@ -95,7 +95,6 @@ const start = (runId: string): ServerToDaemon => ({
   prompt: 'prompt',
   task: {
     allowEdits: false,
-    allowCommits: false,
   },
   env: {},
   idleTimeoutMs: 0,

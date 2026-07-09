@@ -126,7 +126,6 @@ describe('server task provider behavior', () => {
           createdAt: AT,
           updatedAt: AT,
           allowEdits: false,
-          allowCommits: false,
           messages: [],
         },
         null,

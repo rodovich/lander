@@ -64,12 +64,9 @@ try {
   const projects = await waitUp()
   slug = projects[0].slug
 
-  // 1. UI may create a task with edits+commits.
-  const ui = await create(
-    { 'x-lander-ui-token': UI },
-    { allowEdits: true, allowCommits: true },
-  )
-  ok('UI grants edits+commits', ui.status === 201 && ui.body.allowEdits === true)
+  // 1. UI may create a task with edits.
+  const ui = await create({ 'x-lander-ui-token': UI }, { allowEdits: true })
+  ok('UI grants edits', ui.status === 201 && ui.body.allowEdits === true)
   ok('token not leaked over HTTP', ui.body.token === undefined, `got ${ui.body.token}`)
   const parentId = ui.body.session
   const parentToken = diskToken(parentId)
@@ -79,11 +76,11 @@ try {
   const anon = await create({}, { allowEdits: true })
   ok('anon denied edits', anon.status === 403, `status ${anon.status}`)
 
-  // 3. Anon may create a no-perms task.
+  // 3. Anon may create a read-only task.
   const anonPlain = await create({}, {})
-  ok('anon may create plain task', anonPlain.status === 201)
+  ok('anon may create read-only task', anonPlain.status === 201)
 
-  // 4. A task with a valid token may pass on a perm it HAS (edits).
+  // 4. A task with a valid token may pass on the edit access it HAS.
   const taskHdr = {
     'x-lander-task': parentId,
     'x-lander-project': slug,
@@ -92,16 +89,16 @@ try {
   const childEdits = await create(taskHdr, { allowEdits: true })
   ok('task forwards held edits', childEdits.status === 201, `status ${childEdits.status}`)
 
-  // 5. A task may NOT pass on a perm it lacks. Make a task with edits only.
-  const editsOnly = await create({ 'x-lander-ui-token': UI }, { allowEdits: true })
-  const editsOnlyToken = diskToken(editsOnly.body.session)
-  const eHdr = {
-    'x-lander-task': editsOnly.body.session,
+  // 5. A task may NOT pass on edits it lacks. Make a read-only task.
+  const readOnly = await create({ 'x-lander-ui-token': UI }, {})
+  const readOnlyToken = diskToken(readOnly.body.session)
+  const roHdr = {
+    'x-lander-task': readOnly.body.session,
     'x-lander-project': slug,
-    'x-lander-token': editsOnlyToken,
+    'x-lander-token': readOnlyToken,
   }
-  const overreach = await create(eHdr, { allowCommits: true })
-  ok('task denied forwarding unheld commits', overreach.status === 403, `status ${overreach.status}`)
+  const overreach = await create(roHdr, { allowEdits: true })
+  ok('task denied forwarding unheld edits', overreach.status === 403, `status ${overreach.status}`)
 
   // 6. A task may NOT impersonate another by guessing its id without the token.
   const impersonate = await create(
@@ -110,26 +107,26 @@ try {
   )
   ok('bad token treated as anon (denied)', impersonate.status === 403, `status ${impersonate.status}`)
 
-  // 7. A task may NOT self-escalate via PATCH.
-  const patch = await fetch(`${API}/api/${slug}/tasks/${editsOnly.body.session}`, {
+  // 7. A task may NOT self-escalate its edit grant via PATCH.
+  const patch = await fetch(`${API}/api/${slug}/tasks/${readOnly.body.session}`, {
     method: 'PATCH',
-    headers: { 'content-type': 'application/json', ...eHdr },
-    body: JSON.stringify({ allowCommits: true }),
+    headers: { 'content-type': 'application/json', ...roHdr },
+    body: JSON.stringify({ allowEdits: true }),
   })
-  ok('task denied self-PATCH of perms', patch.status === 403, `status ${patch.status}`)
+  ok('task denied self-PATCH of edits', patch.status === 403, `status ${patch.status}`)
 
-  // 8. UI may PATCH perms.
-  const uiPatch = await fetch(`${API}/api/${slug}/tasks/${editsOnly.body.session}`, {
+  // 8. UI may PATCH the edit grant.
+  const uiPatch = await fetch(`${API}/api/${slug}/tasks/${readOnly.body.session}`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json', 'x-lander-ui-token': UI },
-    body: JSON.stringify({ allowCommits: true }),
+    body: JSON.stringify({ allowEdits: true }),
   })
-  ok('UI may PATCH perms', uiPatch.status === 200)
+  ok('UI may PATCH edits', uiPatch.status === 200)
 
   // 9. A task may NOT grant a tool via /allow.
-  const allow = await fetch(`${API}/api/${slug}/tasks/${editsOnly.body.session}/allow`, {
+  const allow = await fetch(`${API}/api/${slug}/tasks/${readOnly.body.session}/allow`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...eHdr },
+    headers: { 'content-type': 'application/json', ...roHdr },
     body: JSON.stringify({ rule: 'Bash(rm:*)', scope: 'task' }),
   })
   ok('task denied /allow', allow.status === 403, `status ${allow.status}`)

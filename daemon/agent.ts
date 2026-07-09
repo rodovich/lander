@@ -5,7 +5,6 @@ export type AgentTaskView = {
   agent?: AgentKind
   sessionId?: string
   allowEdits: boolean
-  allowCommits: boolean
   allow?: string[]
   worktree?: string
 }

@@ -92,7 +92,7 @@ async function resolveAwait(value, { self } = {}) {
 }
 
 async function launchTask(rest) {
-  const o = { project: PROJECT, allowEdits: false, allowCommits: false }
+  const o = { project: PROJECT, allowEdits: false }
   const pos = []
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i]
@@ -103,12 +103,12 @@ async function launchTask(rest) {
     else if (a === '--time') o.time = Number(rest[++i])
     else if (a === '--await') o.await = rest[++i]
     else if (a === '--edits') o.allowEdits = true
-    else if (a === '--commits') o.allowCommits = true
     else pos.push(a)
   }
-  // The server caps the requested --edits/--commits to what this (spawning)
-  // task holds, authenticating us by the caller headers `call` attaches; a task
-  // can't grant a child access it lacks.
+  // The server caps the requested --edits to what this (spawning) task holds,
+  // authenticating us by the caller headers `call` attaches; a task can't grant
+  // a child edit access it lacks. Git and other Bash follow the project's normal
+  // .claude permissions, not a Lander grant.
   o.message ??= pos.shift()
   if (o.message === '-') o.message = await readStdin()
   if (!o.message?.trim()) die('usage: lander launch <message>')
@@ -355,7 +355,7 @@ async function viewTask(args) {
   console.log(`${task.title}  [${task.status}]`)
   console.log(`id: ${task.id}`)
   if (task.scheduledFor) console.log(`scheduled: ${task.scheduledFor}`)
-  console.log(`edits: ${task.allowEdits}  commits: ${task.allowCommits}`)
+  console.log(`edits: ${task.allowEdits}`)
   const clip = (s) => (s.length > 600 ? `${s.slice(0, 600)}…` : s)
   for (const m of task.messages.slice(-6)) {
     const parts = []
@@ -517,7 +517,6 @@ function makeLander(inputs) {
         date: opts.date,
         time: opts.time,
         allowEdits: !!opts.edits,
-        allowCommits: !!opts.commits,
       }
       validateSchedule(o)
       o.await = await resolveAwait(opts.await)

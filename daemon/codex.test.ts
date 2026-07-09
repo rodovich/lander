@@ -64,7 +64,6 @@ describe('Codex adapter reducer', () => {
     const launch = adapter.buildLaunch({
       task: {
         allowEdits: false,
-        allowCommits: true,
       },
       prompt: 'hello codex',
       root: '/repo',
@@ -102,7 +101,7 @@ describe('Codex adapter reducer', () => {
       'read-only',
       managedPrompt(
         'hello codex',
-        'This Codex turn runs with the read-only sandbox. Task allow rules and commit-only grants are stored by Lander but do not affect Codex runs yet',
+        'This Codex turn runs with the read-only sandbox. Task allow rules are stored by Lander but do not affect Codex runs yet',
       ),
     ])
     expect(launch.args.join('\0')).not.toContain('secret-token')
@@ -113,7 +112,6 @@ describe('Codex adapter reducer', () => {
     const launch = adapter.buildLaunch({
       task: {
         allowEdits: true,
-        allowCommits: true,
       },
       prompt: 'edit files',
       root: '/repo',
@@ -138,7 +136,7 @@ describe('Codex adapter reducer', () => {
       'workspace-write',
       managedPrompt(
         'edit files',
-        'This Codex turn runs with the workspace-write sandbox for file edits. Task allow rules and commit-only grants are stored by Lander but do not affect Codex runs yet',
+        'This Codex turn runs with the workspace-write sandbox for file edits. Task allow rules are stored by Lander but do not affect Codex runs yet',
       ),
     ])
   })
@@ -148,7 +146,6 @@ describe('Codex adapter reducer', () => {
       task: {
         sessionId: '019f0000-0000-7000-8000-000000000001',
         allowEdits: false,
-        allowCommits: false,
       },
       prompt: 'follow up',
       root: '/repo',
@@ -175,7 +172,7 @@ describe('Codex adapter reducer', () => {
       '019f0000-0000-7000-8000-000000000001',
       managedPrompt(
         'follow up',
-        'This Codex turn runs with the read-only sandbox. Task allow rules and commit-only grants are stored by Lander but do not affect Codex runs yet',
+        'This Codex turn runs with the read-only sandbox. Task allow rules are stored by Lander but do not affect Codex runs yet',
       ),
     ])
   })
@@ -185,7 +182,6 @@ describe('Codex adapter reducer', () => {
       task: {
         sessionId: '019f0000-0000-7000-8000-000000000001',
         allowEdits: true,
-        allowCommits: false,
       },
       prompt: 'follow up with edits',
       root: '/repo',
@@ -212,7 +208,7 @@ describe('Codex adapter reducer', () => {
       '019f0000-0000-7000-8000-000000000001',
       managedPrompt(
         'follow up with edits',
-        'This Codex turn runs with the workspace-write sandbox for file edits. Task allow rules and commit-only grants are stored by Lander but do not affect Codex runs yet',
+        'This Codex turn runs with the workspace-write sandbox for file edits. Task allow rules are stored by Lander but do not affect Codex runs yet',
       ),
     ])
   })
@@ -227,7 +223,6 @@ describe('Codex adapter reducer', () => {
       task: {
         sessionId: '019f0000-0000-7000-8000-000000000001',
         allowEdits: true,
-        allowCommits: false,
       },
       prompt: 'configured follow up',
       root: '/repo',
@@ -260,7 +255,7 @@ describe('Codex adapter reducer', () => {
       '019f0000-0000-7000-8000-000000000001',
       managedPrompt(
         'configured follow up',
-        'This Codex turn runs with the workspace-write sandbox for file edits. Task allow rules and commit-only grants are stored by Lander but do not affect Codex runs yet',
+        'This Codex turn runs with the workspace-write sandbox for file edits. Task allow rules are stored by Lander but do not affect Codex runs yet',
       ),
     ])
   })
@@ -274,7 +269,6 @@ describe('Codex adapter reducer', () => {
     const launch = configured.buildLaunch({
       task: {
         allowEdits: true,
-        allowCommits: false,
       },
       prompt: 'use configured codex',
       root: '/repo',
@@ -305,7 +299,7 @@ describe('Codex adapter reducer', () => {
       'workspace-write',
       managedPrompt(
         'use configured codex',
-        'This Codex turn runs with the workspace-write sandbox for file edits. Task allow rules and commit-only grants are stored by Lander but do not affect Codex runs yet',
+        'This Codex turn runs with the workspace-write sandbox for file edits. Task allow rules are stored by Lander but do not affect Codex runs yet',
       ),
     ])
   })

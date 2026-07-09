@@ -108,9 +108,11 @@ function buildClaudeArgs(
   },
 ): string[] {
   const worktreeArgs = task.worktree ? ['--worktree', task.worktree] : []
+  // Edit access is the only grant Lander injects into --allowedTools; git and
+  // other Bash follow the project's normal .claude permissions (settings.json /
+  // settings.local.json) plus any per-task allow rules below.
   const allowed: string[] = ['Bash(lander:*)']
   if (task.allowEdits) allowed.push('Edit', 'Write', 'MultiEdit')
-  if (task.allowCommits) allowed.push('Bash(git:*)')
   if (task.allow?.length) allowed.push(...task.allow)
   const editArgs = allowed.length ? ['--allowedTools', ...allowed] : []
 

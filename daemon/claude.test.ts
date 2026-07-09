@@ -22,7 +22,6 @@ describe('Claude adapter', () => {
     const launch = adapter.buildLaunch({
       task: {
         allowEdits: true,
-        allowCommits: true,
         allow: ['Bash(npm test)'],
         worktree: 'feature',
       },
@@ -33,7 +32,10 @@ describe('Claude adapter', () => {
     })
 
     expect(launch.env).toEqual({ LANDER_TASK: 'task-1' })
-    expect(launch.args.slice(0, 9)).toEqual([
+    // git is no longer injected into --allowedTools: it follows the project's
+    // .claude permissions now. Only the edit tools and the per-task allow rule
+    // ride the allowlist.
+    expect(launch.args.slice(0, 8)).toEqual([
       '--worktree',
       'feature',
       '--allowedTools',
@@ -41,7 +43,6 @@ describe('Claude adapter', () => {
       'Edit',
       'Write',
       'MultiEdit',
-      'Bash(git:*)',
       'Bash(npm test)',
     ])
     expect(launch.args.slice(-6)).toEqual([
@@ -84,13 +85,13 @@ describe('Claude adapter', () => {
 
   it('builds the per-turn context block from grants and the git snapshot', () => {
     const context = adapter.buildTurnContext?.({
-      task: { allowEdits: true, allowCommits: true },
+      task: { allowEdits: true },
       root: '/repo',
       cwd: '/repo/worktree',
     })
     expect(context).toContain('<task-context>')
     expect(context).toContain(
-      'You currently have permission for editing files and git commits',
+      'You currently have permission for editing files',
     )
     expect(context).toContain('cwd /repo/worktree')
     expect(context).toContain('</task-context>')
@@ -103,11 +104,11 @@ describe('Claude adapter', () => {
       readGitContext: () => undefined,
     })
     const context = noGit.buildTurnContext?.({
-      task: { allowEdits: false, allowCommits: false },
+      task: { allowEdits: false },
       root: '/repo',
       cwd: '/repo',
     })
-    expect(context).toContain('You currently have no edit or commit permissions')
+    expect(context).toContain('You currently have no edit permission')
     expect(context).not.toContain('Git status')
   })
 
@@ -208,7 +209,7 @@ describe('Claude adapter', () => {
       taskPromptTemplate: 'Prompt: {{forwardable}}.',
     })
     const context = realGit.buildTurnContext?.({
-      task: { allowEdits: true, allowCommits: true, worktree: 'feature' },
+      task: { allowEdits: true, worktree: 'feature' },
       root,
       cwd: root,
     })

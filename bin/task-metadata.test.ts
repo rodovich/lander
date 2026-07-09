@@ -11,7 +11,6 @@ describe('taskMetadata', () => {
       updatedAt: '2026-06-30T20:25:26.253Z',
       seenAt: '2026-06-30T20:25:23.750Z',
       allowEdits: true,
-      allowCommits: true,
       token: 'secret',
       messages: [{ role: 'user', text: 'hi', createdAt: '2026-06-30T20:25:23.750Z' }],
       events: [{ kind: 'launched', createdAt: '2026-06-30T20:25:23.750Z' }],
