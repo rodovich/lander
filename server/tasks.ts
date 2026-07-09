@@ -6,11 +6,18 @@
 
 import path from 'node:path'
 import type { Step, Usage } from './stream'
+import type { Attachment } from './attachments'
 
 export type Message = {
   role: 'user' | 'assistant'
   text: string
   createdAt: string
+  // Files/images attached to a user message (refs only — id/name/mime/size, never
+  // the bytes; the durable blobs live in the project's attachmentsDir). Carried
+  // separately from `text` (which stays the user's prose): the UI renders these as
+  // chips/thumbnails, and driveTask pulls the turn's refs onto the outgoing run so
+  // the daemon can materialize them for the agent. Absent on messages with none.
+  attachments?: Attachment[]
   // Present on assistant turns that were streamed: the live activity trace.
   steps?: Step[]
   // Present on assistant turns once the run's terminal result event lands: the
@@ -92,6 +99,10 @@ export type ScheduledMessage = {
   waitFor?: string[]
   relaunch?: boolean
   repeat?: RepeatSpec
+  // Attachment refs sent with a deferred `lander send --files --date/--await`,
+  // carried until delivery when they land on the appended user message (like an
+  // immediate send). Absent when the deferred message had none.
+  attachments?: Attachment[]
 }
 
 // Strip the secret `token` (and the server-internal run pointers) before sending
@@ -303,7 +314,12 @@ export function applyDueMessages(
   // Seal once even if several relaunch entries are due in the same sweep.
   if (relaunch.length) sealForRelaunch(task, at)
   for (const m of [...relaunch, ...rest]) {
-    task.messages.push({ role: 'user', text: m.text, createdAt: at })
+    task.messages.push({
+      role: 'user',
+      text: m.text,
+      createdAt: at,
+      ...(m.attachments?.length ? { attachments: m.attachments } : {}),
+    })
     ;(task.queued ??= []).push(m.text)
   }
   // Re-arm the next occurrence of any repeating relaunch (`--interval`) that just
@@ -353,6 +369,33 @@ export function lastTurnPrompts(messages: Message[]): string[] {
     i--
   }
   return prompts
+}
+
+// The attachment refs carried by the trailing `count` user messages — the ones a
+// just-drained turn is made of (driveTask drains the whole `queued` array at once,
+// one entry per trailing unread user message; see the trailing-N rule publicTask
+// relies on). Gathered in message order and flattened, so the daemon materializes
+// exactly this turn's attachments (not the task's whole history). Returns [] when
+// none of those messages carried any.
+export function turnAttachments(
+  messages: Message[],
+  count: number,
+): Attachment[] {
+  const picked: number[] = []
+  let remaining = count
+  for (let i = messages.length - 1; i >= 0 && remaining > 0; i--) {
+    if (messages[i].role === 'user') {
+      picked.push(i)
+      remaining--
+    }
+  }
+  picked.reverse()
+  const out: Attachment[] = []
+  for (const i of picked) {
+    const atts = messages[i].attachments
+    if (atts?.length) out.push(...atts)
+  }
+  return out
 }
 
 // Locate the in-flight assistant message (the one a run is streaming into).

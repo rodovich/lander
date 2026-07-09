@@ -22,6 +22,12 @@ export type Project = {
   // <name>.js flow scripts. The server only resolves and hands back their path
   // (GET /api/:project/flows/:name); the `lander flow` CLI imports and runs them.
   flowsDir: string
+  // Sibling of dataDir: ./data/<normalized-project-path>/attachments, the durable
+  // blob store for message file/image attachments. Each attachment is a `<id>`
+  // blob plus an `<id>.json` metadata sidecar ({id,name,mime,size}). This is the
+  // source of truth the web UI renders and the browser uploads to; the daemon
+  // lazily materializes a task's attachments from here into its own per-task dir.
+  attachmentsDir: string
 }
 
 // Namespace each project's tasks under ./data/<normalized-project-path>/tasks.
@@ -71,6 +77,7 @@ export function parseProjects(
       runsDir: path.join(root, 'data', norm, 'runs'),
       archiveDir: path.join(root, 'data', norm, 'archived'),
       flowsDir: path.join(root, 'data', norm, 'flows'),
+      attachmentsDir: path.join(root, 'data', norm, 'attachments'),
     })
   }
   return projects

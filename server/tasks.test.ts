@@ -6,6 +6,7 @@ import {
   pendingMessage,
   ensurePending,
   lastTurnPrompts,
+  turnAttachments,
   worktreeName,
   applyRelaunch,
   applyDueMessages,
@@ -171,6 +172,39 @@ describe('lastTurnPrompts', () => {
 
   it('returns empty when the turn has no user prompt', () => {
     expect(lastTurnPrompts([msg({ text: 'reply' })])).toEqual([])
+  })
+})
+
+describe('turnAttachments', () => {
+  const att = (id: string) => ({ id, name: id, mime: 'text/plain', size: 1 })
+
+  it('gathers refs off the trailing N user messages, in message order', () => {
+    const out = turnAttachments(
+      [
+        msg({ role: 'user', text: 'old', attachments: [att('old')] }),
+        msg({ text: 'reply' }),
+        msg({ role: 'user', text: 'a', attachments: [att('a1'), att('a2')] }),
+        msg({ role: 'user', text: 'b', attachments: [att('b1')] }),
+      ],
+      2,
+    )
+    expect(out.map((a) => a.id)).toEqual(['a1', 'a2', 'b1'])
+  })
+
+  it('ignores user messages beyond the batch and those with no attachments', () => {
+    expect(
+      turnAttachments(
+        [
+          msg({ role: 'user', text: 'a', attachments: [att('a1')] }),
+          msg({ role: 'user', text: 'b' }),
+        ],
+        1,
+      ),
+    ).toEqual([])
+  })
+
+  it('returns empty when nothing in the batch carried attachments', () => {
+    expect(turnAttachments([msg({ role: 'user', text: 'x' })], 1)).toEqual([])
   })
 })
 

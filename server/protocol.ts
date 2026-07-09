@@ -16,6 +16,17 @@ export type UsageBody = { session: UsageWindow | null; weekly: UsageWindow | nul
 
 // ── Server → daemon ────────────────────────────────────────────────────────
 
+// A message attachment as it crosses to the daemon: refs only — id/name/mime/size,
+// never the bytes and never a host path. The daemon fetches the bytes from the
+// server's authed download endpoint and materializes them into its own per-task
+// LANDER_FILES_DIR; the id keys both the store blob and that local file.
+export type AttachmentRef = {
+  id: string
+  name: string
+  mime: string
+  size: number
+}
+
 // Launch a run: like today's RunJob minus the file paths and the absolute cwd.
 // The server sends the project slug plus cwd hints (the recorded task cwd and the
 // worktree flag) and the daemon resolves the actual directory from the host paths
@@ -53,6 +64,12 @@ export type StartRunMessage = {
   // differs from this. Absent on a fresh session (first turn, or after a
   // relaunch sealed the old one), so the new session always gets the full block.
   turnContext?: string
+  // The attachments belonging to this turn's user message(s), refs only. The
+  // daemon materializes them into LANDER_FILES_DIR, generates the prompt manifest
+  // block, and hands image paths to the adapter's vision channel. Absent/empty
+  // when the turn carries none. Persisted on the message, so a retry/resume
+  // rebuilds the same list for free.
+  attachments?: AttachmentRef[]
   env: Record<string, string>
   idleTimeoutMs: number
 }

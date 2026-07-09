@@ -41,6 +41,7 @@ import {
   recordStatusTransition,
   pendingMessage,
   lastTurnPrompts,
+  turnAttachments,
   worktreeName,
   applyRelaunch,
   applyDueMessages,
@@ -50,6 +51,15 @@ import {
   type ScheduledMessage,
   type RepeatSpec,
 } from './tasks'
+import {
+  saveAttachment,
+  readAttachmentMeta,
+  readAttachmentBytes,
+  isAttachmentId,
+  AttachmentTooLargeError,
+  MAX_ATTACHMENT_BYTES,
+  type Attachment,
+} from './attachments'
 
 const execFileAsync = promisify(execFile)
 
@@ -375,6 +385,7 @@ async function runTurn(
   project: Project,
   id: string,
   prompt: string,
+  attachments: Attachment[] = [],
 ): Promise<'done' | 'crashed'> {
   const file = path.join(project.dataDir, `${id}.json`)
   let task: Task
@@ -481,6 +492,9 @@ async function runTurn(
     // The context baseline rides only with a session to resume: a fresh session
     // (first turn, or post-relaunch) must always receive the full block.
     turnContext: task.sessionId ? task.turnContext : undefined,
+    // This turn's attachment refs; the daemon materializes them and builds the
+    // prompt manifest. Omitted when the turn carries none.
+    attachments: attachments.length ? attachments : undefined,
     env: landerEnv,
     idleTimeoutMs: 10 * 60_000,
   }
@@ -634,14 +648,19 @@ async function driveTask(project: Project, id: string): Promise<void> {
       // reply. The loop repeats because more can arrive while this batch runs;
       // those become the next batched turn.
       let batch: string[] = []
+      let atts: Attachment[] = []
       await mutateTask(file, (t) => {
         if (t.queued && t.queued.length) {
           batch = t.queued
+          // Gather the attachments off the trailing user messages this batch is
+          // made of, under the same lock, so the run carries exactly this turn's
+          // files (see turnAttachments).
+          atts = turnAttachments(t.messages, batch.length)
           delete t.queued
         }
       }).catch(() => {})
       if (!batch.length) break
-      await runTurn(project, id, batch.join('\n\n'))
+      await runTurn(project, id, batch.join('\n\n'), atts)
     }
   } finally {
     running.delete(id)
@@ -947,6 +966,79 @@ app.get('/api/:project/flows/:name', async (c) => {
   }
 })
 
+// Upload one or more file/image attachments to a project's durable blob store,
+// returning their refs ({id,name,mime,size}). The browser (paperclip) and the
+// `lander --files` CLI both POST here as multipart/form-data; each `file` part
+// becomes one attachment. Only an identified caller may upload — the human
+// (UI token) or an authenticated task — so an anon request can't fill the store.
+// A follow-up POST /tasks or /messages carries the returned ids to associate them
+// with a message. Over-size files 413; the whole request fails if any part does.
+app.post('/api/:project/attachments', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  const principal = await resolvePrincipal(c.req)
+  if (principal.kind === 'anon')
+    return c.json({ error: 'not authorized to upload attachments' }, 403)
+  try {
+    const body = await c.req.parseBody({ all: true })
+    // `all: true` yields a single value or an array per field; normalize the
+    // `file` field to a flat list of the File parts the multipart body carried.
+    const raw = body['file'] ?? body['files']
+    const parts = (Array.isArray(raw) ? raw : [raw]).filter(
+      (p): p is File => p instanceof File,
+    )
+    if (!parts.length) return c.json({ error: 'no files in upload' }, 400)
+    const attachments: Attachment[] = []
+    for (const part of parts) {
+      const bytes = new Uint8Array(await part.arrayBuffer())
+      attachments.push(
+        await saveAttachment(project.attachmentsDir, {
+          name: part.name,
+          mime: part.type,
+          bytes,
+        }),
+      )
+    }
+    return c.json({ attachments }, 201)
+  } catch (e) {
+    if (e instanceof AttachmentTooLargeError)
+      return c.json(
+        { error: `attachment too large (max ${MAX_ATTACHMENT_BYTES} bytes)` },
+        413,
+      )
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
+  }
+})
+
+// Stream an attachment's bytes from the durable store. Serves both the browser
+// (thumbnails/downloads, UI token) and the daemon, which fetches here to
+// materialize a task's files at turn time (authenticating with the task's
+// LANDER_TOKEN). Only an identified caller may read; the store isn't scoped
+// per-task, so any task in the project may fetch any of its attachments — fine
+// under the same-project trust model.
+app.get('/api/:project/attachments/:id', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  const principal = await resolvePrincipal(c.req)
+  if (principal.kind === 'anon')
+    return c.json({ error: 'not authorized' }, 403)
+  const id = c.req.param('id')
+  if (!isAttachmentId(id)) return c.json({ error: 'invalid attachment id' }, 400)
+  const meta = await readAttachmentMeta(project.attachmentsDir, id)
+  const bytes = meta && (await readAttachmentBytes(project.attachmentsDir, id))
+  if (!meta || !bytes) return c.json({ error: 'attachment not found' }, 404)
+  // Hand Hono a plain ArrayBuffer view of the blob (a Node Buffer isn't one of
+  // c.body's accepted body types).
+  const ab = bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer
+  return c.body(ab, 200, {
+    'content-type': meta.mime,
+    'content-length': String(meta.size),
+  })
+})
+
 // Resolve a requested wakeup time from either `date` (any date/time the server
 // can parse) or `wait` (minutes from now). The two are mutually exclusive. Used
 // by task creation (`--date`/`--wait` on `lander new`) and by `lander rest`.
@@ -1055,6 +1147,27 @@ async function resolveAwait(
   return { waitFor: ids }
 }
 
+// Resolve a message's `attachments: id[]` body field to the full refs stored on
+// the message: validate each id and look up its metadata sidecar in the project's
+// durable store, rejecting any unknown id (a stale/foreign ref the daemon could
+// never materialize). Returns [] for the common no-attachments case.
+async function resolveAttachments(
+  project: Project,
+  value: unknown,
+): Promise<{ attachments: Attachment[] } | { error: string }> {
+  if (value === undefined || value === null) return { attachments: [] }
+  if (!Array.isArray(value) || !value.every((x) => typeof x === 'string'))
+    return { error: 'attachments expects a list of attachment ids' }
+  const out: Attachment[] = []
+  for (const id of value as string[]) {
+    if (!isAttachmentId(id)) return { error: `invalid attachment id: ${id}` }
+    const meta = await readAttachmentMeta(project.attachmentsDir, id)
+    if (!meta) return { error: `attachment not found: ${id}` }
+    out.push(meta)
+  }
+  return { attachments: out }
+}
+
 // Whether `target` is reachable from `ids` along the waitingFor graph — i.e.
 // some awaited task already (transitively) rests on it. Used by resolveAwait to
 // reject an await edge that would close a deadlock cycle. The visited set bounds
@@ -1117,6 +1230,7 @@ app.post('/api/:project/tasks', async (c) => {
       await?: unknown
       agent?: unknown
       allowEdits?: unknown
+      attachments?: unknown
     }>()
     const title = typeof body.title === 'string' ? body.title.trim() : ''
     const rawMessage = typeof body.message === 'string' ? body.message : ''
@@ -1135,6 +1249,13 @@ app.post('/api/:project/tasks', async (c) => {
     const awaited = await resolveAwait(project, body.await)
     if ('error' in awaited) return c.json({ error: awaited.error }, 400)
     const waitingFor = awaited.waitFor.length ? awaited.waitFor : undefined
+    // Resolve any attachment refs up front so an unknown id fails the request
+    // rather than creating a task whose opening message points at nothing.
+    const attached = await resolveAttachments(project, body.attachments)
+    if ('error' in attached) return c.json({ error: attached.error }, 400)
+    const attachments = attached.attachments.length
+      ? attached.attachments
+      : undefined
     // Only defer when there's actually a message to run later; a deferred task
     // with nothing to do would just sit resting forever.
     const deferred =
@@ -1219,7 +1340,14 @@ app.post('/api/:project/tasks', async (c) => {
         : {}),
       // Authenticates this task's own callbacks (see Task.token).
       token: randomUUID(),
-      messages: [{ role: 'user', text: message, createdAt: now }],
+      messages: [
+        {
+          role: 'user',
+          text: message,
+          createdAt: now,
+          ...(attachments ? { attachments } : {}),
+        },
+      ],
       events: [createdEvent],
       // The opening message rides the same queue as follow-ups; driveTask
       // drains it (immediately, or when the scheduler launches a deferred task).
@@ -1828,6 +1956,7 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
       date?: unknown
       time?: unknown
       await?: unknown
+      attachments?: unknown
     }>()
     const rawMessage = typeof body.message === 'string' ? body.message : ''
     if (!rawMessage.trim()) return c.json({ error: 'message is required' }, 400)
@@ -1859,6 +1988,11 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
     if ('error' in sched) return c.json({ error: sched.error }, 400)
     const awaited = await resolveAwait(project, body.await)
     if ('error' in awaited) return c.json({ error: awaited.error }, 400)
+    const attached = await resolveAttachments(project, body.attachments)
+    if ('error' in attached) return c.json({ error: attached.error }, 400)
+    const attachments = attached.attachments.length
+      ? attached.attachments
+      : undefined
     const deliverAt = sched.scheduledFor ?? undefined
     const waitFor = awaited.waitFor.length ? awaited.waitFor : undefined
 
@@ -1867,9 +2001,14 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
       // trigger fires (the due time or all awaited tasks landing, whichever
       // first). Don't touch status or queue now — the recipient may be resting
       // (or even landed) until then. mutateTask avoids clobbering a concurrent
-      // run.
+      // run. Any attachments ride along until delivery (see applyDueMessages).
       await mutateTask(file, (t) => {
-        ;(t.scheduledMessages ??= []).push({ text: message, deliverAt, waitFor })
+        ;(t.scheduledMessages ??= []).push({
+          text: message,
+          deliverAt,
+          waitFor,
+          ...(attachments ? { attachments } : {}),
+        })
       })
       const updated = await readTask(project.dataDir, id)
       return c.json(publicTask(updated ?? task))
@@ -1884,7 +2023,12 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
       // "un-wedged"/"un-landed" transition a hair before the message's own
       // timestamp so the timeline shows it ahead of the message that caused it.
       recordStatusTransition(t, 'riding', new Date(Date.parse(now) - 1).toISOString())
-      t.messages.push({ role: 'user', text: message, createdAt: now })
+      t.messages.push({
+        role: 'user',
+        text: message,
+        createdAt: now,
+        ...(attachments ? { attachments } : {}),
+      })
       t.updatedAt = now
       // Queue the prompt for the session and go "riding". driveTask clears it to
       // "resting" once the queue drains.
