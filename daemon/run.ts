@@ -58,9 +58,15 @@ export type RunManagerOptions = {
     adapter: AgentAdapter,
   ) => { root: string; cwd: string }
   send: (msg: RunManagerMessage) => void
-  // Materialize a run's attachments into a per-task LANDER_FILES_DIR and build the
-  // prompt manifest block before spawn. Called only when the start message carries
-  // attachments; returns undefined (or is absent) when there's nothing to do.
+  // The deterministic per-task file store dir (pure function of the run's
+  // project/task). Set as LANDER_FILES_DIR on EVERY turn so `lander file cat/ls`
+  // keep reaching a file attached on an earlier turn — the blobs persist there
+  // even on turns that carry no new attachment. Sync so the common (no-attachment)
+  // path still spawns without an await.
+  resolveFilesDir?: (msg: StartRunMessage) => string
+  // Materialize a run's attachments into that dir and build the prompt manifest
+  // block before spawn. Called only when the start message carries attachments;
+  // returns undefined (or is absent) when there's nothing to do.
   materialize?: (
     msg: StartRunMessage,
     opts: { visionNative: boolean },
@@ -81,6 +87,7 @@ export function createRunManager({
   adapters,
   resolveRunPaths,
   send,
+  resolveFilesDir,
   materialize,
   refreshUsage = () => {},
   defaultIdleMs = DEFAULT_IDLE_MS,
@@ -183,8 +190,12 @@ export function createRunManager({
     const promptParts = [msg.prompt]
     if (materialized?.manifestBlock) promptParts.push(materialized.manifestBlock)
     if (sentContext) promptParts.push(sentContext)
-    const landerEnv = materialized
-      ? { ...msg.env, LANDER_FILES_DIR: materialized.filesDir }
+    // LANDER_FILES_DIR points at the persistent per-task store on every turn (so a
+    // file attached earlier stays cat-able), falling back to the just-materialized
+    // dir if no resolver is wired.
+    const filesDir = resolveFilesDir?.(msg) ?? materialized?.filesDir
+    const landerEnv = filesDir
+      ? { ...msg.env, LANDER_FILES_DIR: filesDir }
       : msg.env
     const launch = activeAdapter.buildLaunch({
       task: taskView,

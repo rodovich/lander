@@ -406,6 +406,32 @@ describe('daemon run manager', () => {
     )
   })
 
+  it('sets LANDER_FILES_DIR every turn, even one carrying no new attachments', () => {
+    const spawns: SpawnCall[] = []
+    const manager = createRunManager({
+      adapters: {
+        codex: createCodexAdapter({ taskPromptTemplate: 'Prompt: {{forwardable}}.' }),
+      },
+      resolveRunPaths: () => ({ root: '/repo', cwd: '/repo' }),
+      send: () => {},
+      resolveFilesDir: (msg) => `/files/${msg.project}/${msg.taskId}`,
+      spawn: (command, args, options) => {
+        const child = new FakeChild()
+        spawns.push({ command, args, options, child })
+        return child as unknown as ChildProcess
+      },
+      now: () => '2026-01-01T00:00:00.000Z',
+    })
+
+    // No attachments: spawns synchronously, but LANDER_FILES_DIR is still injected
+    // so `lander file cat/ls` can reach files from an earlier turn.
+    manager.startRun(makeStart({ agent: 'codex' }))
+    expect(spawns).toHaveLength(1)
+    expect(
+      (spawns[0].options.env as Record<string, string>).LANDER_FILES_DIR,
+    ).toBe('/files/proj/task-1')
+  })
+
   it('aborts a run interrupted while its attachments were still materializing', async () => {
     const messages: RunManagerMessage[] = []
     const spawns: SpawnCall[] = []
