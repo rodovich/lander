@@ -7,6 +7,8 @@
 // LANDER_TASK, and LANDER_TOKEN (the per-task secret that authenticates these
 // callbacks).
 import { spawnSync } from 'node:child_process'
+import { createReadStream, readFileSync } from 'node:fs'
+import { basename, extname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { inDateRange, matchesText, taskMetadata } from './task-metadata.js'
 
@@ -60,6 +62,99 @@ async function readStdin() {
   return Buffer.concat(chunks).toString('utf8')
 }
 
+// --- attachments -----------------------------------------------------------
+// `lander file cat/ls` read the daemon-local file store the daemon materialized
+// for this turn (LANDER_FILES_DIR): a `<id>` blob per attachment plus a
+// manifest.json. Pure local reads — no server call, no sandbox widening — so they
+// work over the already-allowlisted Bash(lander:*) channel.
+const FILES_DIR = process.env.LANDER_FILES_DIR
+
+// Guess an upload's mime from its extension; the server stores whatever we send
+// and only special-cases image/* for the vision channel, so a coarse map is fine.
+function guessMime(file) {
+  const ext = extname(file).toLowerCase()
+  return (
+    {
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.svg': 'image/svg+xml',
+      '.csv': 'text/csv',
+      '.json': 'application/json',
+      '.txt': 'text/plain',
+      '.md': 'text/markdown',
+      '.pdf': 'application/pdf',
+    }[ext] || 'application/octet-stream'
+  )
+}
+
+// Upload local files to the project's durable store, returning their attachment
+// ids for a follow-up launch/send. Multipart, authenticated as the calling task
+// (or the UI, if those headers are absent). Dies on a missing file or a rejected
+// upload.
+async function uploadAttachments(project, paths) {
+  if (!API) die('not inside a lander task (LANDER_API unset)')
+  const fd = new FormData()
+  for (const p of paths) {
+    let bytes
+    try {
+      bytes = readFileSync(p)
+    } catch {
+      die(`cannot read file: ${p}`)
+    }
+    fd.append('file', new Blob([bytes], { type: guessMime(p) }), basename(p))
+  }
+  const auth = {}
+  if (TASK) auth['x-lander-task'] = TASK
+  if (PROJECT) auth['x-lander-project'] = PROJECT
+  if (TOKEN) auth['x-lander-token'] = TOKEN
+  const res = await fetch(`${API}/api/${project}/attachments`, {
+    method: 'POST',
+    headers: auth,
+    body: fd,
+  })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) die(body.error || `${res.status} ${res.statusText}`)
+  return (body.attachments ?? []).map((a) => a.id)
+}
+
+// `lander file cat <id>` — stream the materialized blob to stdout.
+// `lander file ls` — list this task's attachments (manifest.json) with sizes.
+async function fileCommand(args) {
+  const [sub, ...rest] = args
+  if (!FILES_DIR)
+    die('no attachments for this task (LANDER_FILES_DIR unset)')
+  if (sub === 'ls') {
+    let manifest
+    try {
+      manifest = JSON.parse(readFileSync(join(FILES_DIR, 'manifest.json'), 'utf8'))
+    } catch {
+      manifest = []
+    }
+    if (!Array.isArray(manifest) || !manifest.length)
+      return void console.log('(no attachments)')
+    for (const a of manifest)
+      console.log(`${a.id}  ${String(a.size).padStart(9)}  ${a.mime}  ${a.name}`)
+    return
+  }
+  if (sub === 'cat') {
+    const id = rest[0]
+    if (!id) die('usage: lander file cat <id>')
+    // Guard the id to a filename segment so `cat ../foo` can't escape the store.
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) die(`invalid attachment id: ${id}`)
+    await new Promise((resolve, reject) => {
+      const stream = createReadStream(join(FILES_DIR, id))
+      stream.on('error', () => reject(new Error(`no such attachment: ${id}`)))
+      stream.on('end', resolve)
+      stream.pipe(process.stdout, { end: false })
+    }).catch((e) => die(e.message))
+    return
+  }
+  die('usage: lander file (ls | cat <id>)')
+}
+
 // --date (a date/time the server parses) and --time (minutes from now) both set
 // a wakeup time; they're mutually exclusive, and --time must be a positive
 // number. Shared by `launch` (where a wakeup is optional), `rest`, and `send`.
@@ -92,7 +187,7 @@ async function resolveAwait(value, { self } = {}) {
 }
 
 async function launchTask(rest) {
-  const o = { project: PROJECT, allowEdits: false }
+  const o = { project: PROJECT, allowEdits: false, files: [] }
   const pos = []
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i]
@@ -103,6 +198,10 @@ async function launchTask(rest) {
     else if (a === '--time') o.time = Number(rest[++i])
     else if (a === '--await') o.await = rest[++i]
     else if (a === '--edits') o.allowEdits = true
+    // --files is variadic: consume following args up to the next --flag.
+    else if (a === '--files')
+      while (i + 1 < rest.length && !rest[i + 1].startsWith('--'))
+        o.files.push(rest[++i])
     else pos.push(a)
   }
   // The server caps the requested --edits to what this (spawning) task holds,
@@ -117,6 +216,8 @@ async function launchTask(rest) {
   // here); combinable with --date/--time, in which case launch fires on
   // whichever trigger comes first.
   o.await = await resolveAwait(o.await)
+  // Upload any --files first so the new task's opening message references them.
+  if (o.files.length) o.attachments = await uploadAttachments(o.project, o.files)
   // --title sets the name directly; without it the server asks haiku. --date or
   // --time defers the launch (a date/time the server parses, or N minutes from
   // now) and the server runs the task then.
@@ -377,13 +478,17 @@ async function viewTask(args) {
 // delivered now (queued behind any in-flight turn); --date/--time/--await defer
 // delivery until that trigger fires (whichever comes first when several are set).
 async function sendTask(args) {
-  const o = {}
+  const o = { files: [] }
   const pos = []
   for (let i = 0; i < args.length; i++) {
     const a = args[i]
     if (a === '--date') o.date = args[++i]
     else if (a === '--time') o.time = Number(args[++i])
     else if (a === '--await') o.await = args[++i]
+    // --files is variadic: consume following args up to the next --flag.
+    else if (a === '--files')
+      while (i + 1 < args.length && !args[i + 1].startsWith('--'))
+        o.files.push(args[++i])
     else pos.push(a)
   }
   const target = pos.shift()
@@ -394,9 +499,18 @@ async function sendTask(args) {
   validateSchedule(o)
   const awaitIds = await resolveAwait(o.await)
   const id = await resolveId(target)
+  const attachments = o.files.length
+    ? await uploadAttachments(PROJECT, o.files)
+    : undefined
   await call(PROJECT, `/tasks/${id}/messages`, {
     method: 'POST',
-    body: JSON.stringify({ message, date: o.date, time: o.time, await: awaitIds }),
+    body: JSON.stringify({
+      message,
+      date: o.date,
+      time: o.time,
+      await: awaitIds,
+      attachments,
+    }),
   })
   const verb =
     o.date != null || o.time != null || o.await != null ? 'scheduled' : 'sent'
@@ -520,6 +634,8 @@ function makeLander(inputs) {
       }
       validateSchedule(o)
       o.await = await resolveAwait(opts.await)
+      if (opts.files?.length)
+        o.attachments = await uploadAttachments(o.project, opts.files)
       const task = await call(o.project, '/tasks', {
         method: 'POST',
         body: JSON.stringify(o),
@@ -531,6 +647,9 @@ function makeLander(inputs) {
       validateSchedule(opts)
       const awaitIds = await resolveAwait(opts.await)
       const id = await resolveId(target)
+      const attachments = opts.files?.length
+        ? await uploadAttachments(PROJECT, opts.files)
+        : undefined
       await call(PROJECT, `/tasks/${id}/messages`, {
         method: 'POST',
         body: JSON.stringify({
@@ -538,6 +657,7 @@ function makeLander(inputs) {
           date: opts.date,
           time: opts.time,
           await: awaitIds,
+          attachments,
         }),
       })
       return id
@@ -772,6 +892,7 @@ const run = {
   send: () => sendTask(rest),
   archive: () => archiveTask(rest),
   assist: () => assist(rest),
+  file: () => fileCommand(rest),
   flow: () => runFlow(rest),
   'bash-guard': () => bashGuard(),
   'record-cwd': () => recordCwd(),
