@@ -40,6 +40,7 @@ import {
   latestUpdateAt,
   recordStatusTransition,
   pendingMessage,
+  recordArtifactOnMessage,
   lastTurnPrompts,
   turnAttachments,
   worktreeName,
@@ -55,11 +56,19 @@ import {
   saveAttachment,
   readAttachmentMeta,
   readAttachmentBytes,
+  deleteAttachment,
+  sanitizeName,
   isAttachmentId,
   AttachmentTooLargeError,
   MAX_ATTACHMENT_BYTES,
   type Attachment,
 } from './attachments'
+import {
+  isArtifactName,
+  upsertArtifact,
+  MAX_ARTIFACT_BYTES,
+  type Artifact,
+} from './artifacts'
 
 const execFileAsync = promisify(execFile)
 
@@ -152,6 +161,14 @@ type Task = {
   // tasks saved before this field existed — treat undefined as empty.
   allow?: string[]
   messages: Message[]
+  // Named output slots this task has published (`lander artifact put`), latest
+  // version only — the slot registry, upserted by name. Each points at its
+  // current blob in the project's attachmentsDir (shared with input attachments);
+  // republishing a name mints a fresh blob and supersedes the old. The generating
+  // assistant message also carries a point-in-time ref (Message.artifacts), but
+  // this is the source of truth for the current version, and downloads resolve
+  // against it by name. Absent on tasks that have published none.
+  artifacts?: Artifact[]
   // Lifecycle events (launch, rename, wedged/un-wedged, landed/un-landed),
   // interleaved with messages by timestamp in the UI. Absent on tasks saved
   // before this existed.
@@ -1036,6 +1053,127 @@ app.get('/api/:project/attachments/:id', async (c) => {
   return c.body(ab, 200, {
     'content-type': meta.mime,
     'content-length': String(meta.size),
+  })
+})
+
+// Publish an artifact — a named output file — of a task, latest version only.
+// Multipart: a `file` part plus an optional `name` text field (defaults to the
+// uploaded filename, sanitized then validated against the addressable-name
+// regex). Publishing to an existing name mints a fresh blob, repoints the slot,
+// and — only after the task JSON write commits — deletes the superseded blob (a
+// crash strands an orphan, never a dangling ref). Only the human (UI token) or
+// the task itself may publish; a task owns its own outputs. The buffered save
+// (whole blob in memory) is acceptable for v1's local single-user server.
+app.post('/api/:project/tasks/:id/artifacts', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  try {
+    const id = c.req.param('id')
+    if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    const file = path.join(project.dataDir, `${id}.json`)
+    if (!(await readTask(project.dataDir, id)))
+      return c.json({ error: 'task not found' }, 404)
+
+    const principal = await resolvePrincipal(c.req)
+    if (
+      principal.kind !== 'ui' &&
+      !(principal.kind === 'task' && principal.id === id)
+    )
+      return c.json(
+        { error: 'only the task itself may publish its artifacts' },
+        403,
+      )
+
+    const body = await c.req.parseBody()
+    const part = body['file']
+    if (!(part instanceof File)) return c.json({ error: 'no file in upload' }, 400)
+    // Name defaults to the uploaded filename; sanitize (strip dirs/control chars)
+    // then validate, so anything unsafe for a route segment / filename 400s here.
+    const rawName =
+      typeof body['name'] === 'string' && body['name'].trim()
+        ? body['name']
+        : part.name
+    const name = sanitizeName(rawName)
+    if (!isArtifactName(name))
+      return c.json({ error: `invalid artifact name: ${name}` }, 400)
+
+    const bytes = new Uint8Array(await part.arrayBuffer())
+    let blob: Attachment
+    try {
+      blob = await saveAttachment(
+        project.attachmentsDir,
+        { name, mime: part.type, bytes },
+        MAX_ARTIFACT_BYTES,
+      )
+    } catch (e) {
+      if (e instanceof AttachmentTooLargeError)
+        return c.json(
+          { error: `artifact too large (max ${MAX_ARTIFACT_BYTES} bytes)` },
+          413,
+        )
+      throw e
+    }
+
+    // Upsert the slot and record the message ref in one read-modify-write, then
+    // delete the superseded blob after the write has committed.
+    const now = new Date().toISOString()
+    let artifact: Artifact | undefined
+    let supersededId: string | null = null
+    await mutateTask(file, (t) => {
+      const res = upsertArtifact(t, { name, blob, at: now })
+      artifact = res.artifact
+      supersededId = res.supersededId
+      recordArtifactOnMessage(t, res.artifact)
+      t.updatedAt = now
+    })
+    if (supersededId) await deleteAttachment(project.attachmentsDir, supersededId)
+    return c.json({ artifact }, 201)
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
+  }
+})
+
+// List a task's artifact slots (latest version of each). Any identified caller
+// may read — the human or any task in the project — matching the attachment
+// download's posture; an anon request is refused.
+app.get('/api/:project/tasks/:id/artifacts', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  const id = c.req.param('id')
+  if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+  const principal = await resolvePrincipal(c.req)
+  if (principal.kind === 'anon') return c.json({ error: 'not authorized' }, 403)
+  const task = await readTask(project.dataDir, id)
+  if (!task) return c.json({ error: 'task not found' }, 404)
+  return c.json({ artifacts: task.artifacts ?? [] })
+})
+
+// Stream an artifact's current blob by slot name, with its stored Content-Type
+// and a filename download disposition (the name is regex-validated, so it's safe
+// unquoted). Same read auth as the list/attachment download. 404 on an unknown
+// task or name.
+app.get('/api/:project/tasks/:id/artifacts/:name', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  const id = c.req.param('id')
+  if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+  const principal = await resolvePrincipal(c.req)
+  if (principal.kind === 'anon') return c.json({ error: 'not authorized' }, 403)
+  const name = c.req.param('name')
+  const task = await readTask(project.dataDir, id)
+  if (!task) return c.json({ error: 'task not found' }, 404)
+  const artifact = task.artifacts?.find((a) => a.name === name)
+  if (!artifact) return c.json({ error: 'artifact not found' }, 404)
+  const bytes = await readAttachmentBytes(project.attachmentsDir, artifact.id)
+  if (!bytes) return c.json({ error: 'artifact not found' }, 404)
+  const ab = bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer
+  return c.body(ab, 200, {
+    'content-type': artifact.mime,
+    'content-length': String(artifact.size),
+    'content-disposition': `attachment; filename="${artifact.name}"`,
   })
 })
 

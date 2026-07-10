@@ -5,6 +5,7 @@ import {
   recordStatusTransition,
   pendingMessage,
   ensurePending,
+  recordArtifactOnMessage,
   lastTurnPrompts,
   turnAttachments,
   worktreeName,
@@ -222,6 +223,48 @@ describe('ensurePending', () => {
     expect(created).toMatchObject({ role: 'assistant', text: '', steps: [], pending: true })
     expect(task.messages).toHaveLength(2)
     expect(task.messages[1]).toBe(created)
+  })
+})
+
+describe('recordArtifactOnMessage', () => {
+  const artifact = (name: string) => ({
+    name,
+    id: `blob-${name}`,
+    mime: 'text/plain',
+    size: 3,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  })
+
+  it('attaches to the in-flight pending assistant message when mid-turn', () => {
+    const pending = msg({ text: 'live', pending: true })
+    const task = { messages: [msg({ role: 'user', text: 'q' }), pending] }
+    recordArtifactOnMessage(task, artifact('out.txt'))
+    expect(pending.artifacts).toEqual([artifact('out.txt')])
+  })
+
+  it('attaches to the last assistant message when none is pending', () => {
+    const last = msg({ text: 'done' })
+    const task = {
+      messages: [msg({ role: 'assistant', text: 'old' }), msg({ role: 'user', text: 'q' }), last],
+    }
+    recordArtifactOnMessage(task, artifact('a'))
+    expect(last.artifacts).toEqual([artifact('a')])
+    expect(task.messages[0].artifacts).toBeUndefined()
+  })
+
+  it('appends multiple refs to the same generating message', () => {
+    const pending = msg({ text: 'live', pending: true })
+    const task = { messages: [pending] }
+    recordArtifactOnMessage(task, artifact('a'))
+    recordArtifactOnMessage(task, artifact('b'))
+    expect(pending.artifacts?.map((r) => r.name)).toEqual(['a', 'b'])
+  })
+
+  it('is a no-op (slot-only) when the task has no assistant message yet', () => {
+    const task = { messages: [msg({ role: 'user', text: 'q' })] }
+    recordArtifactOnMessage(task, artifact('a'))
+    expect(task.messages[0].artifacts).toBeUndefined()
   })
 })
 

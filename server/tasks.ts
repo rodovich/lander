@@ -7,6 +7,7 @@
 import path from 'node:path'
 import type { Step, Usage } from './stream'
 import type { Attachment } from './attachments'
+import type { Artifact } from './artifacts'
 
 export type Message = {
   role: 'user' | 'assistant'
@@ -18,6 +19,14 @@ export type Message = {
   // chips/thumbnails, and driveTask pulls the turn's refs onto the outgoing run so
   // the daemon can materialize them for the agent. Absent on messages with none.
   attachments?: Attachment[]
+  // Artifacts (named output files) an assistant turn published while it ran (refs
+  // only — the durable blobs live in the project's attachmentsDir, shared with
+  // input attachments). Recorded at publish time by recordArtifactOnMessage so the
+  // UI can render them under the message that generated them. The task's own
+  // `artifacts` slot registry is the source of truth for the latest version;
+  // these are the point-in-time refs, and an older one may point at a blob a later
+  // republish superseded. Absent on messages that published none.
+  artifacts?: Artifact[]
   // Present on assistant turns that were streamed: the live activity trace.
   steps?: Step[]
   // Present on assistant turns once the run's terminal result event lands: the
@@ -427,6 +436,29 @@ export function ensurePending(task: { messages: Message[] }): Message {
     task.messages.push(msg)
   }
   return msg
+}
+
+// Record an artifact ref on the assistant message that generated it, so the UI
+// renders the output row under that message. Prefers the in-flight (pending)
+// assistant message when the task is mid-turn (the common publish-during-a-run
+// case), else the last assistant message; if the task has no assistant message
+// yet, this is a no-op and the task's slot registry alone holds the artifact. On
+// republish it appends a fresh ref to the current generating message — an earlier
+// message's ref may then point at a superseded blob, which is fine: downloads
+// resolve by slot name and always serve the latest.
+export function recordArtifactOnMessage(
+  task: { messages: Message[] },
+  artifact: Artifact,
+): void {
+  let msg = pendingMessage(task)
+  if (!msg)
+    for (let i = task.messages.length - 1; i >= 0; i--)
+      if (task.messages[i].role === 'assistant') {
+        msg = task.messages[i]
+        break
+      }
+  if (!msg) return
+  ;(msg.artifacts ??= []).push(artifact)
 }
 
 // Derive the name to pass to `claude --worktree` from the absolute worktree root

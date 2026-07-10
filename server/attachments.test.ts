@@ -6,6 +6,7 @@ import {
   saveAttachment,
   readAttachmentMeta,
   readAttachmentBytes,
+  deleteAttachment,
   sanitizeName,
   isAttachmentId,
   AttachmentTooLargeError,
@@ -79,6 +80,39 @@ describe('readAttachmentMeta / readAttachmentBytes', () => {
     expect(isAttachmentId('../secret')).toBe(false)
     expect(await readAttachmentMeta(dir, '../secret')).toBeNull()
     expect(await readAttachmentBytes(dir, '../secret')).toBeNull()
+  })
+})
+
+describe('saveAttachment maxBytes override', () => {
+  it('honors a caller-supplied larger cap (the artifact path)', async () => {
+    const bytes = new Uint8Array(MAX_ATTACHMENT_BYTES + 1)
+    // Rejected at the default attachment cap...
+    await expect(
+      saveAttachment(dir, { name: 'big.bin', mime: '', bytes }),
+    ).rejects.toBeInstanceOf(AttachmentTooLargeError)
+    // ...but accepted when a larger cap is passed.
+    const meta = await saveAttachment(
+      dir,
+      { name: 'big.bin', mime: '', bytes },
+      MAX_ATTACHMENT_BYTES + 10,
+    )
+    expect(meta.size).toBe(bytes.byteLength)
+  })
+})
+
+describe('deleteAttachment', () => {
+  it('removes the blob and its sidecar, and is a no-op on a missing id', async () => {
+    const meta = await saveAttachment(dir, {
+      name: 'x.bin',
+      mime: 'application/octet-stream',
+      bytes: new Uint8Array([1, 2, 3]),
+    })
+    await deleteAttachment(dir, meta.id)
+    expect(await readAttachmentMeta(dir, meta.id)).toBeNull()
+    expect(await readAttachmentBytes(dir, meta.id)).toBeNull()
+    // Deleting again (or an unknown/path-unsafe id) doesn't throw.
+    await expect(deleteAttachment(dir, meta.id)).resolves.toBeUndefined()
+    await expect(deleteAttachment(dir, '../secret')).resolves.toBeUndefined()
   })
 })
 

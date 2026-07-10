@@ -3,7 +3,7 @@
 // attachmentsDir. Kept free of the server's HTTP wiring so it can be unit-tested
 // against a temp dir; index.ts binds these to the endpoints.
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 
@@ -48,23 +48,27 @@ function blobFile(dir: string, id: string): string {
 }
 
 export class AttachmentTooLargeError extends Error {
-  constructor(public readonly size: number) {
-    super(
-      `attachment exceeds the ${MAX_ATTACHMENT_BYTES}-byte limit (${size} bytes)`,
-    )
+  constructor(
+    public readonly size: number,
+    public readonly limit: number = MAX_ATTACHMENT_BYTES,
+  ) {
+    super(`upload exceeds the ${limit}-byte limit (${size} bytes)`)
     this.name = 'AttachmentTooLargeError'
   }
 }
 
 // Persist an uploaded blob: mint an id, write the bytes and a metadata sidecar,
 // return the ref. Throws AttachmentTooLargeError on an over-size upload (the
-// caller maps it to a 413).
+// caller maps it to a 413). `maxBytes` defaults to the attachment cap; the
+// artifact endpoints pass their own larger MAX_ARTIFACT_BYTES, since both kinds
+// of output share this one blob store.
 export async function saveAttachment(
   attachmentsDir: string,
   input: { name: unknown; mime: unknown; bytes: Uint8Array },
+  maxBytes: number = MAX_ATTACHMENT_BYTES,
 ): Promise<Attachment> {
-  if (input.bytes.byteLength > MAX_ATTACHMENT_BYTES)
-    throw new AttachmentTooLargeError(input.bytes.byteLength)
+  if (input.bytes.byteLength > maxBytes)
+    throw new AttachmentTooLargeError(input.bytes.byteLength, maxBytes)
   const id = randomUUID()
   const meta: Attachment = {
     id,
@@ -109,4 +113,18 @@ export async function readAttachmentBytes(
   } catch {
     return null
   }
+}
+
+// Delete a blob and its metadata sidecar, best-effort — a missing file is not an
+// error. Used by the artifact slot store when a republish supersedes a blob: the
+// caller deletes the old one only after the task JSON write commits, so a crash
+// strands an orphan blob rather than a dangling ref. Guards the id to a filename
+// segment so a bad id can't reach outside the store.
+export async function deleteAttachment(
+  attachmentsDir: string,
+  id: string,
+): Promise<void> {
+  if (!isAttachmentId(id)) return
+  await rm(blobFile(attachmentsDir, id), { force: true })
+  await rm(metaFile(attachmentsDir, id), { force: true })
 }

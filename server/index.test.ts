@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -264,5 +264,184 @@ describe('attachments', () => {
       attachments: ['no-such-id'],
     })
     expect(res.status).toBe(400)
+  })
+})
+
+describe('artifacts', () => {
+  const attachmentsDir = () => path.join(dataRoot, 'attachments')
+
+  // Seed a task on disk with a token and a pending assistant message, so a
+  // publish has a slot owner and a generating message to attach the ref to.
+  async function seedTask(
+    id: string,
+    over: Record<string, unknown> = {},
+  ): Promise<void> {
+    await writeFile(
+      path.join(tasksDir, `${id}.json`),
+      JSON.stringify(
+        {
+          id,
+          title: 'Artifact task',
+          status: 'riding',
+          createdAt: AT,
+          updatedAt: AT,
+          allowEdits: false,
+          token: `token-${id}`,
+          messages: [
+            { role: 'user', text: 'make a file', createdAt: AT },
+            { role: 'assistant', text: '', createdAt: AT, pending: true },
+          ],
+          ...over,
+        },
+        null,
+        2,
+      ),
+    )
+  }
+
+  async function publish(
+    id: string,
+    file: { name: string; type: string; bytes: Uint8Array },
+    opts: { name?: string; headers?: Record<string, string> } = {},
+  ): Promise<Response> {
+    const fd = new FormData()
+    fd.append('file', new File([file.bytes as BlobPart], file.name, { type: file.type }))
+    if (opts.name) fd.append('name', opts.name)
+    return app.request(`/api/${slug}/tasks/${id}/artifacts`, {
+      method: 'POST',
+      headers: opts.headers ?? { 'x-lander-ui-token': UI_TOKEN },
+      body: fd,
+    })
+  }
+
+  it('publishes a slot, records the message ref, and streams it back by name', async () => {
+    const id = 'artifact-basic'
+    await seedTask(id)
+    const bytes = new TextEncoder().encode('hello output')
+    const res = await publish(id, { name: 'out.txt', type: 'text/plain', bytes })
+    expect(res.status).toBe(201)
+    const { artifact } = (await res.json()) as {
+      artifact: { name: string; id: string; size: number }
+    }
+    expect(artifact).toMatchObject({ name: 'out.txt', size: bytes.byteLength })
+
+    const raw = JSON.parse(
+      await readFile(path.join(tasksDir, `${id}.json`), 'utf8'),
+    )
+    expect(raw.artifacts).toHaveLength(1)
+    expect(raw.artifacts[0].name).toBe('out.txt')
+    // The ref lands on the pending assistant message.
+    expect(raw.messages[1].artifacts).toHaveLength(1)
+    expect(raw.messages[1].artifacts[0].name).toBe('out.txt')
+
+    const dl = await app.request(`/api/${slug}/tasks/${id}/artifacts/out.txt`, {
+      headers: { 'x-lander-ui-token': UI_TOKEN },
+    })
+    expect(dl.status).toBe(200)
+    expect(dl.headers.get('content-type')).toBe('text/plain')
+    expect(dl.headers.get('content-disposition')).toBe(
+      'attachment; filename="out.txt"',
+    )
+    expect(new Uint8Array(await dl.arrayBuffer())).toEqual(bytes)
+  })
+
+  it('republishing a name replaces the blob, leaving exactly one blob for the slot', async () => {
+    const id = 'artifact-replace'
+    await seedTask(id)
+    await publish(id, { name: 'r.txt', type: 'text/plain', bytes: new Uint8Array([1]) })
+    const first = JSON.parse(
+      await readFile(path.join(tasksDir, `${id}.json`), 'utf8'),
+    )
+    const firstBlob = first.artifacts[0].id
+
+    const res = await publish(id, {
+      name: 'r.txt',
+      type: 'text/plain',
+      bytes: new Uint8Array([2, 2, 2]),
+    })
+    expect(res.status).toBe(201)
+    const raw = JSON.parse(
+      await readFile(path.join(tasksDir, `${id}.json`), 'utf8'),
+    )
+    // Still one slot, pointing at a fresh blob, createdAt preserved.
+    expect(raw.artifacts).toHaveLength(1)
+    expect(raw.artifacts[0].id).not.toBe(firstBlob)
+    expect(raw.artifacts[0].createdAt).toBe(first.artifacts[0].createdAt)
+    expect(raw.artifacts[0].size).toBe(3)
+
+    // The superseded blob (+ sidecar) is gone: only the current one remains.
+    const entries = await readdir(attachmentsDir())
+    expect(entries).not.toContain(firstBlob)
+    expect(entries).toContain(raw.artifacts[0].id)
+    // Download serves the latest bytes.
+    const dl = await app.request(`/api/${slug}/tasks/${id}/artifacts/r.txt`, {
+      headers: { 'x-lander-ui-token': UI_TOKEN },
+    })
+    expect(new Uint8Array(await dl.arrayBuffer())).toEqual(new Uint8Array([2, 2, 2]))
+  })
+
+  it('lets the task itself publish with its token but rejects another task and anon', async () => {
+    const id = 'artifact-auth'
+    await seedTask(id)
+    const own = { 'x-lander-task': id, 'x-lander-project': slug, 'x-lander-token': `token-${id}` }
+    const mine = await publish(
+      id,
+      { name: 'o.txt', type: 'text/plain', bytes: new Uint8Array([1]) },
+      { headers: own },
+    )
+    expect(mine.status).toBe(201)
+
+    // A different task's (valid) credentials can't publish here.
+    await seedTask('artifact-other')
+    const other = {
+      'x-lander-task': 'artifact-other',
+      'x-lander-project': slug,
+      'x-lander-token': 'token-artifact-other',
+    }
+    const foreign = await publish(
+      id,
+      { name: 'x.txt', type: 'text/plain', bytes: new Uint8Array([1]) },
+      { headers: other },
+    )
+    expect(foreign.status).toBe(403)
+
+    const anon = await publish(
+      id,
+      { name: 'x.txt', type: 'text/plain', bytes: new Uint8Array([1]) },
+      { headers: {} },
+    )
+    expect(anon.status).toBe(403)
+  })
+
+  it('rejects an unsafe artifact name that survives sanitization', async () => {
+    const id = 'artifact-badname'
+    await seedTask(id)
+    // A leading dot and an embedded space both clear sanitizeName (which only
+    // strips directory components + control chars) but fail the strict name regex.
+    for (const name of ['.hidden', 'bad name']) {
+      const res = await publish(
+        id,
+        { name: 'out.txt', type: 'text/plain', bytes: new Uint8Array([1]) },
+        { name },
+      )
+      expect(res.status).toBe(400)
+    }
+  })
+
+  it('lists slots and 404s an unknown name', async () => {
+    const id = 'artifact-list'
+    await seedTask(id)
+    await publish(id, { name: 'a.txt', type: 'text/plain', bytes: new Uint8Array([1]) })
+    const list = await app.request(`/api/${slug}/tasks/${id}/artifacts`, {
+      headers: { 'x-lander-ui-token': UI_TOKEN },
+    })
+    expect(list.status).toBe(200)
+    const { artifacts } = (await list.json()) as { artifacts: { name: string }[] }
+    expect(artifacts.map((a) => a.name)).toEqual(['a.txt'])
+
+    const missing = await app.request(`/api/${slug}/tasks/${id}/artifacts/nope`, {
+      headers: { 'x-lander-ui-token': UI_TOKEN },
+    })
+    expect(missing.status).toBe(404)
   })
 })
