@@ -22,24 +22,6 @@ export function askOptionLabel(opt: AskOption): string {
   return clock ? `${opt.label} (${clock})` : opt.label
 }
 
-// What an answered ask conveys, in prose: the edited value of an editable option,
-// else the chosen option's label, else the confirm/text answer. Mirrors the
-// server's answerValue.
-export function answeredValue(ask: Ask): string {
-  const a = ask.answer
-  if (!a) return ''
-  if (ask.form.type === 'choice') {
-    const opt = ask.form.options.find((o) => o.id === a.optionId)
-    if (opt?.editable) return (a.text ?? opt.value ?? opt.label).trim()
-    return opt?.label ?? a.optionId ?? ''
-  }
-  if (ask.form.type === 'confirm')
-    return a.optionId === CONFIRM_YES
-      ? (ask.form.confirmLabel ?? 'Yes')
-      : (ask.form.denyLabel ?? 'No')
-  return (a.text ?? '').trim()
-}
-
 export function AskForm({
   ask,
   linkTask,

@@ -2079,15 +2079,6 @@ body {
   cursor: default;
 }
 
-/* The quiet marker left when a question is withdrawn (superseded by a new
-   message). Recedes — it's history, not a prompt. */
-.ask-withdrawn {
-  padding: 4px 28px;
-  font-size: 13px;
-  color: var(--muted);
-  opacity: 0.7;
-}
-
 /* The drag handle straddling the boundary above a resizable panel. Negative
    margins let it overlay the 1px divider and a few pixels either side as a grab
    target without adding any net height to the flex column. A purple bar lights

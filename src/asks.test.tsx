@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { AskForm, askOptionLabel, answeredValue } from './asks'
+import { AskForm, askOptionLabel } from './asks'
 import type { Ask } from './types'
 
 const noLink = () => undefined
@@ -28,50 +28,6 @@ describe('askOptionLabel', () => {
     )
     expect(askOptionLabel({ id: 'x', label: 'Retry now', at: AT })).toBe('Retry now')
     expect(askOptionLabel({ id: 'x', label: 'Plain' })).toBe('Plain')
-  })
-})
-
-describe('answeredValue', () => {
-  it('reads a chosen option label', () => {
-    const a = ask({
-      state: 'answered',
-      form: { type: 'choice', options: [{ id: 'a', label: 'Alpha' }] },
-      answer: { optionId: 'a', at: AT },
-    })
-    expect(answeredValue(a)).toBe('Alpha')
-  })
-
-  it('reads the edited value of an editable option (round-trip)', () => {
-    const a = ask({
-      state: 'answered',
-      form: {
-        type: 'choice',
-        options: [{ id: 'r', label: 'Grant', value: 'git log', editable: true }],
-      },
-      answer: { optionId: 'r', text: 'git:*', at: AT },
-    })
-    expect(answeredValue(a)).toBe('git:*')
-  })
-
-  it('reads confirm and text answers', () => {
-    expect(
-      answeredValue(
-        ask({
-          state: 'answered',
-          form: { type: 'confirm', confirmLabel: 'Ship it' },
-          answer: { optionId: 'confirm', at: AT },
-        }),
-      ),
-    ).toBe('Ship it')
-    expect(
-      answeredValue(
-        ask({
-          state: 'answered',
-          form: { type: 'text' },
-          answer: { text: 'a name', at: AT },
-        }),
-      ),
-    ).toBe('a name')
   })
 })
 

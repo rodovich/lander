@@ -40,7 +40,6 @@ import type { TimelineItem } from './timeline'
 import { Collapsible, StepView } from './toolStep'
 import { planTurnCollapse } from './turnCollapse'
 import type {
-  Ask,
   DateCategory,
   Message,
   Project,
@@ -502,7 +501,7 @@ export function App() {
         `${current.messages.length} msgs`,
       )
     : {
-        items: [] as TimelineItem<Message, TaskEvent, Ask>[],
+        items: [] as TimelineItem<Message, TaskEvent>[],
         queuedIndices: new Set<number>(),
       }
 
@@ -1851,19 +1850,6 @@ export function App() {
                       slug={current.projectSlug}
                       linkTask={resolveTaskLink}
                     />
-                  )
-                }
-                if (item.kind === 'ask') {
-                  // An open ask's form renders under the assistant message it
-                  // belongs to (see the message footer below), and an answered
-                  // ask's outcome is carried by the delivered user message — so
-                  // the only ask that surfaces standalone here is a withdrawn
-                  // one, as a quiet marker that a question was dropped.
-                  if (item.ask.state !== 'withdrawn') return null
-                  return (
-                    <div className="ask-withdrawn" key={`ask-${item.ask.id}`}>
-                      Question withdrawn
-                    </div>
                   )
                 }
                 const m = item.message

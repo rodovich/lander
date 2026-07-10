@@ -14,12 +14,10 @@
 
 type Msg = { role: 'user' | 'assistant'; createdAt: string; queued?: boolean }
 type Evt = { createdAt: string }
-type Ask = { createdAt: string }
 
-export type TimelineItem<M, E, A = Ask> =
+export type TimelineItem<M, E> =
   | { kind: 'message'; at: string; message: M; index: number }
   | { kind: 'event'; at: string; event: E }
-  | { kind: 'ask'; at: string; ask: A }
 
 // Which messages are still queued (the agent hasn't read them yet). The server
 // flags them on the message (publicTask, projected from its work queue); we just
@@ -32,12 +30,12 @@ function queuedMessageIndices(task: { messages: Msg[] }): Set<number> {
   return indices
 }
 
-export function buildTimeline<M extends Msg, E extends Evt, A extends Ask = Ask>(
-  task: { messages: M[]; events?: E[]; asks?: A[] },
+export function buildTimeline<M extends Msg, E extends Evt>(
+  task: { messages: M[]; events?: E[] },
   now: string,
-): { items: TimelineItem<M, E, A>[]; queuedIndices: Set<number> } {
+): { items: TimelineItem<M, E>[]; queuedIndices: Set<number> } {
   const queuedIndices = queuedMessageIndices(task)
-  const items: TimelineItem<M, E, A>[] = []
+  const items: TimelineItem<M, E>[] = []
 
   // Messages are rendered in array order — the server only ever appends (every
   // write is a tail push stamped with the current clock), so array position is
@@ -61,53 +59,41 @@ export function buildTimeline<M extends Msg, E extends Evt, A extends Ask = Ask>
       break
     }
   }
-  const ordered: { item: TimelineItem<M, E, A>; spliceAt: string }[] = []
-  const queued: TimelineItem<M, E, A>[] = []
+  const ordered: { item: TimelineItem<M, E>; spliceAt: string }[] = []
+  const queued: TimelineItem<M, E>[] = []
   task.messages.forEach((message, i) => {
     const inFlight = i > lastAsst
     const spliceAt = inFlight ? now : message.createdAt
-    const item: TimelineItem<M, E, A> = {
-      kind: 'message',
-      at: spliceAt,
-      message,
-      index: i,
-    }
+    const item: TimelineItem<M, E> = { kind: 'message', at: spliceAt, message, index: i }
     if (queuedIndices.has(i)) queued.push(item)
     else ordered.push({ item, spliceAt })
   })
 
-  // Splice interleaved items (lifecycle events + asks) into the stream by
-  // timestamp: each surfaces just before the first message whose `spliceAt` it
-  // predates. Both are sparse and stamped with the clock at the moment they
-  // land, so a single createdAt-sorted stream orders them correctly against each
-  // other and the messages. The running `floor` keeps the comparison thresholds
-  // non-decreasing: a prompt that was queued during an earlier turn has a
-  // createdAt predating that turn's reply, so without the floor the greedy walk
-  // could pull an interleaved item ahead of a message it should follow.
-  const interleaved: TimelineItem<M, E, A>[] = [
-    ...(task.events ?? []).map(
-      (event): TimelineItem<M, E, A> => ({
-        kind: 'event',
-        at: event.createdAt,
-        event,
-      }),
-    ),
-    ...(task.asks ?? []).map(
-      (ask): TimelineItem<M, E, A> => ({ kind: 'ask', at: ask.createdAt, ask }),
-    ),
-  ].sort((a, b) => a.at.localeCompare(b.at))
+  // Splice lifecycle events into the stream by timestamp: each event surfaces
+  // just before the first item whose `spliceAt` it predates. Events are sparse
+  // and mark deliberate status crossings (wedged/landed and their inverses). The
+  // running `floor` keeps the comparison thresholds non-decreasing: a prompt
+  // that was queued during an earlier turn has a createdAt predating that turn's
+  // reply, so without the floor the greedy walk could pull an event ahead of a
+  // message it should follow. (Asks don't interleave here — an open ask renders
+  // as its assistant message's footer, and a resolved one as the delivered
+  // message, so none needs a slot in this stream.)
+  const events = [...(task.events ?? [])].sort((a, b) =>
+    a.createdAt.localeCompare(b.createdAt),
+  )
   let e = 0
   let floor = ''
   for (const { item, spliceAt } of ordered) {
     if (spliceAt > floor) floor = spliceAt
-    while (e < interleaved.length && interleaved[e].at <= floor)
-      items.push(interleaved[e++])
+    while (e < events.length && events[e].createdAt <= floor)
+      items.push({ kind: 'event', at: events[e].createdAt, event: events[e++] })
     items.push(item)
   }
-  // Trailing interleaved items — including any that arrived while a follow-up sat
-  // queued — surface before the queued prompts: a queued message's place in the
+  // Trailing events — including any that arrived while a follow-up sat queued —
+  // surface before the queued prompts: a queued message's place in the
   // conversation is fixed by when the agent actually reads it, not when it was sent.
-  while (e < interleaved.length) items.push(interleaved[e++])
+  while (e < events.length)
+    items.push({ kind: 'event', at: events[e].createdAt, event: events[e++] })
   for (const item of queued) items.push(item)
 
   return { items, queuedIndices }
