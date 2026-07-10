@@ -679,6 +679,51 @@ async function landTask(args) {
   }
 }
 
+// Parse `--reason <text>` and repeatable `--option <id:label>` (split on the
+// first colon) off a wedge invocation. Returns { reason, options }, dying on a
+// malformed option or `--option` without `--reason`. Shared by the CLI and the
+// flow API's wedge routing. Kept pure (no network) so it's unit-testable.
+function parseWedgeArgs(args) {
+  let reason
+  const options = []
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]
+    if (a === '--reason') reason = args[++i]
+    else if (a === '--option') {
+      const spec = args[++i] ?? ''
+      const colon = spec.indexOf(':')
+      if (colon <= 0 || colon === spec.length - 1)
+        die('lander wedge: --option must be <id:label>')
+      options.push({ id: spec.slice(0, colon), label: spec.slice(colon + 1) })
+    }
+  }
+  if (options.length && reason == null)
+    die('lander wedge: --option requires --reason')
+  return { reason, options }
+}
+
+// Raise a task-blocking ask that wedges the task (server-side, no separate
+// PATCH): a choice form when options are given, else a free-text form (the
+// "blocking question" case). The chosen/typed answer arrives as the next user
+// message. Shared body of the CLI wedge --reason path and the flow API.
+async function wedgeWithAsk(reason, options) {
+  if (!TASK) die('no current task (LANDER_TASK unset)')
+  const form = options.length ? { type: 'choice', options } : { type: 'text' }
+  await call(PROJECT, `/tasks/${TASK}/asks`, {
+    method: 'POST',
+    body: JSON.stringify({ prompt: reason, form, blocking: 'task' }),
+  })
+  console.log('status → wedged')
+}
+
+// `lander wedge` — bare, it just sets status (today's behavior). With `--reason`
+// it wedges by raising an ask, optionally with `--option id:label` buttons.
+async function wedgeTask(args) {
+  const { reason, options } = parseWedgeArgs(args)
+  if (reason == null) return setStatus('wedged')
+  return wedgeWithAsk(reason, options)
+}
+
 // --- assist ----------------------------------------------------------------
 // Run a provider-backed one-shot session and return its reply. The prompt comes
 // first; any further args are appended on their own line as the material to act
@@ -790,7 +835,16 @@ function makeLander(inputs) {
       return opts.status ? tasks.filter((t) => t.status === opts.status) : tasks
     },
     land: () => setStatus('landed', { quiet: true }),
-    wedge: () => setStatus('wedged'),
+    // Bare wedge sets status; { reason, options: [{id,label}] } wedges by raising
+    // a task-blocking ask (a choice form with options, else a free-text form).
+    wedge: (opts = {}) => {
+      if (opts.reason == null) {
+        if (opts.options?.length)
+          die('lander.wedge: options require a reason')
+        return setStatus('wedged')
+      }
+      return wedgeWithAsk(opts.reason, opts.options ?? [])
+    },
     async rest(opts = {}) {
       // { clear: true } drops a pending wakeup instead of arming one; returns
       // whether any trigger was actually disarmed.
@@ -1010,7 +1064,7 @@ async function clearWorktree() {
 const [cmd, ...rest] = process.argv.slice(2)
 const run = {
   land: () => landTask(rest),
-  wedge: () => setStatus('wedged'),
+  wedge: () => wedgeTask(rest),
   rest: () => restTask(rest),
   relaunch: () => relaunchTask(rest),
   launch: () => launchTask(rest),
@@ -1030,7 +1084,8 @@ const run = {
 if (!run)
   die(
     `unknown command: ${cmd ?? '(none)'} — try ` +
-      'land [id...] | wedge | rest (--date|--time|--await|--clear) | ' +
+      'land [id...] | wedge [--reason <text> [--option id:label]...] | ' +
+      'rest (--date|--time|--await|--clear) | ' +
       'relaunch <message> ' +
       '[--date|--time|--await|--interval|--repeat-count|--repeat-until|--clear] | ' +
       'launch <message> | list | view <id> [--tools] | send <id> <message> | ' +
