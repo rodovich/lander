@@ -1,3 +1,4 @@
+import { formatTokens } from './format'
 import type { TelemetryItem } from './types'
 
 // One meter: value/max as a clamped percentage, an optional accent band, and an
@@ -33,13 +34,40 @@ function MeterItem({
   )
 }
 
-function TelemetryItemView({ item }: { item: TelemetryItem }) {
+// A labeled number, shown abbreviated ("in 35k"). The label sits inline before the
+// value, both in the muted body color the surface sets.
+function CountItem({
+  item,
+}: {
+  item: Extract<TelemetryItem, { type: 'count' }>
+}) {
+  return (
+    <span className="telemetry-count">
+      {item.label} {formatTokens(item.value)}
+      {item.unit ? ` ${item.unit}` : ''}
+    </span>
+  )
+}
+
+// A bare string value (model name, cost). Text values are self-describing in a
+// compact readout, so the label isn't shown — unlike a count, where "35k" alone
+// is ambiguous. The label stays in the data to identify the item.
+function TextItem({
+  item,
+}: {
+  item: Extract<TelemetryItem, { type: 'text' }>
+}) {
+  return <span className="telemetry-text">{item.value}</span>
+}
+
+export function TelemetryItemView({ item }: { item: TelemetryItem }) {
   switch (item.type) {
     case 'meter':
       return <MeterItem item={item} />
-    // 'text' and 'count' primitives arrive with the composer footer (Phase B).
-    default:
-      return null
+    case 'count':
+      return <CountItem item={item} />
+    case 'text':
+      return <TextItem item={item} />
   }
 }
 

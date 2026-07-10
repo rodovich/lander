@@ -2156,14 +2156,16 @@ body.resizing-row {
   opacity: 0.6;
 }
 
-/* Holds the per-turn token-usage readout below the reply composer; the usage
+/* Holds the per-turn telemetry readout below the reply composer; the readout
    pushes itself to the right with margin-left:auto. */
 .allow-row {
   display: flex;
   gap: 20px;
 }
 
-.token-usage {
+/* The inline telemetry readout: a muted, right-aligned row holding the static
+   model label and, beside it, the turn/total toggle. */
+.telemetry-inline {
   margin-left: auto;
   align-self: center;
   display: flex;
@@ -2174,7 +2176,8 @@ body.resizing-row {
   white-space: nowrap;
 }
 
-.token-stats {
+/* The scope + counts + cost, which the button flips between turn and total. */
+.telemetry-toggle {
   display: flex;
   align-items: baseline;
   gap: 10px;
@@ -2186,15 +2189,11 @@ body.resizing-row {
   cursor: pointer;
 }
 
-.token-stats:hover {
+.telemetry-toggle:hover {
   color: var(--fg);
 }
 
-.token-model {
-  font-size: 0.9em;
-}
-
-.token-scope {
+.telemetry-scope {
   text-transform: uppercase;
   font-size: 0.8em;
   letter-spacing: 0.04em;

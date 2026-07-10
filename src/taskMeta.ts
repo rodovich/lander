@@ -1,5 +1,6 @@
 import { agentDisplayName, formatAgentModelName } from './agentDisplay'
-import type { Task, TokenUsage } from './types'
+import { formatCost } from './format'
+import type { Task, TelemetryItem, TokenUsage } from './types'
 
 // The timestamp of a task's most recent *completed* update: the newest of its
 // finished messages and its lifecycle events. The in-flight assistant message
@@ -64,4 +65,37 @@ export function totalUsage(task: Task): TokenUsage | undefined {
   }
   if (!any) return undefined
   return { ...total, model: latestUsage(task)?.model, costUsd: cost }
+}
+
+// The composer footer's token readout as generic telemetry items: the driving
+// model, the turn's uncached input / cache read / output counts, and its cost.
+// Client-derived (this surface stays simple — the daemon doesn't publish it), fed
+// to the same generic item renderer the flow-status panel uses.
+export function taskUsageTelemetry(
+  u: TokenUsage,
+  agent: Task['agent'],
+): TelemetryItem[] {
+  // Uncached = fresh input processed this turn (regular input + the part written
+  // to cache); cache read is the discounted re-read, reported separately.
+  const uncached = u.input + u.cacheCreation
+  // Claude cost arrives with the turn's result event; Codex reports tokens without
+  // account cost, and a still-streaming turn hasn't landed one yet.
+  const cost =
+    u.costUsd !== undefined
+      ? formatCost(u.costUsd)
+      : agent === 'codex'
+        ? 'n/a'
+        : '$…'
+  return [
+    {
+      id: 'model',
+      label: 'model',
+      type: 'text',
+      value: taskAgentModelName(agent, u.model),
+    },
+    { id: 'in', label: 'in', type: 'count', value: uncached },
+    { id: 'cache', label: 'cache', type: 'count', value: u.cacheRead },
+    { id: 'out', label: 'out', type: 'count', value: u.output },
+    { id: 'cost', label: 'cost', type: 'text', value: cost },
+  ]
 }

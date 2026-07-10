@@ -11,10 +11,8 @@ import { dataTransferHasFiles } from './fileDrop'
 import {
   DATE_CATEGORY_LABELS,
   dateCategory,
-  formatCost,
   formatTaskTime,
   formatTimestamp,
-  formatTokens,
   lastPathComponent,
   taskIdFromPath,
   worktreeName,
@@ -38,13 +36,14 @@ import {
   latestUpdateAt,
   latestUsage,
   taskAgentModelName,
+  taskUsageTelemetry,
   totalUsage,
 } from './taskMeta'
 import { buildTimeline } from './timeline'
 import type { TimelineItem } from './timeline'
 import { Collapsible, StepView } from './toolStep'
 import { planTurnCollapse } from './turnCollapse'
-import { TelemetryPanel } from './telemetry'
+import { TelemetryItemView, TelemetryPanel } from './telemetry'
 import type {
   DateCategory,
   Message,
@@ -2242,10 +2241,6 @@ export function App() {
                     ? totalUsage(current)
                     : latestUsage(current)
                   if (!u) return null
-                  // Uncached = fresh input processed this turn (regular input +
-                  // the part written to cache); cache read is the discounted
-                  // re-read of cached context — reported separately.
-                  const uncached = u.input + u.cacheCreation
                   const scope = usageTotal ? 'total' : 'turn'
                   const costText =
                     u.costUsd !== undefined
@@ -2253,20 +2248,17 @@ export function App() {
                       : current.agent === 'codex'
                         ? 'unavailable for Codex'
                         : '… (available when the turn lands)'
-                  const costBadge =
-                    u.costUsd !== undefined
-                      ? formatCost(u.costUsd)
-                      : current.agent === 'codex'
-                        ? 'n/a'
-                        : '$…'
+                  const items = taskUsageTelemetry(u, current.agent)
+                  // The model names the whole task, not a scope, so it sits outside
+                  // the turn/total toggle; the counts + cost are what the toggle flips.
+                  const model = items.find((i) => i.id === 'model')
+                  const stats = items.filter((i) => i.id !== 'model')
                   return (
-                    <div className="token-usage">
-                      <span className="token-model">
-                        {taskAgentModelName(current.agent, u.model)}
-                      </span>
+                    <div className="telemetry-inline">
+                      {model && <TelemetryItemView item={model} />}
                       <button
                         type="button"
-                        className="token-stats"
+                        className="telemetry-toggle"
                         onClick={() => setUsageTotal((v) => !v)}
                         title={
                           `${scope} — click to show ` +
@@ -2274,8 +2266,8 @@ export function App() {
                           `uncached input ${u.input.toLocaleString()} ` +
                           `(+ ${u.cacheCreation.toLocaleString()} written to cache)\n` +
                           `cache read ${u.cacheRead.toLocaleString()}\n` +
-                          // The turn's cache-miss diagnostic, when the API
-                          // reported one (per-turn only; misses don't sum).
+                          // The turn's cache-miss diagnostic, when the API reported
+                          // one (per-turn only; misses don't sum).
                           (!usageTotal && u.cacheMiss
                             ? `cache miss: ${u.cacheMiss.reason.replaceAll('_', ' ')} ` +
                               `(${u.cacheMiss.missedTokens.toLocaleString()} tokens missed)\n`
@@ -2284,13 +2276,10 @@ export function App() {
                           `cost ${costText}`
                         }
                       >
-                        <span className="token-scope">{scope}</span>
-                        <span>in {formatTokens(uncached)}</span>
-                        <span>cache {formatTokens(u.cacheRead)}</span>
-                        <span>out {formatTokens(u.output)}</span>
-                        {/* Claude cost arrives with the turn's result event; Codex
-                            currently reports token usage without account cost. */}
-                        <span className="token-cost">{costBadge}</span>
+                        <span className="telemetry-scope">{scope}</span>
+                        {stats.map((item) => (
+                          <TelemetryItemView key={item.id} item={item} />
+                        ))}
                       </button>
                     </div>
                   )
