@@ -193,86 +193,18 @@ function MessageAttachments({
   return (
     <div className="message-attachments">
       {attachments.map((a) => (
-        <AttachmentChip key={a.id} attachment={a} slug={slug} />
+        <FileChip key={a.id} file={a} url={`/api/${slug}/attachments/${a.id}`} />
       ))}
     </div>
   )
 }
 
-function AttachmentChip({
-  attachment,
-  slug,
-}: {
-  attachment: Attachment
-  slug: string
-}) {
-  const isImage = attachment.mime.startsWith('image/')
-  const [thumb, setThumb] = useState<string | null>(null)
-
-  // The download endpoint wants the UI token, which a bare <img src> can't send,
-  // so fetch the bytes with the header and hand back a blob URL. Used for the
-  // image thumbnail and revoked on unmount.
-  async function fetchBlob(): Promise<Blob | null> {
-    const token = import.meta.env.VITE_LANDER_UI_TOKEN
-    const r = await fetch(`/api/${slug}/attachments/${attachment.id}`, {
-      headers: token ? { 'x-lander-ui-token': token } : {},
-    })
-    return r.ok ? r.blob() : null
-  }
-
-  useEffect(() => {
-    if (!isImage) return
-    let url: string | null = null
-    let cancelled = false
-    void fetchBlob().then((b) => {
-      if (b && !cancelled) {
-        url = URL.createObjectURL(b)
-        setThumb(url)
-      }
-    })
-    return () => {
-      cancelled = true
-      if (url) URL.revokeObjectURL(url)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attachment.id, slug, isImage])
-
-  async function download() {
-    const b = await fetchBlob()
-    if (!b) return
-    const url = URL.createObjectURL(b)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = attachment.name
-    link.click()
-    URL.revokeObjectURL(url)
-  }
-
-  return (
-    <button
-      type="button"
-      className={`attachment-chip${isImage ? ' attachment-chip-image' : ''}`}
-      onClick={() => void download()}
-      title={`${attachment.name} — ${formatBytes(attachment.size)} (click to download)`}
-    >
-      {isImage && thumb ? (
-        <img className="attachment-thumb" src={thumb} alt={attachment.name} />
-      ) : (
-        <span className="attachment-chip-icon" aria-hidden>
-          {isImage ? '🖼' : '📄'}
-        </span>
-      )}
-      <span className="attachment-chip-meta">
-        <span className="attachment-chip-name">{attachment.name}</span>
-        <span className="attachment-chip-size">{formatBytes(attachment.size)}</span>
-      </span>
-    </button>
-  )
-}
-
 // The artifacts (named output files) an assistant message published, rendered as
-// rows at the bottom of that message. Each downloads the slot's current blob by
-// name from the task's artifact endpoint.
+// the same chips at the bottom of that message. Each downloads its slot's blob by
+// name from the task's artifact endpoint — not by the ref's blob id, since a
+// republish deletes the superseded blob, so only the by-name route is guaranteed
+// to resolve (it serves the latest version). Keyed by blob id so two refs of the
+// same name (a republish within one turn) don't collide.
 function MessageArtifacts({
   artifacts,
   taskId,
@@ -283,53 +215,84 @@ function MessageArtifacts({
   slug: string
 }) {
   return (
-    <div className="message-artifacts">
+    <div className="message-attachments">
       {artifacts.map((a) => (
-        <ArtifactRow key={a.id} artifact={a} taskId={taskId} slug={slug} />
+        <FileChip
+          key={a.id}
+          file={a}
+          url={`/api/${slug}/tasks/${taskId}/artifacts/${encodeURIComponent(a.name)}`}
+        />
       ))}
     </div>
   )
 }
 
-function ArtifactRow({
-  artifact,
-  taskId,
-  slug,
-}: {
-  artifact: Artifact
-  taskId: string
-  slug: string
-}) {
-  // The download endpoint wants the UI token, which a bare <a href> can't send,
-  // so fetch the bytes with the header and click a synthetic link — the same
-  // dance an AttachmentChip's download does.
-  async function download() {
+// A single downloadable file chip — shared by input attachments and output
+// artifacts (an Artifact is structurally an Attachment plus timestamps). `file`
+// supplies the display fields; `url` is the token-gated endpoint the bytes come
+// from, which differs by kind (attachment-by-id vs artifact-by-name). Images show
+// a thumbnail; any chip downloads on click.
+function FileChip({ file, url }: { file: Attachment; url: string }) {
+  const isImage = file.mime.startsWith('image/')
+  const [thumb, setThumb] = useState<string | null>(null)
+
+  // The endpoint wants the UI token, which a bare <img src>/<a href> can't send,
+  // so fetch the bytes with the header and hand back a blob URL. Used for the
+  // image thumbnail and revoked on unmount.
+  async function fetchBlob(): Promise<Blob | null> {
     const token = import.meta.env.VITE_LANDER_UI_TOKEN
-    const r = await fetch(
-      `/api/${slug}/tasks/${taskId}/artifacts/${encodeURIComponent(artifact.name)}`,
-      { headers: token ? { 'x-lander-ui-token': token } : {} },
-    )
-    if (!r.ok) return
-    const url = URL.createObjectURL(await r.blob())
+    const r = await fetch(url, {
+      headers: token ? { 'x-lander-ui-token': token } : {},
+    })
+    return r.ok ? r.blob() : null
+  }
+
+  useEffect(() => {
+    if (!isImage) return
+    let obj: string | null = null
+    let cancelled = false
+    void fetchBlob().then((b) => {
+      if (b && !cancelled) {
+        obj = URL.createObjectURL(b)
+        setThumb(obj)
+      }
+    })
+    return () => {
+      cancelled = true
+      if (obj) URL.revokeObjectURL(obj)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url, isImage])
+
+  async function download() {
+    const b = await fetchBlob()
+    if (!b) return
+    const obj = URL.createObjectURL(b)
     const link = document.createElement('a')
-    link.href = url
-    link.download = artifact.name
+    link.href = obj
+    link.download = file.name
     link.click()
-    URL.revokeObjectURL(url)
+    URL.revokeObjectURL(obj)
   }
 
   return (
     <button
       type="button"
-      className="artifact-row"
+      className={`attachment-chip${isImage ? ' attachment-chip-image' : ''}`}
       onClick={() => void download()}
-      title={`${artifact.name} — ${formatBytes(artifact.size)} (click to download)`}
+      title={`${file.name} — ${formatBytes(file.size)} (click to download)`}
     >
-      <span className="artifact-row-icon" aria-hidden>
-        📦
+      {isImage && thumb ? (
+        <img className="attachment-thumb" src={thumb} alt={file.name} />
+      ) : (
+        <span className="attachment-chip-icon" aria-hidden>
+          {isImage ? '🖼' : '📄'}
+        </span>
+      )}
+      <span className="attachment-chip-meta">
+        <span className="attachment-chip-name">{file.name}</span>
+        <span className="attachment-chip-size">{formatBytes(file.size)}</span>
       </span>
-      <span className="artifact-row-name">{artifact.name}</span>
-      <span className="artifact-row-size">{formatBytes(artifact.size)}</span>
     </button>
   )
 }
