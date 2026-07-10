@@ -5,6 +5,7 @@
 // server Task type (index.ts passes its Task, which satisfies these shapes).
 
 import path from 'node:path'
+import type { AgentKind } from './agent'
 import type { Step, Usage } from './stream'
 import type { Attachment } from './attachments'
 import type { Artifact } from './artifacts'
@@ -114,15 +115,34 @@ export type ScheduledMessage = {
   attachments?: Attachment[]
 }
 
+// Grant-capability flags served on the public task so the UI stops branching on
+// the agent kind: `task` = task-scope allow rules are honored, `project` =
+// project-scope grants are supported. Derived from the task's agent here — the one
+// place that maps an agent to its grant capabilities — so a provider that doesn't
+// honor a scope degrades from data rather than a UI `agent === 'codex'` special
+// case. codex saves task rules for parity but honors neither scope yet (both
+// false); claude supports both. The flow inversion supersedes this switch with
+// each flow's announced meta.capabilities (see docs/flow-inversion.md).
+export type GrantCaps = { task: boolean; project: boolean }
+
+export function agentGrantCaps(agent: AgentKind): GrantCaps {
+  return agent === 'codex'
+    ? { task: false, project: false }
+    : { task: true, project: true }
+}
+
 // Strip the secret `token` (and the server-internal run pointers / retry stash)
 // before sending a task over HTTP, so the UI — and any task scraping the API —
 // can't read another task's token and impersonate it. `retry` is internal
 // bookkeeping the wedge's retry ask supersedes on the wire, so it's stripped too.
-// A shallow copy: the messages/events arrays are shared with the source, not
+// Also attaches the derived `grants` capability flags (see agentGrantCaps). A
+// shallow copy: the messages/events arrays are shared with the source, not
 // deep-cloned.
 export function publicTask<T extends object>(
   task: T,
-): Omit<T, 'token' | 'runId' | 'runCursor' | 'queued' | 'retry'> {
+): Omit<T, 'token' | 'runId' | 'runCursor' | 'queued' | 'retry'> & {
+  grants?: GrantCaps
+} {
   const {
     token: _t,
     runId: _r,
@@ -159,7 +179,14 @@ export function publicTask<T extends object>(
       flagged.has(i) ? { ...m, queued: true } : m,
     )
   }
-  return rest as Omit<T, 'token' | 'runId' | 'runCursor' | 'queued' | 'retry'>
+  // Attach the derived grant capabilities when the task carries an agent (real
+  // tasks always do; the structurally-typed test fixtures may not).
+  const agent = (task as { agent?: AgentKind }).agent
+  const withGrants = agent ? { ...rest, grants: agentGrantCaps(agent) } : rest
+  return withGrants as Omit<
+    T,
+    'token' | 'runId' | 'runCursor' | 'queued' | 'retry'
+  > & { grants?: GrantCaps }
 }
 
 // The timestamp of a task's most recent *completed* update: the newest of its

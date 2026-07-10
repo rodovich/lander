@@ -12,7 +12,7 @@ describe('BlockedSummary line', () => {
           { key: 'a', rule: 'Bash(git push)', tool: 'Bash' },
           { key: 'b', rule: 'WebFetch(https://x)', tool: 'WebFetch' },
         ]}
-        agent="claude"
+        grants={{ task: true, project: true }}
         onAllow={noop}
       />,
     )
@@ -20,7 +20,7 @@ describe('BlockedSummary line', () => {
     const one = renderToStaticMarkup(
       <BlockedSummary
         requests={[{ key: 'a', rule: 'Bash(ls)', tool: 'Bash' }]}
-        agent="claude"
+        grants={{ task: true, project: true }}
         onAllow={noop}
       />,
     )
@@ -34,7 +34,7 @@ describe('RuleRow', () => {
     renderToStaticMarkup(
       <RuleRow
         rule="Bash(git push)"
-        agent="claude"
+        grants={{ task: true, project: true }}
         menuOpen={false}
         onToggleMenu={() => {}}
         onAllow={noop}
@@ -58,8 +58,11 @@ describe('RuleRow', () => {
     expect(html).toContain('Allow in project')
   })
 
-  it('relabels task scope and disables project scope for codex', () => {
-    const html = render({ menuOpen: true, agent: 'codex' })
+  it('relabels task scope and disables project scope when neither is honored (codex)', () => {
+    const html = render({
+      menuOpen: true,
+      grants: { task: false, project: false },
+    })
     expect(html).toContain('Save rule')
     expect(html).toContain('Project unsupported')
     expect(html).toContain('disabled')
@@ -83,7 +86,7 @@ describe('RuleRow', () => {
 describe('GrantControl', () => {
   it('renders a labelled stamp trigger (popup opens on click, not in SSR)', () => {
     const html = renderToStaticMarkup(
-      <GrantControl agent="claude" onAllow={noop} />,
+      <GrantControl grants={{ task: true, project: true }} onAllow={noop} />,
     )
     expect(html).toContain('aria-label="Grant a permission rule"')
     // Closed by default: no popup/rule row in the initial markup.

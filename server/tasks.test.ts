@@ -76,6 +76,21 @@ describe('publicTask', () => {
     const out = publicTask({ id: 's', messages })
     expect((out as { messages: Message[] }).messages).toBe(messages)
   })
+
+  it('derives grant capabilities from the task agent', () => {
+    expect(publicTask({ id: 's', agent: 'claude' }).grants).toEqual({
+      task: true,
+      project: true,
+    })
+    expect(publicTask({ id: 's', agent: 'codex' }).grants).toEqual({
+      task: false,
+      project: false,
+    })
+  })
+
+  it('omits grants when the task carries no agent', () => {
+    expect('grants' in publicTask({ id: 's' })).toBe(false)
+  })
 })
 
 describe('latestUpdateAt', () => {

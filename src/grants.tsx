@@ -30,11 +30,13 @@ function BlockedIcon() {
 // committed draft is exactly what the kebab actions grant, so the user can shape
 // the rule (`git log` → `git:*`) before allowing it. Menu-open state is lifted to
 // the parent so only one row's kebab is open at a time. Rule strings stay opaque
-// agent-owned data: for codex, "allow in task" reads "save rule" (the server
-// returns a parity warning) and project scope is unsupported.
+// agent-owned data: which scopes a grant is honored in comes from the task's
+// server-derived `grants` capability flags — when task-scope isn't honored (codex
+// today) "allow in task" reads "save rule" and carries a parity note, and when
+// project scope isn't supported that action is disabled.
 export function RuleRow({
   rule: initialRule,
-  agent,
+  grants,
   menuOpen,
   onToggleMenu,
   onAllow,
@@ -44,7 +46,7 @@ export function RuleRow({
   placeholder,
 }: {
   rule: string
-  agent: Task['agent']
+  grants: Task['grants']
   menuOpen: boolean
   onToggleMenu: () => void
   onAllow: (rule: string, scope: 'task' | 'project') => Promise<boolean>
@@ -67,7 +69,9 @@ export function RuleRow({
   // it can't spill past the window's bottom (measured against the kebab's live
   // viewport rect, so it works wherever the enclosing popup ended up).
   const [menuUp, setMenuUp] = useState(false)
-  const codex = agent === 'codex'
+  // Absent capabilities (legacy payloads) default to fully capable.
+  const canGrantTask = grants?.task ?? true
+  const canGrantProject = grants?.project ?? true
 
   useEffect(() => {
     if (editing) {
@@ -142,7 +146,11 @@ export function RuleRow({
       {granted ? (
         <span
           className="rule-row-granted"
-          title={codex ? 'Rule saved' : `Allowed in ${granted}`}
+          title={
+            (granted === 'project' ? canGrantProject : canGrantTask)
+              ? `Allowed in ${granted}`
+              : 'Rule saved'
+          }
         >
           ✓
         </span>
@@ -171,27 +179,27 @@ export function RuleRow({
                 role="menuitem"
                 className="task-menu-item"
                 title={
-                  codex
-                    ? 'Saved for parity; codex runs do not honor task allow rules yet'
-                    : undefined
+                  canGrantTask
+                    ? undefined
+                    : "Saved for parity; this task's agent does not honor task allow rules yet"
                 }
                 onClick={() => void grant('task')}
               >
-                {codex ? 'Save rule' : 'Allow in task'}
+                {canGrantTask ? 'Allow in task' : 'Save rule'}
               </button>
               <button
                 type="button"
                 role="menuitem"
                 className="task-menu-item"
-                disabled={codex}
+                disabled={!canGrantProject}
                 title={
-                  codex
-                    ? 'Project grants are not supported for codex tasks yet'
-                    : undefined
+                  canGrantProject
+                    ? undefined
+                    : "Project grants are not supported for this task's agent yet"
                 }
                 onClick={() => void grant('project')}
               >
-                {codex ? 'Project unsupported' : 'Allow in project'}
+                {canGrantProject ? 'Allow in project' : 'Project unsupported'}
               </button>
             </div>
           )}
@@ -209,11 +217,11 @@ export function RuleRow({
 // denials, so a task whose agent never reports them (codex) simply shows nothing.
 export function BlockedSummary({
   requests,
-  agent,
+  grants,
   onAllow,
 }: {
   requests: BlockedRequest[]
-  agent: Task['agent']
+  grants: Task['grants']
   onAllow: (rule: string, scope: 'task' | 'project') => Promise<boolean>
 }) {
   const { open, setOpen, containerRef, triggerRef, popupRef, popupStyle } =
@@ -247,7 +255,7 @@ export function BlockedSummary({
             <RuleRow
               key={r.key}
               rule={r.rule}
-              agent={agent}
+              grants={grants}
               menuOpen={openMenuKey === r.key}
               onToggleMenu={() =>
                 setOpenMenuKey((k) => (k === r.key ? null : r.key))
@@ -295,10 +303,10 @@ function StampIcon() {
 // with a prefill. Fixed-anchored like the other header popups so it can't be
 // clipped.
 export function GrantControl({
-  agent,
+  grants,
   onAllow,
 }: {
-  agent: Task['agent']
+  grants: Task['grants']
   onAllow: (rule: string, scope: 'task' | 'project') => Promise<boolean>
 }) {
   const { open, setOpen, containerRef, triggerRef, popupRef, popupStyle } =
@@ -335,7 +343,7 @@ export function GrantControl({
               popup unmounts on close), so authoring another rule is one reopen. */}
           <RuleRow
             rule=""
-            agent={agent}
+            grants={grants}
             autoEdit
             placeholder="e.g. Bash(git:*)"
             menuOpen={menuOpen}

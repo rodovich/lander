@@ -1797,7 +1797,7 @@ export function App() {
                   </button>
                   <CopyIdButton id={current.id} />
                   {!current.archived && (
-                    <GrantControl agent={current.agent} onAllow={allowTool} />
+                    <GrantControl grants={current.grants} onAllow={allowTool} />
                   )}
                   {!current.allowEdits && !current.archived && (
                     <ReadOnlyMenu
@@ -2125,7 +2125,7 @@ export function App() {
                       return requests.length > 0 ? (
                         <BlockedSummary
                           requests={requests}
-                          agent={current.agent}
+                          grants={current.grants}
                           onAllow={allowTool}
                         />
                       ) : null

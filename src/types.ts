@@ -155,6 +155,12 @@ export type Task = {
   // the daemon owns and the client never sees.
   id: string
   agent: 'claude' | 'codex'
+  // Grant-capability flags derived server-side (publicTask/agentGrantCaps): `task`
+  // = task-scope allow rules are honored, `project` = project grants are supported.
+  // The grant UI reads these instead of branching on `agent`, so a provider that
+  // doesn't honor a scope degrades from data. Absent on legacy payloads — treat as
+  // fully capable.
+  grants?: { task: boolean; project: boolean }
   title: string
   status: string
   createdAt: string
