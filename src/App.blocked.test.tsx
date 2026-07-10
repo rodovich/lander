@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { BlockedSummary, RuleRow } from './App'
+import { BlockedSummary, GrantControl, RuleRow } from './App'
 
 const noop = async () => true
 
@@ -38,6 +38,8 @@ describe('RuleRow', () => {
         menuOpen={false}
         onToggleMenu={() => {}}
         onAllow={noop}
+        granted={null}
+        onGranted={() => {}}
         {...props}
       />,
     )
@@ -63,11 +65,28 @@ describe('RuleRow', () => {
     expect(html).toContain('disabled')
   })
 
+  it('shows a checkmark and no kebab once granted', () => {
+    const html = render({ granted: 'task' })
+    expect(html).toContain('rule-row-granted')
+    expect(html).not.toContain('rule-row-kebab')
+  })
+
   it('starts in edit mode with a placeholder for an empty authoring row', () => {
     const html = render({ rule: '', autoEdit: true, placeholder: 'Author a rule…' })
     expect(html).toContain('rule-row-input')
     expect(html).toContain('Author a rule…')
     // An empty rule leaves the kebab disabled (nothing to grant yet).
     expect(html).toContain('disabled')
+  })
+})
+
+describe('GrantControl', () => {
+  it('renders a labelled stamp trigger (popup opens on click, not in SSR)', () => {
+    const html = renderToStaticMarkup(
+      <GrantControl agent="claude" onAllow={noop} />,
+    )
+    expect(html).toContain('aria-label="Grant a permission rule"')
+    // Closed by default: no popup/rule row in the initial markup.
+    expect(html).not.toContain('rule-row')
   })
 })

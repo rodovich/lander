@@ -3,11 +3,12 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from 'react'
-import type { Dispatch, SetStateAction } from 'react'
+import type { CSSProperties, Dispatch, SetStateAction } from 'react'
 import { agentDisplayName, formatAgentModelName } from './agentDisplay'
 import { Markdown } from './markdown'
 import type { TaskLinkResolver } from './markdown'
@@ -810,6 +811,67 @@ function UsageSummary({
   )
 }
 
+// A fixed-anchored popup that hangs under its trigger, flipping *above* it when
+// there isn't room below (so it never spills past the window's bottom), with
+// outside-click / Escape dismissal and re-anchoring on scroll/resize. Owns the
+// open state and returns refs to wire up. The popup is measured after it mounts
+// (hidden for one layout tick), so the up/down decision uses its real height.
+// Shared by the blocked-permissions summary and the header grant control.
+function useAnchoredPopup() {
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const popupRef = useRef<HTMLDivElement>(null)
+  const [style, setStyle] = useState<CSSProperties | null>(null)
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setStyle(null)
+      return
+    }
+    const place = () => {
+      const r = triggerRef.current?.getBoundingClientRect()
+      if (!r) return
+      const gap = 6
+      const ph = popupRef.current?.offsetHeight ?? 0
+      const spaceBelow = window.innerHeight - r.bottom
+      const spaceAbove = r.top
+      // Flip up only once the height is known (ph > 0) and below can't hold it
+      // while above has more room; otherwise hang below.
+      const openUp = ph > 0 && spaceBelow < ph + gap && spaceAbove > spaceBelow
+      setStyle({
+        left: r.left,
+        ...(openUp
+          ? { bottom: window.innerHeight - r.top + gap }
+          : { top: r.bottom + gap }),
+      })
+    }
+    place()
+    const onDown = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node))
+        setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [open])
+
+  // Until the first layout pass sets a real position, keep the mounted popup
+  // hidden so its unplaced frame never flashes at the top-left.
+  const popupStyle: CSSProperties = style ?? { visibility: 'hidden', top: 0, left: 0 }
+  return { open, setOpen, containerRef, triggerRef, popupRef, popupStyle }
+}
+
 // The no-smoking-style prohibition mark — a circle with a diagonal slash, no
 // cigarette — that leads the "N permissions blocked this turn" summary.
 function BlockedIcon() {
@@ -845,6 +907,8 @@ export function RuleRow({
   menuOpen,
   onToggleMenu,
   onAllow,
+  granted,
+  onGranted,
   autoEdit,
   placeholder,
 }: {
@@ -853,6 +917,11 @@ export function RuleRow({
   menuOpen: boolean
   onToggleMenu: () => void
   onAllow: (rule: string, scope: 'task' | 'project') => Promise<boolean>
+  // The scope this rule was granted in, if any — owned by the parent so it
+  // survives the popup closing and reopening; null shows the kebab, a value the
+  // checkmark. `onGranted` records a successful grant.
+  granted: 'task' | 'project' | null
+  onGranted: (scope: 'task' | 'project') => void
   // Start in edit mode (the empty authoring row); a seeded denial row starts read.
   autoEdit?: boolean
   placeholder?: string
@@ -860,8 +929,13 @@ export function RuleRow({
   const [editing, setEditing] = useState(!!autoEdit)
   const [committed, setCommitted] = useState(initialRule)
   const [draft, setDraft] = useState(initialRule)
-  const [granted, setGranted] = useState<'task' | 'project' | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const kebabRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  // Open the scope menu upward when there isn't room for it below the kebab, so
+  // it can't spill past the window's bottom (measured against the kebab's live
+  // viewport rect, so it works wherever the enclosing popup ended up).
+  const [menuUp, setMenuUp] = useState(false)
   const codex = agent === 'codex'
 
   useEffect(() => {
@@ -870,6 +944,19 @@ export function RuleRow({
       inputRef.current?.select()
     }
   }, [editing])
+
+  useLayoutEffect(() => {
+    if (!menuOpen) {
+      setMenuUp(false)
+      return
+    }
+    const kr = kebabRef.current?.getBoundingClientRect()
+    const mh = menuRef.current?.offsetHeight ?? 0
+    if (kr) {
+      const spaceBelow = window.innerHeight - kr.bottom
+      setMenuUp(mh > 0 && spaceBelow < mh + 8 && kr.top > spaceBelow)
+    }
+  }, [menuOpen])
 
   function commit() {
     setCommitted(draft.trim())
@@ -881,7 +968,7 @@ export function RuleRow({
   }
   async function grant(scope: 'task' | 'project') {
     onToggleMenu() // close this row's menu (it is the open one)
-    if (await onAllow(committed, scope)) setGranted(scope)
+    if (await onAllow(committed, scope)) onGranted(scope)
   }
 
   return (
@@ -931,6 +1018,7 @@ export function RuleRow({
       ) : (
         <div className="rule-row-menu">
           <button
+            ref={kebabRef}
             type="button"
             className="rule-row-kebab"
             aria-haspopup="menu"
@@ -942,7 +1030,11 @@ export function RuleRow({
             ⋮
           </button>
           {menuOpen && (
-            <div className="rule-row-menu-popup" role="menu">
+            <div
+              ref={menuRef}
+              className={'rule-row-menu-popup' + (menuUp ? ' up' : '')}
+              role="menu"
+            >
               <button
                 type="button"
                 role="menuitem"
@@ -993,45 +1085,21 @@ export function BlockedSummary({
   agent: Task['agent']
   onAllow: (rule: string, scope: 'task' | 'project') => Promise<boolean>
 }) {
-  const [open, setOpen] = useState(false)
+  const { open, setOpen, containerRef, triggerRef, popupRef, popupStyle } =
+    useAnchoredPopup()
   const [openMenuKey, setOpenMenuKey] = useState<string | null>(null)
-  const ref = useRef<HTMLDivElement>(null)
-  const buttonRef = useRef<HTMLButtonElement>(null)
-  const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null)
+  // Which rules have been granted, kept here (not in the rows) so a checkmark
+  // survives the popup closing and reopening within this turn's summary.
+  const [granted, setGranted] = useState<Record<string, 'task' | 'project'>>({})
 
   useEffect(() => {
-    if (!open) {
-      setAnchor(null)
-      setOpenMenuKey(null)
-      return
-    }
-    const place = () => {
-      const r = buttonRef.current?.getBoundingClientRect()
-      if (r) setAnchor({ top: r.bottom + 6, left: r.left })
-    }
-    place()
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    window.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKey)
-    window.addEventListener('resize', place)
-    window.addEventListener('scroll', place, true)
-    return () => {
-      window.removeEventListener('mousedown', onDown)
-      window.removeEventListener('keydown', onKey)
-      window.removeEventListener('resize', place)
-      window.removeEventListener('scroll', place, true)
-    }
+    if (!open) setOpenMenuKey(null)
   }, [open])
 
   return (
-    <div className="blocked-summary" ref={ref}>
+    <div className="blocked-summary" ref={containerRef}>
       <button
-        ref={buttonRef}
+        ref={triggerRef}
         type="button"
         className="blocked-summary-line"
         aria-haspopup="dialog"
@@ -1042,11 +1110,8 @@ export function BlockedSummary({
         {requests.length} permission{requests.length === 1 ? '' : 's'} blocked
         this turn
       </button>
-      {open && anchor && (
-        <div
-          className="blocked-popup"
-          style={{ top: anchor.top, left: anchor.left }}
-        >
+      {open && (
+        <div ref={popupRef} className="blocked-popup" style={popupStyle}>
           {requests.map((r) => (
             <RuleRow
               key={r.key}
@@ -1057,8 +1122,97 @@ export function BlockedSummary({
                 setOpenMenuKey((k) => (k === r.key ? null : r.key))
               }
               onAllow={onAllow}
+              granted={granted[r.key] ?? null}
+              onGranted={(scope) =>
+                setGranted((g) => ({ ...g, [r.key]: scope }))
+              }
             />
           ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// The rubber-stamp mark on the always-available grant control — authoring a rule
+// is "stamping" an approval. A handled stamp pressing down onto its base plate.
+function StampIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M9 5a3 3 0 0 1 6 0c0 1.6-1.2 2.1-1.2 3.4 0 1 .8 1.3 1.7 2 .9.8 1 1.6 1 3.1H6.5c0-1.5.1-2.3 1-3.1.9-.7 1.7-1 1.7-2C10.2 7.1 9 6.6 9 5z" />
+      <line x1="4.5" y1="17" x2="19.5" y2="17" />
+      <line x1="6.5" y1="20.5" x2="17.5" y2="20.5" />
+    </svg>
+  )
+}
+
+// The always-available grant control in the task header: a rubber-stamp button
+// that opens a one-row rule-authoring popup — the same RuleRow the blocked
+// summary uses, a single empty editable row with the same task/project kebab — so
+// a rule can be granted proactively, no archaeology through denied chips. The
+// doc's primary permission surface; permission asks will later deep-link into it
+// with a prefill. Fixed-anchored like the other header popups so it can't be
+// clipped.
+export function GrantControl({
+  agent,
+  onAllow,
+}: {
+  agent: Task['agent']
+  onAllow: (rule: string, scope: 'task' | 'project') => Promise<boolean>
+}) {
+  const { open, setOpen, containerRef, triggerRef, popupRef, popupStyle } =
+    useAnchoredPopup()
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [granted, setGranted] = useState<'task' | 'project' | null>(null)
+
+  // Each open starts a fresh authoring row (empty rule, no checkmark).
+  useEffect(() => {
+    if (!open) {
+      setMenuOpen(false)
+      setGranted(null)
+    }
+  }, [open])
+
+  return (
+    <div className="task-menu" ref={containerRef}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="edit-title-button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title="Grant a permission rule"
+        aria-label="Grant a permission rule"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <StampIcon />
+      </button>
+      {open && (
+        <div ref={popupRef} className="blocked-popup" style={popupStyle}>
+          <div className="rule-popup-head">Grant a permission rule</div>
+          {/* One empty row, remounted fresh each time the popup reopens (the
+              popup unmounts on close), so authoring another rule is one reopen. */}
+          <RuleRow
+            rule=""
+            agent={agent}
+            autoEdit
+            placeholder="e.g. Bash(git:*)"
+            menuOpen={menuOpen}
+            onToggleMenu={() => setMenuOpen((o) => !o)}
+            onAllow={onAllow}
+            granted={granted}
+            onGranted={(scope) => setGranted(scope)}
+          />
         </div>
       )}
     </div>
@@ -3727,6 +3881,9 @@ export function App() {
                     </svg>
                   </button>
                   <CopyIdButton id={current.id} />
+                  {!current.archived && (
+                    <GrantControl agent={current.agent} onAllow={allowTool} />
+                  )}
                   {!current.allowEdits && !current.archived && (
                     <ReadOnlyMenu
                       onAllowEdits={() => void setAllowEdits(true)}

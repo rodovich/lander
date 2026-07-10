@@ -1827,10 +1827,11 @@ body {
   background: color-mix(in srgb, var(--wedged) 10%, transparent);
 }
 
-/* The popup of denied rules, anchored under the summary line. Fixed-positioned
-   (top/left set inline from the line's measured rect) so the scrolling timeline
-   can't clip it and the composer can't paint over it — same escape as the tool
-   popup and the header menus. */
+/* The rule-row list popup — shared shell for the per-turn denied rules (anchored
+   under the summary line) and the always-available grant control (anchored under
+   the header stamp). Fixed-positioned (top/left set inline from the trigger's
+   measured rect) so the scrolling timeline can't clip it and the composer can't
+   paint over it — same escape as the header menus. */
 .blocked-popup {
   position: fixed;
   z-index: 100;
@@ -1846,6 +1847,14 @@ body {
   box-shadow: 0 8px 24px rgba(17, 0, 0, 0.16);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   font-size: 13px;
+}
+
+/* The grant control's popup label, naming the otherwise-unlabelled empty row. */
+.rule-popup-head {
+  padding: 2px 6px 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 /* One rule + its kebab. The rule flexes to fill; the kebab sits at the right. */
@@ -1869,15 +1878,25 @@ body {
 }
 
 /* The read (click-to-edit) rule reads as plain text until hovered, when it hints
-   at its editability. */
+   at its editability. A long rule stays on one line and scrolls horizontally
+   rather than truncating, so the whole request is readable without editing. */
 .rule-row-rule {
   border: 1px solid transparent;
   background: none;
   color: var(--fg);
   cursor: text;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-x: auto;
   white-space: nowrap;
+}
+
+/* A thin, unobtrusive scrollbar under a long rule. */
+.rule-row-rule::-webkit-scrollbar {
+  height: 5px;
+}
+
+.rule-row-rule::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
 }
 
 .rule-row-rule:hover {
@@ -1926,13 +1945,13 @@ body {
   cursor: default;
 }
 
-/* The two-scope grant menu, dropping down and to the right of a row's kebab.
-   Reuses .task-menu-item for its rows; sits within the fixed .blocked-popup, so
-   it needs no escape of its own. */
+/* The two-scope grant menu, dropping down from a row's kebab with its left edge
+   aligned to the kebab. Reuses .task-menu-item for its rows; sits within the
+   fixed .blocked-popup, so it needs no escape of its own. */
 .rule-row-menu-popup {
   position: absolute;
   top: 100%;
-  right: 0;
+  left: 0;
   z-index: 1;
   min-width: 150px;
   margin-top: 2px;
@@ -1943,6 +1962,15 @@ body {
   border: 1px solid var(--border);
   border-radius: 6px;
   box-shadow: 0 6px 18px rgba(17, 0, 0, 0.16);
+}
+
+/* When there isn't room below the kebab, the menu opens upward instead so it
+   can't spill past the window's bottom. */
+.rule-row-menu-popup.up {
+  top: auto;
+  bottom: 100%;
+  margin-top: 0;
+  margin-bottom: 2px;
 }
 
 /* Codex's unsupported project scope reads disabled, not clickable. */
