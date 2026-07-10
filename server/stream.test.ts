@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   summarizeToolInput,
+  fullToolInput,
   toolRule,
   diffEdits,
   rawToolResultText,
@@ -63,6 +64,38 @@ describe('summarizeToolInput', () => {
     const out = summarizeToolInput({ command: 'x'.repeat(300) })
     expect(out).toBe('x'.repeat(200) + '…')
     expect(out.length).toBe(201)
+  })
+})
+
+describe('fullToolInput', () => {
+  it('returns empty string for non-object input', () => {
+    expect(fullToolInput(null)).toBe('')
+    expect(fullToolInput(undefined)).toBe('')
+    expect(fullToolInput('str')).toBe('')
+  })
+
+  it('preserves newlines and internal whitespace, unlike summarizeToolInput', () => {
+    const cmd = 'line one\n  line two\n\tline three'
+    expect(fullToolInput({ command: cmd })).toBe(cmd)
+    expect(summarizeToolInput({ command: cmd })).toBe('line one line two line three')
+  })
+
+  it('keeps the full text past the summary 200-char cap, up to 4k', () => {
+    const out = fullToolInput({ command: 'x'.repeat(300) })
+    expect(out).toBe('x'.repeat(300))
+    expect(out.length).toBe(300)
+  })
+
+  it('caps at 4k with a trailing ellipsis on its own line', () => {
+    const out = fullToolInput({ command: 'y'.repeat(5000) })
+    expect(out).toBe('y'.repeat(4000) + '\n…')
+  })
+
+  it('uses the same field precedence and subagent lead as summarizeToolInput', () => {
+    expect(fullToolInput({ path: '/b', command: 'ls' })).toBe('/b')
+    expect(
+      fullToolInput({ subagent_type: 'Explore', description: 'find\nthe reducer' }),
+    ).toBe('Explore: find\nthe reducer')
   })
 })
 
@@ -301,6 +334,58 @@ describe('reduceStreamLine', () => {
         createdAt: AT,
       },
     ])
+  })
+
+  it('carries inputFull for a multi-line tool input, omitting it for short single-line ones', () => {
+    const r = reduceStreamLine(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          content: [
+            {
+              type: 'tool_use',
+              name: 'Bash',
+              id: 'tu_ml',
+              input: { command: 'echo one\necho two' },
+            },
+            {
+              type: 'tool_use',
+              name: 'Bash',
+              id: 'tu_short',
+              input: { command: 'ls' },
+            },
+          ],
+        },
+      }),
+      AT,
+    )
+    // Multi-line: the chip summary collapses newlines, inputFull keeps them.
+    expect(r.steps[0].input).toBe('echo one echo two')
+    expect(r.steps[0].inputFull).toBe('echo one\necho two')
+    // Short single-line: nothing to add over the chip, so no second copy.
+    expect(r.steps[1].input).toBe('ls')
+    expect(r.steps[1].inputFull).toBeUndefined()
+  })
+
+  it('carries inputFull for a tool input past the 200-char chip cap', () => {
+    const r = reduceStreamLine(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          content: [
+            {
+              type: 'tool_use',
+              name: 'Bash',
+              id: 'tu_long',
+              input: { command: 'z'.repeat(300) },
+            },
+          ],
+        },
+      }),
+      AT,
+    )
+    expect(r.steps[0].input).toBe('z'.repeat(200) + '…')
+    expect(r.steps[0].inputFull).toBe('z'.repeat(300))
   })
 
   it('stamps text and tool_use steps with the inference (message) id', () => {

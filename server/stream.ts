@@ -8,6 +8,13 @@ export type Step = {
   text?: string
   tool?: string
   input?: string
+  // tool_use only: the identifying input field untruncated and newline-preserving
+  // — the exact text `input` collapses to one line — so the expanded chip can show
+  // a multi-line command or a long argument as written. Set only when it carries
+  // more than the one-line `input` summary (a multi-line or truncated input),
+  // omitted for short single-line inputs to keep task files lean. Capped like
+  // `edits` at 4k. Absent on steps recorded before this field existed.
+  inputFull?: string
   // The tool call's id, carried on both the tool_use step and its matching
   // tool_result step so the UI can pair a call with its outcome.
   toolUseId?: string
@@ -113,6 +120,29 @@ export function summarizeToolInput(input: unknown): string {
   const summary = sub ? (v ? `${sub}: ${v}` : sub) : v || JSON.stringify(i)
   const flat = summary.replace(/\s+/g, ' ').trim()
   return flat.length > 200 ? flat.slice(0, 200) + '…' : flat
+}
+
+// The one-line `input` summary's untruncated, newline-preserving twin: the same
+// identifying field, but with whitespace (and line breaks) left intact and only a
+// 4k cap, so the expanded chip can render a multi-line command or a long argument
+// as written. Field-selection order matches summarizeToolInput; the cap mirrors
+// diffEdits. Callers store it only when it differs from the one-line summary (see
+// reduceStreamLine) — a short single-line input needs no second copy.
+export function fullToolInput(input: unknown): string {
+  if (!input || typeof input !== 'object') return ''
+  const i = input as Record<string, unknown>
+  const str = (k: string) => (typeof i[k] === 'string' ? (i[k] as string) : '')
+  const v =
+    str('file_path') ||
+    str('path') ||
+    str('command') ||
+    str('pattern') ||
+    str('query') ||
+    str('url') ||
+    str('description')
+  const sub = str('subagent_type')
+  const full = sub ? (v ? `${sub}: ${v}` : sub) : v || JSON.stringify(i)
+  return full.length > 4000 ? full.slice(0, 4000) + '\n…' : full
 }
 
 // Render a tool call as a settings.json-style permission rule, e.g.
@@ -302,10 +332,16 @@ export function reduceStreamLine(
         // inside its own trace and must not overwrite the message's reply text.
         if (!parentToolUseId) finalText = block.text
       } else if (block.type === 'tool_use') {
+        const input = summarizeToolInput(block.input)
+        const inputFull = fullToolInput(block.input)
         steps.push({
           kind: 'tool_use',
           tool: block.name,
-          input: summarizeToolInput(block.input),
+          input,
+          // Keep the untruncated input only when it says more than the one-line
+          // summary already shows (multi-line or truncated); a short single-line
+          // input needs no second copy.
+          ...(inputFull && inputFull !== input ? { inputFull } : {}),
           toolUseId: block.id,
           inferenceId,
           parentToolUseId,

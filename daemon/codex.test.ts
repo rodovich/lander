@@ -398,6 +398,33 @@ describe('Codex adapter reducer', () => {
     expect(r.finalText).toBe('done')
   })
 
+  it('carries inputFull for a multi-line command, omitting it for short single-line ones', () => {
+    const multi = reduceCodexStreamLine(
+      JSON.stringify({
+        type: 'item.started',
+        item: { type: 'command_execution', id: 'item_0', command: 'echo one\necho two' },
+      }),
+      AT,
+    )
+    expect(multi.steps[0]).toEqual({
+      kind: 'tool_use',
+      tool: 'Bash',
+      input: 'echo one\necho two',
+      inputFull: 'echo one\necho two',
+      toolUseId: 'item_0',
+      rule: 'Bash(echo one\necho two)',
+      createdAt: AT,
+    })
+    const short = reduceCodexStreamLine(
+      JSON.stringify({
+        type: 'item.started',
+        item: { type: 'command_execution', id: 'item_1', command: 'ls' },
+      }),
+      AT,
+    )
+    expect(short.steps[0].inputFull).toBeUndefined()
+  })
+
   it('marks failed command executions without treating them as permission blocks', () => {
     const r = reduceFixture('failed-command.jsonl')
     expect(r.steps[1]).toEqual({

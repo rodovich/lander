@@ -1,6 +1,6 @@
 import type { AgentAdapter, AgentLineUpdate, AgentTaskView } from './agent'
 import type { Usage } from '../server/stream'
-import { summarizeToolResult, toolRule } from '../server/stream'
+import { fullToolInput, summarizeToolInput, summarizeToolResult, toolRule } from '../server/stream'
 import { promptWithTaskManagement } from './task-management'
 
 export type CodexAdapterOptions = {
@@ -186,10 +186,18 @@ export function reduceCodexStreamLine(
         const id = typeof item.id === 'string' ? item.id : undefined
         const command = typeof item.command === 'string' ? item.command : ''
         if (ev.type === 'item.started') {
+          // A multi-line or long command reads on the chip as one clipped line;
+          // keep the untruncated, newline-preserving form so the expanded chip can
+          // show it as written. Omit it when the one-line summary already says as
+          // much (a short single-line command).
+          const inputFull = fullToolInput({ command })
           steps.push({
             kind: 'tool_use',
             tool: 'Bash',
             input: command,
+            ...(inputFull && inputFull !== summarizeToolInput({ command })
+              ? { inputFull }
+              : {}),
             toolUseId: id,
             rule: toolRule('Bash', { command }),
             createdAt: at,
