@@ -16,6 +16,8 @@ import type { TimelineItem } from './timeline'
 import { planTurnCollapse } from './turnCollapse'
 import { tick, timed } from './perf'
 import { dataTransferHasFiles } from './fileDrop'
+import { blockedRequests } from './permissions'
+import type { BlockedRequest } from './permissions'
 
 // Request headers that mark a call as coming from the human's browser. The
 // server gates permission-granting endpoints (creating a task with edit/commit
@@ -883,6 +885,261 @@ function ToolPopup({
           >
             {codex ? 'project unsupported' : 'allow in project'}
           </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// The no-smoking-style prohibition mark — a circle with a diagonal slash, no
+// cigarette — that leads the "N permissions blocked this turn" summary.
+function BlockedIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      aria-hidden
+    >
+      <circle cx="12" cy="12" r="9" />
+      <line x1="5.64" y1="5.64" x2="18.36" y2="18.36" />
+    </svg>
+  )
+}
+
+// One editable permission rule with a kebab of grant scopes. Shared by the
+// per-turn blocked-permissions popup (each row seeded from a denied call) and the
+// always-available grant control (a single empty row authored from scratch). The
+// rule string is click-to-edit like the task title — click swaps in an input
+// seeded with the current rule; Enter/blur commits, Escape reverts — and the
+// committed draft is exactly what the kebab actions grant, so the user can shape
+// the rule (`git log` → `git:*`) before allowing it. Menu-open state is lifted to
+// the parent so only one row's kebab is open at a time. Rule strings stay opaque
+// agent-owned data: for codex, "allow in task" reads "save rule" (the server
+// returns a parity warning) and project scope is unsupported.
+export function RuleRow({
+  rule: initialRule,
+  agent,
+  menuOpen,
+  onToggleMenu,
+  onAllow,
+  autoEdit,
+  placeholder,
+}: {
+  rule: string
+  agent: Task['agent']
+  menuOpen: boolean
+  onToggleMenu: () => void
+  onAllow: (rule: string, scope: 'task' | 'project') => Promise<boolean>
+  // Start in edit mode (the empty authoring row); a seeded denial row starts read.
+  autoEdit?: boolean
+  placeholder?: string
+}) {
+  const [editing, setEditing] = useState(!!autoEdit)
+  const [committed, setCommitted] = useState(initialRule)
+  const [draft, setDraft] = useState(initialRule)
+  const [granted, setGranted] = useState<'task' | 'project' | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const codex = agent === 'codex'
+
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    }
+  }, [editing])
+
+  function commit() {
+    setCommitted(draft.trim())
+    setEditing(false)
+  }
+  function cancel() {
+    setDraft(committed)
+    setEditing(false)
+  }
+  async function grant(scope: 'task' | 'project') {
+    onToggleMenu() // close this row's menu (it is the open one)
+    if (await onAllow(committed, scope)) setGranted(scope)
+  }
+
+  return (
+    <div className="rule-row">
+      {editing ? (
+        <input
+          ref={inputRef}
+          className="rule-row-input"
+          value={draft}
+          placeholder={placeholder}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              commit()
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              cancel()
+            }
+          }}
+          onBlur={commit}
+        />
+      ) : (
+        <button
+          type="button"
+          className="rule-row-rule"
+          title="Click to edit"
+          onClick={() => {
+            setDraft(committed)
+            setEditing(true)
+          }}
+        >
+          {committed || (
+            <span className="rule-row-placeholder">
+              {placeholder ?? 'Add a rule…'}
+            </span>
+          )}
+        </button>
+      )}
+      {granted ? (
+        <span
+          className="rule-row-granted"
+          title={codex ? 'Rule saved' : `Allowed in ${granted}`}
+        >
+          ✓
+        </span>
+      ) : (
+        <div className="rule-row-menu">
+          <button
+            type="button"
+            className="rule-row-kebab"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            aria-label="Grant scope"
+            disabled={!committed}
+            onClick={onToggleMenu}
+          >
+            ⋮
+          </button>
+          {menuOpen && (
+            <div className="rule-row-menu-popup" role="menu">
+              <button
+                type="button"
+                role="menuitem"
+                className="task-menu-item"
+                title={
+                  codex
+                    ? 'Saved for parity; codex runs do not honor task allow rules yet'
+                    : undefined
+                }
+                onClick={() => void grant('task')}
+              >
+                {codex ? 'Save rule' : 'Allow in task'}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="task-menu-item"
+                disabled={codex}
+                title={
+                  codex
+                    ? 'Project grants are not supported for codex tasks yet'
+                    : undefined
+                }
+                onClick={() => void grant('project')}
+              >
+                {codex ? 'Project unsupported' : 'Allow in project'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// The per-turn denial-review surface at the foot of a finished assistant message:
+// a muted "N permissions blocked this turn" line that opens a fixed-anchored
+// popup of editable rule rows (one per deduped denial), each grantable in task or
+// project scope. Fixed-positioned like the other header/chip popups so the
+// scrolling timeline can't clip it. Only rendered when there are confirmed
+// denials, so a task whose agent never reports them (codex) simply shows nothing.
+export function BlockedSummary({
+  requests,
+  agent,
+  onAllow,
+}: {
+  requests: BlockedRequest[]
+  agent: Task['agent']
+  onAllow: (rule: string, scope: 'task' | 'project') => Promise<boolean>
+}) {
+  const [open, setOpen] = useState(false)
+  const [openMenuKey, setOpenMenuKey] = useState<string | null>(null)
+  const ref = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null)
+
+  useEffect(() => {
+    if (!open) {
+      setAnchor(null)
+      setOpenMenuKey(null)
+      return
+    }
+    const place = () => {
+      const r = buttonRef.current?.getBoundingClientRect()
+      if (r) setAnchor({ top: r.bottom + 6, left: r.left })
+    }
+    place()
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [open])
+
+  return (
+    <div className="blocked-summary" ref={ref}>
+      <button
+        ref={buttonRef}
+        type="button"
+        className="blocked-summary-line"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <BlockedIcon />
+        {requests.length} permission{requests.length === 1 ? '' : 's'} blocked
+        this turn
+      </button>
+      {open && anchor && (
+        <div
+          className="blocked-popup"
+          style={{ top: anchor.top, left: anchor.left }}
+        >
+          {requests.map((r) => (
+            <RuleRow
+              key={r.key}
+              rule={r.rule}
+              agent={agent}
+              menuOpen={openMenuKey === r.key}
+              onToggleMenu={() =>
+                setOpenMenuKey((k) => (k === r.key ? null : r.key))
+              }
+              onAllow={onAllow}
+            />
+          ))}
         </div>
       )}
     </div>
@@ -2906,12 +3163,17 @@ export function App() {
     }
   }
 
-  // Grant a blocked tool call from its popup: "task" scope persists the rule on
-  // the task (used on future turns), "project" scope writes it to the project's
-  // settings.local.json. Close the popup either way; refresh so a task-scoped
-  // grant shows up.
-  async function allowTool(rule: string, scope: 'task' | 'project') {
-    if (!current) return
+  // Grant a permission rule: "task" scope persists the rule on the task (used on
+  // future turns), "project" scope writes it to the project's settings.local.json.
+  // Close the old chip popup either way; refresh so a task-scoped grant shows up.
+  // Returns whether the grant landed, so a caller (the blocked-summary rows) can
+  // mark the row granted only on success. The rule may have been hand-edited
+  // before granting.
+  async function allowTool(
+    rule: string,
+    scope: 'task' | 'project',
+  ): Promise<boolean> {
+    if (!current) return false
     const id = current.id
     const proj = current.projectSlug
     setOpenTool(null)
@@ -2924,10 +3186,14 @@ export function App() {
       })
       const body = await r.json()
       if (!r.ok) throw new Error(body.error ?? r.statusText)
+      // A codex task-scope grant succeeds but comes back with a parity warning;
+      // surface it without treating the grant as failed.
       if (typeof body.warning === 'string') setError(body.warning)
       if (scope === 'task') setTasks((await loadShownTasks(shown)).tasks)
+      return true
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
+      return false
     }
   }
 
@@ -3950,6 +4216,23 @@ export function App() {
                   ) : (
                     <MessageText text={m.text} linkTask={resolveTaskLink} />
                   )}
+                  {/* A finished assistant turn's confirmed denials, distilled into
+                      a review surface. Only at turn end (denials are authoritative
+                      on the terminal result event, so a pending message shows
+                      nothing) and only when there are any — a task whose agent
+                      never reports denials simply has no line. */}
+                  {m.role === 'assistant' &&
+                    !m.pending &&
+                    (() => {
+                      const requests = blockedRequests(m.steps ?? [])
+                      return requests.length > 0 ? (
+                        <BlockedSummary
+                          requests={requests}
+                          agent={current.agent}
+                          onAllow={allowTool}
+                        />
+                      ) : null
+                    })()}
                   {m.attachments && m.attachments.length > 0 && (
                     <MessageAttachments
                       attachments={m.attachments}
