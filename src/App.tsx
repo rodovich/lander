@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { loadShownTasks, uiHeaders, uploadAttachments } from './api'
+import { AskCard } from './asks'
 import { AttachButton, MessageArtifacts, MessageAttachments } from './attachments'
 import { dataTransferHasFiles } from './fileDrop'
 import {
@@ -40,6 +41,7 @@ import type { TimelineItem } from './timeline'
 import { Collapsible, StepView } from './toolStep'
 import { planTurnCollapse } from './turnCollapse'
 import type {
+  Ask,
   DateCategory,
   Message,
   Project,
@@ -144,6 +146,7 @@ export function App() {
   )
   const [sendingBy, setSendingBy] = useState<Record<string, boolean>>({})
   const [retryingBy, setRetryingBy] = useState<Record<string, boolean>>({})
+  const [answeringBy, setAnsweringBy] = useState<Record<string, boolean>>({})
   const composerRef = useRef<HTMLTextAreaElement>(null)
 
   // Files attached to the new-task message and to per-task replies, held as File
@@ -501,7 +504,7 @@ export function App() {
         `${current.messages.length} msgs`,
       )
     : {
-        items: [] as TimelineItem<Message, TaskEvent>[],
+        items: [] as TimelineItem<Message, TaskEvent, Ask>[],
         queuedIndices: new Set<number>(),
       }
 
@@ -1048,6 +1051,36 @@ export function App() {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setRetryingBy((prev) => ({ ...prev, [id]: false }))
+    }
+  }
+
+  // Answer an ask (a choice option, confirm yes/no, or free text). The server
+  // stamps the answer and un-wedges — or schedules the delivery for a future
+  // option `at` — then re-drives the session; here we just post and refresh.
+  // Per-task in-flight disabling mirrors retryTask.
+  async function answerAsk(
+    askId: string,
+    body: { optionId?: string; text?: string },
+  ) {
+    if (!current) return
+    const id = current.id
+    const proj = current.projectSlug
+    if (answeringBy[id]) return
+    setAnsweringBy((prev) => ({ ...prev, [id]: true }))
+    setError(null)
+    try {
+      const r = await fetch(`/api/${proj}/tasks/${id}/asks/${askId}/answer`, {
+        method: 'POST',
+        headers: uiHeaders(),
+        body: JSON.stringify(body),
+      })
+      const resBody = await r.json()
+      if (!r.ok) throw new Error(resBody.error ?? r.statusText)
+      setTasks((await loadShownTasks(shown, view === 'archived')).tasks)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setAnsweringBy((prev) => ({ ...prev, [id]: false }))
     }
   }
 
@@ -1830,6 +1863,17 @@ export function App() {
                       event={item.event}
                       slug={current.projectSlug}
                       linkTask={resolveTaskLink}
+                    />
+                  )
+                }
+                if (item.kind === 'ask') {
+                  return (
+                    <AskCard
+                      key={`ask-${item.ask.id}`}
+                      ask={item.ask}
+                      linkTask={resolveTaskLink}
+                      disabled={answeringBy[current.id] ?? false}
+                      onAnswer={(body) => void answerAsk(item.ask.id, body)}
                     />
                   )
                 }

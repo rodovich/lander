@@ -113,6 +113,40 @@ export type TaskEvent = {
   createdAt: string
 }
 
+// One option in a choice ask. `at` schedules the answer's delivery for that time
+// (e.g. "retry when the limit resets"); `value` + `editable` prefill a text the
+// user can amend before answering (e.g. a permission rule).
+export type AskOption = {
+  id: string
+  label: string
+  detail?: string
+  style?: 'primary' | 'danger'
+  at?: string
+  value?: string
+  editable?: boolean
+}
+
+export type AskForm =
+  | { type: 'choice'; options: AskOption[] }
+  | { type: 'confirm'; confirmLabel?: string; denyLabel?: string }
+  | { type: 'text'; placeholder?: string; multiline?: boolean }
+
+// A stored question interleaved with messages in the conversation timeline (like
+// a TaskEvent). A task-blocking ask is what a wedged task is waiting on: the
+// reason is the prompt, the buttons are the options. Mirrors the server's Ask.
+export type Ask = {
+  id: string
+  createdAt: string
+  prompt: string
+  form: AskForm
+  blocking: 'ride' | 'task' | 'none'
+  state: 'open' | 'answered' | 'withdrawn'
+  answer?: { optionId?: string; text?: string; at: string }
+  // Marks the platform usage-limit/error retry ask; the UI answers it through
+  // the same endpoint, and the server routes it through retry recovery.
+  origin?: 'retry'
+}
+
 export type Task = {
   // The task's own short id (a nanoid; legacy tasks carry the uuid they were
   // keyed by). Distinct from the provider session that backs its turns, which
@@ -152,6 +186,9 @@ export type Task = {
   }[]
   messages: Message[]
   events?: TaskEvent[]
+  // Questions raised on this task, interleaved with messages/events by createdAt.
+  // A task-blocking ask wedges the task until it's answered. Absent when none.
+  asks?: Ask[]
   // Present only when the task wedged on an assistant error (not the agent's own
   // wedge): drives the retry button below the conversation. `committed` is
   // whether the failed turn's prompt reached the session — true means a retry

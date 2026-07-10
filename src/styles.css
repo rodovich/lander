@@ -2046,6 +2046,79 @@ body {
   cursor: default;
 }
 
+/* A stored question in the conversation timeline. An open task-blocking ask is
+   what a wedged task waits on: it carries the wedged color and scrolls with the
+   messages as one of them. Inset 28px to match messages/composer. */
+.ask-card {
+  padding: 12px 28px;
+  border-left: 3px solid var(--wedged);
+}
+
+.ask-answered,
+.ask-withdrawn {
+  /* A resolved ask is history: no accent bar, and it recedes. */
+  border-left-color: transparent;
+  opacity: 0.6;
+}
+
+.ask-prompt {
+  margin-bottom: 8px;
+}
+
+.ask-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ask-editable,
+.ask-text-form {
+  display: flex;
+  gap: 6px;
+  flex: 1 1 100%;
+}
+
+.ask-input {
+  font: inherit;
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.ask-option {
+  font: inherit;
+  font-weight: 600;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-tinted);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.ask-option-primary {
+  border-color: color-mix(in srgb, var(--riding) 40%, var(--border));
+  color: var(--riding);
+}
+
+.ask-option-danger {
+  border-color: color-mix(in srgb, var(--wedged) 45%, var(--border));
+  color: var(--wedged);
+}
+
+.ask-option:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ask-record {
+  font-size: 13px;
+  color: var(--muted);
+}
+
 /* The drag handle straddling the boundary above a resizable panel. Negative
    margins let it overlay the 1px divider and a few pixels either side as a grab
    target without adding any net height to the flex column. A purple bar lights

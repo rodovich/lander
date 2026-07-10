@@ -10,6 +10,7 @@ type M = {
   queued?: boolean
 }
 type E = { kind: string; createdAt: string }
+type A = { id: string; createdAt: string }
 
 const u = (id: string, createdAt: string): M => ({ role: 'user', createdAt, id })
 // A still-queued follow-up: the agent hasn't read it; the server flags it.
@@ -25,23 +26,26 @@ const a = (id: string, createdAt: string): M => ({
   id,
 })
 const ev = (kind: string, createdAt: string): E => ({ kind, createdAt })
+const ask = (id: string, createdAt: string): A => ({ id, createdAt })
 
 // Pick clearly-ordered ISO timestamps without hand-writing the date each time.
 const T = (clock: string) => `2026-06-26T${clock}.000Z`
 
 // Render each timeline item as a short tag so order assertions stay readable:
 // `user:q1` / `asst:r1` for messages, `event:wedged` for lifecycle events.
-const seq = (items: ReturnType<typeof buildTimeline<M, E>>['items']) =>
+const seq = (items: ReturnType<typeof buildTimeline<M, E, A>>['items']) =>
   items.map((it) =>
     it.kind === 'event'
       ? `event:${it.event.kind}`
-      : `${it.message.role === 'assistant' ? 'asst' : 'user'}:${it.message.id}`,
+      : it.kind === 'ask'
+        ? `ask:${it.ask.id}`
+        : `${it.message.role === 'assistant' ? 'asst' : 'user'}:${it.message.id}`,
   )
 
 const build = (
-  task: { messages: M[]; events?: E[] },
+  task: { messages: M[]; events?: E[]; asks?: A[] },
   now = T('23:59:59'),
-) => buildTimeline<M, E>(task, now)
+) => buildTimeline<M, E, A>(task, now)
 
 describe('buildTimeline turn grouping', () => {
   it('keeps a simple alternating conversation in message order', () => {
@@ -117,6 +121,36 @@ describe('buildTimeline event splicing', () => {
       'user:p1',
       'asst:r1',
       'event:landed',
+    ])
+  })
+})
+
+describe('buildTimeline ask interleaving', () => {
+  it('splices asks by createdAt alongside events and messages', () => {
+    const messages = [u('p1', T('10:00:00')), a('r1', T('10:00:05'))]
+    const events = [ev('wedged', T('10:00:10'))]
+    // An open task-blocking ask is the newest thing; it trails the reply and the
+    // wedged event that accompanies it, interleaved by timestamp.
+    const asks = [ask('k1', T('10:00:11'))]
+    const { items } = build({ messages, events, asks })
+    expect(seq(items)).toEqual(['user:p1', 'asst:r1', 'event:wedged', 'ask:k1'])
+  })
+
+  it('orders an earlier ask ahead of a later message', () => {
+    const messages = [
+      u('p1', T('10:00:00')),
+      a('r1', T('10:00:05')),
+      u('p2', T('10:02:00')),
+      a('r2', T('10:02:05')),
+    ]
+    const asks = [ask('k1', T('10:01:00'))]
+    const { items } = build({ messages, asks })
+    expect(seq(items)).toEqual([
+      'user:p1',
+      'asst:r1',
+      'ask:k1',
+      'user:p2',
+      'asst:r2',
     ])
   })
 })
