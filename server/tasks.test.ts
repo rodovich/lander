@@ -253,12 +253,28 @@ describe('recordArtifactOnMessage', () => {
     expect(task.messages[0].artifacts).toBeUndefined()
   })
 
-  it('appends multiple refs to the same generating message', () => {
+  it('appends one ref per distinct name to the same generating message', () => {
     const pending = msg({ text: 'live', pending: true })
     const task = { messages: [pending] }
     recordArtifactOnMessage(task, artifact('a'))
     recordArtifactOnMessage(task, artifact('b'))
     expect(pending.artifacts?.map((r) => r.name)).toEqual(['a', 'b'])
+  })
+
+  it('updates in place when the same name republishes onto one message', () => {
+    const pending = msg({ text: 'live', pending: true })
+    const task = { messages: [pending] }
+    recordArtifactOnMessage(task, artifact('out.txt'))
+    const v2 = {
+      ...artifact('out.txt'),
+      id: 'blob-v2',
+      size: 99,
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    }
+    recordArtifactOnMessage(task, v2)
+    // One chip for the name, carrying the latest blob — not two.
+    expect(pending.artifacts).toHaveLength(1)
+    expect(pending.artifacts?.[0]).toEqual(v2)
   })
 
   it('is a no-op (slot-only) when the task has no assistant message yet', () => {

@@ -368,6 +368,10 @@ describe('artifacts', () => {
     expect(raw.artifacts[0].id).not.toBe(firstBlob)
     expect(raw.artifacts[0].createdAt).toBe(first.artifacts[0].createdAt)
     expect(raw.artifacts[0].size).toBe(3)
+    // The generating message keeps a single ref for the name (updated in place),
+    // not a second stale chip from the republish.
+    expect(raw.messages[1].artifacts).toHaveLength(1)
+    expect(raw.messages[1].artifacts[0].id).toBe(raw.artifacts[0].id)
 
     // The superseded blob (+ sidecar) is gone: only the current one remains.
     const entries = await readdir(attachmentsDir())

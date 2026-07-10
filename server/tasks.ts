@@ -442,10 +442,11 @@ export function ensurePending(task: { messages: Message[] }): Message {
 // renders the output row under that message. Prefers the in-flight (pending)
 // assistant message when the task is mid-turn (the common publish-during-a-run
 // case), else the last assistant message; if the task has no assistant message
-// yet, this is a no-op and the task's slot registry alone holds the artifact. On
-// republish it appends a fresh ref to the current generating message — an earlier
-// message's ref may then point at a superseded blob, which is fine: downloads
-// resolve by slot name and always serve the latest.
+// yet, this is a no-op and the task's slot registry alone holds the artifact.
+// Republishing a name onto the same message updates that message's ref in place —
+// one chip per output name, always the latest blob — rather than stacking a
+// second, now-stale chip. A ref left on an *earlier* message keeps its old size
+// but stays correct to click: downloads resolve by slot name and serve the latest.
 export function recordArtifactOnMessage(
   task: { messages: Message[] },
   artifact: Artifact,
@@ -458,7 +459,10 @@ export function recordArtifactOnMessage(
         break
       }
   if (!msg) return
-  ;(msg.artifacts ??= []).push(artifact)
+  const refs = (msg.artifacts ??= [])
+  const existing = refs.findIndex((r) => r.name === artifact.name)
+  if (existing >= 0) refs[existing] = artifact
+  else refs.push(artifact)
 }
 
 // Derive the name to pass to `claude --worktree` from the absolute worktree root
