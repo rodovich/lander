@@ -210,6 +210,28 @@ export type Project = {
 export type UsageWindow = { utilization: number; resetsAt: string | null }
 export type Usage = { session: UsageWindow | null; weekly: UsageWindow | null }
 
+// A presentation-agnostic telemetry datum a flow publishes for one of the two
+// readouts (the per-flow status panel below the new-task form; the per-task
+// composer footer). The server caches and serves these opaquely and the UI renders
+// them blind — the producing flow owns what they mean. Three shapes:
+//   text  — a labeled string ("Model: claude-sonnet-5")
+//   count — a labeled number, shown abbreviated ("Tokens: 12k")
+//   meter — a bar: value/max as a percentage, an optional accent band ('warn'), and
+//           an optional preformatted note (e.g. "resets 3:45 PM"). The producer, not
+//           the renderer, decides the band and formats the note.
+export type TelemetryItem =
+  | { id: string; label: string; type: 'text'; value: string }
+  | { id: string; label: string; type: 'count'; value: number; unit?: string }
+  | {
+      id: string
+      label: string
+      type: 'meter'
+      value: number
+      max: number
+      level?: 'ok' | 'warn'
+      note?: string
+    }
+
 // The list's time window: tasks updated today, this week (from Sunday), before
 // this week ('older', same Sunday cutoff), or with no bound. 'today'/'week'/
 // 'older' also surface in the dropdown title.

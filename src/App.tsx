@@ -7,6 +7,8 @@ import {
   DATE_CATEGORY_LABELS,
   dateCategory,
   formatCost,
+  formatResetTime,
+  formatResetWhen,
   formatTaskTime,
   formatTimestamp,
   formatTokens,
@@ -39,6 +41,7 @@ import { buildTimeline } from './timeline'
 import type { TimelineItem } from './timeline'
 import { Collapsible, StepView } from './toolStep'
 import { planTurnCollapse } from './turnCollapse'
+import { TelemetryPanel } from './telemetry'
 import type {
   DateCategory,
   Message,
@@ -47,11 +50,57 @@ import type {
   TaskEvent,
   TaskView,
   TaskWithProject,
+  TelemetryItem,
   TimeFilter,
   ToolStatus,
   Usage,
+  UsageWindow,
 } from './types'
-import { UsageSummary } from './usage'
+
+// A1-only bridge: derive the two account-usage meters from the polled snapshot on
+// the client, so the generic panel can render them. Phase A2 moves this mapping
+// into the claude adapter (the flow owns it) and deletes this helper.
+function usageMeter(
+  id: string,
+  label: string,
+  window: UsageWindow,
+  reset: string,
+): TelemetryItem {
+  const pct = Math.max(0, Math.min(100, Math.round(window.utilization)))
+  return {
+    id,
+    label,
+    type: 'meter',
+    value: window.utilization,
+    max: 100,
+    level: pct >= 90 ? 'warn' : 'ok',
+    note: reset ? `resets ${reset}` : undefined,
+  }
+}
+
+function usageMeters(usage: Usage | null): TelemetryItem[] {
+  if (!usage) return []
+  const items: TelemetryItem[] = []
+  if (usage.session)
+    items.push(
+      usageMeter(
+        'session',
+        'Session',
+        usage.session,
+        usage.session.resetsAt ? formatResetTime(usage.session.resetsAt) : '',
+      ),
+    )
+  if (usage.weekly)
+    items.push(
+      usageMeter(
+        'weekly',
+        'Weekly',
+        usage.weekly,
+        usage.weekly.resetsAt ? formatResetWhen(usage.weekly.resetsAt) : '',
+      ),
+    )
+  return items
+}
 
 export function App() {
   // Opt-in profiling (see perf.ts): count every App render. The whole
@@ -1733,7 +1782,13 @@ export function App() {
           </div>
         </form>
 
-        <UsageSummary usage={usage} agent={current?.agent} />
+        {current?.agent === 'codex' ? (
+          <div className="telemetry-panel telemetry-unsupported">
+            Codex subscription usage unsupported
+          </div>
+        ) : (
+          <TelemetryPanel items={usageMeters(usage)} />
+        )}
       </div>
 
       <div className="detail">

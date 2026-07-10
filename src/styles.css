@@ -963,7 +963,7 @@ body {
   font-size: 11px;
 }
 
-.usage-summary {
+.telemetry-panel {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -972,17 +972,17 @@ body {
   background: var(--bg-tinted);
 }
 
-.usage-unsupported {
+.telemetry-unsupported {
   font-size: 12px;
   color: var(--muted);
 }
 
-.usage-windows {
+.telemetry-items {
   display: flex;
   gap: 16px;
 }
 
-.usage-window {
+.meter {
   flex: 1;
   min-width: 0;
   display: flex;
@@ -990,41 +990,41 @@ body {
   gap: 4px;
 }
 
-.usage-window-head {
+.meter-head {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
   font-size: 12px;
 }
 
-.usage-label {
+.meter-label {
   color: var(--fg);
 }
 
-.usage-pct {
+.meter-value {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 
-.usage-bar {
+.meter-track {
   height: 5px;
   border-radius: 3px;
   background: var(--selected);
   overflow: hidden;
 }
 
-.usage-bar-fill {
+.meter-fill {
   height: 100%;
   border-radius: 3px;
   background: var(--landed);
   transition: width 0.3s ease;
 }
 
-.usage-bar-fill.high {
+.meter-fill.warn {
   background: var(--wedged);
 }
 
-.usage-reset {
+.meter-note {
   font-size: 11px;
   color: var(--muted);
 }
