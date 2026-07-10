@@ -40,6 +40,7 @@ Each project gets a URL slug from its path (e.g. `/Users/me/code/app` → `users
 - `POST /api/:project/tasks` — create a task, store its chosen agent, and queue the first turn on the daemon.
 - `POST /api/:project/tasks/:id/messages` — append a user message; the daemon resumes the task's stored provider session. Both this and `POST .../tasks` accept `attachments: id[]` to associate uploaded files with the message (see [Attachments](#attachments)).
 - `POST /api/:project/attachments` — upload one or more files (multipart) to the project's durable blob store, returning their refs (`{id, name, mime, size}`). `GET /api/:project/attachments/:id` streams a stored file's bytes. Both require an identified caller (the browser's UI token or a task's `LANDER_TOKEN`).
+- `POST /api/:project/tasks/:id/artifacts` — publish a task's named output file (multipart `file` + optional `name`), latest version only; `GET /api/:project/tasks/:id/artifacts` lists the slots and `GET .../artifacts/:name` streams the current blob. Only the task itself (or the human) may publish; any identified caller may read. See [Artifacts](#artifacts).
 - `POST /api/:project/tasks/:id/allow` — grant a permission rule the agent was blocked on. `{ rule, scope }`: for Claude, `scope: "task"` appends `rule` to the task's `allow` list (fed to `--allowedTools` on future turns) and `scope: "project"` writes it to the project's `.claude/settings.local.json`. Codex task rules are saved for parity but do not affect Codex runs yet, and project grants are not supported for Codex tasks. Human-only (see [Authenticated permission grants](#authenticated-permission-grants)).
 - `POST /api/:project/tasks/:id/archive` — `{ archived }` (default `true`) moves the task's JSON between `tasks/` and `archived/`. Archiving takes a task out of the list (and out of the scheduler's and recovery's view, which only scan `tasks/`); `{ archived: false }` restores it. A `riding` task can't be archived — it has a live run the reducer must keep reattaching to — so the call `409`s until it comes to rest.
 
@@ -76,6 +77,7 @@ A task's agent can call back into lander to manage itself. When the daemon launc
 | `lander send <id> <message>` | Message another task in this project — now, or deferred with `--date`/`--time`/`--await`. |
 | `lander archive <id> [--restore]` | Archive a task (or `--restore` it) — move it out of the list into `archived/`, or back. |
 | `lander file ls` / `lander file cat <id>` | List **this** task's attachments (id/name/mime/size) or stream one's raw bytes to stdout — see [Attachments](#attachments). |
+| `lander artifact put <path> [--name <n>] [--mime <m>]` / `lander artifact ls` / `lander artifact cat <name>` | Publish **this** task's named output file (name defaults to the basename), list its output slots, or stream a slot's current blob to stdout — see [Artifacts](#artifacts). |
 
 `land`, `wedge`, and `rest` act on the current task via `LANDER_TASK`; `launch`, `list`, `view`, `send`, and `archive` only need `LANDER_API`/`LANDER_PROJECT`. `list`, `view`, `send`, and `archive` are scoped to the caller's own project: `list` accepts `--status <s>` to filter, `--since`/`--until <when>` to bound the range by createdAt, `--text <terms>` to search title and message text, and `--json` for structured metadata. In all cases `list` returns metadata only, never task conversations. `view` takes a full id or unambiguous prefix and accepts `--json` for the full task. `send` resolves a prefix, reads its message from the argument or stdin (`-`), and leads the delivered message with a bare `From <sender id>:` backlink to the sending task.
 
@@ -90,6 +92,12 @@ With no trigger flag, `send` delivers immediately, queued behind any in-flight t
 Messages can carry file/image attachments, propagated to both Claude and Codex agents. From the web UI, a **paperclip** below the new-task and reply composers attaches files; from the CLI, `lander launch` and `lander send` take `--files <paths…>` (variadic — put it last, after the message, since it consumes following args up to the next `--flag`). Attachments are uploaded to a durable per-project blob store (`data/<project>/attachments/`, an `<id>` blob plus an `<id>.json` metadata sidecar) and carried on the message as refs (`{id, name, mime, size}`) — never inlined into the prompt.
 
 At turn time the daemon lazily materializes a task's attachments into a per-task dir on its host (`LANDER_FILES_DIR`, cached across turns), writes a `manifest.json`, and appends a small **manifest block** (ids/names/sizes, never the bytes) to the outgoing prompt. Images additionally reach the model's **vision**: Codex via `--image`, Claude via `Read` on the local path (the daemon grants `--add-dir` for the store dir so Read can reach it). To read any attached file's bytes an agent runs `lander file cat <id>` (a pure local read of `$LANDER_FILES_DIR/<id>` — no server call, no sandbox widening), and `lander file ls` lists the current task's attachments with sizes.
+
+#### Artifacts
+
+Where attachments are message **inputs**, artifacts are a task's **outputs**: named files a task publishes as it works. An artifact is a named slot on the task holding only its latest version — publishing to the same name mints a fresh blob, repoints the slot, and deletes the superseded blob (only after the task write commits, so a crash strands an orphan blob rather than a dangling ref). The blobs reuse the same durable per-project store as attachments (`data/<project>/attachments/`), with a separate 100 MiB cap. Names are addressable (route segment + download filename) so they're validated strictly (`^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$` — no leading dot, no slash).
+
+An agent publishes with `lander artifact put <path> [--name <n>] [--mime <m>]` (name defaults to the file's basename), lists its slots with `lander artifact ls`, and reads a slot's current bytes with `lander artifact cat <name>` — all scoped to the current task, which may publish only its own outputs. Each publish records a ref on the assistant message that generated it (the in-flight message when mid-turn, else the last assistant message), and the web UI renders those as **download rows at the bottom of that message**. Downloads resolve by slot name and always serve the latest version, so an older message's ref pointing at a superseded blob is harmless.
 
 #### Authenticated permission grants
 
@@ -130,6 +138,7 @@ The server only **resolves** the script's path (`GET /api/:project/flows/:name`,
 | `await lander.list({ status })` | the project's tasks as an array |
 | `lander.land()` / `lander.wedge()` / `await lander.rest({ date, time, await })` | act on the current task |
 | `await lander.rest({ clear: true })` | drop the current task's pending wakeup triggers; returns whether any were armed |
+| `await lander.artifacts.put(pathOrBytes, { name, mime })` / `.list()` / `.cat(name)` | publish the current task's named output (returns the ref), list its slots, or fetch a slot's current bytes |
 | `lander.assist(prompt, …text)` | a one-shot `claude` or `codex` run, returning its trimmed reply |
 | `lander.shell(command, …args)` | run `command` under `sh` with args as `$1`, `$2`, …; returns trimmed stdout |
 | `await lander.flow(name, inputs)` | run another flow (flows nest) |
