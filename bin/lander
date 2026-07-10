@@ -155,6 +155,125 @@ async function fileCommand(args) {
   die('usage: lander file (ls | cat <id>)')
 }
 
+// --- artifacts -------------------------------------------------------------
+// `lander artifact` publishes and reads the current task's named output slots —
+// the outputs sibling to input attachments. Each slot holds only its latest
+// version: republishing a name supersedes the old blob. All three subcommands act
+// on LANDER_TASK, authenticated as the calling task (a task publishes only its
+// own outputs), reusing the fetch/auth plumbing of the attachment upload above.
+
+// Publish a local file (path) or in-memory bytes as an artifact of the current
+// task, returning the resulting ref. The slot name defaults to the file's
+// basename (or `file` for bytes) unless `name` overrides it; the mime is guessed
+// from the extension for a path, else octet-stream. Shared by `lander artifact
+// put` and the flow API's artifacts.put.
+async function putArtifact(pathOrBytes, { name, mime } = {}) {
+  if (!API) die('not inside a lander task (LANDER_API unset)')
+  if (!TASK) die('no current task (LANDER_TASK unset)')
+  let bytes
+  let filename
+  if (typeof pathOrBytes === 'string') {
+    try {
+      bytes = readFileSync(pathOrBytes)
+    } catch {
+      die(`cannot read file: ${pathOrBytes}`)
+    }
+    filename = name || basename(pathOrBytes)
+    mime ||= guessMime(pathOrBytes)
+  } else {
+    bytes = pathOrBytes
+    filename = name || 'file'
+  }
+  const fd = new FormData()
+  fd.append(
+    'file',
+    new Blob([bytes], { type: mime || 'application/octet-stream' }),
+    filename,
+  )
+  // Send an explicit name field only when overriding; otherwise the server takes
+  // the (sanitized) upload filename as the slot name.
+  if (name) fd.append('name', name)
+  const auth = {}
+  if (TASK) auth['x-lander-task'] = TASK
+  if (PROJECT) auth['x-lander-project'] = PROJECT
+  if (TOKEN) auth['x-lander-token'] = TOKEN
+  const res = await fetch(`${API}/api/${PROJECT}/tasks/${TASK}/artifacts`, {
+    method: 'POST',
+    headers: auth,
+    body: fd,
+  })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) die(body.error || `${res.status} ${res.statusText}`)
+  return body.artifact
+}
+
+// The current task's artifact slots (latest version of each), via the calling
+// task's credentials.
+async function listArtifacts() {
+  if (!TASK) die('no current task (LANDER_TASK unset)')
+  const body = await call(PROJECT, `/tasks/${TASK}/artifacts`, { method: 'GET' })
+  return body.artifacts ?? []
+}
+
+// Fetch an artifact's current blob by slot name and return its bytes. Shared by
+// `lander artifact cat` (which streams them to stdout) and the flow API.
+async function fetchArtifact(name) {
+  if (!API) die('not inside a lander task (LANDER_API unset)')
+  if (!TASK) die('no current task (LANDER_TASK unset)')
+  if (!name) die('an artifact name is required')
+  const auth = {}
+  if (TASK) auth['x-lander-task'] = TASK
+  if (PROJECT) auth['x-lander-project'] = PROJECT
+  if (TOKEN) auth['x-lander-token'] = TOKEN
+  const res = await fetch(
+    `${API}/api/${PROJECT}/tasks/${TASK}/artifacts/${encodeURIComponent(name)}`,
+    { headers: auth },
+  )
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    die(body.error || `${res.status} ${res.statusText}`)
+  }
+  return Buffer.from(await res.arrayBuffer())
+}
+
+// `lander artifact put <path> [--name <n>] [--mime <m>]` — publish a file.
+// `lander artifact ls` — list this task's slots (size, mime, updatedAt, name).
+// `lander artifact cat <name>` — stream a slot's current blob to stdout.
+async function artifactCommand(args) {
+  const [sub, ...rest] = args
+  if (sub === 'put') {
+    const o = {}
+    const pos = []
+    for (let i = 0; i < rest.length; i++) {
+      const a = rest[i]
+      if (a === '--name') o.name = rest[++i]
+      else if (a === '--mime') o.mime = rest[++i]
+      else pos.push(a)
+    }
+    const p = pos.shift()
+    if (!p) die('usage: lander artifact put <path> [--name <n>] [--mime <m>]')
+    const artifact = await putArtifact(p, { name: o.name, mime: o.mime })
+    console.log(`${artifact.name}  ${artifact.id}  ${artifact.size}`)
+    return
+  }
+  if (sub === 'ls') {
+    const artifacts = await listArtifacts()
+    if (!artifacts.length) return void console.log('(no artifacts)')
+    for (const a of artifacts)
+      console.log(
+        `${String(a.size).padStart(9)}  ${a.mime}  ${a.updatedAt}  ${a.name}`,
+      )
+    return
+  }
+  if (sub === 'cat') {
+    const name = rest[0]
+    if (!name) die('usage: lander artifact cat <name>')
+    process.stdout.write(await fetchArtifact(name))
+    return
+  }
+  die('usage: lander artifact (put <path> [--name <n>] [--mime <m>] | ls | cat <name>)')
+}
+
 // --date (a date/time the server parses) and --time (minutes from now) both set
 // a wakeup time; they're mutually exclusive, and --time must be a positive
 // number. Shared by `launch` (where a wakeup is optional), `rest`, and `send`.
@@ -728,6 +847,14 @@ function makeLander(inputs) {
         }),
       })
     },
+    // The current task's named output slots: publish a file/bytes, list the
+    // slots, or fetch a slot's current blob as bytes — the flow-side mirror of
+    // the `lander artifact` CLI, scoped to LANDER_TASK.
+    artifacts: {
+      put: (pathOrBytes, opts = {}) => putArtifact(pathOrBytes, opts),
+      list: () => listArtifacts(),
+      cat: (name) => fetchArtifact(name),
+    },
     assist: (prompt, ...args) => runAssist(prompt, args).trim(),
     shell: (command, ...args) => runShell(command, args).trim(),
     flow: (name, inputs = {}) => runFlowByName(name, inputs),
@@ -893,6 +1020,7 @@ const run = {
   archive: () => archiveTask(rest),
   assist: () => assist(rest),
   file: () => fileCommand(rest),
+  artifact: () => artifactCommand(rest),
   flow: () => runFlow(rest),
   'bash-guard': () => bashGuard(),
   'record-cwd': () => recordCwd(),
@@ -906,6 +1034,7 @@ if (!run)
       'relaunch <message> ' +
       '[--date|--time|--await|--interval|--repeat-count|--repeat-until|--clear] | ' +
       'launch <message> | list | view <id> [--tools] | send <id> <message> | ' +
-      'archive <id...> [--restore] | assist <prompt> | flow <name>',
+      'archive <id...> [--restore] | assist <prompt> | ' +
+      'artifact (put <path>|ls|cat <name>) | flow <name>',
   )
 run().catch((e) => die(e.message))
