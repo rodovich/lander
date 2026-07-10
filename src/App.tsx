@@ -15,6 +15,7 @@ import { buildTimeline } from './timeline'
 import type { TimelineItem } from './timeline'
 import { planTurnCollapse } from './turnCollapse'
 import { tick, timed } from './perf'
+import { dataTransferHasFiles } from './fileDrop'
 
 // Request headers that mark a call as coming from the human's browser. The
 // server gates permission-granting endpoints (creating a task with edit/commit
@@ -48,10 +49,59 @@ async function uploadAttachments(slug: string, files: File[]): Promise<string[]>
   return (body.attachments ?? []).map((a: { id: string }) => a.id)
 }
 
-// The paperclip control shown below a composer: opens the file browser, then
-// shows the picked filename (single) or "N files" with an ✕ to clear. Holds its
-// own hidden <input type=file>; the parent owns the File[] state and uploads on
-// submit. Disabled while its composer is busy.
+// Make an element a file-only drop target without swallowing ordinary dragged
+// text. The depth counter keeps the highlight steady while a drag crosses child
+// elements (the paperclip's SVG, for example), which fire their own enter/leave
+// events. Dropped files feed the same File[] state as the native file picker.
+function useFileDrop<T extends HTMLElement>(
+  onAdd: (files: File[]) => void,
+  disabled = false,
+) {
+  const [active, setActive] = useState(false)
+  const depth = useRef(0)
+
+  useEffect(() => {
+    if (disabled) {
+      depth.current = 0
+      setActive(false)
+    }
+  }, [disabled])
+
+  return {
+    active,
+    handlers: {
+      onDragEnter(e: React.DragEvent<T>) {
+        if (disabled || !dataTransferHasFiles(e.dataTransfer)) return
+        e.preventDefault()
+        depth.current += 1
+        setActive(true)
+      },
+      onDragOver(e: React.DragEvent<T>) {
+        if (disabled || !dataTransferHasFiles(e.dataTransfer)) return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'copy'
+      },
+      onDragLeave(e: React.DragEvent<T>) {
+        if (disabled || depth.current === 0) return
+        e.preventDefault()
+        depth.current -= 1
+        if (depth.current === 0) setActive(false)
+      },
+      onDrop(e: React.DragEvent<T>) {
+        const files = Array.from(e.dataTransfer.files)
+        if (disabled || files.length === 0) return
+        e.preventDefault()
+        depth.current = 0
+        setActive(false)
+        onAdd(files)
+      },
+    },
+  }
+}
+
+// The paperclip control shown below a composer opens the file browser, then
+// shows the picked filename (single) or "N files" with an ✕ to clear. Its parent
+// composer is the drop target; this holds only the hidden <input type=file>.
 function AttachButton({
   files,
   onAdd,
@@ -69,7 +119,7 @@ function AttachButton({
       <button
         type="button"
         className="attach-btn"
-        title="Attach files"
+        title="Attach files or drop them here"
         aria-label="Attach files"
         disabled={disabled}
         onClick={() => inputRef.current?.click()}
@@ -1866,6 +1916,23 @@ export function App() {
   const [newFiles, setNewFiles] = useState<File[]>([])
   const [replyFiles, setReplyFiles] = useState<Record<string, File[]>>({})
 
+  // A browser treats an unhandled file drop as navigation to that local file.
+  // Cancel that default at the window capture phase as a safety net: the target
+  // composer's React handler still receives the event and attaches the files,
+  // while a miss or a disabled composer simply leaves the current page intact.
+  useEffect(() => {
+    const preventFileNavigation = (e: DragEvent) => {
+      if (e.dataTransfer && dataTransferHasFiles(e.dataTransfer))
+        e.preventDefault()
+    }
+    window.addEventListener('dragover', preventFileNavigation, true)
+    window.addEventListener('drop', preventFileNavigation, true)
+    return () => {
+      window.removeEventListener('dragover', preventFileNavigation, true)
+      window.removeEventListener('drop', preventFileNavigation, true)
+    }
+  }, [])
+
   // The tool chip whose grant popup is open, keyed "<messageIndex>:<stepIndex>".
   // Only one is open at a time; null means none.
   const [openTool, setOpenTool] = useState<string | null>(null)
@@ -2162,6 +2229,26 @@ export function App() {
       ? selectedTaskId
       : orderedTasks[0]?.id ?? null
   const current = tasks.find((t) => t.id === selected) ?? null
+
+  // Each whole composer panel is one drop target, including its textarea,
+  // paperclip, and surrounding action area. Keep the reply target bound to the
+  // task currently open so switching tasks cannot leak a dropped file into
+  // another task's draft.
+  const newMessageDrop = useFileDrop<HTMLFormElement>(
+    (picked) => setNewFiles((prev) => [...prev, ...picked]),
+    submitting,
+  )
+  const replyDrop = useFileDrop<HTMLDivElement>(
+    (picked) => {
+      if (!current) return
+      const id = current.id
+      setReplyFiles((prev) => ({
+        ...prev,
+        [id]: [...(prev[id] ?? []), ...picked],
+      }))
+    },
+    !current || !!current.archived || (sendingBy[current.id] ?? false),
+  )
 
   // The open task's latest completed update, and whether the viewer is actively
   // viewing it (open + tab active + scrolled to the bottom where new content
@@ -3363,9 +3450,10 @@ export function App() {
           label="Resize new task area"
         />
         <form
-          className="new-task"
+          className={`new-task${newMessageDrop.active ? ' file-drop-active' : ''}`}
           onSubmit={onSubmit}
           style={{ height: newTaskHeight }}
+          {...newMessageDrop.handlers}
         >
           <div className="new-task-head">
             <h2>New task</h2>
@@ -3862,7 +3950,11 @@ export function App() {
               reserveTop={200}
               label="Resize reply area"
             />
-            <div className="composer-bar" style={{ height: composerHeight }}>
+            <div
+              className={`composer-bar${replyDrop.active ? ' file-drop-active' : ''}`}
+              style={{ height: composerHeight }}
+              {...replyDrop.handlers}
+            >
               <textarea
                 ref={composerRef}
                 className="composer"

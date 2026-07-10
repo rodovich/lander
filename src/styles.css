@@ -819,6 +819,14 @@ body {
   box-shadow: inset 0 0 0 2px var(--riding);
 }
 
+/* Each whole composer panel is a drop target. Use the focus accent plus a light
+   tint so its full drop area stays obvious while crossing nested controls. */
+.new-task.file-drop-active,
+.composer-bar.file-drop-active {
+  box-shadow: inset 0 0 0 2px var(--riding);
+  background: rgba(102, 68, 238, 0.06);
+}
+
 .new-task button {
   font: inherit;
   font-weight: 600;
