@@ -285,7 +285,7 @@ function MessageArtifacts({
   return (
     <div className="message-artifacts">
       {artifacts.map((a) => (
-        <ArtifactRow key={a.name} artifact={a} taskId={taskId} slug={slug} />
+        <ArtifactRow key={a.id} artifact={a} taskId={taskId} slug={slug} />
       ))}
     </div>
   )
