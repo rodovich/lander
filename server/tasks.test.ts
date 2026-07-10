@@ -26,19 +26,22 @@ const msg = (over: Partial<Message>): Message => ({
 })
 
 describe('publicTask', () => {
-  it('strips token, runId and runCursor, preserving everything else', () => {
+  it('strips token, runId, runCursor and the retry stash, preserving everything else', () => {
     const out = publicTask({
       id: 's',
       title: 't',
       token: 'secret',
       runId: 'r1',
       runCursor: 42,
+      retry: { committed: true, prompts: ['x'] },
       allowEdits: true,
     })
     expect(out).toEqual({ id: 's', title: 't', allowEdits: true })
     expect('token' in out).toBe(false)
     expect('runId' in out).toBe(false)
     expect('runCursor' in out).toBe(false)
+    // retry is internal bookkeeping now that the retry ask carries the wire state.
+    expect('retry' in out).toBe(false)
   })
 
   it('does not choke when the stripped fields are absent', () => {

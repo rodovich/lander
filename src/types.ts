@@ -189,12 +189,6 @@ export type Task = {
   // Questions raised on this task, interleaved with messages/events by createdAt.
   // A task-blocking ask wedges the task until it's answered. Absent when none.
   asks?: Ask[]
-  // Present only when the task wedged on an assistant error (not the agent's own
-  // wedge): the server's retry bookkeeping. The UI no longer reads it directly —
-  // the wedge's retry ask (origin:'retry') is what renders and answers — but it's
-  // still served over the wire, so the field stays typed. See the server's
-  // Task.retry for the full rationale.
-  retry?: { committed: boolean; prompts: string[]; resetsAt?: string }
   // The working directory the previous turn ended in, recorded by the Stop hook
   // (see the server's Task.cwd). When it's a git worktree the agent entered, its
   // name shows beside the project in the detail header. Absent until the first

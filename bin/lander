@@ -577,6 +577,15 @@ async function viewTask(args) {
   if (task.scheduledFor) console.log(`scheduled: ${task.scheduledFor}`)
   console.log(`edits: ${task.allowEdits}`)
   const clip = (s) => (s.length > 600 ? `${s.slice(0, 600)}…` : s)
+  // Open asks first: what a wedged task is waiting on, so a sibling can answer
+  // it (or decide what to send). Prompt plus each choice option's id → label.
+  for (const ask of task.asks ?? []) {
+    if (ask.state !== 'open') continue
+    console.log(`\nasking: ${clip(ask.prompt)}`)
+    if (ask.form?.type === 'choice')
+      for (const o of ask.form.options) console.log(`  - ${o.id}: ${o.label}`)
+    else if (ask.form?.type === 'text') console.log('  (free-text answer)')
+  }
   for (const m of task.messages.slice(-6)) {
     const parts = []
     for (const s of m.steps ?? []) {

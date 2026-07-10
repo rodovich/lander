@@ -114,23 +114,27 @@ export type ScheduledMessage = {
   attachments?: Attachment[]
 }
 
-// Strip the secret `token` (and the server-internal run pointers) before sending
-// a task over HTTP, so the UI — and any task scraping the API — can't read
-// another task's token and impersonate it. A shallow copy: the messages/events
-// arrays are shared with the source, not deep-cloned.
+// Strip the secret `token` (and the server-internal run pointers / retry stash)
+// before sending a task over HTTP, so the UI — and any task scraping the API —
+// can't read another task's token and impersonate it. `retry` is internal
+// bookkeeping the wedge's retry ask supersedes on the wire, so it's stripped too.
+// A shallow copy: the messages/events arrays are shared with the source, not
+// deep-cloned.
 export function publicTask<T extends object>(
   task: T,
-): Omit<T, 'token' | 'runId' | 'runCursor' | 'queued'> {
+): Omit<T, 'token' | 'runId' | 'runCursor' | 'queued' | 'retry'> {
   const {
     token: _t,
     runId: _r,
     runCursor: _c,
+    retry: _retry,
     queued,
     ...rest
   } = task as T & {
     token?: unknown
     runId?: unknown
     runCursor?: unknown
+    retry?: unknown
     queued?: string[]
     messages?: Message[]
   }
@@ -155,7 +159,7 @@ export function publicTask<T extends object>(
       flagged.has(i) ? { ...m, queued: true } : m,
     )
   }
-  return rest as Omit<T, 'token' | 'runId' | 'runCursor' | 'queued'>
+  return rest as Omit<T, 'token' | 'runId' | 'runCursor' | 'queued' | 'retry'>
 }
 
 // The timestamp of a task's most recent *completed* update: the newest of its
