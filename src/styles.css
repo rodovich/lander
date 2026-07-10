@@ -1874,6 +1874,18 @@ body {
   word-break: break-word;
 }
 
+/* The untruncated tool input revealed above the chip's output/diff. Reads like
+   the result peek — mono, wrapped, newline-preserving — but a touch brighter
+   than the muted output, since it's the call the user is inspecting, not its
+   incidental stdout. Sits inside .collapsible-body, which supplies the indent. */
+.step-input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8em;
+  color: var(--fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* An error result reads red, matching its blocked chip. (Scoped class name, not
    a bare `error` — the global `.error` block sets a large padding that would
    otherwise bloat the chip and this peek.) */

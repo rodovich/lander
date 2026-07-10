@@ -302,6 +302,10 @@ type Step = {
   text?: string
   tool?: string
   input?: string
+  // tool_use: the untruncated, newline-preserving input, revealed under the chip's
+  // disclosure. Set by the server only when it says more than the one-line `input`
+  // (a multi-line or truncated input); absent for short inputs and older steps.
+  inputFull?: string
   // Pairs a tool_use step with its tool_result step.
   toolUseId?: string
   // text/tool_use: the id of the model inference that produced this block. A
@@ -973,7 +977,7 @@ function Collapsible({
 // option/shift-clicking toggles every such chip in the message at once. The chip
 // + popup share one ref so an outside click — anywhere but here — dismisses the
 // popup.
-function ToolStep({
+export function ToolStep({
   step,
   status,
   allowable,
@@ -1005,15 +1009,29 @@ function ToolStep({
   // trace as its revealable detail, pre-rendered by the caller. Absent otherwise.
   subSteps?: React.ReactNode
 }) {
+  // The untruncated input to reveal above the rest: the server's capture when it
+  // has one, else the chip's own input only when it's multi-line — a plain
+  // single-line input already shows in full on the chip, so we don't repeat it
+  // (older steps predate inputFull; a codex command is the multi-line case there).
+  const inputDetail =
+    step.inputFull ?? (step.input?.includes('\n') ? step.input : undefined)
+  const hasInput = !!inputDetail
   const hasDiff = !!step.edits && step.edits.length > 0
   // A subagent spawner reveals the nested trace; an edit reveals its diff;
   // everything else reveals its captured output (if any — a still-running call has
   // none yet). The trace subsumes the call's result text (it ends with the
   // subagent's final reply), and the diff wins over an Edit's noisy confirmation.
+  // The full input, when present, rides above whichever of these the chip has.
   const hasChildren = !!subSteps
   const hasResult = !hasDiff && !hasChildren && !!result?.text
-  const hasDetail = hasDiff || hasChildren || hasResult
-  const noun = hasDiff ? 'diff' : hasChildren ? 'activity' : 'output'
+  const hasDetail = hasInput || hasDiff || hasChildren || hasResult
+  const noun = hasDiff
+    ? 'diff'
+    : hasChildren
+      ? 'activity'
+      : hasResult
+        ? 'output'
+        : 'input'
   const ref = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
   // The popup is fixed-positioned (so the scrolling timeline can't clip it), so
@@ -1078,6 +1096,7 @@ function ToolStep({
           toggleLabel={`${detailOpen ? 'Hide' : 'Show'} ${noun}`}
           toggleTitle={`${detailOpen ? 'Hide' : 'Show'} ${noun} (⌥/⇧ for all)`}
         >
+          {hasInput && <div className="step-input">{inputDetail}</div>}
           {hasDiff && <DiffView edits={step.edits!} />}
           {hasChildren && <div className="steps sub-steps">{subSteps}</div>}
           {hasResult && (
@@ -3716,7 +3735,9 @@ export function App() {
                         const detailKeys = m.steps!
                           .map((s, j) =>
                             s.kind === 'tool_use' &&
-                            (s.edits?.length ||
+                            (s.inputFull ||
+                              s.input?.includes('\n') ||
+                              s.edits?.length ||
                               (s.toolUseId &&
                                 (resultById.get(s.toolUseId)?.text ||
                                   childrenByParent.has(s.toolUseId))))
