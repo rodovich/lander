@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { loadShownTasks, uiHeaders, uploadAttachments } from './api'
-import { AskCard } from './asks'
+import { AskForm } from './asks'
 import { AttachButton, MessageArtifacts, MessageAttachments } from './attachments'
 import { dataTransferHasFiles } from './fileDrop'
 import {
@@ -504,6 +504,20 @@ export function App() {
     : {
         items: [] as TimelineItem<Message, TaskEvent, Ask>[],
         queuedIndices: new Set<number>(),
+      }
+
+  // A wedged task's open ask renders as the footer of the assistant message it
+  // belongs to (the message is the question, the form is the answer), so find
+  // that message. There's at most one open ask at a time. When the task has no
+  // assistant message to anchor to, askAnchorIndex stays -1 and the form renders
+  // standalone below the conversation (see the fallback near the composer).
+  const openAsk = current?.asks?.find((a) => a.state === 'open')
+  let askAnchorIndex = -1
+  if (openAsk && current)
+    for (let i = current.messages.length - 1; i >= 0; i--)
+      if (current.messages[i].role === 'assistant') {
+        askAnchorIndex = i
+        break
       }
 
   // Roving-tabindex bookkeeping for the task list: the selected row is the one
@@ -1840,14 +1854,16 @@ export function App() {
                   )
                 }
                 if (item.kind === 'ask') {
+                  // An open ask's form renders under the assistant message it
+                  // belongs to (see the message footer below), and an answered
+                  // ask's outcome is carried by the delivered user message — so
+                  // the only ask that surfaces standalone here is a withdrawn
+                  // one, as a quiet marker that a question was dropped.
+                  if (item.ask.state !== 'withdrawn') return null
                   return (
-                    <AskCard
-                      key={`ask-${item.ask.id}`}
-                      ask={item.ask}
-                      linkTask={resolveTaskLink}
-                      disabled={answeringBy[current.id] ?? false}
-                      onAnswer={(body) => void answerAsk(item.ask.id, body)}
-                    />
+                    <div className="ask-withdrawn" key={`ask-${item.ask.id}`}>
+                      Question withdrawn
+                    </div>
                   )
                 }
                 const m = item.message
@@ -2142,6 +2158,16 @@ export function App() {
                       slug={current.projectSlug}
                     />
                   )}
+                  {/* The open ask's controls hang off the message that raised it:
+                      the message is the question, these are the answer. */}
+                  {openAsk && i === askAnchorIndex && (
+                    <AskForm
+                      ask={openAsk}
+                      linkTask={resolveTaskLink}
+                      disabled={answeringBy[current.id] ?? false}
+                      onAnswer={(body) => void answerAsk(openAsk.id, body)}
+                    />
+                  )}
                 </div>
                 )
               })}
@@ -2159,6 +2185,18 @@ export function App() {
                     </div>
                   </div>
                 )}
+              {/* Fallback: an open ask with no assistant message to anchor to
+                  (a task wedged before any reply) renders its form standalone. */}
+              {openAsk && askAnchorIndex === -1 && (
+                <div className="message message-assistant">
+                  <AskForm
+                    ask={openAsk}
+                    linkTask={resolveTaskLink}
+                    disabled={answeringBy[current.id] ?? false}
+                    onAnswer={(body) => void answerAsk(openAsk.id, body)}
+                  />
+                </div>
+              )}
             </div>
             <ResizeHandle
               height={composerHeight}

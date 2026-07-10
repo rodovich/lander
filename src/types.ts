@@ -137,7 +137,9 @@ export type AskForm =
 export type Ask = {
   id: string
   createdAt: string
-  prompt: string
+  // Optional markdown above the form. An agent wedge omits it (its own message is
+  // the question); platform asks (the retry ask) carry their own.
+  prompt?: string
   form: AskForm
   blocking: 'ride' | 'task' | 'none'
   state: 'open' | 'answered' | 'withdrawn'

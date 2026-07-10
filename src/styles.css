@@ -2020,19 +2020,11 @@ body {
   border-left-color: var(--wedged);
 }
 
-/* A stored question in the conversation timeline. An open task-blocking ask is
-   what a wedged task waits on: it carries the wedged color and scrolls with the
-   messages as one of them. Inset 28px to match messages/composer. */
-.ask-card {
-  padding: 12px 28px;
-  border-left: 3px solid var(--wedged);
-}
-
-.ask-answered,
-.ask-withdrawn {
-  /* A resolved ask is history: no accent bar, and it recedes. */
-  border-left-color: transparent;
-  opacity: 0.6;
+/* An open ask's controls, rendered as a footer of the assistant message that
+   raised it — the message is the question, so the form hangs directly off it
+   with a little top gap rather than in its own card. */
+.ask {
+  margin-top: 8px;
 }
 
 .ask-prompt {
@@ -2064,7 +2056,6 @@ body {
 
 .ask-option {
   font: inherit;
-  font-weight: 600;
   padding: 6px 12px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -2088,9 +2079,13 @@ body {
   cursor: default;
 }
 
-.ask-record {
+/* The quiet marker left when a question is withdrawn (superseded by a new
+   message). Recedes — it's history, not a prompt. */
+.ask-withdrawn {
+  padding: 4px 28px;
   font-size: 13px;
   color: var(--muted);
+  opacity: 0.7;
 }
 
 /* The drag handle straddling the boundary above a resizable panel. Negative

@@ -30,7 +30,10 @@ export type Ask = {
   // clock and the task's existing ask count.
   id: string
   createdAt: string
-  prompt: string // markdown
+  // Optional markdown shown above the form. An agent-raised wedge omits it — the
+  // agent's own message is the question, and the form renders under that message
+  // — so only platform asks (e.g. the retry ask) carry their own prompt.
+  prompt?: string
   form: AskForm
   // Task-blocking is the only behavior implemented; `ride`/`none` ship in the
   // vocabulary but the create endpoint rejects them (see conversation-model.md).
@@ -100,7 +103,7 @@ export function createAsk(
   task: AskTask,
   opts: {
     id: string
-    prompt: string
+    prompt?: string
     form: AskForm
     blocking: Ask['blocking']
     origin?: 'retry'
@@ -110,10 +113,10 @@ export function createAsk(
   const ask: Ask = {
     id: opts.id,
     createdAt: opts.at,
-    prompt: opts.prompt,
     form: opts.form,
     blocking: opts.blocking,
     state: 'open',
+    ...(opts.prompt ? { prompt: opts.prompt } : {}),
     ...(opts.origin ? { origin: opts.origin } : {}),
   }
   ;(task.asks ??= []).push(ask)
@@ -246,10 +249,14 @@ export function answerValue(ask: Ask): string {
 // The visible user message an answered ask delivers to the agent on re-entry, so
 // the answer appears in the re-entry prompt. Null for an `origin: 'retry'` ask:
 // the retry machinery composes the recovery turn itself (nudge or prompt
-// re-send), which is the delivery. Assumes the ask has been answered.
+// re-send), which is the delivery. A promptless ask (the common agent wedge)
+// delivers the bare value — the agent's own message was the question, so the
+// answer reads naturally as the user's reply; a prompted ask names it. Assumes
+// the ask has been answered.
 export function answerDelivery(ask: Ask): string | null {
   if (ask.origin === 'retry') return null
-  return `Answer to "${firstLine(ask.prompt)}": ${answerValue(ask)}`
+  const value = answerValue(ask)
+  return ask.prompt ? `Answer to "${firstLine(ask.prompt)}": ${value}` : value
 }
 
 // Flip every open ask on the task to `withdrawn`. Called wherever the user's new

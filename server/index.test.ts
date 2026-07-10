@@ -564,19 +564,24 @@ describe('asks', () => {
     expect(anon.status).toBe(403)
   })
 
-  it('400s an empty prompt, a malformed form, or an unimplemented blocking level', async () => {
+  it('creates a promptless ask (the agent message is the question)', async () => {
+    const id = 'ask-create-noprompt'
+    await seedTask(id)
+    const res = await create(id, { form: choiceForm })
+    expect(res.status).toBe(201)
+    const { ask } = (await res.json()) as { ask: { prompt?: string } }
+    expect(ask.prompt).toBeUndefined()
+    const raw = await readRaw(id)
+    expect(raw.status).toBe('wedged')
+  })
+
+  it('400s a malformed form or an unimplemented blocking level', async () => {
     const id = 'ask-create-valid'
     await seedTask(id)
-    expect((await create(id, { prompt: '  ', form: choiceForm })).status).toBe(400)
     expect(
-      (await create(id, { prompt: 'p', form: { type: 'choice', options: [] } }))
-        .status,
+      (await create(id, { form: { type: 'choice', options: [] } })).status,
     ).toBe(400)
-    const ride = await create(id, {
-      prompt: 'p',
-      form: choiceForm,
-      blocking: 'ride',
-    })
+    const ride = await create(id, { form: choiceForm, blocking: 'ride' })
     expect(ride.status).toBe(400)
     expect(((await ride.json()) as { error: string }).error).toMatch(/not implemented/)
   })

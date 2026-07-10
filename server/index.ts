@@ -2252,8 +2252,9 @@ app.post('/api/:project/tasks/:id/asks', async (c) => {
       form?: unknown
       blocking?: unknown
     }>()
+    // Prompt is optional: an agent wedge omits it (its own message is the
+    // question). Only the form is required.
     const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : ''
-    if (!prompt) return c.json({ error: 'prompt is required' }, 400)
     const formError = validateAskForm(body.form)
     if (formError) return c.json({ error: formError }, 400)
     const form = body.form as AskForm
@@ -2277,7 +2278,13 @@ app.post('/api/:project/tasks/:id/asks', async (c) => {
       recordStatusTransition(t, 'wedged', at)
       t.status = 'wedged'
       t.updatedAt = at
-      created = createAsk(t, { id: askId, prompt, form, blocking: 'task', at })
+      created = createAsk(t, {
+        id: askId,
+        ...(prompt ? { prompt } : {}),
+        form,
+        blocking: 'task',
+        at,
+      })
     })
     return c.json({ ask: created }, 201)
   } catch (e) {

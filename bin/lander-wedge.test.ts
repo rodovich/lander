@@ -38,19 +38,10 @@ function bareEnv(): NodeJS.ProcessEnv {
 }
 
 describe('lander wedge', () => {
-  it('rejects --option without --reason', async () => {
-    const { stderr, code } = await execLander(
-      ['wedge', '--option', 'a:Alpha'],
-      bareEnv(),
-    )
-    expect(code).not.toBe(0)
-    expect(stderr).toContain('--option requires --reason')
-  })
-
   it('rejects a malformed --option (no colon, empty id, or empty label)', async () => {
     for (const spec of ['noColon', ':label', 'id:']) {
       const { stderr, code } = await execLander(
-        ['wedge', '--reason', 'why', '--option', spec],
+        ['wedge', '--option', spec],
         bareEnv(),
       )
       expect(code).not.toBe(0)
@@ -64,12 +55,13 @@ describe('lander wedge', () => {
     expect(stderr).toContain('no current task')
   })
 
-  it('wedge --reason outside a task reports the missing task (parsing passed)', async () => {
+  it('wedge --option (no --reason needed) reaches the network guard once parsed', async () => {
     const { stderr, code } = await execLander(
-      ['wedge', '--reason', 'Deploy?', '--option', 'go:Ship it'],
+      ['wedge', '--option', 'go:Ship it', '--option', 'stop:Abort'],
       bareEnv(),
     )
     expect(code).not.toBe(0)
+    // Options parsed fine → it tried to raise the ask and hit the missing task.
     expect(stderr).toContain('no current task')
   })
 })

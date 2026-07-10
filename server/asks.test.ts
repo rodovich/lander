@@ -174,6 +174,13 @@ describe('answerValue / answerDelivery', () => {
     answerAsk(task, ask.id, { optionId: 'a', at: AT })
     expect(answerDelivery(ask)).toBeNull()
   })
+
+  it('delivers the bare value for a promptless ask (the message was the question)', () => {
+    const { task, ask } = seed(choice, { prompt: undefined })
+    expect(ask.prompt).toBeUndefined()
+    answerAsk(task, ask.id, { optionId: 'a', at: AT })
+    expect(answerDelivery(ask)).toBe('Alpha')
+  })
 })
 
 describe('withdrawOpenAsks', () => {

@@ -1,8 +1,7 @@
-// The ask renderer: a card in the conversation timeline for a stored question.
-// An open task-blocking ask shows its prompt and its form (choice buttons /
-// confirm / text input) and posts the answer; an answered or withdrawn ask
-// renders as a quiet record. Mirrors the grants module's shape — a small
-// self-contained component with a pure helper — so it unit-tests via SSR.
+// The ask form: the controls for an open ask, rendered inline under the assistant
+// message it belongs to (not as a separate card). An agent wedge carries no
+// prompt — its own message is the question — so this usually renders just the
+// buttons; a platform ask (the retry ask) carries a prompt line above them.
 
 import { useState } from 'react'
 import { retryResetTime } from './format'
@@ -23,9 +22,9 @@ export function askOptionLabel(opt: AskOption): string {
   return clock ? `${opt.label} (${clock})` : opt.label
 }
 
-// What an answered ask conveys, in prose, for its quiet record: the edited value
-// of an editable option, else the chosen option's label, else the confirm/text
-// answer. Mirrors the server's answerValue.
+// What an answered ask conveys, in prose: the edited value of an editable option,
+// else the chosen option's label, else the confirm/text answer. Mirrors the
+// server's answerValue.
 export function answeredValue(ask: Ask): string {
   const a = ask.answer
   if (!a) return ''
@@ -41,7 +40,7 @@ export function answeredValue(ask: Ask): string {
   return (a.text ?? '').trim()
 }
 
-export function AskCard({
+export function AskForm({
   ask,
   linkTask,
   disabled,
@@ -55,7 +54,7 @@ export function AskCard({
   onAnswer: (body: { optionId?: string; text?: string }) => void
 }) {
   // Per-editable-option text, seeded from each option's prefill; and the free
-  // text form's input. Both are only meaningful for an open ask.
+  // text form's input.
   const [edited, setEdited] = useState<Record<string, string>>(() =>
     ask.form.type === 'choice'
       ? Object.fromEntries(
@@ -68,99 +67,93 @@ export function AskCard({
   const [textValue, setTextValue] = useState('')
 
   return (
-    <div className={`ask-card ask-${ask.state}`}>
-      <div className="ask-prompt">
-        <Markdown text={ask.prompt} linkTask={linkTask} />
-      </div>
-      {ask.state === 'open' ? (
-        <div className="ask-form">
-          {ask.form.type === 'choice' &&
-            ask.form.options.map((opt) =>
-              opt.editable ? (
-                <div className="ask-editable" key={opt.id}>
-                  <input
-                    className="ask-input"
-                    value={edited[opt.id] ?? ''}
-                    disabled={disabled}
-                    onChange={(e) =>
-                      setEdited((prev) => ({ ...prev, [opt.id]: e.target.value }))
-                    }
-                  />
-                  <button
-                    type="button"
-                    className={optionClass(opt)}
-                    disabled={disabled || !(edited[opt.id] ?? '').trim()}
-                    onClick={() =>
-                      onAnswer({ optionId: opt.id, text: edited[opt.id] ?? '' })
-                    }
-                  >
-                    {askOptionLabel(opt)}
-                  </button>
-                </div>
-              ) : (
+    <div className="ask">
+      {ask.prompt && (
+        <div className="ask-prompt">
+          <Markdown text={ask.prompt} linkTask={linkTask} />
+        </div>
+      )}
+      <div className="ask-form">
+        {ask.form.type === 'choice' &&
+          ask.form.options.map((opt) =>
+            opt.editable ? (
+              <div className="ask-editable" key={opt.id}>
+                <input
+                  className="ask-input"
+                  value={edited[opt.id] ?? ''}
+                  disabled={disabled}
+                  onChange={(e) =>
+                    setEdited((prev) => ({ ...prev, [opt.id]: e.target.value }))
+                  }
+                />
                 <button
                   type="button"
                   className={optionClass(opt)}
-                  key={opt.id}
-                  disabled={disabled}
-                  title={opt.detail}
-                  onClick={() => onAnswer({ optionId: opt.id })}
+                  disabled={disabled || !(edited[opt.id] ?? '').trim()}
+                  onClick={() =>
+                    onAnswer({ optionId: opt.id, text: edited[opt.id] ?? '' })
+                  }
                 >
                   {askOptionLabel(opt)}
                 </button>
-              ),
-            )}
-          {ask.form.type === 'confirm' && (
-            <>
+              </div>
+            ) : (
               <button
                 type="button"
-                className="ask-option ask-option-primary"
+                className={optionClass(opt)}
+                key={opt.id}
                 disabled={disabled}
-                onClick={() => onAnswer({ optionId: CONFIRM_YES })}
+                title={opt.detail}
+                onClick={() => onAnswer({ optionId: opt.id })}
               >
-                {ask.form.confirmLabel ?? 'Yes'}
+                {askOptionLabel(opt)}
               </button>
-              <button
-                type="button"
-                className="ask-option"
-                disabled={disabled}
-                onClick={() => onAnswer({ optionId: CONFIRM_NO })}
-              >
-                {ask.form.denyLabel ?? 'No'}
-              </button>
-            </>
+            ),
           )}
-          {ask.form.type === 'text' && (
-            <div className="ask-text-form">
-              <input
-                className="ask-input"
-                placeholder={ask.form.placeholder}
-                value={textValue}
-                disabled={disabled}
-                onChange={(e) => setTextValue(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && textValue.trim() && !disabled)
-                    onAnswer({ text: textValue })
-                }}
-              />
-              <button
-                type="button"
-                className="ask-option ask-option-primary"
-                disabled={disabled || !textValue.trim()}
-                onClick={() => onAnswer({ text: textValue })}
-              >
-                Answer
-              </button>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="ask-record">
-          {ask.state === 'withdrawn'
-            ? 'Withdrawn'
-            : `Answered: ${answeredValue(ask)}`}
-        </div>
-      )}
+        {ask.form.type === 'confirm' && (
+          <>
+            <button
+              type="button"
+              className="ask-option ask-option-primary"
+              disabled={disabled}
+              onClick={() => onAnswer({ optionId: CONFIRM_YES })}
+            >
+              {ask.form.confirmLabel ?? 'Yes'}
+            </button>
+            <button
+              type="button"
+              className="ask-option"
+              disabled={disabled}
+              onClick={() => onAnswer({ optionId: CONFIRM_NO })}
+            >
+              {ask.form.denyLabel ?? 'No'}
+            </button>
+          </>
+        )}
+        {ask.form.type === 'text' && (
+          <div className="ask-text-form">
+            <input
+              className="ask-input"
+              placeholder={ask.form.placeholder}
+              value={textValue}
+              disabled={disabled}
+              onChange={(e) => setTextValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && textValue.trim() && !disabled)
+                  onAnswer({ text: textValue })
+              }}
+            />
+            <button
+              type="button"
+              className="ask-option ask-option-primary"
+              disabled={disabled || !textValue.trim()}
+              onClick={() => onAnswer({ text: textValue })}
+            >
+              Answer
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

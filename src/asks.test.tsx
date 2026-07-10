@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { AskCard, askOptionLabel, answeredValue } from './asks'
+import { AskForm, askOptionLabel, answeredValue } from './asks'
 import type { Ask } from './types'
 
 const noLink = () => undefined
@@ -10,7 +10,6 @@ const FUTURE = '2099-01-01T00:00:00.000Z'
 const ask = (over: Partial<Ask> = {}): Ask => ({
   id: 'k1',
   createdAt: AT,
-  prompt: 'Pick one',
   form: { type: 'choice', options: [{ id: 'a', label: 'Alpha' }] },
   blocking: 'task',
   state: 'open',
@@ -19,7 +18,7 @@ const ask = (over: Partial<Ask> = {}): Ask => ({
 
 const render = (a: Ask, disabled = false) =>
   renderToStaticMarkup(
-    <AskCard ask={a} linkTask={noLink} disabled={disabled} onAnswer={() => {}} />,
+    <AskForm ask={a} linkTask={noLink} disabled={disabled} onAnswer={() => {}} />,
   )
 
 describe('askOptionLabel', () => {
@@ -76,11 +75,10 @@ describe('answeredValue', () => {
   })
 })
 
-describe('AskCard rendering', () => {
-  it('renders choice options as buttons, carrying the style class', () => {
+describe('AskForm rendering', () => {
+  it('renders choice options as buttons, carrying the style class, with no card wrapper', () => {
     const html = render(
       ask({
-        prompt: 'Deploy?',
         form: {
           type: 'choice',
           options: [
@@ -90,10 +88,18 @@ describe('AskCard rendering', () => {
         },
       }),
     )
-    expect(html).toContain('Deploy?')
     expect(html).toContain('Ship')
     expect(html).toContain('ask-option-primary')
     expect(html).toContain('ask-option-danger')
+    // No standalone card chrome — the form hangs off the message.
+    expect(html).not.toContain('ask-card')
+  })
+
+  it('omits a prompt line when the ask has none, and shows it when present', () => {
+    expect(render(ask())).not.toContain('ask-prompt')
+    expect(render(ask({ prompt: 'Usage limit reached.' }))).toContain(
+      'Usage limit reached.',
+    )
   })
 
   it('prefills an editable option input with its value', () => {
@@ -122,31 +128,7 @@ describe('AskCard rendering', () => {
   })
 
   it('disables every control while an answer is in flight', () => {
-    const html = render(
-      ask({
-        form: {
-          type: 'choice',
-          options: [{ id: 'a', label: 'Alpha' }],
-        },
-      }),
-      true,
-    )
+    const html = render(ask(), true)
     expect(html).toContain('disabled')
-  })
-
-  it('renders answered and withdrawn asks as quiet records, no buttons', () => {
-    const answered = render(
-      ask({
-        state: 'answered',
-        answer: { optionId: 'a', at: AT },
-      }),
-    )
-    expect(answered).toContain('ask-answered')
-    expect(answered).toContain('Answered: Alpha')
-    expect(answered).not.toContain('ask-option')
-
-    const withdrawn = render(ask({ state: 'withdrawn' }))
-    expect(withdrawn).toContain('ask-withdrawn')
-    expect(withdrawn).toContain('Withdrawn')
   })
 })
