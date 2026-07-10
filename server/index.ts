@@ -2225,11 +2225,12 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
 })
 
 // Raise an ask on a task: a stored question that, when task-blocking, wedges the
-// task until it's answered. Principal: the task itself (posting its own ask
-// mid-turn — self-initiated, so no run interrupt, exactly like `lander wedge`)
-// or the UI (mirror the artifact-publish gate). v1 implements only
-// `blocking: 'task'`; `ride`/`none` ship in the vocabulary but 400 here until
-// their behavior exists.
+// task until it's answered; when advisory (`blocking: 'none'`, `lander ask`) it
+// leaves the status alone — the task rests with the question attached, nothing in
+// the list. Principal: the task itself (posting its own ask mid-turn —
+// self-initiated, so no run interrupt, exactly like `lander wedge`) or the UI
+// (mirror the artifact-publish gate). Ride-blocking (`ride`) ships in the
+// vocabulary but 400s here until its behavior exists.
 app.post('/api/:project/tasks/:id/asks', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
@@ -2258,11 +2259,12 @@ app.post('/api/:project/tasks/:id/asks', async (c) => {
     const formError = validateAskForm(body.form)
     if (formError) return c.json({ error: formError }, 400)
     const form = body.form as AskForm
-    // Only task-blocking asks are reachable in v1: ride-blocking (long-poll) and
-    // advisory asks aren't implemented, so reject rather than store a shape whose
-    // behavior doesn't exist yet.
+    // Task-blocking (`lander wedge --option`) and advisory (`lander ask`,
+    // blocking: 'none') asks are reachable; ride-blocking (long-poll) isn't
+    // implemented, so reject rather than store a shape whose behavior doesn't
+    // exist yet.
     const blocking = body.blocking ?? 'task'
-    if (blocking !== 'task')
+    if (blocking !== 'task' && blocking !== 'none')
       return c.json(
         { error: `blocking: '${blocking}' is not implemented yet` },
         400,
@@ -2272,17 +2274,26 @@ app.post('/api/:project/tasks/:id/asks', async (c) => {
     await mutateTask(file, (t) => {
       const at = new Date().toISOString()
       const askId = nextAskId(t, Date.now())
+      // The last ask raised in a turn wins: a fresh ask supersedes any still open
+      // (the agent has no way to withdraw one to revise it). This also keeps the
+      // "at most one open ask" invariant the UI relies on. Mint the id first —
+      // withdrawing doesn't change the ask count, so the seq stays correct.
+      withdrawOpenAsks(t)
       // A task-blocking ask wedges the task in the same write, recording the
       // crossing so it surfaces in the timeline (decision 2). driveTask's finally
-      // only demotes riding→resting, so a wedge set here survives a self-post.
-      recordStatusTransition(t, 'wedged', at)
-      t.status = 'wedged'
+      // only demotes riding→resting, so a wedge set here survives a self-post. A
+      // `none` ask leaves the status untouched — the task rests, nothing in the
+      // list — and only the create endpoint ever wedges, never un-wedges.
+      if (blocking === 'task') {
+        recordStatusTransition(t, 'wedged', at)
+        t.status = 'wedged'
+      }
       t.updatedAt = at
       created = createAsk(t, {
         id: askId,
         ...(prompt ? { prompt } : {}),
         form,
-        blocking: 'task',
+        blocking,
         at,
       })
     })

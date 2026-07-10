@@ -586,6 +586,61 @@ describe('asks', () => {
     expect(((await ride.json()) as { error: string }).error).toMatch(/not implemented/)
   })
 
+  it('creates an advisory (blocking:none) ask without wedging', async () => {
+    const id = 'ask-create-none'
+    await seedTask(id) // default status: 'riding'
+    const res = await create(id, { form: choiceForm, blocking: 'none' })
+    expect(res.status).toBe(201)
+    const { ask } = (await res.json()) as {
+      ask: { blocking: string; state: string }
+    }
+    expect(ask).toMatchObject({ blocking: 'none', state: 'open' })
+    const raw = await readRaw(id)
+    // No status transition — the task rests with the question attached, and the
+    // wedge crossing that a task-blocking ask records is absent.
+    expect(raw.status).toBe('riding')
+    expect(
+      ((raw.events as Raw[]) ?? []).some((e) => e.kind === 'wedged'),
+    ).toBe(false)
+  })
+
+  it('withdraws the prior open ask when a fresh one supersedes it (last-in-turn wins)', async () => {
+    const id = 'ask-create-supersede'
+    await seedTask(id, { status: 'wedged', asks: [openAsk()] })
+    const res = await create(id, { form: choiceForm, blocking: 'none' })
+    expect(res.status).toBe(201)
+    const asks = (await readRaw(id)).asks as Raw[]
+    // The seeded ask is withdrawn; only the fresh one stays open — at most one
+    // open ask, so the UI's single-open-ask finder still holds.
+    expect(asks).toHaveLength(2)
+    expect(asks[0].state).toBe('withdrawn')
+    expect(asks[1].state).toBe('open')
+    expect(asks.filter((a) => a.state === 'open')).toHaveLength(1)
+  })
+
+  it('answers an advisory ask: delivers the bare value and goes riding', async () => {
+    const id = 'ask-answer-none'
+    await seedTask(id, {
+      status: 'resting',
+      // Promptless (the agent message was the question), like an agent wedge.
+      asks: [openAsk({ blocking: 'none', prompt: undefined })],
+    })
+    const res = await answer(id, 'ask-seed-0', { optionId: 'b' })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      status: string
+      asks: Raw[]
+      messages: { role: string; text: string }[]
+    }
+    expect(body.status).toBe('riding')
+    expect(body.asks[0].state).toBe('answered')
+    // A promptless ask delivers the bare chosen label as the next user message.
+    expect(body.messages[body.messages.length - 1]).toMatchObject({
+      role: 'user',
+      text: 'Beta',
+    })
+  })
+
   it('answers immediately: un-wedges, queues the delivery, marks the ask answered', async () => {
     const id = 'ask-answer'
     await seedTask(id, { status: 'wedged', asks: [openAsk()] })
