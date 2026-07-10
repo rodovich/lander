@@ -449,3 +449,233 @@ describe('artifacts', () => {
     expect(missing.status).toBe(404)
   })
 })
+
+describe('asks', () => {
+  type Raw = Record<string, unknown>
+  const taskFile = (id: string) => path.join(tasksDir, `${id}.json`)
+  const readRaw = async (id: string): Promise<Raw> =>
+    JSON.parse(await readFile(taskFile(id), 'utf8'))
+
+  // Seed a wedged task on disk with a token, so a create/answer has an owner and
+  // (for answer tests) an ask already open.
+  async function seedTask(id: string, over: Raw = {}): Promise<void> {
+    await writeFile(
+      taskFile(id),
+      JSON.stringify(
+        {
+          id,
+          title: 'Ask task',
+          status: 'riding',
+          createdAt: AT,
+          updatedAt: AT,
+          allowEdits: false,
+          token: `token-${id}`,
+          messages: [{ role: 'user', text: 'go', createdAt: AT }],
+          ...over,
+        },
+        null,
+        2,
+      ),
+    )
+  }
+
+  const choiceForm = {
+    type: 'choice',
+    options: [
+      { id: 'a', label: 'Alpha' },
+      { id: 'b', label: 'Beta' },
+    ],
+  }
+
+  const openAsk = (over: Raw = {}) => ({
+    id: 'ask-seed-0',
+    createdAt: AT,
+    prompt: 'Pick one',
+    form: choiceForm,
+    blocking: 'task',
+    state: 'open',
+    ...over,
+  })
+
+  const headers = (h: Record<string, string>) => ({
+    'content-type': 'application/json',
+    ...h,
+  })
+  const taskAuth = (id: string) => ({
+    'x-lander-task': id,
+    'x-lander-project': slug,
+    'x-lander-token': `token-${id}`,
+  })
+
+  async function create(
+    id: string,
+    body: unknown,
+    h: Record<string, string> = { 'x-lander-ui-token': UI_TOKEN },
+  ): Promise<Response> {
+    return app.request(`/api/${slug}/tasks/${id}/asks`, {
+      method: 'POST',
+      headers: headers(h),
+      body: JSON.stringify(body),
+    })
+  }
+
+  async function answer(
+    id: string,
+    askId: string,
+    body: unknown,
+    h: Record<string, string> = { 'x-lander-ui-token': UI_TOKEN },
+  ): Promise<Response> {
+    return app.request(`/api/${slug}/tasks/${id}/asks/${askId}/answer`, {
+      method: 'POST',
+      headers: headers(h),
+      body: JSON.stringify(body),
+    })
+  }
+
+  it('creates a task-blocking ask, wedging the task in the same write', async () => {
+    const id = 'ask-create'
+    await seedTask(id)
+    const res = await create(id, { prompt: 'Deploy?', form: choiceForm })
+    expect(res.status).toBe(201)
+    const { ask } = (await res.json()) as { ask: { id: string; state: string } }
+    expect(ask.state).toBe('open')
+
+    const raw = await readRaw(id)
+    expect(raw.status).toBe('wedged')
+    expect((raw.asks as Raw[]).map((a) => a.id)).toEqual([ask.id])
+    // The wedge crossing is recorded so it surfaces in the timeline.
+    expect((raw.events as Raw[]).some((e) => e.kind === 'wedged')).toBe(true)
+  })
+
+  it('lets the task itself raise its ask but rejects a foreign task and anon', async () => {
+    const id = 'ask-create-auth'
+    await seedTask(id)
+    const mine = await create(id, { prompt: 'p', form: choiceForm }, taskAuth(id))
+    expect(mine.status).toBe(201)
+
+    await seedTask('ask-other')
+    const foreign = await create(
+      id,
+      { prompt: 'p', form: choiceForm },
+      taskAuth('ask-other'),
+    )
+    expect(foreign.status).toBe(403)
+    const anon = await create(id, { prompt: 'p', form: choiceForm }, {})
+    expect(anon.status).toBe(403)
+  })
+
+  it('400s an empty prompt, a malformed form, or an unimplemented blocking level', async () => {
+    const id = 'ask-create-valid'
+    await seedTask(id)
+    expect((await create(id, { prompt: '  ', form: choiceForm })).status).toBe(400)
+    expect(
+      (await create(id, { prompt: 'p', form: { type: 'choice', options: [] } }))
+        .status,
+    ).toBe(400)
+    const ride = await create(id, {
+      prompt: 'p',
+      form: choiceForm,
+      blocking: 'ride',
+    })
+    expect(ride.status).toBe(400)
+    expect(((await ride.json()) as { error: string }).error).toMatch(/not implemented/)
+  })
+
+  it('answers immediately: un-wedges, queues the delivery, marks the ask answered', async () => {
+    const id = 'ask-answer'
+    await seedTask(id, { status: 'wedged', asks: [openAsk()] })
+    const res = await answer(id, 'ask-seed-0', { optionId: 'b' })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      status: string
+      asks: Raw[]
+      messages: { role: string; text: string; queued?: boolean }[]
+    }
+    expect(body.status).toBe('riding')
+    expect(body.asks[0].state).toBe('answered')
+    // The delivery is appended as a queued user message carrying the chosen label.
+    const last = body.messages[body.messages.length - 1]
+    expect(last).toMatchObject({
+      role: 'user',
+      text: 'Answer to "Pick one": Beta',
+      queued: true,
+    })
+  })
+
+  it('answers with a future-at option: stays wedged and schedules the delivery', async () => {
+    const id = 'ask-answer-sched'
+    const resetsAt = '2099-01-01T00:00:00.000Z'
+    await seedTask(id, {
+      status: 'wedged',
+      asks: [
+        openAsk({
+          form: {
+            type: 'choice',
+            options: [
+              { id: 'now', label: 'Now' },
+              { id: 'later', label: 'Later', at: resetsAt },
+            ],
+          },
+        }),
+      ],
+    })
+    const res = await answer(id, 'ask-seed-0', { optionId: 'later' })
+    expect(res.status).toBe(200)
+    const raw = await readRaw(id)
+    // Stays wedged, with a scheduled wakeup and the delivery queued for it.
+    expect(raw.status).toBe('wedged')
+    expect(raw.scheduledFor).toBe(resetsAt)
+    expect((raw.events as Raw[]).some((e) => e.kind === 'scheduled')).toBe(true)
+    expect(raw.queued).toEqual(['Answer to "Pick one": Later'])
+    expect((raw.asks as Raw[])[0].state).toBe('answered')
+  })
+
+  it('gates answering to the UI, 404s an unknown ask, and 409s a non-open one', async () => {
+    const id = 'ask-answer-auth'
+    await seedTask(id, { status: 'wedged', asks: [openAsk()] })
+    const asTask = await answer(id, 'ask-seed-0', { optionId: 'a' }, taskAuth(id))
+    expect(asTask.status).toBe(403)
+
+    expect((await answer(id, 'nope', { optionId: 'a' })).status).toBe(404)
+
+    expect((await answer(id, 'ask-seed-0', { optionId: 'a' })).status).toBe(200)
+    // Already answered → 409.
+    expect((await answer(id, 'ask-seed-0', { optionId: 'a' })).status).toBe(409)
+  })
+
+  it('withdraws an open ask when a fresh message supersedes it', async () => {
+    const id = 'ask-withdraw-msg'
+    await seedTask(id, { status: 'wedged', asks: [openAsk()] })
+    const res = await post(`/api/${slug}/tasks/${id}/messages`, {
+      message: 'never mind, do this instead',
+    })
+    expect(res.status).toBe(200)
+    const raw = await readRaw(id)
+    expect((raw.asks as Raw[])[0].state).toBe('withdrawn')
+    expect(raw.status).toBe('riding')
+  })
+
+  it('withdraws an open ask when the task is manually moved off wedged', async () => {
+    const id = 'ask-withdraw-patch'
+    await seedTask(id, { status: 'wedged', asks: [openAsk()] })
+    const res = await app.request(`/api/${slug}/tasks/${id}`, {
+      method: 'PATCH',
+      headers: headers({ 'x-lander-ui-token': UI_TOKEN }),
+      body: JSON.stringify({ status: 'landed' }),
+    })
+    expect(res.status).toBe(200)
+    const raw = await readRaw(id)
+    expect((raw.asks as Raw[])[0].state).toBe('withdrawn')
+  })
+
+  it('withdraws an open ask when the task is relaunched', async () => {
+    const id = 'ask-withdraw-relaunch'
+    await seedTask(id, { status: 'wedged', asks: [openAsk()] })
+    const res = await post(`/api/${slug}/tasks/${id}/relaunch`, {
+      message: 'start over',
+    })
+    expect(res.status).toBe(200)
+    const raw = await readRaw(id)
+    expect((raw.asks as Raw[])[0].state).toBe('withdrawn')
+  })
+})

@@ -69,6 +69,17 @@ import {
   MAX_ARTIFACT_BYTES,
   type Artifact,
 } from './artifacts'
+import {
+  createAsk,
+  answerAsk,
+  answerDelivery,
+  chosenOption,
+  withdrawOpenAsks,
+  validateAskForm,
+  nextAskId,
+  type Ask,
+  type AskForm,
+} from './asks'
 
 const execFileAsync = promisify(execFile)
 
@@ -173,6 +184,11 @@ type Task = {
   // interleaved with messages by timestamp in the UI. Absent on tasks saved
   // before this existed.
   events?: TaskEvent[]
+  // Questions raised on this task (`POST /asks`, or the platform's usage-limit/
+  // error retry ask), interleaved with messages/events by `createdAt` in the UI
+  // exactly like events. A task-blocking ask wedges until answered. Passed
+  // through by publicTask (nothing secret in an ask). Absent when none raised.
+  asks?: Ask[]
   // Follow-up prompts sent while a run was in flight, awaiting their turn.
   // Persisted so they survive a server restart; drained by driveTask when the
   // current run finishes — the whole queue joins into one turn (see driveTask).
@@ -1611,6 +1627,10 @@ app.patch('/api/:project/tasks/:id', async (c) => {
         recordStatusTransition(t, body.status, at)
         if (body.status !== t.status) t.updatedAt = at
         t.status = body.status
+        // Moving off wedged (a manual land/resume) supersedes any open ask; a
+        // fresh wedge keeps it. (When not previously wedged there's no open
+        // task-blocking ask to touch, so this only bites the intended case.)
+        if (body.status !== 'wedged') withdrawOpenAsks(t)
       }
     })
 
@@ -1858,6 +1878,9 @@ app.post('/api/:project/tasks/:id/relaunch', async (c) => {
     // repeat spec arms the first successor off this delivery.
     await mutateTask(file, (t) => {
       applyRelaunch(t, rawMessage, at, repeat)
+      // The relaunch is the user's new intent; withdraw any open ask it
+      // supersedes (parity with the retry it already drops in applyRelaunch).
+      withdrawOpenAsks(t)
     })
     // The normal path is a mid-turn call, where running.has(id) is already true:
     // the in-flight drainer picks up the queued message and the sealed session
@@ -2173,8 +2196,10 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
       t.queued = [...(t.queued ?? []), message]
       t.status = 'riding'
       // A fresh message is the user's new intent; drop any pending retry so its
-      // button doesn't linger over the revived conversation.
+      // button doesn't linger over the revived conversation, and withdraw any
+      // open ask the message supersedes.
       delete t.retry
+      withdrawOpenAsks(t)
     })
 
     // If a run is already in flight it will drain this message when it
@@ -2182,6 +2207,141 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
     if (!running.has(id)) void driveTask(project, id)
 
     return c.json(publicTask(task))
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
+  }
+})
+
+// Raise an ask on a task: a stored question that, when task-blocking, wedges the
+// task until it's answered. Principal: the task itself (posting its own ask
+// mid-turn — self-initiated, so no run interrupt, exactly like `lander wedge`)
+// or the UI (mirror the artifact-publish gate). v1 implements only
+// `blocking: 'task'`; `ride`/`none` ship in the vocabulary but 400 here until
+// their behavior exists.
+app.post('/api/:project/tasks/:id/asks', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  try {
+    const id = c.req.param('id')
+    if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    const file = path.join(project.dataDir, `${id}.json`)
+    if (!(await readTask(project.dataDir, id)))
+      return c.json({ error: 'task not found' }, 404)
+
+    const principal = await resolvePrincipal(c.req)
+    if (
+      principal.kind !== 'ui' &&
+      !(principal.kind === 'task' && principal.id === id)
+    )
+      return c.json({ error: 'only the task itself may raise its asks' }, 403)
+
+    const body = await c.req.json<{
+      prompt?: unknown
+      form?: unknown
+      blocking?: unknown
+    }>()
+    const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : ''
+    if (!prompt) return c.json({ error: 'prompt is required' }, 400)
+    const formError = validateAskForm(body.form)
+    if (formError) return c.json({ error: formError }, 400)
+    const form = body.form as AskForm
+    // Only task-blocking asks are reachable in v1: ride-blocking (long-poll) and
+    // advisory asks aren't implemented, so reject rather than store a shape whose
+    // behavior doesn't exist yet.
+    const blocking = body.blocking ?? 'task'
+    if (blocking !== 'task')
+      return c.json(
+        { error: `blocking: '${blocking}' is not implemented yet` },
+        400,
+      )
+
+    let created: Ask | undefined
+    await mutateTask(file, (t) => {
+      const at = new Date().toISOString()
+      const askId = nextAskId(t, Date.now())
+      // A task-blocking ask wedges the task in the same write, recording the
+      // crossing so it surfaces in the timeline (decision 2). driveTask's finally
+      // only demotes riding→resting, so a wedge set here survives a self-post.
+      recordStatusTransition(t, 'wedged', at)
+      t.status = 'wedged'
+      t.updatedAt = at
+      created = createAsk(t, { id: askId, prompt, form, blocking: 'task', at })
+    })
+    return c.json({ ask: created }, 201)
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
+  }
+})
+
+// Answer an ask (UI principal only, like /retry — answering re-drives the
+// session). Stamps the answer and un-wedges: a chosen option carrying a future
+// `at` stays wedged and schedules the delivery for then (via scheduledFor, drained
+// by launchTask — exactly the deferred-retry path); otherwise the task goes riding
+// now and the answer is delivered as a visible user message. An `origin: 'retry'`
+// ask delivers nothing of its own — the retry-recovery machinery composes the
+// turn (added in the wedge recast).
+app.post('/api/:project/tasks/:id/asks/:askId/answer', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  try {
+    const id = c.req.param('id')
+    if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    const askId = c.req.param('askId')
+    const file = path.join(project.dataDir, `${id}.json`)
+    if (!(await readTask(project.dataDir, id)))
+      return c.json({ error: 'task not found' }, 404)
+
+    if ((await resolvePrincipal(c.req)).kind !== 'ui')
+      return c.json({ error: 'not authorized to answer' }, 403)
+
+    const body = await c.req.json<{ optionId?: unknown; text?: unknown }>()
+    const optionId = typeof body.optionId === 'string' ? body.optionId : undefined
+    const text = typeof body.text === 'string' ? body.text : undefined
+
+    const now = new Date().toISOString()
+    const before = new Date(Date.parse(now) - 1).toISOString()
+    let fail: { error: string; status: 404 | 409 | 400 } | undefined
+    let defer = false
+    await mutateTask(file, (t) => {
+      const res = answerAsk(t, askId, { optionId, text, at: now })
+      if (!res.ok) {
+        fail = { error: res.error, status: res.status }
+        return
+      }
+      const ask = res.ask
+      const opt = chosenOption(ask)
+      const scheduleAt = opt?.at
+      defer = !!scheduleAt && Date.parse(scheduleAt) > Date.now()
+      // Deliver the answer as a visible user message so it appears in the
+      // re-entry prompt. Null for an origin:'retry' ask — the retry recovery is
+      // its delivery (recast); a plain answer's text is queued for the session.
+      const delivery = answerDelivery(ask)
+      if (delivery != null) {
+        t.messages.push({ role: 'user', text: delivery, createdAt: now })
+        t.queued = [...(t.queued ?? []), delivery]
+      }
+      if (defer && scheduleAt) {
+        // Scheduling is not an un-wedge: stay wedged (the moon shows via
+        // scheduledFor) until launchTask fires the wakeup and drains the
+        // queued delivery — mirrors the deferred retry exactly.
+        t.scheduledFor = scheduleAt
+        ;(t.events ??= []).push({
+          kind: 'scheduled',
+          title: t.title,
+          scheduledFor: scheduleAt,
+          createdAt: now,
+        })
+      } else {
+        recordStatusTransition(t, 'riding', before)
+        t.status = 'riding'
+      }
+      t.updatedAt = now
+    })
+    if (fail) return c.json({ error: fail.error }, fail.status)
+    if (!defer && !running.has(id)) void driveTask(project, id)
+
+    const updated = await readTask(project.dataDir, id)
+    return c.json(publicTask(updated ?? (await readTask(project.dataDir, id))!))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
