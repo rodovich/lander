@@ -270,6 +270,70 @@ function AttachmentChip({
   )
 }
 
+// The artifacts (named output files) an assistant message published, rendered as
+// rows at the bottom of that message. Each downloads the slot's current blob by
+// name from the task's artifact endpoint.
+function MessageArtifacts({
+  artifacts,
+  taskId,
+  slug,
+}: {
+  artifacts: Artifact[]
+  taskId: string
+  slug: string
+}) {
+  return (
+    <div className="message-artifacts">
+      {artifacts.map((a) => (
+        <ArtifactRow key={a.name} artifact={a} taskId={taskId} slug={slug} />
+      ))}
+    </div>
+  )
+}
+
+function ArtifactRow({
+  artifact,
+  taskId,
+  slug,
+}: {
+  artifact: Artifact
+  taskId: string
+  slug: string
+}) {
+  // The download endpoint wants the UI token, which a bare <a href> can't send,
+  // so fetch the bytes with the header and click a synthetic link — the same
+  // dance an AttachmentChip's download does.
+  async function download() {
+    const token = import.meta.env.VITE_LANDER_UI_TOKEN
+    const r = await fetch(
+      `/api/${slug}/tasks/${taskId}/artifacts/${encodeURIComponent(artifact.name)}`,
+      { headers: token ? { 'x-lander-ui-token': token } : {} },
+    )
+    if (!r.ok) return
+    const url = URL.createObjectURL(await r.blob())
+    const link = document.createElement('a')
+    link.href = url
+    link.download = artifact.name
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  return (
+    <button
+      type="button"
+      className="artifact-row"
+      onClick={() => void download()}
+      title={`${artifact.name} — ${formatBytes(artifact.size)} (click to download)`}
+    >
+      <span className="artifact-row-icon" aria-hidden>
+        📦
+      </span>
+      <span className="artifact-row-name">{artifact.name}</span>
+      <span className="artifact-row-size">{formatBytes(artifact.size)}</span>
+    </button>
+  )
+}
+
 type Step = {
   kind: 'text' | 'tool_use' | 'tool_result'
   text?: string
@@ -338,9 +402,21 @@ type Message = {
   // Files/images attached to a user message (refs only). Rendered as chips beside
   // the message text — never inlined into the text/markdown.
   attachments?: Attachment[]
+  // Named output files an assistant turn published while it ran (refs only).
+  // Rendered as rows at the bottom of the message that generated them; the
+  // download resolves the slot's current blob by name.
+  artifacts?: Artifact[]
 }
 
 type Attachment = { id: string; name: string; mime: string; size: number }
+type Artifact = {
+  name: string
+  id: string
+  mime: string
+  size: number
+  createdAt: string
+  updatedAt: string
+}
 
 // A lifecycle event interleaved with messages in the conversation timeline: the
 // task's launch, a rename, or a crossing into/out of the wedged (needs the
@@ -3901,6 +3977,13 @@ export function App() {
                       <span className="spinner" aria-hidden />
                       {`${taskAgentModelName(current.agent, m.usage?.model)} is working…`}
                     </div>
+                  )}
+                  {m.artifacts && m.artifacts.length > 0 && (
+                    <MessageArtifacts
+                      artifacts={m.artifacts}
+                      taskId={current.id}
+                      slug={current.projectSlug}
+                    />
                   )}
                 </div>
                 )

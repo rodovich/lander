@@ -963,6 +963,48 @@ body {
   font-size: 11px;
 }
 
+/* Artifact (task output) rows at the bottom of the message that published them:
+   one full-width row per named slot, click to download the current blob. */
+.message-artifacts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+.artifact-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-tinted);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.artifact-row:hover {
+  border-color: var(--riding);
+}
+.artifact-row-icon {
+  font-size: 16px;
+  line-height: 1;
+  flex: none;
+}
+.artifact-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.artifact-row-size {
+  color: var(--muted);
+  font-size: 11px;
+  flex: none;
+}
+
 .usage-summary {
   display: flex;
   flex-direction: column;
