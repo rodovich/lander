@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { BlockedSummary, GrantControl, RuleRow } from './App'
+import { BlockedSummary, GrantControl, RuleRow } from './grants'
 
 const noop = async () => true
 

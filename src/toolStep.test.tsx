@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { ToolStep } from './App'
+import { ToolStep } from './toolStep'
 
 // Minimal props for a tool_use chip render. renderToStaticMarkup gives the
 // initial (effect-free) markup, which is all we need: the disclosure body is

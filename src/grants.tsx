@@ -1,0 +1,351 @@
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useAnchoredPopup } from './hooks'
+import type { BlockedRequest } from './permissions'
+import type { Task } from './types'
+
+// The no-smoking-style prohibition mark — a circle with a diagonal slash, no
+// cigarette — that leads the "N permissions blocked this turn" summary.
+function BlockedIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      aria-hidden
+    >
+      <circle cx="12" cy="12" r="9" />
+      <line x1="5.64" y1="5.64" x2="18.36" y2="18.36" />
+    </svg>
+  )
+}
+
+// One editable permission rule with a kebab of grant scopes. Shared by the
+// per-turn blocked-permissions popup (each row seeded from a denied call) and the
+// always-available grant control (a single empty row authored from scratch). The
+// rule string is click-to-edit like the task title — click swaps in an input
+// seeded with the current rule; Enter/blur commits, Escape reverts — and the
+// committed draft is exactly what the kebab actions grant, so the user can shape
+// the rule (`git log` → `git:*`) before allowing it. Menu-open state is lifted to
+// the parent so only one row's kebab is open at a time. Rule strings stay opaque
+// agent-owned data: for codex, "allow in task" reads "save rule" (the server
+// returns a parity warning) and project scope is unsupported.
+export function RuleRow({
+  rule: initialRule,
+  agent,
+  menuOpen,
+  onToggleMenu,
+  onAllow,
+  granted,
+  onGranted,
+  autoEdit,
+  placeholder,
+}: {
+  rule: string
+  agent: Task['agent']
+  menuOpen: boolean
+  onToggleMenu: () => void
+  onAllow: (rule: string, scope: 'task' | 'project') => Promise<boolean>
+  // The scope this rule was granted in, if any — owned by the parent so it
+  // survives the popup closing and reopening; null shows the kebab, a value the
+  // checkmark. `onGranted` records a successful grant.
+  granted: 'task' | 'project' | null
+  onGranted: (scope: 'task' | 'project') => void
+  // Start in edit mode (the empty authoring row); a seeded denial row starts read.
+  autoEdit?: boolean
+  placeholder?: string
+}) {
+  const [editing, setEditing] = useState(!!autoEdit)
+  const [committed, setCommitted] = useState(initialRule)
+  const [draft, setDraft] = useState(initialRule)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const kebabRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  // Open the scope menu upward when there isn't room for it below the kebab, so
+  // it can't spill past the window's bottom (measured against the kebab's live
+  // viewport rect, so it works wherever the enclosing popup ended up).
+  const [menuUp, setMenuUp] = useState(false)
+  const codex = agent === 'codex'
+
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    }
+  }, [editing])
+
+  useLayoutEffect(() => {
+    if (!menuOpen) {
+      setMenuUp(false)
+      return
+    }
+    const kr = kebabRef.current?.getBoundingClientRect()
+    const mh = menuRef.current?.offsetHeight ?? 0
+    if (kr) {
+      const spaceBelow = window.innerHeight - kr.bottom
+      setMenuUp(mh > 0 && spaceBelow < mh + 8 && kr.top > spaceBelow)
+    }
+  }, [menuOpen])
+
+  function commit() {
+    setCommitted(draft.trim())
+    setEditing(false)
+  }
+  function cancel() {
+    setDraft(committed)
+    setEditing(false)
+  }
+  async function grant(scope: 'task' | 'project') {
+    onToggleMenu() // close this row's menu (it is the open one)
+    if (await onAllow(committed, scope)) onGranted(scope)
+  }
+
+  return (
+    <div className="rule-row">
+      {editing ? (
+        <input
+          ref={inputRef}
+          className="rule-row-input"
+          value={draft}
+          placeholder={placeholder}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              commit()
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              cancel()
+            }
+          }}
+          onBlur={commit}
+        />
+      ) : (
+        <button
+          type="button"
+          className="rule-row-rule"
+          title="Click to edit"
+          onClick={() => {
+            setDraft(committed)
+            setEditing(true)
+          }}
+        >
+          {committed || (
+            <span className="rule-row-placeholder">
+              {placeholder ?? 'Add a rule…'}
+            </span>
+          )}
+        </button>
+      )}
+      {granted ? (
+        <span
+          className="rule-row-granted"
+          title={codex ? 'Rule saved' : `Allowed in ${granted}`}
+        >
+          ✓
+        </span>
+      ) : (
+        <div className="rule-row-menu">
+          <button
+            ref={kebabRef}
+            type="button"
+            className="rule-row-kebab"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            aria-label="Grant scope"
+            disabled={!committed}
+            onClick={onToggleMenu}
+          >
+            ⋮
+          </button>
+          {menuOpen && (
+            <div
+              ref={menuRef}
+              className={'rule-row-menu-popup' + (menuUp ? ' up' : '')}
+              role="menu"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className="task-menu-item"
+                title={
+                  codex
+                    ? 'Saved for parity; codex runs do not honor task allow rules yet'
+                    : undefined
+                }
+                onClick={() => void grant('task')}
+              >
+                {codex ? 'Save rule' : 'Allow in task'}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="task-menu-item"
+                disabled={codex}
+                title={
+                  codex
+                    ? 'Project grants are not supported for codex tasks yet'
+                    : undefined
+                }
+                onClick={() => void grant('project')}
+              >
+                {codex ? 'Project unsupported' : 'Allow in project'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// The per-turn denial-review surface at the foot of a finished assistant message:
+// a muted "N permissions blocked this turn" line that opens a fixed-anchored
+// popup of editable rule rows (one per deduped denial), each grantable in task or
+// project scope. Fixed-positioned like the other header/chip popups so the
+// scrolling timeline can't clip it. Only rendered when there are confirmed
+// denials, so a task whose agent never reports them (codex) simply shows nothing.
+export function BlockedSummary({
+  requests,
+  agent,
+  onAllow,
+}: {
+  requests: BlockedRequest[]
+  agent: Task['agent']
+  onAllow: (rule: string, scope: 'task' | 'project') => Promise<boolean>
+}) {
+  const { open, setOpen, containerRef, triggerRef, popupRef, popupStyle } =
+    useAnchoredPopup()
+  const [openMenuKey, setOpenMenuKey] = useState<string | null>(null)
+  // Which rules have been granted, kept here (not in the rows) so a checkmark
+  // survives the popup closing and reopening within this turn's summary.
+  const [granted, setGranted] = useState<Record<string, 'task' | 'project'>>({})
+
+  useEffect(() => {
+    if (!open) setOpenMenuKey(null)
+  }, [open])
+
+  return (
+    <div className="blocked-summary" ref={containerRef}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="blocked-summary-line"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <BlockedIcon />
+        {requests.length} permission{requests.length === 1 ? '' : 's'} blocked
+        this turn
+      </button>
+      {open && (
+        <div ref={popupRef} className="blocked-popup" style={popupStyle}>
+          {requests.map((r) => (
+            <RuleRow
+              key={r.key}
+              rule={r.rule}
+              agent={agent}
+              menuOpen={openMenuKey === r.key}
+              onToggleMenu={() =>
+                setOpenMenuKey((k) => (k === r.key ? null : r.key))
+              }
+              onAllow={onAllow}
+              granted={granted[r.key] ?? null}
+              onGranted={(scope) =>
+                setGranted((g) => ({ ...g, [r.key]: scope }))
+              }
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// The rubber-stamp mark on the always-available grant control — authoring a rule
+// is "stamping" an approval. A handled stamp pressing down onto its base plate.
+function StampIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M9 5a3 3 0 0 1 6 0c0 1.6-1.2 2.1-1.2 3.4 0 1 .8 1.3 1.7 2 .9.8 1 1.6 1 3.1H6.5c0-1.5.1-2.3 1-3.1.9-.7 1.7-1 1.7-2C10.2 7.1 9 6.6 9 5z" />
+      <line x1="4.5" y1="17" x2="19.5" y2="17" />
+      <line x1="6.5" y1="20.5" x2="17.5" y2="20.5" />
+    </svg>
+  )
+}
+
+// The always-available grant control in the task header: a rubber-stamp button
+// that opens a one-row rule-authoring popup — the same RuleRow the blocked
+// summary uses, a single empty editable row with the same task/project kebab — so
+// a rule can be granted proactively, no archaeology through denied chips. The
+// doc's primary permission surface; permission asks will later deep-link into it
+// with a prefill. Fixed-anchored like the other header popups so it can't be
+// clipped.
+export function GrantControl({
+  agent,
+  onAllow,
+}: {
+  agent: Task['agent']
+  onAllow: (rule: string, scope: 'task' | 'project') => Promise<boolean>
+}) {
+  const { open, setOpen, containerRef, triggerRef, popupRef, popupStyle } =
+    useAnchoredPopup()
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [granted, setGranted] = useState<'task' | 'project' | null>(null)
+
+  // Each open starts a fresh authoring row (empty rule, no checkmark).
+  useEffect(() => {
+    if (!open) {
+      setMenuOpen(false)
+      setGranted(null)
+    }
+  }, [open])
+
+  return (
+    <div className="task-menu" ref={containerRef}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="edit-title-button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title="Grant a permission rule"
+        aria-label="Grant a permission rule"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <StampIcon />
+      </button>
+      {open && (
+        <div ref={popupRef} className="blocked-popup" style={popupStyle}>
+          <div className="rule-popup-head">Grant a permission rule</div>
+          {/* One empty row, remounted fresh each time the popup reopens (the
+              popup unmounts on close), so authoring another rule is one reopen. */}
+          <RuleRow
+            rule=""
+            agent={agent}
+            autoEdit
+            placeholder="e.g. Bash(git:*)"
+            menuOpen={menuOpen}
+            onToggleMenu={() => setMenuOpen((o) => !o)}
+            onAllow={onAllow}
+            granted={granted}
+            onGranted={(scope) => setGranted(scope)}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
