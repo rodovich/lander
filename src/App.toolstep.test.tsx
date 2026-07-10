@@ -11,15 +11,9 @@ const render = (step: any, extra: Record<string, unknown> = {}) =>
     <ToolStep
       step={step}
       status="ok"
-      allowable={false}
       result={undefined}
-      open={false}
-      onToggle={() => {}}
-      onClose={() => {}}
-      onAllow={() => {}}
       detailOpen={true}
       onToggleDetail={() => {}}
-      agent="claude"
       {...extra}
     />,
   )
@@ -62,9 +56,12 @@ describe('ToolStep input disclosure', () => {
       createdAt: '2026-01-01T00:00:00.000Z',
     })
     expect(html).not.toContain('step-input')
-    // No revealable detail ⇒ no disclosure toggle, just the collapsible row.
+    // No revealable detail ⇒ no disclosure toggle, and the chip is a plain,
+    // non-interactive label (a <span>), not a button.
     expect(html).not.toContain('collapsible-toggle')
     expect(html).toContain('collapsible-row')
+    expect(html).toContain('step-tool-name plain')
+    expect(html).toContain('<span class="step-tool-name plain">Bash</span>')
   })
 
   it('shows the input above a landed output when the call has both', () => {

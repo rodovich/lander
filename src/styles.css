@@ -1777,84 +1777,19 @@ body {
   background: color-mix(in srgb, var(--wedged) 22%, transparent);
 }
 
-/* The grant popup, anchored under the tool chip. Fixed-positioned (with top/left
-   set inline from the chip's measured rect) so the scrolling timeline can't clip
-   it and the composer bar can't paint over it. */
-.tool-popup {
-  position: fixed;
-  z-index: 100;
-  width: 380px;
-  max-width: 70vw;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(17, 0, 0, 0.16);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  font-size: 13px;
+/* A chip with no revealable detail is a plain label, not a button — no pointer,
+   no hover lift. It keeps its tint (riding, or wedged when errored) so a blocked
+   call with nothing to reveal still reads red. */
+.step-tool-name.plain {
+  cursor: default;
 }
 
-.tool-popup-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
+.step-tool-name.plain:hover {
+  background: color-mix(in srgb, var(--riding) 12%, transparent);
 }
 
-.tool-popup-tool {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-weight: 600;
-  color: var(--riding);
-}
-
-/* Only an errored call shows a status word ("blocked"/"failed"), so it always
-   reads red — a clean call shows no word at all. */
-.tool-popup-status {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--wedged);
-}
-
-.tool-popup-input {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  width: 100%;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-tinted);
-  color: var(--fg);
-  resize: vertical;
-}
-
-.tool-popup-input:focus {
-  outline: none;
-  box-shadow: inset 0 0 0 2px var(--riding);
-}
-
-.tool-popup-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.tool-popup-actions button {
-  font: inherit;
-  font-weight: 600;
-  flex: 1;
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-tinted);
-  color: var(--riding);
-  cursor: pointer;
-}
-
-.tool-popup-actions button:hover {
-  background: var(--selected);
+.step-tool-name.plain.errored:hover {
+  background: color-mix(in srgb, var(--wedged) 14%, transparent);
 }
 
 .step-tool-input {

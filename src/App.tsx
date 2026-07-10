@@ -810,87 +810,6 @@ function UsageSummary({
   )
 }
 
-// The grant popup anchored under a tool chip: shows the call as an editable
-// settings.json rule plus its permission status, and — when the call was
-// blocked — buttons to allow it for just this task or the whole project. The
-// textarea seeds from the rule but the user can edit it before granting.
-function ToolPopup({
-  step,
-  status,
-  agent,
-  allowable,
-  anchor,
-  onAllow,
-}: {
-  step: Step
-  status: ToolStatus
-  agent: Task['agent']
-  // Whether to offer the allow buttons. True when the call was refused at the
-  // permission gate, or it errored before the turn's permission_denials list
-  // arrived (so we can't yet tell a refusal from a plain failure — offer the
-  // grant rather than hide it prematurely). False once the list confirms the
-  // error was not a denial, and for clean or still-running calls.
-  allowable: boolean
-  // Viewport coords of the chip's bottom-left, so the fixed-position popup can
-  // anchor under the chip while escaping the scrolling timeline's clipping.
-  anchor: { top: number; left: number }
-  onAllow: (rule: string, scope: 'task' | 'project') => void
-}) {
-  // `rule` is computed server-side (see toolRule). Steps saved before that field
-  // existed fall back to the bare tool name; they predate blocked/isError too, so
-  // they never offer the allow buttons anyway — the textarea is just a view.
-  const [rule, setRule] = useState(step.rule ?? step.tool ?? '')
-  // Only an error carries a status word: a refusal reads "blocked", any other
-  // error "failed". A clean or still-running call shows just its rule.
-  const label =
-    status === 'blocked' ? 'blocked' : status === 'failed' ? 'failed' : ''
-  const codex = agent === 'codex'
-  return (
-    <div
-      className="tool-popup"
-      style={{ top: anchor.top, left: anchor.left }}
-      onClick={(e) => e.stopPropagation()}
-    >
-      <div className="tool-popup-head">
-        <span className="tool-popup-tool">{step.tool}</span>
-        {label && <span className="tool-popup-status">{label}</span>}
-      </div>
-      <textarea
-        className="tool-popup-input"
-        rows={3}
-        value={rule}
-        onChange={(e) => setRule(e.target.value)}
-      />
-      {allowable && (
-        <div className="tool-popup-actions">
-          <button
-            type="button"
-            title={
-              codex
-                ? 'Saved for parity; Codex runs do not honor task allow rules yet'
-                : undefined
-            }
-            onClick={() => onAllow(rule, 'task')}
-          >
-            {codex ? 'save rule' : 'allow in task'}
-          </button>
-          <button
-            type="button"
-            title={
-              codex
-                ? 'Project grants are not supported for Codex tasks yet'
-                : undefined
-            }
-            onClick={() => onAllow(rule, 'project')}
-          >
-            {codex ? 'project unsupported' : 'allow in project'}
-          </button>
-        </div>
-      )}
-    </div>
-  )
-}
-
 // The no-smoking-style prohibition mark — a circle with a diagonal slash, no
 // cigarette — that leads the "N permissions blocked this turn" summary.
 function BlockedIcon() {
@@ -1227,41 +1146,30 @@ function Collapsible({
   )
 }
 
-// A tool call in the activity trace: a clickable chip (red when the call was
-// blocked or failed) that toggles a grant popup. When the chip has revealable detail — a
-// file-writing tool's diff, or any other tool's captured output — it also gets
-// a disclosure triangle to its left that expands it (default closed);
-// option/shift-clicking toggles every such chip in the message at once. The chip
-// + popup share one ref so an outside click — anywhere but here — dismisses the
-// popup.
+// A tool call in the activity trace: a chip (red when the call was blocked or
+// failed) beside its one-line input. When the chip has revealable detail — the
+// full input, a file-writing tool's diff, any other tool's captured output, or a
+// nested subagent trace — it becomes a disclosure: a triangle to its left and a
+// clickable chip both toggle it (default closed), and option/shift-clicking
+// toggles every such chip in the message at once. A chip with no detail is a
+// plain, non-interactive label. Grants moved to the per-turn blocked summary and
+// the always-available control, so the chip no longer opens anything on its own.
 export function ToolStep({
   step,
   status,
-  allowable,
   result,
-  open,
-  onToggle,
-  onClose,
-  onAllow,
   detailOpen,
   onToggleDetail,
-  agent,
   subSteps,
 }: {
   step: Step
   status: ToolStatus
-  allowable: boolean
   // The matching tool_result's text/error, folded in so the chip can reveal it.
   result?: { text?: string; isError?: boolean }
-  open: boolean
-  onToggle: () => void
-  onClose: () => void
-  onAllow: (rule: string, scope: 'task' | 'project') => void
   detailOpen: boolean
   // `all` is set when the user option/shift-clicked, asking to toggle every
   // detail in the message rather than just this one.
   onToggleDetail: (all: boolean) => void
-  agent: Task['agent']
   // A subagent-spawning call (Agent/Explore) gets its subagent's whole activity
   // trace as its revealable detail, pre-rendered by the caller. Absent otherwise.
   subSteps?: React.ReactNode
@@ -1289,62 +1197,31 @@ export function ToolStep({
       : hasResult
         ? 'output'
         : 'input'
-  const ref = useRef<HTMLDivElement>(null)
-  const buttonRef = useRef<HTMLButtonElement>(null)
-  // The popup is fixed-positioned (so the scrolling timeline can't clip it), so
-  // we anchor it to the chip's live viewport rect and re-measure as the timeline
-  // scrolls or the window resizes.
-  const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null)
-  useEffect(() => {
-    if (!open) {
-      setAnchor(null)
-      return
-    }
-    const place = () => {
-      const r = buttonRef.current?.getBoundingClientRect()
-      if (r) setAnchor({ top: r.bottom + 6, left: r.left })
-    }
-    place()
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKey)
-    window.addEventListener('resize', place)
-    // Capture phase so the timeline's own scroll (not just window scroll) repositions.
-    window.addEventListener('scroll', place, true)
-    return () => {
-      window.removeEventListener('mousedown', onDown)
-      window.removeEventListener('keydown', onKey)
-      window.removeEventListener('resize', place)
-      window.removeEventListener('scroll', place, true)
-    }
-  }, [open, onClose])
+  const errored = status === 'blocked' || status === 'failed'
 
-  // The chip (and its input) read the same whether or not the call has revealable
-  // detail; when it does, they ride beside the disclosure triangle as its summary.
+  // The chip: a button that toggles the detail when there's detail to reveal (a
+  // second hinge beside the triangle), else a plain label — never a dead button.
   const chip = (
     <>
-      <button
-        ref={buttonRef}
-        type="button"
-        className={
-          'step-tool-name' +
-          (status === 'blocked' || status === 'failed' ? ' errored' : '')
-        }
-        aria-expanded={open}
-        onClick={onToggle}
-      >
-        {step.tool}
-      </button>
+      {hasDetail ? (
+        <button
+          type="button"
+          className={'step-tool-name' + (errored ? ' errored' : '')}
+          aria-expanded={detailOpen}
+          onClick={(e) => onToggleDetail(e.altKey || e.shiftKey)}
+        >
+          {step.tool}
+        </button>
+      ) : (
+        <span className={'step-tool-name plain' + (errored ? ' errored' : '')}>
+          {step.tool}
+        </span>
+      )}
       {step.input && <span className="step-tool-input">{step.input}</span>}
     </>
   )
   return (
-    <div className="step-tool" ref={ref}>
+    <div className="step-tool">
       {hasDetail ? (
         <Collapsible
           open={detailOpen}
@@ -1367,49 +1244,27 @@ export function ToolStep({
       ) : (
         <div className="collapsible-row">{chip}</div>
       )}
-      {open && anchor && (
-        <ToolPopup
-          step={step}
-          status={status}
-          agent={agent}
-          allowable={allowable}
-          anchor={anchor}
-          onAllow={onAllow}
-        />
-      )}
     </div>
   )
 }
 
 // One entry in a streamed assistant turn: prose as markdown, a tool call as a
-// clickable chip, or a dimmed peek at a tool result.
+// chip, or a dimmed peek at a tool result.
 function Step({
   step,
   status,
-  allowable,
   result,
-  open,
-  onToggle,
-  onClose,
-  onAllow,
   detailOpen,
   onToggleDetail,
   linkTask,
-  agent,
   subSteps,
 }: {
   step: Step
   status: ToolStatus
-  allowable: boolean
   result?: { text?: string; isError?: boolean }
-  open: boolean
-  onToggle: () => void
-  onClose: () => void
-  onAllow: (rule: string, scope: 'task' | 'project') => void
   detailOpen: boolean
   onToggleDetail: (all: boolean) => void
   linkTask: TaskLinkResolver
-  agent: Task['agent']
   // A subagent spawner's nested trace, pre-rendered by the caller; passed through
   // to ToolStep as the chip's revealable detail.
   subSteps?: React.ReactNode
@@ -1419,15 +1274,9 @@ function Step({
       <ToolStep
         step={step}
         status={status}
-        allowable={allowable}
         result={result}
-        open={open}
-        onToggle={onToggle}
-        onClose={onClose}
-        onAllow={onAllow}
         detailOpen={detailOpen}
         onToggleDetail={onToggleDetail}
-        agent={agent}
         subSteps={subSteps}
       />
     )
@@ -2248,10 +2097,6 @@ export function App() {
     }
   }, [])
 
-  // The tool chip whose grant popup is open, keyed "<messageIndex>:<stepIndex>".
-  // Only one is open at a time; null means none.
-  const [openTool, setOpenTool] = useState<string | null>(null)
-
   // The set of tool chips whose detail (a diff or captured output) is revealed,
   // keyed the same "<messageIndex>:<stepIndex>". Details start closed and several
   // can be open at once (option/shift-click toggles a whole message's worth).
@@ -2935,11 +2780,10 @@ export function App() {
   }
 
   // Reset per-task view state when switching tasks so none of it bleeds across
-  // them: leave title-edit mode, close any tool popup, and collapse revealed
-  // tool details and expanded turns.
+  // them: leave title-edit mode and collapse revealed tool details and expanded
+  // turns.
   useEffect(() => {
     setEditingTitle(false)
-    setOpenTool(null)
     setOpenDetails(new Set())
     setExpandedTurns(new Set())
   }, [selected])
@@ -3165,10 +3009,9 @@ export function App() {
 
   // Grant a permission rule: "task" scope persists the rule on the task (used on
   // future turns), "project" scope writes it to the project's settings.local.json.
-  // Close the old chip popup either way; refresh so a task-scoped grant shows up.
-  // Returns whether the grant landed, so a caller (the blocked-summary rows) can
-  // mark the row granted only on success. The rule may have been hand-edited
-  // before granting.
+  // Refresh so a task-scoped grant shows up. Returns whether the grant landed, so
+  // a caller (the blocked-summary rows) can mark the row granted only on success.
+  // The rule may have been hand-edited before granting.
   async function allowTool(
     rule: string,
     scope: 'task' | 'project',
@@ -3176,7 +3019,6 @@ export function App() {
     if (!current) return false
     const id = current.id
     const proj = current.projectSlug
-    setOpenTool(null)
     setError(null)
     try {
       const r = await fetch(`/api/${proj}/tasks/${id}/allow`, {
@@ -4052,15 +3894,13 @@ export function App() {
                             s.kind === 'tool_use' && s.toolUseId
                               ? resultById.get(s.toolUseId)
                               : undefined
+                          // Whether this call is in the turn's permission_denials
+                          // (reconciled onto the tool_result at turn end); a denied
+                          // call reads "blocked", any other errored call "failed".
                           const inDenials =
                             s.kind === 'tool_use' && s.toolUseId
                               ? outcomes.get(s.toolUseId) === true
                               : false
-                          // permission_denials lands with the turn's terminal
-                          // result event, after which the message stops being
-                          // pending. Until then we can't tell a refusal from a
-                          // plain error, so treat the denials as not-yet-known.
-                          const denialsKnown = !m.pending
                           const status: ToolStatus =
                             s.kind !== 'tool_use'
                               ? 'running'
@@ -4071,13 +3911,6 @@ export function App() {
                                   : res
                                     ? 'ok'
                                     : 'running'
-                          // Offer the grant when the call was refused, or it
-                          // errored before the denials list arrived (it might yet
-                          // prove a refusal). Once the list is known and this call
-                          // isn't in it, the error was a genuine failure — no grant.
-                          const allowable =
-                            s.kind === 'tool_use' &&
-                            (inDenials || (!!res?.isError && !denialsKnown))
                           // A result owned by a tool_use chip is now revealed from
                           // that chip — skip the standalone peek. Orphan/legacy
                           // results (no matching chip) still render inline.
@@ -4103,19 +3936,11 @@ export function App() {
                               key={j}
                               step={s}
                               status={status}
-                              allowable={allowable}
                               result={res}
-                              open={openTool === key}
-                              onToggle={() =>
-                                setOpenTool(openTool === key ? null : key)
-                              }
-                              onClose={() => setOpenTool(null)}
-                              onAllow={allowTool}
                               detailOpen={openDetails.has(key)}
                               onToggleDetail={(all) =>
                                 toggleDetail(key, all ? detailKeys : [key])
                               }
-                              agent={current.agent}
                               linkTask={resolveTaskLink}
                               subSteps={subSteps}
                             />
