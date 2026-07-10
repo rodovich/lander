@@ -16,6 +16,25 @@ export type UsageWindow = { utilization: number; resetsAt: string | null }
 // account API didn't report it).
 export type UsageBody = { session: UsageWindow | null; weekly: UsageWindow | null }
 
+// A presentation-agnostic telemetry datum a flow publishes for a status readout.
+// The server caches and serves these opaquely; only the producing adapter knows
+// what they mean. Mirrors the client copy in src/types.ts (kept in sync by hand,
+// like the other shared shapes here). Three kinds: text (labeled string), count
+// (labeled number, shown abbreviated), meter (value/max bar with an optional
+// 'warn' band and a preformatted note like "resets 3:45 PM").
+export type TelemetryItem =
+  | { id: string; label: string; type: 'text'; value: string }
+  | { id: string; label: string; type: 'count'; value: number; unit?: string }
+  | {
+      id: string
+      label: string
+      type: 'meter'
+      value: number
+      max: number
+      level?: 'ok' | 'warn'
+      note?: string
+    }
+
 // ── Server → daemon ────────────────────────────────────────────────────────
 
 // A message attachment as it crosses to the daemon: refs only — id/name/mime/size,
@@ -204,13 +223,15 @@ export type ProjectGrantResultMessage = {
   status?: number
 }
 
-// A fresh usage snapshot, pushed whenever the daemon refreshes (per-turn, on the
-// reset timer, at boot). Not tied to any run; the server caches and serves it
-// verbatim. Carries the same `UsageBody` shape (session + weekly windows).
-export type UsageMessage = {
-  type: 'usage'
-  session: UsageWindow | null
-  weekly: UsageWindow | null
+// A fresh telemetry snapshot for one flow's status panel, pushed whenever the
+// producing adapter refreshes it (per-turn, on the reset timer, at boot). Not tied
+// to any run; the server caches it keyed by `agent` and serves the items verbatim,
+// never learning what they mean. An adapter that publishes nothing (Codex) simply
+// never sends this, so its panel stays empty.
+export type TelemetryMessage = {
+  type: 'telemetry'
+  agent: AgentKind
+  items: TelemetryItem[]
 }
 
 export type DaemonToServer =
@@ -220,4 +241,4 @@ export type DaemonToServer =
   | SessionMessage
   | TurnContextMessage
   | ProjectGrantResultMessage
-  | UsageMessage
+  | TelemetryMessage

@@ -114,19 +114,3 @@ export function retryResetTime(retry?: { resetsAt?: string }): string | undefine
   if (!at || Date.parse(at) <= Date.now()) return undefined
   return formatResetTime(at)
 }
-
-// How a reset moment reads: the clock time if it lands today, otherwise the
-// weekday (e.g. "Mon"). Used for the weekly window, which usually resets on a
-// later day.
-export function formatResetWhen(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  const now = new Date()
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate()
-  return sameDay
-    ? formatResetTime(iso)
-    : d.toLocaleDateString([], { weekday: 'short' })
-}

@@ -15,8 +15,8 @@ import type {
   DoneMessage,
   SessionMessage,
   TurnContextMessage,
-  UsageBody,
   AgentKind,
+  TelemetryItem,
 } from './protocol'
 
 // One run's inbound events, delivered in order to the reducer awaiting them. The
@@ -239,8 +239,9 @@ type DaemonServerOpts = {
   token: string
   // Called with the slugs the daemon serves on each primary `register` message.
   onRegister?: (slugs: string[]) => void
-  // Called with each pushed usage snapshot, for the server to cache and serve.
-  onUsage?: (body: UsageBody) => void
+  // Called with each pushed telemetry snapshot (a flow's status items, keyed by
+  // agent), for the server to cache and serve.
+  onTelemetry?: (agent: AgentKind, items: TelemetryItem[]) => void
 }
 
 // Attach the daemon WS endpoint to the running HTTP server at /daemon. Handles
@@ -336,8 +337,8 @@ export function attachDaemonServer(
           })
           break
         }
-        case 'usage':
-          opts.onUsage?.({ session: msg.session, weekly: msg.weekly })
+        case 'telemetry':
+          opts.onTelemetry?.(msg.agent, msg.items)
           break
       }
     })

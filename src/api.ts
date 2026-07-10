@@ -1,4 +1,8 @@
-import type { Task, TaskWithProject, Usage } from './types'
+import type { Task, TaskWithProject, TelemetryItem } from './types'
+
+// The per-flow status telemetry map (agent → items) the tasks poll carries. Global,
+// so every project's response repeats it; an agent with no items is simply absent.
+export type FlowTelemetry = Record<string, TelemetryItem[]>
 
 // Request headers that mark a call as coming from the human's browser. The
 // server gates permission-granting endpoints (creating a task with edit/commit
@@ -40,7 +44,7 @@ export async function uploadAttachments(
 export async function loadShownTasks(
   slugs: string[],
   includeArchived: boolean,
-): Promise<{ tasks: TaskWithProject[]; usage: Usage | null }> {
+): Promise<{ tasks: TaskWithProject[]; telemetry: FlowTelemetry }> {
   const lists = await Promise.all(
     slugs.map(async (slug) => {
       const r = await fetch(
@@ -50,7 +54,7 @@ export async function loadShownTasks(
       if (!r.ok) throw new Error(body.error ?? r.statusText)
       return {
         tasks: (body.tasks as Task[]).map((t) => ({ ...t, projectSlug: slug })),
-        usage: (body.usage ?? null) as Usage | null,
+        telemetry: (body.telemetry ?? {}) as FlowTelemetry,
       }
     }),
   )
@@ -58,8 +62,9 @@ export async function loadShownTasks(
   merged.sort((a, b) =>
     (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt),
   )
-  // Usage is global — every project's response carries the same snapshot, so
-  // take the first one that's populated.
-  const usage = lists.map((l) => l.usage).find((u) => u != null) ?? null
-  return { tasks: merged, usage }
+  // Telemetry is global — every project's response carries the same map, so take
+  // the first one that has any items.
+  const telemetry =
+    lists.map((l) => l.telemetry).find((t) => Object.keys(t).length > 0) ?? {}
+  return { tasks: merged, telemetry }
 }

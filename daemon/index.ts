@@ -17,12 +17,12 @@ import type { AgentAdapter } from './agent'
 import { createClaudeAdapter } from './claude'
 import { codexOptionsFromEnv, createCodexAdapter } from './codex'
 import { projectSlug } from '../server/projects'
-import { fetchUsage, type UsageBody } from '../server/usage'
+import { fetchUsage, usageTelemetry, type UsageBody } from '../server/usage'
 import type {
   ServerToDaemon,
   StartRunMessage,
   RegisterMessage,
-  UsageMessage,
+  TelemetryMessage,
   ProjectGrantResultMessage,
   AgentKind,
 } from '../server/protocol'
@@ -90,7 +90,7 @@ function send(
   msg:
     | RunManagerMessage
     | RegisterMessage
-    | UsageMessage
+    | TelemetryMessage
     | ProjectGrantResultMessage,
 ): void {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
@@ -120,7 +120,11 @@ let usageResetTimer: ReturnType<typeof setTimeout> | null = null
 
 function pushUsage(): void {
   if (usageBody)
-    send({ type: 'usage', session: usageBody.session, weekly: usageBody.weekly })
+    send({
+      type: 'telemetry',
+      agent: CLAUDE_ADAPTER.kind,
+      items: usageTelemetry(usageBody),
+    })
 }
 
 // Fetch unless a snapshot was taken within the TTL — the single 60s floor every

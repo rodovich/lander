@@ -27,7 +27,7 @@ import {
   requestResume,
   requestProjectGrant,
 } from './daemon'
-import type { AgentKind, StartRunMessage, UsageBody } from './protocol'
+import type { AgentKind, StartRunMessage, TelemetryItem } from './protocol'
 import {
   readTasks as readTasksStore,
   readTask as readTaskStore,
@@ -870,13 +870,13 @@ async function launchScheduled(): Promise<void> {
   }
 }
 
-// The latest usage snapshot the daemon pushed (decision 6). The daemon owns the
-// fetch + refresh schedule and sends a `usage` message on each refresh, which
-// lands here via the WS handler; the server only caches it and serves it (the
-// tasks poll embeds it, /api/usage returns it). The server never reads the
-// credential or hits the OAuth endpoint, which is what lets it move into a
-// credential-less container later.
-let usageCache: { at: number; body: UsageBody } | null = null
+// The latest telemetry snapshot each flow pushed, keyed by agent (decision 6). A
+// producing adapter owns the fetch + refresh schedule and sends a `telemetry`
+// message on each refresh, which lands here via the WS handler; the server only
+// caches the items and serves them (the tasks poll embeds them, /api/telemetry
+// returns them). The server never learns what the items mean, nor reads any
+// credential — which is what lets it move into a credential-less container later.
+const telemetryCache = new Map<AgentKind, TelemetryItem[]>()
 
 // The shared secret that marks a request as coming from the human's browser
 // (vs. a task's `lander` CLI). Prefer the env var dev.mjs sets — it hands the
@@ -934,16 +934,13 @@ async function resolvePrincipal(req: {
 
 export const app = new Hono()
 
-// Current Claude subscription usage: the 5-hour session window and the 7-day
-// weekly window, each as { utilization (0-100), resetsAt }. Mirrors what the
-// `/usage` command in the Claude CLI shows. Served from the snapshot the daemon
-// pushes (decision 6) — the same cache the tasks poll embeds; the server never
-// fetches it. 503 until the daemon's first push lands.
-app.get('/api/usage', (c) => {
-  if (!usageCache)
-    return c.json({ error: 'no usage snapshot available yet' }, 503)
-  return c.json(usageCache.body)
-})
+// The per-flow status telemetry each producing adapter pushes, as an { agent:
+// items } map — the same cache the tasks poll embeds. Opaque to the server; empty
+// object until the first push lands. (The Claude flow publishes two usage meters
+// here; other flows publish their own items or none.)
+app.get('/api/telemetry', (c) =>
+  c.json(Object.fromEntries(telemetryCache)),
+)
 
 // List the configured projects; the first is the default the UI redirects to.
 app.get('/api/projects', (c) =>
@@ -957,14 +954,15 @@ app.get('/api/:project/tasks', async (c) => {
     // By default only active tasks are listed; `?archived=1` lists only the
     // archived ones instead, each tagged so the UI can mark the row and offer
     // Restore.
-    // Account usage rides along with every tasks poll so the client never has to
-    // decide when it's stale (the daemon refreshes and pushes it — decision 6).
-    // It's global, not per-project — the same snapshot on every project's response.
-    const usage = usageCache?.body ?? null
+    // Flow status telemetry rides along with every tasks poll so the client never
+    // has to decide when it's stale (the producing adapter refreshes and pushes it
+    // — decision 6). It's global, not per-project — the same { agent: items } map
+    // on every project's response.
+    const telemetry = Object.fromEntries(telemetryCache)
     if (c.req.query('archived') !== '1')
       return c.json({
         tasks: (await readTasks(project.dataDir)).map(publicTask),
-        usage,
+        telemetry,
       })
     const archived = (await readTasks(project.archiveDir)).map((t) => ({
       ...t,
@@ -973,7 +971,7 @@ app.get('/api/:project/tasks', async (c) => {
     archived.sort((a, b) =>
       (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt),
     )
-    return c.json({ tasks: archived.map(publicTask), usage })
+    return c.json({ tasks: archived.map(publicTask), telemetry })
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
@@ -2743,8 +2741,8 @@ if (process.env.NODE_ENV !== 'test' && process.env.VITEST !== 'true') {
             `${extra.join(', ')} — launch-arg drift, harmless.`,
         )
     },
-    onUsage: (body) => {
-      usageCache = { at: Date.now(), body }
+    onTelemetry: (agent, items) => {
+      telemetryCache.set(agent, items)
     },
   })
   console.log(`daemon WS endpoint at ws://localhost:${port}/daemon`)

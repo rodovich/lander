@@ -207,9 +207,6 @@ export type Project = {
   slug: string
 }
 
-export type UsageWindow = { utilization: number; resetsAt: string | null }
-export type Usage = { session: UsageWindow | null; weekly: UsageWindow | null }
-
 // A presentation-agnostic telemetry datum a flow publishes for one of the two
 // readouts (the per-flow status panel below the new-task form; the per-task
 // composer footer). The server caches and serves these opaquely and the UI renders

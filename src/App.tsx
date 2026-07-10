@@ -1,5 +1,10 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { loadShownTasks, uiHeaders, uploadAttachments } from './api'
+import {
+  loadShownTasks,
+  uiHeaders,
+  uploadAttachments,
+  type FlowTelemetry,
+} from './api'
 import { AskForm } from './asks'
 import { AttachButton, MessageArtifacts, MessageAttachments } from './attachments'
 import { dataTransferHasFiles } from './fileDrop'
@@ -7,8 +12,6 @@ import {
   DATE_CATEGORY_LABELS,
   dateCategory,
   formatCost,
-  formatResetTime,
-  formatResetWhen,
   formatTaskTime,
   formatTimestamp,
   formatTokens,
@@ -50,57 +53,9 @@ import type {
   TaskEvent,
   TaskView,
   TaskWithProject,
-  TelemetryItem,
   TimeFilter,
   ToolStatus,
-  Usage,
-  UsageWindow,
 } from './types'
-
-// A1-only bridge: derive the two account-usage meters from the polled snapshot on
-// the client, so the generic panel can render them. Phase A2 moves this mapping
-// into the claude adapter (the flow owns it) and deletes this helper.
-function usageMeter(
-  id: string,
-  label: string,
-  window: UsageWindow,
-  reset: string,
-): TelemetryItem {
-  const pct = Math.max(0, Math.min(100, Math.round(window.utilization)))
-  return {
-    id,
-    label,
-    type: 'meter',
-    value: window.utilization,
-    max: 100,
-    level: pct >= 90 ? 'warn' : 'ok',
-    note: reset ? `resets ${reset}` : undefined,
-  }
-}
-
-function usageMeters(usage: Usage | null): TelemetryItem[] {
-  if (!usage) return []
-  const items: TelemetryItem[] = []
-  if (usage.session)
-    items.push(
-      usageMeter(
-        'session',
-        'Session',
-        usage.session,
-        usage.session.resetsAt ? formatResetTime(usage.session.resetsAt) : '',
-      ),
-    )
-  if (usage.weekly)
-    items.push(
-      usageMeter(
-        'weekly',
-        'Weekly',
-        usage.weekly,
-        usage.weekly.resetsAt ? formatResetWhen(usage.weekly.resetsAt) : '',
-      ),
-    )
-  return items
-}
 
 export function App() {
   // Opt-in profiling (see perf.ts): count every App render. The whole
@@ -115,10 +70,10 @@ export function App() {
   // endpoints), so without this an archived id referenced from an inbox
   // message — or vice versa — wouldn't link.
   const [linkTasks, setLinkTasks] = useState<TaskWithProject[]>([])
-  // Account usage, carried on every tasks poll. The server decides when to
-  // refresh it from upstream (on turn-end and at each window reset); the client
-  // just shows the latest snapshot it was handed.
-  const [usage, setUsage] = useState<Usage | null>(null)
+  // Per-flow status telemetry (agent → items), carried on every tasks poll. The
+  // producing flow decides when to refresh; the client just renders the latest
+  // snapshot it was handed for whichever flow is in view.
+  const [telemetry, setTelemetry] = useState<FlowTelemetry>({})
   const [projects, setProjects] = useState<Project[]>([])
   // The project dropdown acts as a filter: `shown` holds the slugs whose tasks
   // are merged into the list. It is always either a single project or every
@@ -729,10 +684,10 @@ export function App() {
     let cancelled = false
     const refresh = () =>
       loadShownTasks(shown, view === 'archived')
-        .then(({ tasks, usage }) => {
+        .then(({ tasks, telemetry }) => {
           if (!cancelled) {
             setTasks(tasks)
-            setUsage(usage)
+            setTelemetry(telemetry)
             hasLoadedRef.current = true
           }
         })
@@ -1782,13 +1737,9 @@ export function App() {
           </div>
         </form>
 
-        {current?.agent === 'codex' ? (
-          <div className="telemetry-panel telemetry-unsupported">
-            Codex subscription usage unsupported
-          </div>
-        ) : (
-          <TelemetryPanel items={usageMeters(usage)} />
-        )}
+        <TelemetryPanel
+          items={telemetry[current?.agent ?? newTaskAgent] ?? []}
+        />
       </div>
 
       <div className="detail">
