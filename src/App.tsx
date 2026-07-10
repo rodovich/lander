@@ -1328,13 +1328,16 @@ export function ToolStep({
   // trace as its revealable detail, pre-rendered by the caller. Absent otherwise.
   subSteps?: React.ReactNode
 }) {
-  // The untruncated input to reveal above the rest: the server's capture when it
-  // has one, else the chip's own input only when it's multi-line — a plain
-  // single-line input already shows in full on the chip, so we don't repeat it
-  // (older steps predate inputFull; a codex command is the multi-line case there).
-  const inputDetail =
-    step.inputFull ?? (step.input?.includes('\n') ? step.input : undefined)
-  const hasInput = !!inputDetail
+  // Whether the input alone makes the chip a disclosure: it does when the server
+  // captured an untruncated copy, or when the raw input is multi-line — either way
+  // there's more to see than the one-line chip shows. A plain single-line input
+  // has nothing extra, so it stays a non-expanding label (older steps predate
+  // inputFull; a codex command is the multi-line case there).
+  const hasInput =
+    !!step.inputFull || !!(step.input && step.input.includes('\n'))
+  // What the open body wraps: the server's untruncated capture, else the chip's
+  // own input. It replaces the one-line copy on the chip once expanded.
+  const fullInput = step.inputFull ?? step.input
   const hasDiff = !!step.edits && step.edits.length > 0
   // A subagent spawner reveals the nested trace; an edit reveals its diff;
   // everything else reveals its captured output (if any — a still-running call has
@@ -1371,7 +1374,12 @@ export function ToolStep({
           {step.tool}
         </span>
       )}
-      {step.input && <span className="step-tool-input">{step.input}</span>}
+      {/* The one-line, ellipsized input rides the chip until the disclosure opens,
+          when it moves into the body to wrap in full below. A plain chip has no
+          body, so its input always stays here. */}
+      {step.input && !(hasDetail && detailOpen) && (
+        <span className="step-tool-input">{step.input}</span>
+      )}
     </>
   )
   return (
@@ -1384,7 +1392,7 @@ export function ToolStep({
           toggleLabel={`${detailOpen ? 'Hide' : 'Show'} ${noun}`}
           toggleTitle={`${detailOpen ? 'Hide' : 'Show'} ${noun} (⌥/⇧ for all)`}
         >
-          {hasInput && <div className="step-input">{inputDetail}</div>}
+          {step.input && <div className="step-input">{fullInput}</div>}
           {hasDiff && <DiffView edits={step.edits!} />}
           {hasChildren && <div className="steps sub-steps">{subSteps}</div>}
           {hasResult && (

@@ -1672,7 +1672,7 @@ body {
 .collapsible-body {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   margin-left: 4px;
   padding-left: 10px;
   border-left: 2px solid var(--border);
@@ -1753,7 +1753,6 @@ body {
   background: color-mix(in srgb, var(--riding) 12%, transparent);
   color: var(--riding);
   font: inherit;
-  font-weight: 600;
   cursor: pointer;
 }
 
@@ -2002,14 +2001,13 @@ body {
   word-break: break-word;
 }
 
-/* The untruncated tool input revealed above the chip's output/diff. Reads like
-   the result peek — mono, wrapped, newline-preserving — but a touch brighter
-   than the muted output, since it's the call the user is inspecting, not its
-   incidental stdout. Sits inside .collapsible-body, which supplies the indent. */
+/* The untruncated tool input revealed above the chip's output/diff — the one-line
+   copy that rode the collapsed chip, now moved here to wrap in full. Wears the
+   same mono/size/muted color as that chip input (.step-tool-input, inherited from
+   .step-tool), but wraps and preserves newlines instead of ellipsizing. Sits
+   inside .collapsible-body, which supplies the indent. */
 .step-input {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.8em;
-  color: var(--fg);
+  color: var(--muted);
   white-space: pre-wrap;
   word-break: break-word;
 }
