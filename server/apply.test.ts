@@ -110,24 +110,30 @@ describe('applyDone', () => {
     // A reply streamed first.
     applyUpdate(t, update({ steps: [step({ text: 'hello' })], finalText: 'hello', cursor: 1 }))
     const finishedAt = '2026-01-01T00:05:00.000Z'
-    applyDone(t, { exitCode: 0, interrupted: false, stderr: '' }, { at: finishedAt })
+    applyDone(
+      t,
+      { exitCode: 0, interrupted: false, stderr: '' },
+      { at: finishedAt, askId: 'ask-x-0' },
+    )
     const msg = t.messages[1]
     expect(msg.pending).toBe(false)
     expect(msg.text).toBe('hello')
     expect(t.status).toBe('riding') // not wedged
     expect(t.retry).toBeUndefined()
+    // A clean finish raises no ask.
+    expect(t.asks).toBeUndefined()
     expect(t.updatedAt).toBe(finishedAt)
     expect('runId' in t).toBe(false)
     expect('runCursor' in t).toBe(false)
   })
 
-  it('wedges and stashes a retry on a non-zero assistant error', () => {
+  it('wedges, stashes a retry, and raises the usage-limit ask when a reset time is present', () => {
     const t = task()
     const at = '2026-01-01T00:05:00.000Z'
     applyDone(
       t,
       { exitCode: 1, interrupted: false, stderr: 'boom' },
-      { at, rateLimitResetsAt: '2026-01-01T01:00:00.000Z' },
+      { at, rateLimitResetsAt: '2026-01-01T01:00:00.000Z', askId: 'ask-x-0' },
     )
     const msg = t.messages[1]
     expect(msg.pending).toBe(false)
@@ -141,25 +147,77 @@ describe('applyDone', () => {
     })
     // The wedge crossing was recorded as a timeline event.
     expect(t.events?.some((e) => e.kind === 'wedged')).toBe(true)
+    // The usage-limit ask: two options, the reset one carrying `at`, origin:retry.
+    expect(t.asks).toHaveLength(1)
+    const ask = t.asks![0]
+    expect(ask).toMatchObject({ id: 'ask-x-0', origin: 'retry', blocking: 'task' })
+    expect(ask.prompt).toBe('Usage limit reached.')
+    expect(ask.form.type === 'choice' && ask.form.options.map((o) => o.id)).toEqual([
+      'retry-now',
+      'retry-at-reset',
+    ])
+    expect(
+      ask.form.type === 'choice' &&
+        ask.form.options.find((o) => o.id === 'retry-at-reset')?.at,
+    ).toBe('2026-01-01T01:00:00.000Z')
   })
 
-  it('marks committed true when a reply had begun before the error', () => {
+  it('marks committed true and raises the generic one-option ask when a reply had begun', () => {
     const t = task()
     applyUpdate(t, update({ steps: [step({ text: 'partial' })], finalText: 'partial', cursor: 1 }))
-    applyDone(t, { exitCode: 1, interrupted: false, stderr: '' }, { at: AT })
+    applyDone(
+      t,
+      { exitCode: 1, interrupted: false, stderr: '' },
+      { at: AT, askId: 'ask-x-0' },
+    )
     expect(t.status).toBe('wedged')
     expect(t.retry?.committed).toBe(true)
     // The partial reply text stands; it isn't overwritten by an error message.
     expect(t.messages[1].text).toBe('partial')
+    // The generic error ask: one option, labelled "Try again" (committed), no reset.
+    expect(t.asks).toHaveLength(1)
+    const ask = t.asks![0]
+    expect(ask.prompt).toBe('The assistant run failed.')
+    expect(ask.form.type === 'choice' && ask.form.options).toMatchObject([
+      { id: 'retry-now', label: 'Try again' },
+    ])
   })
 
-  it('keeps an interrupted run unwedged and notes the stop when nothing streamed', () => {
+  it('labels the generic ask "Resend" when the failed turn had not committed', () => {
     const t = task()
-    applyDone(t, { exitCode: 137, interrupted: true, stderr: '' }, { at: AT })
+    applyDone(
+      t,
+      { exitCode: 1, interrupted: false, stderr: '' },
+      { at: AT, askId: 'ask-x-0' },
+    )
+    const ask = t.asks![0]
+    expect(ask.form.type === 'choice' && ask.form.options[0].label).toBe('Resend')
+  })
+
+  it('keeps an interrupted run unwedged, with no ask', () => {
+    const t = task()
+    applyDone(
+      t,
+      { exitCode: 137, interrupted: true, stderr: '' },
+      { at: AT, askId: 'ask-x-0' },
+    )
     const msg = t.messages[1]
     expect(msg.pending).toBe(false)
     expect(msg.text).toBe('_(interrupted)_')
     expect(t.status).toBe('riding') // an interrupt is not an assistant error
     expect(t.retry).toBeUndefined()
+    expect(t.asks).toBeUndefined()
+  })
+
+  it('raises no ask when the agent had already wedged itself (not a still-riding error)', () => {
+    const t = task({ status: 'wedged' })
+    applyDone(
+      t,
+      { exitCode: 1, interrupted: false, stderr: '' },
+      { at: AT, askId: 'ask-x-0' },
+    )
+    // applyDone only wedges (and asks) a still-riding task; a self-wedge stands.
+    expect(t.retry).toBeUndefined()
+    expect(t.asks).toBeUndefined()
   })
 })

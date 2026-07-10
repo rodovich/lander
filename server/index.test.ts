@@ -678,4 +678,87 @@ describe('asks', () => {
     const raw = await readRaw(id)
     expect((raw.asks as Raw[])[0].state).toBe('withdrawn')
   })
+
+  // A platform retry ask (origin:'retry') routes the answer through the
+  // retry-recovery machinery instead of a generic delivery.
+  const retryAsk = (over: Raw = {}) => ({
+    id: 'ask-retry-0',
+    createdAt: AT,
+    prompt: 'The assistant run failed.',
+    form: { type: 'choice', options: [{ id: 'retry-now', label: 'Try again' }] },
+    blocking: 'task',
+    state: 'open',
+    origin: 'retry',
+    ...over,
+  })
+
+  it('answers retry-now on a committed wedge: nudges the session and un-wedges', async () => {
+    const id = 'ask-retry-committed'
+    await seedTask(id, {
+      status: 'wedged',
+      retry: { committed: true, prompts: ['do the thing'] },
+      asks: [retryAsk()],
+    })
+    const res = await answer(id, 'ask-retry-0', { optionId: 'retry-now' })
+    expect(res.status).toBe(200)
+    const raw = await readRaw(id)
+    expect(raw.status).toBe('riding')
+    // Committed → a "try again" nudge (re-sending would duplicate the turn).
+    expect(raw.queued).toEqual(['try again'])
+    expect(raw.retry).toBeUndefined()
+    expect((raw.asks as Raw[])[0].state).toBe('answered')
+    // No generic "Answer to …" delivery message for a retry ask.
+    const texts = (raw.messages as { text: string }[]).map((m) => m.text)
+    expect(texts.some((t) => t.startsWith('Answer to'))).toBe(false)
+  })
+
+  it('answers retry-now on an uncommitted wedge: re-sends the un-received prompts', async () => {
+    const id = 'ask-retry-resend'
+    await seedTask(id, {
+      status: 'wedged',
+      retry: { committed: false, prompts: ['first', 'second'] },
+      asks: [retryAsk({ form: { type: 'choice', options: [{ id: 'retry-now', label: 'Resend' }] } })],
+    })
+    const res = await answer(id, 'ask-retry-0', { optionId: 'retry-now' })
+    expect(res.status).toBe(200)
+    const raw = await readRaw(id)
+    expect(raw.status).toBe('riding')
+    // Not committed → re-queue the exact prompts (already in messages[]).
+    expect(raw.queued).toEqual(['first', 'second'])
+  })
+
+  it('answers retry-at-reset: stays wedged and schedules the recovery for the reset', async () => {
+    const id = 'ask-retry-deferred'
+    const resetsAt = '2099-01-01T00:00:00.000Z'
+    await seedTask(id, {
+      status: 'wedged',
+      retry: { committed: true, prompts: ['do it'], resetsAt },
+      asks: [
+        retryAsk({
+          prompt: 'Usage limit reached.',
+          form: {
+            type: 'choice',
+            options: [
+              { id: 'retry-now', label: 'Retry now' },
+              {
+                id: 'retry-at-reset',
+                label: 'Retry when the limit resets',
+                at: resetsAt,
+                style: 'primary',
+              },
+            ],
+          },
+        }),
+      ],
+    })
+    const res = await answer(id, 'ask-retry-0', { optionId: 'retry-at-reset' })
+    expect(res.status).toBe(200)
+    const raw = await readRaw(id)
+    // Stays wedged, schedules the wakeup, queues the recovery for it.
+    expect(raw.status).toBe('wedged')
+    expect(raw.scheduledFor).toBe(resetsAt)
+    expect(raw.queued).toEqual(['try again'])
+    expect((raw.events as Raw[]).some((e) => e.kind === 'scheduled')).toBe(true)
+    expect((raw.asks as Raw[])[0].state).toBe('answered')
+  })
 })

@@ -45,6 +45,7 @@ import {
   turnAttachments,
   worktreeName,
   applyRelaunch,
+  applyRetryRecovery,
   applyDueMessages,
   armScheduledRelaunch,
   type Message,
@@ -71,6 +72,7 @@ import {
 } from './artifacts'
 import {
   createAsk,
+  createRetryAsk,
   answerAsk,
   answerDelivery,
   chosenOption,
@@ -486,8 +488,14 @@ async function runTurn(
       t.updatedAt = at
       // The turn never reached the agent, so nothing was committed — stash the
       // prompt(s) so the user can just retry once a daemon is back (a transient
-      // daemon outage is the expected cause).
+      // daemon outage is the expected cause), and raise the generic retry ask so
+      // the wedge carries a button just like an assistant-error wedge does.
       t.retry = { committed: false, prompts: lastTurnPrompts(t.messages) }
+      createRetryAsk(t, {
+        id: nextAskId(t, Date.parse(at)),
+        committed: false,
+        at,
+      })
     }).catch(() => {})
     return 'crashed'
   }
@@ -624,7 +632,11 @@ async function reduceRunWs(
       if (ev.kind === 'done') {
         const at = new Date().toISOString()
         await mutateTask(file, (t) => {
-          applyDone(t, ev.msg, { rateLimitResetsAt, at })
+          applyDone(t, ev.msg, {
+            rateLimitResetsAt,
+            at,
+            askId: nextAskId(t, Date.parse(at)),
+          })
         }).catch(() => {})
         // Tell the daemon it can drop this run's replay buffer.
         sendToDaemon({ type: 'ack', runId })
@@ -2312,9 +2324,16 @@ app.post('/api/:project/tasks/:id/asks/:askId/answer', async (c) => {
       const opt = chosenOption(ask)
       const scheduleAt = opt?.at
       defer = !!scheduleAt && Date.parse(scheduleAt) > Date.now()
+      // A platform retry ask routes through the retry-recovery machinery instead
+      // of a generic delivery: retry-now recovers immediately, retry-at-reset (a
+      // future option `at`) schedules the recovery for then. It composes its own
+      // turn (nudge or prompt re-send) from the `retry` stash.
+      if (ask.origin === 'retry') {
+        applyRetryRecovery(t, { defer, resetsAt: scheduleAt, now })
+        return
+      }
       // Deliver the answer as a visible user message so it appears in the
-      // re-entry prompt. Null for an origin:'retry' ask — the retry recovery is
-      // its delivery (recast); a plain answer's text is queued for the session.
+      // re-entry prompt; a plain answer's text is queued for the session.
       const delivery = answerDelivery(ask)
       if (delivery != null) {
         t.messages.push({ role: 'user', text: delivery, createdAt: now })
@@ -2342,107 +2361,6 @@ app.post('/api/:project/tasks/:id/asks/:askId/answer', async (c) => {
 
     const updated = await readTask(project.dataDir, id)
     return c.json(publicTask(updated ?? (await readTask(project.dataDir, id))!))
-  } catch (e) {
-    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
-  }
-})
-
-// Retry a turn that wedged on an assistant error (500/429/etc). The recovery depends
-// on whether the failed turn's prompt reached the session (recorded as
-// `retry.committed` when the run wedged): if it did, re-sending it would
-// duplicate the user turn in the provider transcript, so we nudge the session to
-// pick the orphaned turn back up with a minimal "try again". If it didn't, the
-// prompt(s) never landed — re-send them. They're already in messages[] from the
-// original send, so the re-send only re-queues (no duplicate visible message);
-// the nudge does append a "try again" user message so the conversation reads.
-//
-// When the wedge was a session-limit rejection whose reset time is still in the
-// future (`retry.resetsAt`), retrying now would just hit the same wall — so
-// instead of driving immediately we queue the recovery turn and rest the task
-// with `scheduledFor` at the reset time. The scheduler then relaunches it via
-// launchTask, draining the queued prompt(s), exactly as a `lander rest --date`
-// wakeup does.
-app.post('/api/:project/tasks/:id/retry', async (c) => {
-  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
-  if (!project) return c.json({ error: 'unknown project' }, 404)
-  try {
-    const id = c.req.param('id')
-    if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
-    const file = path.join(project.dataDir, `${id}.json`)
-
-    let task: Task
-    try {
-      task = JSON.parse(await readFile(file, 'utf8')) as Task
-    } catch {
-      return c.json({ error: 'task not found' }, 404)
-    }
-
-    // Retrying re-drives the session, so it's the human's call: only the UI may
-    // do it, mirroring the other status-changing actions.
-    if ((await resolvePrincipal(c.req)).kind !== 'ui')
-      return c.json({ error: 'not authorized to retry' }, 403)
-
-    if (!task.retry) return c.json({ error: 'nothing to retry' }, 400)
-
-    const now = new Date().toISOString()
-    // A session-limit wedge whose limit hasn't lifted yet schedules the retry for
-    // its reset time rather than driving now; a past (or absent) reset retries
-    // immediately, as before.
-    const resetsAt = task.retry.resetsAt
-    const defer = !!resetsAt && Date.parse(resetsAt) > Date.now()
-    // For an immediate retry, record the un-wedge a hair before the action's own
-    // timestamp so the timeline shows it ahead of what follows, exactly as a
-    // follow-up message does. A deferred retry stays wedged (see below), so this
-    // is unused there.
-    const before = new Date(Date.parse(now) - 1).toISOString()
-    await mutateTask(file, (t) => {
-      if (!t.retry) return
-      // Queue the recovery turn either way — the only difference is when it runs.
-      const resend = t.retry.prompts.filter((p) => p.trim())
-      if (t.retry.committed || !resend.length) {
-        // Committed (or nothing concrete to re-send): nudge the session forward.
-        const text = 'try again'
-        t.messages.push({ role: 'user', text, createdAt: now })
-        t.queued = [...(t.queued ?? []), text]
-      } else {
-        // Not committed: re-send the un-received prompt(s). Already in messages[]
-        // from the original send, so only re-queue them for the session.
-        t.queued = [...(t.queued ?? []), ...resend]
-      }
-      if (defer && resetsAt) {
-        // Scheduling a retry is not an un-wedge: the task stays wedged until the
-        // limit actually lifts, so the user keeps seeing it as needing them (and
-        // the sidebar shows the moon, driven by scheduledFor below). We record
-        // only a 'scheduled' event to mark the wait in the timeline; the un-wedge
-        // is deferred to launchTask, which records it when the wakeup fires —
-        // just before it drains the queued prompt(s), exactly as if the user had
-        // waited until the reset time and sent "try again" themselves.
-        // recoverQueues skips scheduledFor tasks, so the queued prompt(s) sit
-        // untouched until launchScheduled fires launchTask at resetsAt.
-        t.scheduledFor = resetsAt
-        ;(t.events ??= []).push({
-          kind: 'scheduled',
-          title: t.title,
-          scheduledFor: resetsAt,
-          createdAt: now,
-        })
-        // status stays 'wedged' — deliberately left unchanged.
-      } else {
-        // Revive and drive now.
-        recordStatusTransition(t, 'riding', before)
-        t.status = 'riding'
-      }
-      t.updatedAt = now
-      delete t.retry
-    })
-
-    // Drive now only for an immediate retry; a deferred one waits for the
-    // scheduler. Resume the session if no run is already in flight (mirrors
-    // /messages).
-    if (!defer && !running.has(id)) void driveTask(project, id)
-
-    const updated = await readTask(project.dataDir, id)
-    return c.json(publicTask(updated ?? task))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }

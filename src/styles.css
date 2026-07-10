@@ -2020,32 +2020,6 @@ body {
   border-left-color: var(--wedged);
 }
 
-/* Retry affordance for a conversation wedged on an assistant error. Scrolls with the
-   message list as its last item, left-aligned; carries the riding color, since
-   retrying sends the task riding again. */
-.retry-bar {
-  display: flex;
-  /* Inset the button to 28px like the messages above and composer below, so it
-     doesn't sit flush against the conversation's left edge. */
-  padding: 12px 28px;
-}
-
-.retry-button {
-  font: inherit;
-  font-weight: 600;
-  padding: 6px 12px;
-  border: 1px solid color-mix(in srgb, var(--riding) 40%, var(--border));
-  border-radius: 6px;
-  background: var(--bg-tinted);
-  color: var(--riding);
-  cursor: pointer;
-}
-
-.retry-button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
 /* A stored question in the conversation timeline. An open task-blocking ask is
    what a wedged task waits on: it carries the wedged color and scrolls with the
    messages as one of them. Inset 28px to match messages/composer. */

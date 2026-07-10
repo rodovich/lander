@@ -11,7 +11,6 @@ import {
   formatTimestamp,
   formatTokens,
   lastPathComponent,
-  retryResetTime,
   taskIdFromPath,
   worktreeName,
 } from './format'
@@ -145,7 +144,6 @@ export function App() {
     {},
   )
   const [sendingBy, setSendingBy] = useState<Record<string, boolean>>({})
-  const [retryingBy, setRetryingBy] = useState<Record<string, boolean>>({})
   const [answeringBy, setAnsweringBy] = useState<Record<string, boolean>>({})
   const composerRef = useRef<HTMLTextAreaElement>(null)
 
@@ -1026,31 +1024,6 @@ export function App() {
       // Disabling the textarea while sending drops its focus; restore it once
       // the element re-enables so you can keep typing the next reply.
       requestAnimationFrame(() => composerRef.current?.focus())
-    }
-  }
-
-  // Retry a turn that wedged on an assistant error. The server decides between
-  // nudging the session and re-sending the un-received prompt(s) from the
-  // task's `retry` info; here we just fire it and refresh.
-  async function retryTask() {
-    if (!current) return
-    const id = current.id
-    const proj = current.projectSlug
-    if (retryingBy[id]) return
-    setRetryingBy((prev) => ({ ...prev, [id]: true }))
-    setError(null)
-    try {
-      const r = await fetch(`/api/${proj}/tasks/${id}/retry`, {
-        method: 'POST',
-        headers: uiHeaders(),
-      })
-      const body = await r.json()
-      if (!r.ok) throw new Error(body.error ?? r.statusText)
-      setTasks((await loadShownTasks(shown, view === 'archived')).tasks)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setRetryingBy((prev) => ({ ...prev, [id]: false }))
     }
   }
 
@@ -2186,29 +2159,6 @@ export function App() {
                     </div>
                   </div>
                 )}
-              {current.status === 'wedged' && current.retry && (
-                <div className="retry-bar">
-                  <button
-                    type="button"
-                    className="retry-button"
-                    disabled={retryingBy[current.id] ?? false}
-                    onClick={() => void retryTask()}
-                    title={
-                      retryResetTime(current.retry)
-                        ? `You've hit the session limit — schedule the retry for when it resets (${retryResetTime(current.retry)})`
-                        : current.retry.committed
-                          ? 'Nudge the session to pick the turn back up (re-sending would duplicate it)'
-                          : 'Re-send your message — it never reached the session'
-                    }
-                  >
-                    {retryResetTime(current.retry)
-                      ? `Retry at ${retryResetTime(current.retry)}`
-                      : current.retry.committed
-                        ? 'Try again'
-                        : 'Resend'}
-                  </button>
-                </div>
-              )}
             </div>
             <ResizeHandle
               height={composerHeight}

@@ -47,6 +47,12 @@ export type Ask = {
 export const CONFIRM_YES = 'confirm'
 export const CONFIRM_NO = 'deny'
 
+// The platform retry ask's option ids: retry immediately, or (usage-limit only)
+// schedule the retry for when the limit resets. The answer endpoint routes an
+// origin:'retry' ask through applyRetryRecovery keyed on which was chosen.
+export const RETRY_NOW = 'retry-now'
+export const RETRY_AT_RESET = 'retry-at-reset'
+
 // The task slice the ask helpers read and write. index.ts's Task satisfies this
 // structurally, so it passes its own value; the structural shape also lets the
 // helpers be tested against minimal fixtures.
@@ -112,6 +118,44 @@ export function createAsk(
   }
   ;(task.asks ??= []).push(ask)
   return ask
+}
+
+// Build the platform ask a wedge raises alongside its retry stash (origin:
+// 'retry', task-blocking). A usage-limit wedge (resetsAt present) offers two
+// options — retry now, or retry when the limit resets (carrying `at` so
+// answering schedules the wakeup); a generic error offers one, labelled by
+// whether the failed turn committed ("Try again" vs "Resend"). The single place
+// the retry ask's shape is defined, so applyDone and the daemon-outage wedge
+// agree. `id`/`at` are the caller's (kept injection-friendly for pure tests).
+export function createRetryAsk(
+  task: AskTask,
+  opts: { id: string; committed: boolean; resetsAt?: string; at: string },
+): Ask {
+  const form: AskForm = opts.resetsAt
+    ? {
+        type: 'choice',
+        options: [
+          { id: RETRY_NOW, label: 'Retry now' },
+          {
+            id: RETRY_AT_RESET,
+            label: 'Retry when the limit resets',
+            at: opts.resetsAt,
+            style: 'primary',
+          },
+        ],
+      }
+    : {
+        type: 'choice',
+        options: [{ id: RETRY_NOW, label: opts.committed ? 'Try again' : 'Resend' }],
+      }
+  return createAsk(task, {
+    id: opts.id,
+    prompt: opts.resetsAt ? 'Usage limit reached.' : 'The assistant run failed.',
+    form,
+    blocking: 'task',
+    origin: 'retry',
+    at: opts.at,
+  })
 }
 
 // The task's single open task-blocking ask, if any — what a wedged task is

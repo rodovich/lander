@@ -18,6 +18,7 @@ import {
   type Message,
   type TaskEvent,
 } from './tasks'
+import { createRetryAsk, type Ask } from './asks'
 
 // The slice of a task these functions read and write. index.ts's full Task
 // satisfies this structurally, so it can pass its own value without conversion;
@@ -28,6 +29,7 @@ export type ApplyTask = {
   title: string
   messages: Message[]
   events?: TaskEvent[]
+  asks?: Ask[]
   updatedAt: string
   runId?: string
   runCursor?: number
@@ -63,10 +65,13 @@ export type ApplyDone = Pick<DoneMessage, 'exitCode'> &
 
 // Side inputs applyDone needs that don't come off the done payload itself: the
 // rate-limit reset time captured during the run (carried onto a wedge's retry),
-// and the timestamp to stamp the finish with.
+// the timestamp to stamp the finish with, and the id to mint the platform retry
+// ask under when the run wedges (supplied by the caller so applyDone stays pure
+// and injection-friendly).
 export type ApplyDoneOpts = {
   rateLimitResetsAt?: string
   at: string
+  askId: string
 }
 
 // Apply one reduced batch onto the task: append its steps, reconcile blocked
@@ -123,7 +128,7 @@ export function applyDone(
   done: ApplyDone,
   opts: ApplyDoneOpts,
 ): void {
-  const { at, rateLimitResetsAt } = opts
+  const { at, rateLimitResetsAt, askId } = opts
   const msg = ensurePending(task)
   // Whether the assistant had begun replying before the run ended: real streamed
   // content (steps or text) on the pending message, captured before we
@@ -161,6 +166,16 @@ export function applyDone(
       prompts: lastTurnPrompts(task.messages),
       ...(rateLimitResetsAt ? { resetsAt: rateLimitResetsAt } : {}),
     }
+    // Raise the platform ask the UI renders over the wedge: a usage-limit ask
+    // (with a schedule-at-reset option) when the run carried a reset time, else
+    // a generic error ask. origin:'retry' routes the answer back through the
+    // retry-recovery machinery, which reads the `retry` stash above.
+    createRetryAsk(task, {
+      id: askId,
+      committed: hadOutput,
+      resetsAt: rateLimitResetsAt,
+      at,
+    })
   }
   task.updatedAt = at
   delete task.runId

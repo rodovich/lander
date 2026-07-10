@@ -190,12 +190,10 @@ export type Task = {
   // A task-blocking ask wedges the task until it's answered. Absent when none.
   asks?: Ask[]
   // Present only when the task wedged on an assistant error (not the agent's own
-  // wedge): drives the retry button below the conversation. `committed` is
-  // whether the failed turn's prompt reached the session — true means a retry
-  // nudges the session ("Try again"), false means it re-sends the un-received
-  // prompt ("Resend"). `resetsAt` is set when the wedge was a session-limit
-  // rejection: while it's still in the future the button instead schedules the
-  // retry for then. See the server's Task.retry for the full rationale.
+  // wedge): the server's retry bookkeeping. The UI no longer reads it directly —
+  // the wedge's retry ask (origin:'retry') is what renders and answers — but it's
+  // still served over the wire, so the field stays typed. See the server's
+  // Task.retry for the full rationale.
   retry?: { committed: boolean; prompts: string[]; resetsAt?: string }
   // The working directory the previous turn ended in, recorded by the Stop hook
   // (see the server's Task.cwd). When it's a git worktree the agent entered, its

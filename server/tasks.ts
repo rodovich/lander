@@ -364,6 +364,53 @@ export function armScheduledRelaunch(
   ;(task.events ??= []).push(event)
 }
 
+// Recover a task wedged on an assistant error (the shared body of the retry ask
+// answer and the old /retry route): re-queue the failed turn — a "try again"
+// nudge when the turn had committed (re-sending would duplicate it) or nothing
+// concrete to re-send, else the un-received prompt(s) — then either revive the
+// task now or, when `defer` and a future `resetsAt` are given, keep it wedged and
+// schedule the recovery for the reset time (drained by launchTask at the wakeup,
+// exactly as the deferred retry always did). Reads and clears the `retry` stash.
+export function applyRetryRecovery(
+  task: {
+    status: string
+    title: string
+    updatedAt?: string
+    events?: TaskEvent[]
+    messages: Message[]
+    queued?: string[]
+    scheduledFor?: string
+    retry?: { committed: boolean; prompts: string[]; resetsAt?: string }
+  },
+  opts: { defer: boolean; resetsAt?: string; now: string },
+): void {
+  const { defer, resetsAt, now } = opts
+  if (!task.retry) return
+  const resend = task.retry.prompts.filter((p) => p.trim())
+  if (task.retry.committed || !resend.length) {
+    task.messages.push({ role: 'user', text: 'try again', createdAt: now })
+    task.queued = [...(task.queued ?? []), 'try again']
+  } else {
+    task.queued = [...(task.queued ?? []), ...resend]
+  }
+  if (defer && resetsAt) {
+    // Scheduling is not an un-wedge: stay wedged (the moon shows via
+    // scheduledFor) until launchTask fires and drains the queued recovery.
+    task.scheduledFor = resetsAt
+    ;(task.events ??= []).push({
+      kind: 'scheduled',
+      title: task.title,
+      scheduledFor: resetsAt,
+      createdAt: now,
+    })
+  } else {
+    recordStatusTransition(task, 'riding', new Date(Date.parse(now) - 1).toISOString())
+    task.status = 'riding'
+  }
+  task.updatedAt = now
+  delete task.retry
+}
+
 // The user messages that made up a task's most recent turn: the consecutive run
 // of user messages immediately before the trailing assistant message(s). After a
 // turn ends (or errors) the assistant's reply is the last message, with that
