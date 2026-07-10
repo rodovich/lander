@@ -37,15 +37,15 @@ const seed = (form: AskForm, over: Partial<Parameters<typeof createAsk>[1]> = {}
 }
 
 describe('validateAskForm', () => {
-  it('accepts well-formed choice/confirm/text forms', () => {
+  it('accepts a well-formed choice form', () => {
     expect(validateAskForm(choice)).toBeNull()
-    expect(validateAskForm({ type: 'confirm' })).toBeNull()
-    expect(validateAskForm({ type: 'text', multiline: true })).toBeNull()
   })
 
   it('rejects a missing/unknown form or an empty choice', () => {
     expect(validateAskForm(undefined)).toMatch(/required/)
-    expect(validateAskForm({ type: 'nope' })).toMatch(/must be one of/)
+    expect(validateAskForm({ type: 'nope' })).toMatch(/must be choice/)
+    // Confirm/text forms were dropped as producerless — only choice validates.
+    expect(validateAskForm({ type: 'confirm' })).toMatch(/must be choice/)
     expect(validateAskForm({ type: 'choice', options: [] })).toMatch(/at least one/)
   })
 
@@ -124,19 +124,6 @@ describe('answerAsk', () => {
     })
   })
 
-  it('requires confirm to be answered yes/no and text to carry text', () => {
-    const c = seed({ type: 'confirm' })
-    expect(answerAsk(c.task, c.ask.id, { optionId: 'maybe', at: AT })).toMatchObject({
-      status: 400,
-    })
-    expect(answerAsk(c.task, c.ask.id, { optionId: 'confirm', at: AT }).ok).toBe(true)
-
-    const t = seed({ type: 'text' })
-    expect(answerAsk(t.task, t.ask.id, { text: '  ', at: AT })).toMatchObject({
-      status: 400,
-    })
-    expect(answerAsk(t.task, t.ask.id, { text: 'here', at: AT }).ok).toBe(true)
-  })
 })
 
 describe('answerValue / answerDelivery', () => {
@@ -157,16 +144,6 @@ describe('answerValue / answerDelivery', () => {
     answerAsk(task, ask.id, { optionId: 'rule', text: 'git:*', at: AT })
     expect(answerValue(ask)).toBe('git:*')
     expect(chosenOption(ask)?.id).toBe('rule')
-  })
-
-  it('delivers confirm/text answers', () => {
-    const c = seed({ type: 'confirm', confirmLabel: 'Ship it' }, { prompt: 'Ship?' })
-    answerAsk(c.task, c.ask.id, { optionId: 'confirm', at: AT })
-    expect(answerDelivery(c.ask)).toBe('Answer to "Ship?": Ship it')
-
-    const t = seed({ type: 'text' }, { prompt: 'Name it' })
-    answerAsk(t.task, t.ask.id, { text: 'Frstarz', at: AT })
-    expect(answerDelivery(t.ask)).toBe('Answer to "Name it": Frstarz')
   })
 
   it('delivers nothing for an origin:retry ask (recovery composes the turn)', () => {

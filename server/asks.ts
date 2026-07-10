@@ -1,4 +1,4 @@
-// The Ask primitive: a stored question (choice/confirm/text) the platform or a
+// The Ask primitive: a stored question (a choice of options) the platform or a
 // task raises, and the pure helpers that create, answer, and withdraw them. An
 // ask interleaves with messages/events in the client timeline by `createdAt`,
 // exactly like a TaskEvent — a third parallel array on the task. Kept pure and
@@ -20,10 +20,12 @@ export type AskOption = {
   editable?: boolean
 }
 
-export type AskForm =
-  | { type: 'choice'; options: AskOption[] }
-  | { type: 'confirm'; confirmLabel?: string; denyLabel?: string }
-  | { type: 'text'; placeholder?: string; multiline?: boolean }
+// Only the choice form ships: wedge, ask, and the platform retry ask all raise a
+// choice of options. A confirm form (a degenerate two-option choice) and a
+// free-text form (it would just duplicate the composer) were dropped as
+// producerless. Kept a discriminated shape so a future variant is a non-breaking
+// addition and stored asks keep their `type` tag.
+export type AskForm = { type: 'choice'; options: AskOption[] }
 
 export type Ask = {
   // ask-<epoch36>-<seq>, minted by the caller of createAsk from the current
@@ -46,10 +48,6 @@ export type Ask = {
   origin?: 'retry'
 }
 
-// The confirm form's default button labels when it names none.
-export const CONFIRM_YES = 'confirm'
-export const CONFIRM_NO = 'deny'
-
 // The platform retry ask's option ids: retry immediately, or (usage-limit only)
 // schedule the retry for when the limit resets. The answer endpoint routes an
 // origin:'retry' ask through applyRetryRecovery keyed on which was chosen.
@@ -63,30 +61,27 @@ export type AskTask = { asks?: Ask[] }
 
 // Validate a form's shape for the create endpoint. Returns an error string (for
 // a 400) or null when well-formed. Guards exactly what the renderer/answer path
-// assumes: choice needs at least one option, each with a non-empty id + label
-// and unique ids; confirm/text carry only optional strings.
+// assumes: a choice needs at least one option, each with a non-empty id + label
+// and unique ids.
 export function validateAskForm(form: unknown): string | null {
   if (!form || typeof form !== 'object') return 'form is required'
-  const f = form as { type?: unknown }
-  if (f.type === 'choice') {
-    const opts = (form as { options?: unknown }).options
-    if (!Array.isArray(opts) || opts.length === 0)
-      return 'a choice form needs at least one option'
-    const ids = new Set<string>()
-    for (const o of opts) {
-      if (!o || typeof o !== 'object') return 'each option must be an object'
-      const opt = o as { id?: unknown; label?: unknown }
-      if (typeof opt.id !== 'string' || !opt.id.trim())
-        return 'each option needs an id'
-      if (typeof opt.label !== 'string' || !opt.label.trim())
-        return 'each option needs a label'
-      if (ids.has(opt.id)) return `duplicate option id: ${opt.id}`
-      ids.add(opt.id)
-    }
-    return null
+  if ((form as { type?: unknown }).type !== 'choice')
+    return 'form.type must be choice'
+  const opts = (form as { options?: unknown }).options
+  if (!Array.isArray(opts) || opts.length === 0)
+    return 'a choice form needs at least one option'
+  const ids = new Set<string>()
+  for (const o of opts) {
+    if (!o || typeof o !== 'object') return 'each option must be an object'
+    const opt = o as { id?: unknown; label?: unknown }
+    if (typeof opt.id !== 'string' || !opt.id.trim())
+      return 'each option needs an id'
+    if (typeof opt.label !== 'string' || !opt.label.trim())
+      return 'each option needs a label'
+    if (ids.has(opt.id)) return `duplicate option id: ${opt.id}`
+    ids.add(opt.id)
   }
-  if (f.type === 'confirm' || f.type === 'text') return null
-  return 'form.type must be one of choice, confirm, text'
+  return null
 }
 
 // Mint the id for the next ask on a task: `ask-<epoch36>-<seq>`, where seq is the
@@ -172,10 +167,9 @@ export function findAsk(task: AskTask, askId: string): Ask | undefined {
   return task.asks?.find((a) => a.id === askId)
 }
 
-// The option a choice/confirm answer selected, for reading its `at` (scheduling)
-// and its label/value (delivery). Undefined for a text form or an unmatched id.
+// The option the answer selected, for reading its `at` (scheduling) and its
+// label/value (delivery). Undefined for an unanswered ask or an unmatched id.
 export function chosenOption(ask: Ask): AskOption | undefined {
-  if (ask.form.type !== 'choice') return undefined
   const optionId = ask.answer?.optionId
   return optionId ? ask.form.options.find((o) => o.id === optionId) : undefined
 }
@@ -196,23 +190,13 @@ export function answerAsk(
     return { ok: false, error: `ask is already ${ask.state}`, status: 409 }
   const optionId = answer.optionId
   const text = answer.text
-  if (ask.form.type === 'choice') {
-    if (!optionId) return { ok: false, error: 'an option id is required', status: 400 }
-    if (!ask.form.options.some((o) => o.id === optionId))
-      return { ok: false, error: `unknown option: ${optionId}`, status: 400 }
-  } else if (ask.form.type === 'confirm') {
-    if (optionId !== CONFIRM_YES && optionId !== CONFIRM_NO)
-      return {
-        ok: false,
-        error: `a confirm answer must be "${CONFIRM_YES}" or "${CONFIRM_NO}"`,
-        status: 400,
-      }
-  } else {
-    if (!text || !text.trim())
-      return { ok: false, error: 'answer text is required', status: 400 }
-  }
+  if (!optionId) return { ok: false, error: 'an option id is required', status: 400 }
+  if (!ask.form.options.some((o) => o.id === optionId))
+    return { ok: false, error: `unknown option: ${optionId}`, status: 400 }
+  // `text` rides along only for an editable option (the user-amended value); a
+  // plain option carries none.
   ask.answer = {
-    ...(optionId ? { optionId } : {}),
+    optionId,
     ...(text != null ? { text } : {}),
     at: answer.at,
   }
@@ -227,23 +211,16 @@ function firstLine(prompt: string): string {
 }
 
 // The value an answer conveys, in prose: the edited value of an editable option,
-// else the chosen option's label, else the confirm/text answer. Used both for
-// the delivered user message and anywhere an answer is echoed.
+// else the chosen option's label. Used both for the delivered user message and
+// anywhere an answer is echoed.
 export function answerValue(ask: Ask): string {
   const a = ask.answer
   if (!a) return ''
-  if (ask.form.type === 'choice') {
-    const opt = chosenOption(ask)
-    // An editable option delivers what the user typed (falling back to its
-    // prefill); a plain option delivers its label.
-    if (opt?.editable) return (a.text ?? opt.value ?? opt.label).trim()
-    return opt?.label ?? a.optionId ?? ''
-  }
-  if (ask.form.type === 'confirm') {
-    if (a.optionId === CONFIRM_YES) return ask.form.confirmLabel ?? 'Yes'
-    return ask.form.denyLabel ?? 'No'
-  }
-  return (a.text ?? '').trim()
+  const opt = chosenOption(ask)
+  // An editable option delivers what the user typed (falling back to its
+  // prefill); a plain option delivers its label.
+  if (opt?.editable) return (a.text ?? opt.value ?? opt.label).trim()
+  return opt?.label ?? a.optionId ?? ''
 }
 
 // The visible user message an answered ask delivers to the agent on re-entry, so

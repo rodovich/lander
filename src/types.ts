@@ -126,10 +126,10 @@ export type AskOption = {
   editable?: boolean
 }
 
-export type AskForm =
-  | { type: 'choice'; options: AskOption[] }
-  | { type: 'confirm'; confirmLabel?: string; denyLabel?: string }
-  | { type: 'text'; placeholder?: string; multiline?: boolean }
+// Only the choice form ships (confirm/free-text were dropped as producerless —
+// see server/asks.ts). A one-variant discriminated shape, so a future variant is
+// a non-breaking addition and stored asks keep their `type` tag.
+export type AskForm = { type: 'choice'; options: AskOption[] }
 
 // A stored question interleaved with messages in the conversation timeline (like
 // a TaskEvent). A task-blocking ask is what a wedged task is waiting on: the

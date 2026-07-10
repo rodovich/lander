@@ -71,18 +71,6 @@ describe('AskForm rendering', () => {
     expect(html).toContain('value="git log"')
   })
 
-  it('renders confirm as two buttons and text as an input + submit', () => {
-    const confirm = render(
-      ask({ form: { type: 'confirm', confirmLabel: 'Yes do it', denyLabel: 'No' } }),
-    )
-    expect(confirm).toContain('Yes do it')
-    expect(confirm).toContain('No')
-
-    const text = render(ask({ form: { type: 'text', placeholder: 'type here' } }))
-    expect(text).toContain('placeholder="type here"')
-    expect(text).toContain('Answer')
-  })
-
   it('disables every control while an answer is in flight', () => {
     const html = render(ask(), true)
     expect(html).toContain('disabled')

@@ -2037,8 +2037,7 @@ body {
   gap: 8px;
 }
 
-.ask-editable,
-.ask-text-form {
+.ask-editable {
   display: flex;
   gap: 6px;
   flex: 1 1 100%;
