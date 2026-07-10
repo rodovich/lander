@@ -69,6 +69,7 @@ A task's agent can call back into lander to manage itself. When the daemon launc
 |---------|--------|
 | `lander land` | Mark **this** task `landed`. |
 | `lander wedge [--option id:label]...` | Mark **this** task `wedged` — it's blocked and needs the user. Repeatable `--option id:label` raises a choice ask whose buttons render under your message (your message is the question); the chosen option's label arrives as the next user message. |
+| `lander ask --option id:label...` | Raise an **advisory** choice question on **this** task *without* wedging — the task keeps resting and nothing appears in the list. The option buttons render under your message and the chosen option's label arrives as the next user message. The user may instead just reply, which supersedes the ask. (Choice-only: a free-text ask would just duplicate the composer.) |
 | `lander rest --date <when>` / `--time <minutes>` / `--await <ids>` | Put **this** task to rest until a wakeup trigger fires (a time, or other tasks landing); it resumes then with a generated "Resumed at …" message. |
 | `lander rest --clear` | Drop **this** task's pending wakeup triggers (the time/await a prior `rest` armed) — for when it was woken early and the scheduled resume is no longer wanted. |
 | `lander launch <message>` | Spawn a **sibling** task that runs independently; prints its id. |
@@ -136,7 +137,7 @@ The server only **resolves** the script's path (`GET /api/:project/flows/:name`,
 | `await lander.send(target, message, { date, time, await })` | message another task (id or unambiguous prefix) |
 | `await lander.view(target)` | returns the **parsed task object** (`.status`, `.title`, `.messages`, …) — not text to re-parse |
 | `await lander.list({ status })` | the project's tasks as an array |
-| `lander.land()` / `lander.wedge({ options })` / `await lander.rest({ date, time, await })` | act on the current task — bare `wedge()` just sets status, or pass `{ options: [{ id, label }] }` to raise a choice ask whose chosen label arrives as the next user message |
+| `lander.land()` / `lander.wedge({ options })` / `lander.ask({ options })` / `await lander.rest({ date, time, await })` | act on the current task — bare `wedge()` just sets status, or pass `{ options: [{ id, label }] }` to raise a choice ask whose chosen label arrives as the next user message; `ask({ options })` is the same but advisory (no wedge, nothing in the list) |
 | `await lander.rest({ clear: true })` | drop the current task's pending wakeup triggers; returns whether any were armed |
 | `await lander.artifacts.put(pathOrBytes, { name, mime })` / `.list()` / `.cat(name)` | publish the current task's named output (returns the ref), list its slots, or fetch a slot's current bytes |
 | `lander.assist(prompt, …text)` | a one-shot `claude` or `codex` run, returning its trimmed reply |

@@ -688,9 +688,10 @@ async function landTask(args) {
   }
 }
 
-// Parse repeatable `--option <id:label>` (split on the first colon) off a wedge
-// invocation. Returns { options }, dying on a malformed option. Shared by the
-// CLI and the flow API's wedge routing. Kept pure (no network) so it's testable.
+// Parse repeatable `--option <id:label>` (split on the first colon). Returns
+// { options }, dying on a malformed option. Shared by `lander wedge` and
+// `lander ask` (and their flow-API twins) so the option syntax stays identical.
+// Kept pure (no network) so it's testable.
 function parseWedgeArgs(args) {
   const options = []
   for (let i = 0; i < args.length; i++) {
@@ -699,23 +700,31 @@ function parseWedgeArgs(args) {
       const spec = args[++i] ?? ''
       const colon = spec.indexOf(':')
       if (colon <= 0 || colon === spec.length - 1)
-        die('lander wedge: --option must be <id:label>')
+        die('--option must be <id:label>')
       options.push({ id: spec.slice(0, colon), label: spec.slice(colon + 1) })
     }
   }
   return { options }
 }
 
-// Wedge by raising a task-blocking choice ask (server-side, no separate PATCH).
-// The ask carries no prompt of its own — your message this turn is the question,
-// and the buttons render under it — so this just supplies the options. The chosen
-// option's label arrives as the next user message. Shared by the CLI and flow API.
-async function wedgeWithAsk(options) {
+// Raise an ask on the current task with the given form and blocking level, and
+// return the created ask. The single place the /asks request shape lives, shared
+// by `lander wedge --option` (task-blocking, so the server wedges) and
+// `lander ask` (advisory, no status change) and by their flow-API twins, so the
+// two commands can't drift. The ask carries no prompt of its own — your message
+// this turn is the question, and the form renders under it.
+async function raiseAsk(form, blocking) {
   if (!TASK) die('no current task (LANDER_TASK unset)')
-  await call(PROJECT, `/tasks/${TASK}/asks`, {
+  return call(PROJECT, `/tasks/${TASK}/asks`, {
     method: 'POST',
-    body: JSON.stringify({ form: { type: 'choice', options }, blocking: 'task' }),
+    body: JSON.stringify({ form, blocking }),
   })
+}
+
+// Wedge by raising a task-blocking choice ask (server-side, no separate PATCH).
+// The chosen option's label arrives as the next user message.
+async function wedgeWithAsk(options) {
+  await raiseAsk({ type: 'choice', options }, 'task')
   console.log('status → wedged')
 }
 
@@ -726,6 +735,20 @@ async function wedgeTask(args) {
   const { options } = parseWedgeArgs(args)
   if (!options.length) return setStatus('wedged')
   return wedgeWithAsk(options)
+}
+
+// `lander ask --option id:label...` — raise an advisory choice ask that does
+// *not* wedge: the task keeps resting, your message this turn is the question, and
+// the option buttons render under it. A clicked option's label arrives as the next
+// user message; the user may instead just reply, which supersedes the ask. Unlike
+// wedge, no status change and nothing in the task list. Choice-only by design: a
+// free-text ask would render a second text box beside the composer that does the
+// same thing (send a message), so at least one `--option` is required.
+async function askTask(args) {
+  const { options } = parseWedgeArgs(args)
+  if (!options.length) die('lander ask: needs at least one --option id:label')
+  await raiseAsk({ type: 'choice', options }, 'none')
+  console.log('asked')
 }
 
 // --- assist ----------------------------------------------------------------
@@ -845,6 +868,15 @@ function makeLander(inputs) {
       const options = opts.options ?? []
       if (!options.length) return setStatus('wedged')
       return wedgeWithAsk(options)
+    },
+    // Raise an advisory choice ask (no status change), the offer-or-ignore twin
+    // of wedge. { options: [{id,label}] } renders buttons under your message; the
+    // chosen option's label arrives as the next user message. Choice-only — a
+    // free-text ask would just duplicate the composer.
+    ask: (opts = {}) => {
+      const options = opts.options ?? []
+      if (!options.length) die('lander.ask: options are required')
+      return raiseAsk({ type: 'choice', options }, 'none')
     },
     async rest(opts = {}) {
       // { clear: true } drops a pending wakeup instead of arming one; returns
@@ -1066,6 +1098,7 @@ const [cmd, ...rest] = process.argv.slice(2)
 const run = {
   land: () => landTask(rest),
   wedge: () => wedgeTask(rest),
+  ask: () => askTask(rest),
   rest: () => restTask(rest),
   relaunch: () => relaunchTask(rest),
   launch: () => launchTask(rest),
@@ -1086,6 +1119,7 @@ if (!run)
   die(
     `unknown command: ${cmd ?? '(none)'} — try ` +
       'land [id...] | wedge [--option id:label]... | ' +
+      'ask [--option id:label]... | ' +
       'rest (--date|--time|--await|--clear) | ' +
       'relaunch <message> ' +
       '[--date|--time|--await|--interval|--repeat-count|--repeat-until|--clear] | ' +
