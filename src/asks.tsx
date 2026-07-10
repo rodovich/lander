@@ -49,8 +49,8 @@ export function AskCard({
 }: {
   ask: Ask
   linkTask: TaskLinkResolver
-  // True while an answer to this task's ask is in flight (mirrors retryTask's
-  // per-task disabling), so the buttons can't double-submit.
+  // True while an answer to this task's ask is in flight (the same per-task
+  // in-flight disabling the composer uses), so the buttons can't double-submit.
   disabled: boolean
   onAnswer: (body: { optionId?: string; text?: string }) => void
 }) {

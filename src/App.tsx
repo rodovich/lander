@@ -1030,7 +1030,7 @@ export function App() {
   // Answer an ask (a choice option, confirm yes/no, or free text). The server
   // stamps the answer and un-wedges — or schedules the delivery for a future
   // option `at` — then re-drives the session; here we just post and refresh.
-  // Per-task in-flight disabling mirrors retryTask.
+  // Per-task in-flight disabling mirrors the send path (sendingBy).
   async function answerAsk(
     askId: string,
     body: { optionId?: string; text?: string },
