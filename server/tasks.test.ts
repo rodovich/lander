@@ -108,7 +108,7 @@ describe('publicTask', () => {
     expect('retry' in out).toBe(false)
   })
 
-  it('serves both the native item log and the legacy messages/events/asks projection', () => {
+  it('serves the native item log (no legacy messages/events/asks projection)', () => {
     const items: Item[] = [
       { id: 'e', at: AT, kind: 'event', eventKind: 'launched', title: 't' },
       userItem('do it', later(1)),
@@ -119,18 +119,17 @@ describe('publicTask', () => {
       status: 'riding',
       items,
       rides: [{ id: 'r1', startedAt: later(2), endedAt: later(2), outcome: 'done' }],
-    }) as { items?: Item[]; messages?: { role: string; text: string }[]; events?: unknown[] }
-    // Native items pass through.
+    }) as { items?: Item[]; messages?: unknown; events?: unknown; asks?: unknown }
+    // Native items pass through unchanged.
     expect(out.items).toHaveLength(3)
-    // Legacy projection is derived.
-    expect(out.messages!.map((m) => [m.role, m.text])).toEqual([
-      ['user', 'do it'],
-      ['assistant', 'done'],
-    ])
-    expect(out.events).toHaveLength(1)
+    expect(out.items!.map((i) => i.kind)).toEqual(['event', 'message', 'message'])
+    // The legacy projection is gone from the wire.
+    expect('messages' in out).toBe(false)
+    expect('events' in out).toBe(false)
+    expect('asks' in out).toBe(false)
   })
 
-  it('flags queued on the trailing user item and the legacy message', () => {
+  it('flags queued on the trailing user item', () => {
     const items: Item[] = [userItem('p1', AT), flowItem('r', 'r1', later(1)), userItem('p2', later(2))]
     const out = publicTask({
       id: 's',
@@ -138,9 +137,8 @@ describe('publicTask', () => {
       items,
       rides: [{ id: 'r1', startedAt: later(1), endedAt: later(1), outcome: 'done' }],
       queued: ['p2'],
-    }) as { items?: (MessageItem & { queued?: boolean })[]; messages?: { text: string; queued?: boolean }[] }
+    }) as { items?: (MessageItem & { queued?: boolean })[] }
     expect(out.items!.filter((i) => i.queued).map((i) => (i.kind === 'message' ? i.text : ''))).toEqual(['p2'])
-    expect(out.messages!.filter((m) => m.queued).map((m) => m.text)).toEqual(['p2'])
   })
 
   // Status collapse: stored riding|wedged|landed, served with today's four words.

@@ -45,15 +45,20 @@ export function inDateRange(createdAt, { since, until } = {}) {
   return true
 }
 
-// Whether a task's title or any message text contains, case-insensitively, at
-// least one term from every group in `groups` (an array of term arrays) — a
+// Whether a task's title or any message-item text contains, case-insensitively,
+// at least one term from every group in `groups` (an array of term arrays) — a
 // group is an OR (any term in it matches), groups themselves are ANDed. No
 // groups (an empty array) matches everything. Backs `lander list --text`,
 // which builds one group per occurrence of the flag, splitting each value on
 // commas — so `--text foo,bar --text baz` means (foo OR bar) AND baz.
 export function matchesText(task, groups) {
   if (!groups.length) return true
-  const haystack = [task.title, ...(task.messages ?? []).map((m) => m.text)]
+  const haystack = [
+    task.title,
+    ...(task.items ?? [])
+      .filter((it) => it.kind === 'message')
+      .map((it) => it.text),
+  ]
     .join('\n')
     .toLowerCase()
   return groups.every((terms) =>

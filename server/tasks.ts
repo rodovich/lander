@@ -10,7 +10,6 @@ import type { Step, Usage } from './stream'
 import type { Attachment } from './attachments'
 import type { Artifact } from './artifacts'
 import type { Ask, AskForm } from './asks'
-import { toLegacyShape } from './migrate'
 
 export type Message = {
   role: 'user' | 'assistant'
@@ -417,17 +416,14 @@ function flagQueued<M extends { role: 'user' | 'flow' | 'assistant' }>(
 // before sending a task over HTTP, so the UI — and any task scraping the API —
 // can't read another task's token and impersonate it. `retry` is internal
 // bookkeeping the wedge's retry ask supersedes on the wire, so it's stripped too.
-// Serves the v2 item log natively (`items`/`rides`) *and* the v1 legacy projection
-// (`messages`/`events`/`asks`, via toLegacyShape) so the currently-loaded UI and
-// the CLI keep working through the storage flip — dual-shape serving, dropped in
-// step 6. Also derives the served `status` and attaches the `grants` flags.
+// Serves the v2 item log natively (`items`/`rides`); the client and CLI read it
+// directly now (the legacy `messages`/`events`/`asks` projection is gone — see
+// docs/rides-plan.md step 6). Also derives the served `status` and attaches the
+// `grants` flags.
 export function publicTask<T extends object>(
   task: T,
 ): Omit<T, 'token' | 'runId' | 'runCursor' | 'queued' | 'retry'> & {
   grants?: GrantCaps
-  messages?: Message[]
-  events?: TaskEvent[]
-  asks?: Ask[]
 } {
   const {
     token: _t,
@@ -451,11 +447,6 @@ export function publicTask<T extends object>(
   // Native items, with the queued flag projected onto trailing user items.
   if (restT.items) restT.items = flagQueued(restT.items as MessageItem[], queueLen)
 
-  // Legacy dual-shape projection: rebuild v1 messages/events/asks from the item
-  // log, flagging queued on its trailing user messages the same way.
-  const legacy = toLegacyShape({ rides: restT.rides, items: restT.items })
-  const legacyMessages = flagQueued(legacy.messages, queueLen)
-
   // Derive the served `status` from the collapsed stored vocabulary
   // (`riding | wedged | landed`), so the public wire keeps today's four-word
   // vocabulary byte-for-byte. A stored `riding` task is actively *riding* only
@@ -474,19 +465,10 @@ export function publicTask<T extends object>(
   const agent = (task as { agent?: AgentKind }).agent
   const out = {
     ...rest,
-    messages: legacyMessages,
-    events: legacy.events,
-    asks: legacy.asks,
     ...(agent ? { grants: agentGrantCaps(agent) } : {}),
   }
-  return out as Omit<
-    T,
-    'token' | 'runId' | 'runCursor' | 'queued' | 'retry'
-  > & {
+  return out as Omit<T, 'token' | 'runId' | 'runCursor' | 'queued' | 'retry'> & {
     grants?: GrantCaps
-    messages?: Message[]
-    events?: TaskEvent[]
-    asks?: Ask[]
   }
 }
 

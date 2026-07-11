@@ -144,9 +144,9 @@ describe('inDateRange', () => {
 describe('matchesText', () => {
   const task = {
     title: 'Fix the Auth timeout',
-    messages: [
-      { role: 'user', text: 'sessions are dropping after a few minutes' },
-      { role: 'assistant', text: 'found it — the refresh token expires early' },
+    items: [
+      { kind: 'message', role: 'user', text: 'sessions are dropping after a few minutes' },
+      { kind: 'message', role: 'flow', text: 'found it — the refresh token expires early' },
     ],
   }
 

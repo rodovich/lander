@@ -642,17 +642,17 @@ describe('asks', () => {
     })
     const res = await answer(id, 'ask-seed-0', { optionId: 'b' })
     expect(res.status).toBe(200)
-    const body = (await res.json()) as {
-      status: string
-      asks: Raw[]
-      messages: { role: string; text: string }[]
-    }
+    const body = (await res.json()) as { status: string; items: Raw[] }
     // Stored `riding` with no open ride (no daemon in-test to start one) serves as
     // `resting`; the queued delivery below rides it as soon as a daemon picks it up.
     expect(body.status).toBe('resting')
-    expect(body.asks[0].state).toBe('answered')
+    const asks = body.items.filter((it) => it.kind === 'ask')
+    expect(asks[0].state).toBe('answered')
     // A promptless ask delivers the bare chosen label as the next user message.
-    expect(body.messages[body.messages.length - 1]).toMatchObject({
+    const userItems = body.items.filter(
+      (it) => it.kind === 'message' && it.role === 'user',
+    )
+    expect(userItems[userItems.length - 1]).toMatchObject({
       role: 'user',
       text: 'Beta',
     })
@@ -663,17 +663,17 @@ describe('asks', () => {
     await seedTask(id, { status: 'wedged', asks: [openAsk()] })
     const res = await answer(id, 'ask-seed-0', { optionId: 'b' })
     expect(res.status).toBe(200)
-    const body = (await res.json()) as {
-      status: string
-      asks: Raw[]
-      messages: { role: string; text: string; queued?: boolean }[]
-    }
+    const body = (await res.json()) as { status: string; items: Raw[] }
     // Un-wedges to stored `riding`; with no open ride yet (no daemon in-test) that
     // serves as `resting`, and the queued delivery rides once a daemon picks it up.
     expect(body.status).toBe('resting')
-    expect(body.asks[0].state).toBe('answered')
+    const asks = body.items.filter((it) => it.kind === 'ask')
+    expect(asks[0].state).toBe('answered')
     // The delivery is appended as a queued user message carrying the chosen label.
-    const last = body.messages[body.messages.length - 1]
+    const userItems = body.items.filter(
+      (it) => it.kind === 'message' && it.role === 'user',
+    )
+    const last = userItems[userItems.length - 1]
     expect(last).toMatchObject({
       role: 'user',
       text: 'Answer to "Pick one": Beta',
