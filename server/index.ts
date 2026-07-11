@@ -47,6 +47,10 @@ import {
   applyRelaunch,
   applyRetryRecovery,
   applyDueMessages,
+  taskSessionId,
+  setTaskSessionId,
+  taskTurnContext,
+  setTaskTurnContext,
   armScheduledRelaunch,
   startRide,
   closeRide,
@@ -554,11 +558,11 @@ async function runTurn(
       worktree: task.worktree,
     },
     // The provider session to resume; absent on the first turn, so the daemon
-    // reports one back (reduceRunWs persists it onto task.sessionId).
-    sessionId: task.sessionId,
+    // reports one back (reduceRunWs persists it onto the task's thread state).
+    sessionId: taskSessionId(task),
     // The context baseline rides only with a session to resume: a fresh session
     // (first turn, or post-relaunch) must always receive the full block.
-    turnContext: task.sessionId ? task.turnContext : undefined,
+    turnContext: taskSessionId(task) ? taskTurnContext(task) : undefined,
     // This turn's attachment refs; the daemon materializes them and builds the
     // prompt manifest. Omitted when the turn carries none.
     attachments: attachments.length ? attachments : undefined,
@@ -632,7 +636,7 @@ async function reduceRunWs(
         // Persist it once so every later turn resumes the same session. Idempotent:
         // a replayed announcement after a reconnect finds it already set.
         await mutateTask(file, (t) => {
-          if (!t.sessionId) t.sessionId = ev.msg.sessionId
+          if (!taskSessionId(t)) setTaskSessionId(t, ev.msg.sessionId)
         }).catch(() => {})
         continue
       }
@@ -641,7 +645,7 @@ async function reduceRunWs(
         // prompt; record it as the baseline the next turn's block is compared
         // against. Idempotent: a resume-from replay re-sends the same block.
         await mutateTask(file, (t) => {
-          t.turnContext = ev.msg.context
+          setTaskTurnContext(t, ev.msg.context)
         }).catch(() => {})
         continue
       }

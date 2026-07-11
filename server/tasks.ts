@@ -537,6 +537,36 @@ export function recordStatusTransition(
     )
 }
 
+// The migration seam for a task's provider thread state (its resumable session id
+// and the recorded per-turn context baseline). Every server read/write of these two
+// fields routes through these accessors so a later step can flip their *storage*
+// into `flowState` (the ported claude/codex flows persist thread identity via
+// state-patch) without touching any call site — today they read/write the existing
+// top-level fields verbatim. Codex has no separate thread storage: it rides the same
+// `sessionId` slot, so this one accessor family covers both providers.
+export function taskSessionId(task: { sessionId?: string }): string | undefined {
+  return task.sessionId
+}
+export function setTaskSessionId(task: { sessionId?: string }, id: string): void {
+  task.sessionId = id
+}
+export function taskTurnContext(task: { turnContext?: string }): string | undefined {
+  return task.turnContext
+}
+export function setTaskTurnContext(task: { turnContext?: string }, ctx: string): void {
+  task.turnContext = ctx
+}
+// Clear a task's provider thread (session + context baseline), so its next turn
+// mints a fresh session and receives the full context block. The seam sealForRelaunch
+// uses; a later step re-points it at flowState alongside the accessors above.
+export function clearTaskThread(task: {
+  sessionId?: string
+  turnContext?: string
+}): void {
+  delete task.sessionId
+  delete task.turnContext
+}
+
 // Seal a task's assistant session so its next turn mints a fresh provider session,
 // and record the 'relaunched' divider event. This is the heart of `lander
 // relaunch`: the daemon starts a new provider session whenever it's handed a
@@ -557,10 +587,10 @@ export function sealForRelaunch(
   },
   at: string,
 ): void {
-  delete task.sessionId
-  // The recorded context baseline belongs to the sealed session; drop it so the
-  // fresh session's first turn gets the full dynamic context block again.
-  delete task.turnContext
+  // Clear the provider thread (session + the context baseline that belongs to it,
+  // so the fresh session's first turn gets the full dynamic context block again)
+  // through the accessor seam.
+  clearTaskThread(task)
   // Relaunch = a fresh session with no memory, so clear the flow's durable state
   // too (flow-inversion.md: "relaunch seal = clear the blob"), generalizing the
   // session/context clear above. Inert in step 1 — no flow writes flowState yet.
