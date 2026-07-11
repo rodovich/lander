@@ -9,6 +9,7 @@ import type { AgentKind } from './agent'
 import type { Step, Usage } from './stream'
 import type { Attachment } from './attachments'
 import type { Artifact } from './artifacts'
+import type { Ask, AskForm } from './asks'
 
 export type Message = {
   role: 'user' | 'assistant'
@@ -130,6 +131,75 @@ export function closeRide(
   ride.outcome = outcome
   if (usage) ride.usage = usage
 }
+
+// One entry in the unified item log that replaces the parallel `messages[]`,
+// `events[]`, and `asks[]` arrays (see docs/conversation-model.md). A
+// discriminated union on `kind`; the common fields sit on every kind. Introduced
+// unused in step 3 (the converter builds these; nothing serves them yet) and
+// wired into storage in step 4.
+type ItemCommon = {
+  // Stable id: tool items reuse the provider `toolUseId` (so a wire tool_result
+  // addresses its item directly), ask items keep their `ask-…` id, and
+  // message/event items mint `itm-<epoch36>-<seq>`.
+  id: string
+  at: string
+  // Absent for out-of-ride items (user messages, most events). Present on every
+  // item a ride produced (flow messages, tools).
+  rideId?: string
+  // Nesting: a subagent's items point at the spawning tool item; a natively-written
+  // ask points at its raising message item. Generalizes `parentToolUseId`.
+  parentId?: string
+  // Grouping key (renamed from `inferenceId`): items emitted in one atomic burst.
+  // Not 1:1 with items — one inference fans out into a text block plus a parallel
+  // tool batch. A change between consecutive items rules a collapse line.
+  groupId?: string
+}
+
+export type MessageItem = ItemCommon & {
+  kind: 'message'
+  role: 'user' | 'flow'
+  text: string
+  attachments?: Attachment[]
+  artifacts?: Artifact[]
+  // Set on a user message once a queued batch delivers it: the ride that consumed
+  // it, making the batching visible. Absent on converted history.
+  deliveredIn?: string
+}
+
+export type ToolItem = ItemCommon & {
+  kind: 'tool'
+  name: string
+  input: string
+  inputFull?: string
+  rule?: string
+  // Folded in from the tool_result: the result peek and the call's outcome.
+  // `running` until the result lands.
+  output?: string
+  status: 'running' | 'ok' | 'failed' | 'blocked'
+  edits?: { old: string; new: string }[]
+}
+
+export type EventItem = ItemCommon & {
+  kind: 'event'
+  // Today's TaskEvent.kind, renamed to avoid clashing with the item's own `kind`.
+  eventKind: TaskEvent['kind']
+  title?: string
+  scheduledFor?: string
+  awaiting?: { id: string; title: string }[]
+}
+
+export type AskItem = ItemCommon & {
+  kind: 'ask'
+  // Today's Ask payload minus `createdAt` (the item's `at` carries it).
+  prompt?: string
+  form: AskForm
+  blocking: Ask['blocking']
+  state: Ask['state']
+  answer?: NonNullable<Ask['answer']>
+  origin?: 'retry'
+}
+
+export type Item = MessageItem | ToolItem | EventItem | AskItem
 
 // A repeating-relaunch spec carried on a scheduled relaunch message (`lander
 // relaunch --interval <minutes>`): when the message delivers, the scheduler arms
