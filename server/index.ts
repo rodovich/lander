@@ -48,10 +48,13 @@ import {
   applyRetryRecovery,
   applyDueMessages,
   armScheduledRelaunch,
+  startRide,
+  closeRide,
   type Message,
   type TaskEvent,
   type ScheduledMessage,
   type RepeatSpec,
+  type Ride,
 } from './tasks'
 import {
   saveAttachment,
@@ -174,6 +177,12 @@ type Task = {
   // tasks saved before this field existed — treat undefined as empty.
   allow?: string[]
   messages: Message[]
+  // Rides: one record per run (agent turn) this task has driven, opened when the
+  // run is handed to the daemon and closed when it finishes. `endedAt`-less ⇒ the
+  // ride is open (the task is actively riding). Additive for now — the UI still
+  // reads Message.usage/steps; see docs/rides-plan.md. Absent on tasks that
+  // predate rides.
+  rides?: Ride[]
   // Named output slots this task has published (`lander artifact put`), latest
   // version only — the slot registry, upserted by name. Each points at its
   // current blob in the project's attachmentsDir (shared with input attachments);
@@ -420,6 +429,7 @@ async function runTurn(
   project: Project,
   id: string,
   prompt: string,
+  runId: string,
   attachments: Attachment[] = [],
 ): Promise<'done' | 'crashed'> {
   const file = path.join(project.dataDir, `${id}.json`)
@@ -459,8 +469,6 @@ async function runTurn(
     LANDER_TASK: id,
     LANDER_TOKEN: token,
   }
-
-  const runId = randomUUID()
 
   // Wait briefly for a daemon serving this project to be connected (dev launches
   // it with the server, so it's normally already up); if none arrives, wedge the
@@ -509,6 +517,10 @@ async function runTurn(
     if (!t.token) t.token = token
     t.runId = runId
     t.runCursor = 0
+    // Open the ride for this run (id = runId), now that it's being handed to the
+    // daemon. closeRide stamps its outcome when the run finishes; a crash/abandon
+    // closes it interrupted (see reduceRunWs / driveTask).
+    startRide(t, runId, new Date().toISOString())
     // A new turn supersedes any pending retry from the last failed one.
     delete t.retry
   })
@@ -586,6 +598,9 @@ async function reduceRunWs(
             msg.pending = false
             t.updatedAt = new Date().toISOString()
           }
+          // The run was abandoned (the daemon stayed gone past the grace) — close
+          // its open ride interrupted, paired with the runId delete below.
+          closeRide(t, 'interrupted', new Date().toISOString(), msg?.usage)
           delete t.runId
           delete t.runCursor
         }).catch(() => {})
@@ -705,7 +720,10 @@ async function driveTask(project: Project, id: string): Promise<void> {
         }
       }).catch(() => {})
       if (!batch.length) break
-      await runTurn(project, id, batch.join('\n\n'), atts)
+      // Mint the run id here, at queue-drain time, so the ride id is in hand as
+      // the turn is assembled (a later step stamps the batch's messages with it).
+      // runTurn opens the ride under this id when it hands the run to the daemon.
+      await runTurn(project, id, batch.join('\n\n'), randomUUID(), atts)
     }
   } finally {
     running.delete(id)
@@ -714,7 +732,12 @@ async function driveTask(project: Project, id: string): Promise<void> {
     // to a *newer* drainer that re-rode this task after we left the running set —
     // demoting it would strand that live run at "resting" for its whole duration.
     await mutateTask(file, (t) => {
-      if (t.status === 'riding' && !t.runId) t.status = 'resting'
+      if (t.status === 'riding' && !t.runId) {
+        // No tracked run: if a ride is somehow still open (a run abandoned without
+        // a close), stamp it interrupted so it doesn't linger as a live ride.
+        closeRide(t, 'interrupted', new Date().toISOString())
+        t.status = 'resting'
+      }
     }).catch(() => {})
   }
 

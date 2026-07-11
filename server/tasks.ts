@@ -81,6 +81,56 @@ export type TaskEvent = {
   createdAt: string
 }
 
+// A ride: one activation of the task's flow — today an agent turn, mapped 1:1
+// onto the daemon run whose `runId` it borrows for its id. Opened when the run is
+// handed to the daemon (startRide) and closed when the run finishes (closeRide,
+// from applyDone) or is abandoned. `endedAt` absent ⇒ the ride is open (the task
+// is actively riding); a closed ride carries an `outcome` and the turn's `usage`.
+// Additive for now — the UI still reads Message.usage/steps; see docs/rides-plan.md.
+export type Ride = {
+  id: string
+  startedAt: string
+  // Absent while the ride is open. Stamped by closeRide when the run finishes.
+  endedAt?: string
+  outcome?: 'done' | 'interrupted' | 'error'
+  // The turn's token usage, moved off the message onto the ride at close time.
+  usage?: Usage
+}
+
+// The task's currently-open ride (the last one without an `endedAt`), if any —
+// what a riding task is streaming into. Undefined when no run is in flight, and
+// for tasks saved before rides existed (no `rides` array).
+export function openRide(task: { rides?: Ride[] }): Ride | undefined {
+  const rides = task.rides
+  if (!rides) return undefined
+  for (let i = rides.length - 1; i >= 0; i--) if (!rides[i].endedAt) return rides[i]
+  return undefined
+}
+
+// Open a ride for a run being handed to the daemon: push `{ id, startedAt }`. The
+// id is the daemon runId, so a reattach/close can find the ride by the run it
+// tracks. One ride per run.
+export function startRide(task: { rides?: Ride[] }, id: string, at: string): void {
+  ;(task.rides ??= []).push({ id, startedAt: at })
+}
+
+// Close the task's open ride, if any: stamp `endedAt`/`outcome` and (when given)
+// move the turn's final `usage` onto it. A no-op when no ride is open — a run
+// started before rides existed has none, so callers needn't guard (see the
+// missing-ride tolerance in applyDone).
+export function closeRide(
+  task: { rides?: Ride[] },
+  outcome: Ride['outcome'],
+  at: string,
+  usage?: Usage,
+): void {
+  const ride = openRide(task)
+  if (!ride) return
+  ride.endedAt = at
+  ride.outcome = outcome
+  if (usage) ride.usage = usage
+}
+
 // A repeating-relaunch spec carried on a scheduled relaunch message (`lander
 // relaunch --interval <minutes>`): when the message delivers, the scheduler arms
 // its successor `interval` minutes later. The next fire is measured off the

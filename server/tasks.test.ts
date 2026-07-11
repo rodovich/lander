@@ -13,9 +13,13 @@ import {
   applyDueMessages,
   armScheduledRelaunch,
   nextRepeatMessage,
+  openRide,
+  startRide,
+  closeRide,
   type Message,
   type TaskEvent,
   type ScheduledMessage,
+  type Ride,
 } from './tasks'
 
 const msg = (over: Partial<Message>): Message => ({
@@ -718,5 +722,49 @@ describe('worktreeName', () => {
     expect(worktreeName(project, '/home/me/proj/.claude/worktrees')).toBe(
       undefined,
     )
+  })
+})
+
+describe('rides', () => {
+  const AT = '2026-01-01T00:00:00.000Z'
+  const END = '2026-01-01T00:05:00.000Z'
+
+  it('startRide opens a ride under the given id and creates the array', () => {
+    const t: { rides?: Ride[] } = {}
+    startRide(t, 'r1', AT)
+    expect(t.rides).toEqual([{ id: 'r1', startedAt: AT }])
+    startRide(t, 'r2', END)
+    expect(t.rides).toHaveLength(2)
+  })
+
+  it('openRide returns the last un-ended ride, or undefined', () => {
+    expect(openRide({})).toBeUndefined()
+    expect(openRide({ rides: [] })).toBeUndefined()
+    const closed: Ride = { id: 'r0', startedAt: AT, endedAt: END, outcome: 'done' }
+    expect(openRide({ rides: [closed] })).toBeUndefined()
+    const open: Ride = { id: 'r1', startedAt: END }
+    expect(openRide({ rides: [closed, open] })).toBe(open)
+  })
+
+  it('closeRide stamps endedAt/outcome and moves usage onto the open ride', () => {
+    const t: { rides?: Ride[] } = { rides: [{ id: 'r1', startedAt: AT }] }
+    const usage = { input: 1, output: 2, cacheRead: 0, cacheCreation: 0 }
+    closeRide(t, 'done', END, usage)
+    expect(t.rides![0]).toEqual({
+      id: 'r1',
+      startedAt: AT,
+      endedAt: END,
+      outcome: 'done',
+      usage,
+    })
+  })
+
+  it('closeRide no-ops when no ride is open', () => {
+    const t: { rides?: Ride[] } = {}
+    expect(() => closeRide(t, 'interrupted', END)).not.toThrow()
+    expect(t.rides).toBeUndefined()
+    const settled: Ride = { id: 'r0', startedAt: AT, endedAt: AT, outcome: 'done' }
+    closeRide({ rides: [settled] }, 'interrupted', END)
+    expect(settled.endedAt).toBe(AT)
   })
 })

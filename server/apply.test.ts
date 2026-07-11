@@ -220,4 +220,66 @@ describe('applyDone', () => {
     expect(t.retry).toBeUndefined()
     expect(t.asks).toBeUndefined()
   })
+
+  it('closes the open ride with outcome done and moves the turn usage onto it', () => {
+    const t = task({ rides: [{ id: 'r1', startedAt: AT }] })
+    const usage: Usage = { input: 1, output: 2, cacheRead: 3, cacheCreation: 4 }
+    applyUpdate(t, update({ usage, usageChanged: true, finalText: 'ok', cursor: 1 }))
+    const finishedAt = '2026-01-01T00:05:00.000Z'
+    applyDone(
+      t,
+      { exitCode: 0, interrupted: false, stderr: '' },
+      { at: finishedAt, askId: 'ask-x-0' },
+    )
+    expect(t.rides).toEqual([
+      { id: 'r1', startedAt: AT, endedAt: finishedAt, outcome: 'done', usage },
+    ])
+    // Message.usage stays written too — the UI still reads it until the UI flip.
+    expect(t.messages[1].usage).toEqual(usage)
+  })
+
+  it('closes the ride with outcome error on an assistant error', () => {
+    const t = task({ rides: [{ id: 'r1', startedAt: AT }] })
+    applyDone(
+      t,
+      { exitCode: 1, interrupted: false, stderr: 'boom' },
+      { at: AT, askId: 'ask-x-0' },
+    )
+    expect(t.rides![0]).toMatchObject({ endedAt: AT, outcome: 'error' })
+  })
+
+  it('closes the ride with outcome interrupted on a deliberate interrupt', () => {
+    const t = task({ rides: [{ id: 'r1', startedAt: AT }] })
+    applyDone(
+      t,
+      { exitCode: 137, interrupted: true, stderr: '' },
+      { at: AT, askId: 'ask-x-0' },
+    )
+    expect(t.rides![0]).toMatchObject({ endedAt: AT, outcome: 'interrupted' })
+  })
+
+  it('tolerates a finish with no open ride (a run started before rides existed)', () => {
+    const t = task()
+    expect(() =>
+      applyDone(
+        t,
+        { exitCode: 0, interrupted: false, stderr: '' },
+        { at: AT, askId: 'ask-x-0' },
+      ),
+    ).not.toThrow()
+    expect(t.rides).toBeUndefined()
+  })
+
+  it('leaves an already-closed ride untouched (no second open ride to close)', () => {
+    const t = task({
+      rides: [{ id: 'r0', startedAt: AT, endedAt: AT, outcome: 'done' }],
+    })
+    applyDone(
+      t,
+      { exitCode: 0, interrupted: false, stderr: '' },
+      { at: '2026-01-01T00:05:00.000Z', askId: 'ask-x-0' },
+    )
+    // The settled ride keeps its own endedAt — closeRide only touches an open one.
+    expect(t.rides).toEqual([{ id: 'r0', startedAt: AT, endedAt: AT, outcome: 'done' }])
+  })
 })

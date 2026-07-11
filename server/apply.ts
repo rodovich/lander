@@ -15,8 +15,10 @@ import {
   pendingMessage,
   recordStatusTransition,
   lastTurnPrompts,
+  closeRide,
   type Message,
   type TaskEvent,
+  type Ride,
 } from './tasks'
 import { createRetryAsk, type Ask } from './asks'
 
@@ -30,6 +32,7 @@ export type ApplyTask = {
   messages: Message[]
   events?: TaskEvent[]
   asks?: Ask[]
+  rides?: Ride[]
   updatedAt: string
   runId?: string
   runCursor?: number
@@ -177,6 +180,18 @@ export function applyDone(
       at,
     })
   }
+  // Close the ride this run opened: interrupted on a deliberate stop, error on a
+  // non-zero non-interrupt exit, else done. Move the turn's final usage (already
+  // accumulated onto the message) onto the ride too — the UI still reads
+  // Message.usage until the UI flip, so it stays written there as well. Tolerates
+  // a missing ride: a run started before rides existed (or before this commit)
+  // has none, and closeRide no-ops rather than throwing.
+  const outcome: Ride['outcome'] = done.interrupted
+    ? 'interrupted'
+    : done.exitCode !== 0
+      ? 'error'
+      : 'done'
+  closeRide(task, outcome, at, msg.usage)
   task.updatedAt = at
   delete task.runId
   delete task.runCursor
