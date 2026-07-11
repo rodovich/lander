@@ -618,7 +618,7 @@ describe('asks', () => {
     expect(asks.filter((a) => a.state === 'open')).toHaveLength(1)
   })
 
-  it('answers an advisory ask: delivers the bare value and goes riding', async () => {
+  it('answers an advisory ask: delivers the bare value, delivery queued to ride', async () => {
     const id = 'ask-answer-none'
     await seedTask(id, {
       status: 'resting',
@@ -632,7 +632,9 @@ describe('asks', () => {
       asks: Raw[]
       messages: { role: string; text: string }[]
     }
-    expect(body.status).toBe('riding')
+    // Stored `riding` with no open ride (no daemon in-test to start one) serves as
+    // `resting`; the queued delivery below rides it as soon as a daemon picks it up.
+    expect(body.status).toBe('resting')
     expect(body.asks[0].state).toBe('answered')
     // A promptless ask delivers the bare chosen label as the next user message.
     expect(body.messages[body.messages.length - 1]).toMatchObject({
@@ -651,7 +653,9 @@ describe('asks', () => {
       asks: Raw[]
       messages: { role: string; text: string; queued?: boolean }[]
     }
-    expect(body.status).toBe('riding')
+    // Un-wedges to stored `riding`; with no open ride yet (no daemon in-test) that
+    // serves as `resting`, and the queued delivery rides once a daemon picks it up.
+    expect(body.status).toBe('resting')
     expect(body.asks[0].state).toBe('answered')
     // The delivery is appended as a queued user message carrying the chosen label.
     const last = body.messages[body.messages.length - 1]

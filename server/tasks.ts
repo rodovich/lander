@@ -229,6 +229,22 @@ export function publicTask<T extends object>(
       flagged.has(i) ? { ...m, queued: true } : m,
     )
   }
+  // Derive the served `status` from the collapsed stored vocabulary
+  // (`riding | wedged | landed`), so the public wire keeps today's four-word
+  // vocabulary byte-for-byte. A stored `riding` task is actively *riding* only
+  // while a run is live — an open ride, or (belt for a pre-ride task) a `runId`;
+  // with no live run it is idle, served as `resting`, which the UI decorates with
+  // any `scheduledFor`/`waitingFor`. `wedged`/`landed` serve as stored.
+  const storedStatus = (task as { status?: string }).status
+  if (typeof storedStatus === 'string') {
+    const hasLiveRun = !!openRide(task as { rides?: Ride[] }) || _r != null
+    ;(rest as { status?: string }).status =
+      storedStatus === 'riding'
+        ? hasLiveRun
+          ? 'riding'
+          : 'resting'
+        : storedStatus
+  }
   // Attach the derived grant capabilities when the task carries an agent (real
   // tasks always do; the structurally-typed test fixtures may not).
   const agent = (task as { agent?: AgentKind }).agent

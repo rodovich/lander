@@ -50,12 +50,14 @@ import {
   armScheduledRelaunch,
   startRide,
   closeRide,
+  openRide,
   type Message,
   type TaskEvent,
   type ScheduledMessage,
   type RepeatSpec,
   type Ride,
 } from './tasks'
+import { reviveTask } from './migrate'
 import {
   saveAttachment,
   readAttachmentMeta,
@@ -307,11 +309,16 @@ type Task = {
 
 // Bind the generic task store (server/store.ts) to the concrete Task type, so
 // the rest of the server keeps the same typed call sites.
-const readTasks = (dataDir: string) => readTasksStore<Task>(dataDir)
-const readTask = (dataDir: string, id: string) => readTaskStore<Task>(dataDir, id)
+// Bind the store to the concrete Task type and thread the versioned reader
+// (server/migrate.ts) through every read path, so a task read off disk is always
+// migrated to the current shape — and mutateTask persists that migration on the
+// task's next write (see applyMutation).
+const readTasks = (dataDir: string) => readTasksStore<Task>(dataDir, reviveTask)
+const readTask = (dataDir: string, id: string) =>
+  readTaskStore<Task>(dataDir, id, reviveTask)
 const writeTask = (file: string, task: Task) => writeTaskStore(file, task)
 const mutateTask = (file: string, fn: (task: Task) => void) =>
-  mutateTaskStore(file, fn)
+  mutateTaskStore(file, fn, reviveTask)
 
 async function setTitle(
   dataDir: string,
@@ -727,17 +734,14 @@ async function driveTask(project: Project, id: string): Promise<void> {
     }
   } finally {
     running.delete(id)
-    // Only come to rest if no run is tracked. Our own turn cleared its runId when
-    // it finished (the reducer deletes it on done/crash), so a runId here belongs
-    // to a *newer* drainer that re-rode this task after we left the running set —
-    // demoting it would strand that live run at "resting" for its whole duration.
+    // Under the status collapse there's no riding→resting demotion to do — a
+    // closed ride *is* the demotion (publicTask serves `resting` when no ride is
+    // open). We only tidy a stray open ride: if no run is tracked yet one is still
+    // open (a run abandoned without a paired close), stamp it interrupted so it
+    // doesn't linger as a live ride. A runId here belongs to a *newer* drainer
+    // that re-rode after we left the running set, so leave its ride alone.
     await mutateTask(file, (t) => {
-      if (t.status === 'riding' && !t.runId) {
-        // No tracked run: if a ride is somehow still open (a run abandoned without
-        // a close), stamp it interrupted so it doesn't linger as a live ride.
-        closeRide(t, 'interrupted', new Date().toISOString())
-        t.status = 'resting'
-      }
+      if (!t.runId) closeRide(t, 'interrupted', new Date().toISOString())
     }).catch(() => {})
   }
 
@@ -1506,11 +1510,13 @@ app.post('/api/:project/tasks', async (c) => {
       id,
       agent,
       title: title || '…',
-      // A deferred task rests until the scheduler launches it at scheduledFor.
-      // Otherwise "riding" while the agent works on the opening message (driveTask
-      // flips it to "resting" when it returns), or "wedged" with no message —
-      // it needs the user to supply a first prompt.
-      status: deferred ? 'resting' : message.trim() ? 'riding' : 'wedged',
+      // Stored status is the collapsed vocabulary (`riding | wedged | landed`). A
+      // deferred task stores `riding` with no open ride, so publicTask serves it
+      // as `resting` (decorated with scheduledFor) until the scheduler launches
+      // it; an immediate task rides while the agent works the opening message; a
+      // task with no message is `wedged` — it needs the user to supply a first
+      // prompt.
+      status: message.trim() || deferred ? 'riding' : 'wedged',
       createdAt: now,
       updatedAt: now,
       // Caught up as of creation: the opening message (and launch event) are the
@@ -1657,13 +1663,18 @@ app.patch('/api/:project/tasks/:id', async (c) => {
       if (typeof body.allowEdits === 'boolean') t.allowEdits = body.allowEdits
       if (typeof body.status === 'string') {
         const at = new Date().toISOString()
-        recordStatusTransition(t, body.status, at)
-        if (body.status !== t.status) t.updatedAt = at
-        t.status = body.status
+        // Normalize to the collapsed stored vocabulary: the UI's "rest" action
+        // (and any client) PATCHes `resting`, but idle is a derived presentation
+        // of a `riding` task with no open ride, so store `riding`. publicTask
+        // serves `resting` back. wedged/landed store as sent.
+        const next = body.status === 'resting' ? 'riding' : body.status
+        recordStatusTransition(t, next, at)
+        if (next !== t.status) t.updatedAt = at
+        t.status = next
         // Moving off wedged (a manual land/resume) supersedes any open ask; a
         // fresh wedge keeps it. (When not previously wedged there's no open
         // task-blocking ask to touch, so this only bites the intended case.)
-        if (body.status !== 'wedged') withdrawOpenAsks(t)
+        if (next !== 'wedged') withdrawOpenAsks(t)
       }
     })
 
@@ -1768,9 +1779,9 @@ app.post('/api/:project/tasks/:id/rest', async (c) => {
 
     const at = new Date().toISOString()
     await mutateTask(file, (t) => {
-      // Record leaving any notable status (wedged/landed); resting itself is a
-      // quiet status, so this is usually a no-op for the riding agent.
-      recordStatusTransition(t, 'resting', at)
+      // Record leaving any notable status (wedged/landed); resting is a derived,
+      // quiet presentation, so for the common riding→rest this is a no-op.
+      recordStatusTransition(t, 'riding', at)
       // Replace any prior triggers so re-resting doesn't leave a stale one armed.
       if (scheduledFor) t.scheduledFor = scheduledFor
       else delete t.scheduledFor
@@ -1783,7 +1794,11 @@ app.post('/api/:project/tasks/:id/rest', async (c) => {
           ? { kind: 'awaiting', title: t.title, awaiting, createdAt: at }
           : { kind: 'scheduled', title: t.title, scheduledFor, createdAt: at },
       )
-      t.status = 'resting'
+      // Stored status collapses to `riding`; publicTask serves `resting`
+      // (decorated with the scheduledFor/waitingFor set above) since no ride is
+      // open. The daemon-driven turn, if one is still streaming, closes its ride
+      // on `done`, at which point the rest presentation takes over cleanly.
+      t.status = 'riding'
       t.updatedAt = at
     })
     const task = await readTask(project.dataDir, id)
@@ -2066,7 +2081,10 @@ app.post('/api/:project/tasks/:id/archive', async (c) => {
         { error: archived ? 'task not found' : 'archived task not found' },
         404,
       )
-    if (archived && (task.status === 'riding' || task.runId))
+    // Only a task with a *live* run can't be archived (the reducer must keep
+    // writing to it). Key on the run, not stored status — under the collapse an
+    // idle "resting" task stores `riding` too, and it must stay archivable.
+    if (archived && (task.runId || openRide(task)))
       return c.json({ error: 'cannot archive a task while it is riding' }, 409)
     await mkdir(toDir, { recursive: true })
     await rename(path.join(fromDir, `${id}.json`), path.join(toDir, `${id}.json`))
@@ -2591,9 +2609,18 @@ async function recoverQueues(): Promise<void> {
       }
 
       const hasQueue = !!(task.queued && task.queued.length)
-      // "riding" at boot with no live run is a turn interrupted by the previous
-      // process dying, since nothing is driving it now.
-      const interrupted = task.status === 'riding' && !hasQueue
+      // A turn interrupted by the previous process dying, with nothing driving it
+      // now. Under the status collapse an idle (resting) task is stored `riding`
+      // too, so "riding" no longer means "mid-run" — the real signal is unfinished
+      // work with no live run: a stale pending assistant message, or a trailing
+      // user message that never got its reply (its queue was drained before the
+      // crash). A tracked run (runId) was handled above; wedged/landed are left
+      // alone (their stored status isn't `riding`).
+      const lastMsg = task.messages[task.messages.length - 1]
+      const interrupted =
+        task.status === 'riding' &&
+        !hasQueue &&
+        (task.messages.some((m) => m.pending) || lastMsg?.role === 'user')
       if (!hasQueue && !interrupted) continue
       await mutateTask(file, (t) => {
         for (const m of t.messages) if (m.pending) m.pending = false

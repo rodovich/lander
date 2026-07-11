@@ -95,6 +95,45 @@ describe('publicTask', () => {
   it('omits grants when the task carries no agent', () => {
     expect('grants' in publicTask({ id: 's' })).toBe(false)
   })
+
+  // The status collapse: stored `riding | wedged | landed`, but publicTask serves
+  // today's four-word vocabulary by deriving riding-vs-resting from ride state.
+  const served = (over: Record<string, unknown>) =>
+    (publicTask({ id: 's', status: 'riding', ...over }) as { status?: string })
+      .status
+  const openR: Ride = { id: 'r1', startedAt: '2026-01-01T00:00:00.000Z' }
+  const closedR: Ride = {
+    id: 'r0',
+    startedAt: '2026-01-01T00:00:00.000Z',
+    endedAt: '2026-01-01T00:01:00.000Z',
+    outcome: 'done',
+  }
+
+  it('serves riding for a stored-riding task with an open ride', () => {
+    expect(served({ rides: [openR] })).toBe('riding')
+    expect(served({ rides: [closedR, openR] })).toBe('riding')
+  })
+
+  it('serves riding for a stored-riding task with a runId but no ride (pre-ride belt)', () => {
+    expect(served({ runId: 'r1' })).toBe('riding')
+  })
+
+  it('serves resting for a stored-riding task with no open ride and no runId', () => {
+    expect(served({})).toBe('resting')
+    expect(served({ rides: [closedR] })).toBe('resting')
+    expect(served({ rides: [] })).toBe('resting')
+  })
+
+  it('serves wedged/landed as stored, regardless of ride state', () => {
+    expect(
+      (publicTask({ id: 's', status: 'wedged', rides: [openR] }) as {
+        status?: string
+      }).status,
+    ).toBe('wedged')
+    expect(
+      (publicTask({ id: 's', status: 'landed' }) as { status?: string }).status,
+    ).toBe('landed')
+  })
 })
 
 describe('latestUpdateAt', () => {
