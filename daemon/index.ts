@@ -276,10 +276,12 @@ function onMessage(raw: string): void {
           type: 'project-grant-result',
           requestId: msg.requestId,
           ok: false,
+          // Source the reason from the adapter rather than branching on the agent
+          // name; codex carries the exact current text, so this is byte-identical.
+          // The generic fallback is dead until a third non-grant adapter exists.
           error:
-            msg.agent === 'codex'
-              ? 'Project permission grants are not supported for Codex tasks yet.'
-              : `Project permission grants are not supported for ${msg.agent} tasks.`,
+            adapter.projectGrantsUnsupportedReason ??
+            `Project permission grants are not supported for ${msg.agent} tasks.`,
           status: 400,
         })
         break

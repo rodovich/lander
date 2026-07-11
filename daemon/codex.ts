@@ -41,6 +41,8 @@ export function createCodexAdapter({
     },
     reduceLine: reduceCodexStreamLine,
     extractSession: extractCodexSession,
+    projectGrantsUnsupportedReason:
+      'Project permission grants are not supported for Codex tasks yet.',
     supportsProjectGrants: false,
     supportsWorktreeFlag: false,
     supportsUsageSnapshot: false,

@@ -84,6 +84,12 @@ export type AgentAdapter = {
   reduceLine(line: string, at: string): AgentLineUpdate
   extractSession?(line: string): string | undefined
   persistProjectGrant?(input: AgentProjectGrantInput): Promise<void>
+  // The human-facing reason shown when a project-scope grant is refused because
+  // this adapter can't persist one (used only when `!supportsProjectGrants`). Lets
+  // the daemon source the message from the adapter instead of branching on the
+  // agent name. Optional: an adapter that supports grants never needs it, and one
+  // that doesn't but omits it falls back to a generic message.
+  projectGrantsUnsupportedReason?: string
   supportsProjectGrants: boolean
   supportsWorktreeFlag: boolean
   supportsUsageSnapshot: boolean
