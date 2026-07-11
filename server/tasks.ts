@@ -391,6 +391,14 @@ export function agentGrantCaps(agent: AgentKind): GrantCaps {
     : { task: true, project: true }
 }
 
+// Whether this agent reports a per-turn dollar cost (claude does, via its result
+// event; codex reports tokens without account cost). Served on the public task so
+// the footer reads a capability instead of branching on `agent === 'codex'`, like
+// the grant caps above. Superseded by flow meta.capabilities in the flow inversion.
+export function agentReportsCost(agent: AgentKind): boolean {
+  return agent !== 'codex'
+}
+
 // Flag the trailing-N user entries (N = queue length) as `queued`, cloning only
 // the flagged ones. The unread follow-ups are the trailing user messages, one
 // queue entry each, in order — so the client can dim what the agent hasn't read
@@ -427,6 +435,7 @@ export function publicTask<T extends object>(
   'token' | 'runId' | 'runCursor' | 'queued' | 'retry' | 'flowState' | 'flowStateRev'
 > & {
   grants?: GrantCaps
+  reportsCost?: boolean
 } {
   const {
     token: _t,
@@ -469,18 +478,22 @@ export function publicTask<T extends object>(
       storedStatus === 'riding' ? (hasLiveRun ? 'riding' : 'resting') : storedStatus
   }
 
-  // Attach the derived grant capabilities when the task carries an agent (real
-  // tasks always do; the structurally-typed test fixtures may not).
+  // Attach the derived grant capabilities and cost-reporting flag when the task
+  // carries an agent (real tasks always do; the structurally-typed test fixtures
+  // may not) — so the client reads capabilities, never the agent name.
   const agent = (task as { agent?: AgentKind }).agent
   const out = {
     ...rest,
-    ...(agent ? { grants: agentGrantCaps(agent) } : {}),
+    ...(agent
+      ? { grants: agentGrantCaps(agent), reportsCost: agentReportsCost(agent) }
+      : {}),
   }
   return out as Omit<
     T,
     'token' | 'runId' | 'runCursor' | 'queued' | 'retry' | 'flowState' | 'flowStateRev'
   > & {
     grants?: GrantCaps
+    reportsCost?: boolean
   }
 }
 

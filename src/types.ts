@@ -177,6 +177,11 @@ export type Task = {
   // doesn't honor a scope degrades from data. Absent on legacy payloads — treat as
   // fully capable.
   grants?: { task: boolean; project: boolean }
+  // Whether this task's agent reports a per-turn dollar cost (derived server-side
+  // by publicTask/agentReportsCost: claude does, codex doesn't). The footer reads
+  // this instead of branching on `agent`, so a provider without cost degrades from
+  // data. Absent on legacy payloads / fixtures without an agent.
+  reportsCost?: boolean
   title: string
   status: string
   createdAt: string

@@ -98,18 +98,17 @@ export function totalUsage(task: Task): TokenUsage | undefined {
 export function taskUsageTelemetry(
   u: TokenUsage,
   agent: Task['agent'],
+  reportsCost: boolean,
 ): TelemetryItem[] {
   // Uncached = fresh input processed this turn (regular input + the part written
   // to cache); cache read is the discounted re-read, reported separately.
   const uncached = u.input + u.cacheCreation
-  // Claude cost arrives with the turn's result event; Codex reports tokens without
-  // account cost, and a still-streaming turn hasn't landed one yet.
+  // Claude cost arrives with the turn's result event; a provider that reports no
+  // account cost (codex) shows 'n/a', and a still-streaming turn hasn't landed one
+  // yet. `agent` stays only the model-name display lookup below, never a behavior
+  // branch — the cost decision reads the server-derived capability.
   const cost =
-    u.costUsd !== undefined
-      ? formatCost(u.costUsd)
-      : agent === 'codex'
-        ? 'n/a'
-        : '$…'
+    u.costUsd !== undefined ? formatCost(u.costUsd) : reportsCost ? '$…' : 'n/a'
   return [
     {
       id: 'model',

@@ -2218,13 +2218,17 @@ export function App() {
                     : latestUsage(current)
                   if (!u) return null
                   const scope = usageTotal ? 'total' : 'turn'
+                  // Absent on legacy payloads / fixtures without an agent — treat
+                  // as cost-reporting (claude), matching the grants "fully capable"
+                  // default.
+                  const reportsCost = current.reportsCost ?? true
                   const costText =
                     u.costUsd !== undefined
                       ? `$${u.costUsd.toFixed(4)}`
-                      : current.agent === 'codex'
-                        ? 'unavailable for Codex'
-                        : '… (available when the turn lands)'
-                  const items = taskUsageTelemetry(u, current.agent)
+                      : reportsCost
+                        ? '… (available when the turn lands)'
+                        : 'unavailable for Codex'
+                  const items = taskUsageTelemetry(u, current.agent, reportsCost)
                   // The model names the whole task, not a scope, so it sits outside
                   // the turn/total toggle; the counts + cost are what the toggle flips.
                   const model = items.find((i) => i.id === 'model')

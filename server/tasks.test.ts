@@ -163,6 +163,13 @@ describe('publicTask', () => {
     expect(publicTask({ id: 's', status: 'riding', items: [], agent: 'claude' }).grants).toEqual({ task: true, project: true })
     expect(publicTask({ id: 's', status: 'riding', items: [], agent: 'codex' }).grants).toEqual({ task: false, project: false })
   })
+
+  it('derives the cost-reporting capability from the task agent', () => {
+    expect(publicTask({ id: 's', status: 'riding', items: [], agent: 'claude' }).reportsCost).toBe(true)
+    expect(publicTask({ id: 's', status: 'riding', items: [], agent: 'codex' }).reportsCost).toBe(false)
+    // No agent (a structural fixture) → capability omitted, like grants.
+    expect(publicTask({ id: 's', status: 'riding', items: [] }).reportsCost).toBeUndefined()
+  })
 })
 
 describe('latestUpdateAt', () => {
