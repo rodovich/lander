@@ -1,166 +1,195 @@
 import { describe, it, expect } from 'vitest'
 import { buildTimeline } from './timeline'
-
-// Minimal message/event shapes that satisfy buildTimeline's structural
-// constraints; `id`/`kind` are just labels the assertions read back.
-type M = {
-  role: 'user' | 'assistant'
-  createdAt: string
-  id: string
-  queued?: boolean
-}
-type E = { kind: string; createdAt: string }
-
-const u = (id: string, createdAt: string): M => ({ role: 'user', createdAt, id })
-// A still-queued follow-up: the agent hasn't read it; the server flags it.
-const q = (id: string, createdAt: string): M => ({
-  role: 'user',
-  createdAt,
-  id,
-  queued: true,
-})
-const a = (id: string, createdAt: string): M => ({
-  role: 'assistant',
-  createdAt,
-  id,
-})
-const ev = (kind: string, createdAt: string): E => ({ kind, createdAt })
+import type { EventItem, Item, MessageItem, Ride, ToolItem } from './types'
 
 // Pick clearly-ordered ISO timestamps without hand-writing the date each time.
 const T = (clock: string) => `2026-06-26T${clock}.000Z`
 
-// Render each timeline item as a short tag so order assertions stay readable:
-// `user:q1` / `asst:r1` for messages, `event:wedged` for lifecycle events.
-const seq = (items: ReturnType<typeof buildTimeline<M, E>>['items']) =>
-  items.map((it) =>
-    it.kind === 'event'
-      ? `event:${it.event.kind}`
-      : `${it.message.role === 'assistant' ? 'asst' : 'user'}:${it.message.id}`,
-  )
+// Item/ride builders. Ids double as the tags the order assertions read back.
+const user = (id: string, at: string, queued = false): MessageItem => ({
+  id,
+  at,
+  kind: 'message',
+  role: 'user',
+  text: id,
+  ...(queued ? { queued: true } : {}),
+})
+const flow = (id: string, rideId: string, at: string): MessageItem => ({
+  id,
+  at,
+  rideId,
+  kind: 'message',
+  role: 'flow',
+  text: id,
+})
+const tool = (id: string, rideId: string, at: string): ToolItem => ({
+  id,
+  at,
+  rideId,
+  kind: 'tool',
+  name: 'Bash',
+  input: 'ls',
+  status: 'ok',
+})
+const ev = (eventKind: EventItem['eventKind'], at: string): EventItem => ({
+  id: `itm-${eventKind}-${at}`,
+  at,
+  kind: 'event',
+  eventKind,
+})
+const ride = (id: string, startedAt: string, endedAt?: string): Ride => ({
+  id,
+  startedAt,
+  ...(endedAt ? { endedAt, outcome: 'done' } : {}),
+})
 
 const build = (
-  task: { messages: M[]; events?: E[] },
+  task: { items: Item[]; rides: Ride[] },
   now = T('23:59:59'),
-) => buildTimeline<M, E>(task, now)
+) => buildTimeline(task, now)
 
-describe('buildTimeline turn grouping', () => {
-  it('keeps a simple alternating conversation in message order', () => {
-    const messages = [
-      u('p1', T('10:00:00')),
-      a('r1', T('10:00:05')),
-      u('p2', T('10:01:00')),
-      a('r2', T('10:01:05')),
+// Render each timeline entry as a short tag so order assertions stay readable:
+// `user:p1` for a user bubble, `asst:r1` for a ride turn, `event:wedged`.
+const seq = (items: ReturnType<typeof buildTimeline>['items']) =>
+  items.map((it) =>
+    it.kind === 'event'
+      ? `event:${it.event.eventKind}`
+      : it.kind === 'user'
+        ? `user:${it.item.id}`
+        : `asst:${it.ride.id}`,
+  )
+
+describe('buildTimeline ride grouping', () => {
+  it('keeps a simple alternating conversation in order', () => {
+    const items = [
+      user('p1', T('10:00:00')),
+      flow('r1a', 'r1', T('10:00:05')),
+      user('p2', T('10:01:00')),
+      flow('r2a', 'r2', T('10:01:05')),
     ]
-    const { items } = build({ messages })
-    expect(seq(items)).toEqual(['user:p1', 'asst:r1', 'user:p2', 'asst:r2'])
-    expect(items.map((it) => it.kind === 'message' && it.index)).toEqual([
-      0, 1, 2, 3,
+    const rides = [ride('r1', T('10:00:05'), T('10:00:06')), ride('r2', T('10:01:05'), T('10:01:06'))]
+    const { items: out } = build({ items, rides })
+    expect(seq(out)).toEqual(['user:p1', 'asst:r1', 'user:p2', 'asst:r2'])
+  })
+
+  it('collapses a ride’s contiguous items (flow + tools) into one turn entry', () => {
+    const items = [
+      user('p1', T('10:00:00')),
+      flow('r1a', 'r1', T('10:00:05')),
+      tool('r1b', 'r1', T('10:00:06')),
+      flow('r1c', 'r1', T('10:00:07')),
+    ]
+    const rides = [ride('r1', T('10:00:05'), T('10:00:08'))]
+    const { items: out } = build({ items, rides })
+    expect(seq(out)).toEqual(['user:p1', 'asst:r1'])
+    const asst = out.find((e) => e.kind === 'ride')
+    expect(asst?.kind === 'ride' && asst.items.map((i) => i.id)).toEqual([
+      'r1a',
+      'r1b',
+      'r1c',
     ])
   })
 
-  it('renders several batched prompts as distinct bubbles under one reply', () => {
-    // Follow-ups queued while the agent ran are sent as one turn, but each stays
-    // its own rendered message — several users under a single assistant reply.
-    const messages = [
-      u('p1', T('10:00:00')),
-      u('p2', T('10:00:01')),
-      u('p3', T('10:00:02')),
-      a('r1', T('10:00:10')),
+  it('renders several batched prompts as distinct bubbles before one ride', () => {
+    const items = [
+      user('p1', T('10:00:00')),
+      user('p2', T('10:00:01')),
+      user('p3', T('10:00:02')),
+      flow('r1a', 'r1', T('10:00:10')),
     ]
-    const { items } = build({ messages })
-    expect(seq(items)).toEqual(['user:p1', 'user:p2', 'user:p3', 'asst:r1'])
+    const rides = [ride('r1', T('10:00:10'), T('10:00:11'))]
+    const { items: out } = build({ items, rides })
+    expect(seq(out)).toEqual(['user:p1', 'user:p2', 'user:p3', 'asst:r1'])
   })
 
-  it('gives a doubled/leading assistant its own turn', () => {
-    const messages = [a('r0', T('09:00:00')), a('r1', T('09:00:01'))]
-    const { items } = build({ messages })
-    expect(seq(items)).toEqual(['asst:r0', 'asst:r1'])
+  it('keeps a ride whole when an event splits its items, surfacing the event after the turn', () => {
+    // `lander wedge` fires a `wedged` event mid-turn while the ride keeps writing
+    // its final message — the turn must stay one bubble, the event after it.
+    const items = [
+      user('p1', T('10:00:00')),
+      flow('r1a', 'r1', T('10:00:05')),
+      ev('wedged', T('10:00:06')),
+      flow('r1b', 'r1', T('10:00:07')),
+    ]
+    const rides = [ride('r1', T('10:00:05'), T('10:00:08'))]
+    const { items: out } = build({ items, rides })
+    expect(seq(out)).toEqual(['user:p1', 'asst:r1', 'event:wedged'])
+    const asst = out.find((e) => e.kind === 'ride')
+    expect(asst?.kind === 'ride' && asst.items.map((i) => i.id)).toEqual([
+      'r1a',
+      'r1b',
+    ])
+  })
+
+  it('gives back-to-back rides their own turns', () => {
+    const items = [flow('r0a', 'r0', T('09:00:00')), flow('r1a', 'r1', T('09:00:01'))]
+    const rides = [ride('r0', T('09:00:00'), T('09:00:00')), ride('r1', T('09:00:01'), T('09:00:01'))]
+    const { items: out } = build({ items, rides })
+    expect(seq(out)).toEqual(['asst:r0', 'asst:r1'])
   })
 })
 
-describe('buildTimeline read-time anchoring', () => {
-  it('does not sort by createdAt: a follow-up answered later stays after the reply it waited on', () => {
-    // p2 was queued *during* turn 1, so its enqueue time (10:00:02) is earlier
-    // than turn 1's reply (10:00:30). Sorting by createdAt would float p2 above
-    // r1; turn grouping keeps it in the turn that actually answered it.
-    const messages = [
-      u('p1', T('10:00:00')),
-      a('r1', T('10:00:30')),
-      u('p2', T('10:00:02')),
-      a('r2', T('10:01:00')),
+describe('buildTimeline events in place', () => {
+  it('renders events at their stored array position', () => {
+    const items = [
+      ev('launched', T('09:59:00')),
+      user('p1', T('10:00:00')),
+      flow('r1a', 'r1', T('10:00:05')),
+      ev('landed', T('10:05:00')),
     ]
-    const { items } = build({ messages })
-    expect(seq(items)).toEqual(['user:p1', 'asst:r1', 'user:p2', 'asst:r2'])
-  })
-})
-
-describe('buildTimeline event splicing', () => {
-  it('surfaces an event just before the first message it predates, and a trailing event last', () => {
-    const messages = [u('p1', T('10:00:00')), a('r1', T('10:00:05'))]
-    const events = [ev('launched', T('09:59:00')), ev('landed', T('10:05:00'))]
-    const { items } = build({ messages, events })
-    expect(seq(items)).toEqual([
-      'event:launched',
-      'user:p1',
-      'asst:r1',
-      'event:landed',
-    ])
-  })
-
-  it('sorts events by timestamp before splicing, regardless of input order', () => {
-    const messages = [u('p1', T('10:00:00')), a('r1', T('10:00:05'))]
-    // Deliberately out of order on input.
-    const events = [ev('landed', T('10:05:00')), ev('launched', T('09:59:00'))]
-    const { items } = build({ messages, events })
-    expect(seq(items)).toEqual([
-      'event:launched',
-      'user:p1',
-      'asst:r1',
-      'event:landed',
-    ])
+    const rides = [ride('r1', T('10:00:05'), T('10:00:06'))]
+    const { items: out } = build({ items, rides })
+    expect(seq(out)).toEqual(['event:launched', 'user:p1', 'asst:r1', 'event:landed'])
   })
 })
 
 describe('buildTimeline queued follow-ups', () => {
-  it('sinks queued messages below the whole conversation, with events that arrived meanwhile above them', () => {
-    // p2 is still queued (one entry in `queued`). An event landed while it waited
-    // — that event must render above the queued prompt, which sinks to the bottom.
-    const messages = [
-      u('p1', T('10:00:00')),
-      a('r1', T('10:00:05')),
-      q('p2', T('10:02:00')),
+  it('sinks a queued follow-up below the whole conversation, keeping later events above it', () => {
+    const items = [
+      user('p1', T('10:00:00')),
+      flow('r1a', 'r1', T('10:00:05')),
+      ev('landed', T('10:01:00')),
+      user('p2', T('10:02:00'), true),
     ]
-    const events = [ev('landed', T('10:01:00'))]
-    const { items, queuedIndices } = build({ messages, events })
-    expect(seq(items)).toEqual([
-      'user:p1',
-      'asst:r1',
-      'event:landed',
-      'user:p2',
-    ])
-    expect([...queuedIndices]).toEqual([2])
+    const rides = [ride('r1', T('10:00:05'), T('10:00:06'))]
+    const { items: out } = build({ items, rides })
+    expect(seq(out)).toEqual(['user:p1', 'asst:r1', 'event:landed', 'user:p2'])
+    const p2 = out.find((e) => e.kind === 'user' && e.item.id === 'p2')
+    expect(p2?.kind === 'user' && p2.item.queued).toBe(true)
+  })
+
+  it('pulls a follow-up queued mid-ride out of the ride and down to the bottom', () => {
+    // p_q was sent while r1 was still streaming, so it sits between r1's items in
+    // array order; the sink lifts it out and the ride stays one contiguous turn.
+    const items = [
+      user('p1', T('10:00:00')),
+      flow('r1a', 'r1', T('10:00:05')),
+      user('pq', T('10:00:06'), true),
+      tool('r1b', 'r1', T('10:00:07')),
+    ]
+    const rides = [ride('r1', T('10:00:05'))] // open ride
+    const { items: out } = build({ items, rides })
+    expect(seq(out)).toEqual(['user:p1', 'asst:r1', 'user:pq'])
+    const asst = out.find((e) => e.kind === 'ride')
+    expect(asst?.kind === 'ride' && asst.items.map((i) => i.id)).toEqual(['r1a', 'r1b'])
   })
 
   it('surfaces a deferred retry as scheduled-then-woken, with the un-wedge above the still-queued recovery prompt', () => {
-    // A session-limit wedge whose retry was scheduled: the task stays wedged, a
-    // 'scheduled' event marks the wait, and the recovery prompt is queued *now*
-    // (createdAt at schedule time, 10:05) but sinks to the bottom. The un-wedge
-    // and launch only fire at the wakeup (13:00). Even though the queued prompt's
-    // createdAt predates them, it must render last — below the un-wedge that
-    // releases it — so it reads as "un-wedged, then the prompt is sent".
-    const messages = [
-      u('p1', T('10:00:00')),
-      a('r1', T('10:00:05')), // the failed turn's partial reply
-      q('try-again', T('10:05:00')), // queued when the retry was scheduled
-    ]
-    const events = [
+    // A session-limit wedge whose retry was scheduled: the recovery prompt is
+    // queued (appended at schedule time) but sinks below the un-wedge/launch
+    // events that only fire at the wakeup — it reads as "un-wedged, then sent".
+    const items = [
+      user('p1', T('10:00:00')),
+      flow('r1a', 'r1', T('10:00:05')),
+      user('try-again', T('10:05:00'), true),
       ev('wedged', T('10:00:06')),
       ev('scheduled', T('10:05:00')),
-      ev('unwedged', T('12:59:59.999')), // recorded a hair before the launch
+      ev('unwedged', T('12:59:59')),
       ev('launched', T('13:00:00')),
     ]
-    const { items } = build({ messages, events })
-    expect(seq(items)).toEqual([
+    const rides = [ride('r1', T('10:00:05'), T('10:00:06'))]
+    const { items: out } = build({ items, rides })
+    expect(seq(out)).toEqual([
       'user:p1',
       'asst:r1',
       'event:wedged',
@@ -170,88 +199,19 @@ describe('buildTimeline queued follow-ups', () => {
       'user:try-again',
     ])
   })
-
-  it('reports the flagged messages as queued', () => {
-    const messages = [
-      u('p1', T('10:00:00')),
-      a('r1', T('10:00:05')),
-      q('p2', T('10:02:00')),
-      q('p3', T('10:02:01')),
-    ]
-    const { queuedIndices } = build({ messages })
-    expect([...queuedIndices].sort((x, y) => x - y)).toEqual([2, 3])
-  })
 })
 
-describe('buildTimeline event vs. a turn-opening prompt', () => {
-  it('places an event after the prompt that opened the turn, not above it', () => {
-    // The reported bug: a user prompt (9:58:41), the task is wedged before its
-    // reply streams (9:58:53), and the interrupted reply is stamped last
-    // (9:58:54). The wedge must read *after* the prompt, even though the turn is
-    // anchored to the later reply timestamp.
-    const messages = [
-      u('p1', T('09:27:10')),
-      a('r1', T('09:27:22')),
-      u('p2', T('09:58:41')),
-      a('r2', T('09:58:54')), // interrupted reply, lazily stamped after the wedge
+describe('buildTimeline in-flight anchoring', () => {
+  it('anchors an open ride’s entry to `now`, and a settled one to its own timestamp', () => {
+    const items = [
+      flow('r0a', 'r0', T('10:00:00')),
+      flow('r1a', 'r1', T('10:10:00')),
     ]
-    const events = [
-      ev('launched', T('09:27:10')),
-      ev('wedged', T('09:58:53')),
-      ev('unwedged', T('09:59:26')),
-    ]
-    const { items } = build({ messages, events })
-    expect(seq(items)).toEqual([
-      'event:launched',
-      'user:p1',
-      'asst:r1',
-      'user:p2',
-      'event:wedged',
-      'asst:r2',
-      'event:unwedged',
-    ])
-  })
-
-  it('keeps an event ahead of a prompt that was queued during an earlier turn', () => {
-    // p2 was queued during turn 1 (enqueue time 10:00:02, before turn 1's reply
-    // at 10:00:30) and answered in turn 2. An event at 10:00:20 fired mid-turn-1,
-    // so it belongs above p2 — the running floor prevents p2's stale createdAt
-    // from dragging the event below it.
-    const messages = [
-      u('p1', T('10:00:00')),
-      a('r1', T('10:00:30')),
-      u('p2', T('10:00:02')),
-      a('r2', T('10:01:00')),
-    ]
-    const events = [ev('wedged', T('10:00:20'))]
-    const { items } = build({ messages, events })
-    expect(seq(items)).toEqual([
-      'user:p1',
-      'event:wedged',
-      'asst:r1',
-      'user:p2',
-      'asst:r2',
-    ])
-  })
-})
-
-describe('buildTimeline in-flight turn anchoring', () => {
-  it('anchors a live, unanswered turn to `now` so it stays below already-past events', () => {
-    // p2 has been read and is in flight (no reply yet, not queued). A landed
-    // event at 10:01 is in the past relative to `now` (10:05), so it sits above
-    // the live turn even though p2's own createdAt (10:10) is later than both.
-    const messages = [
-      u('p1', T('10:00:00')),
-      a('r1', T('10:00:05')),
-      u('p2', T('10:10:00')),
-    ]
-    const events = [ev('landed', T('10:01:00'))]
-    const { items } = build({ messages, events }, T('10:05:00'))
-    expect(seq(items)).toEqual([
-      'user:p1',
-      'asst:r1',
-      'event:landed',
-      'user:p2',
-    ])
+    const rides = [ride('r0', T('10:00:00'), T('10:00:01')), ride('r1', T('10:10:00'))]
+    const { items: out } = build({ items, rides }, T('10:05:00'))
+    const settled = out.find((e) => e.kind === 'ride' && e.ride.id === 'r0')
+    const open = out.find((e) => e.kind === 'ride' && e.ride.id === 'r1')
+    expect(settled?.at).toBe(T('10:00:00'))
+    expect(open?.at).toBe(T('10:05:00'))
   })
 })

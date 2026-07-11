@@ -1,21 +1,44 @@
 import { agentDisplayName, formatAgentModelName } from './agentDisplay'
 import { formatCost } from './format'
-import type { Task, TelemetryItem, TokenUsage } from './types'
+import type { Ride, Task, TelemetryItem, TokenUsage } from './types'
 
-// The timestamp of a task's most recent *completed* update: the newest of its
-// finished messages and its lifecycle events. The in-flight assistant message
-// (still streaming) is skipped, so per-chunk churn doesn't count until the
-// message lands — that's what keeps the unseen-update dot from flickering on
-// mid-stream. ISO timestamps compare lexicographically, so the string max is a
-// chronological max; empty string for a task with nothing complete yet.
+// The task's currently-open ride (the last one without an `endedAt`), if any —
+// what a riding task is streaming into. Mirrors the server's openRide.
+function openRide(task: { rides?: Ride[] }): Ride | undefined {
+  const rides = task.rides
+  if (!rides) return undefined
+  for (let i = rides.length - 1; i >= 0; i--)
+    if (!rides[i].endedAt) return rides[i]
+  return undefined
+}
+
+// The timestamp of a task's most recent *completed* update, drives the unseen
+// dot. Byte-for-byte the value the pre-item-log helper produced (so a `seenAt`
+// stored before this migration stays valid and read tasks don't re-surface as
+// unread): the newest of the user messages, the *settled* rides' start times
+// (the old per-turn assistant message carried the turn's start as its
+// `createdAt`, and only that — never its streamed steps), and the lifecycle
+// events. The in-flight ride (its items and its own start) is skipped, so
+// per-chunk churn doesn't count until the turn lands. ISO timestamps compare
+// lexicographically, so the string max is a chronological max; empty string for
+// a task with nothing complete yet.
 export function latestUpdateAt(task: Task): string {
+  const open = openRide(task)
   let latest = ''
-  for (const m of task.messages) {
-    if (m.pending) continue
-    if (m.createdAt > latest) latest = m.createdAt
+  for (const it of task.items ?? []) {
+    // User messages and lifecycle events stamp their own moment; a settled
+    // ride's flow/tool items don't (the turn's timestamp is its ride start).
+    if (it.kind === 'message' && it.role === 'user') {
+      if (it.at > latest) latest = it.at
+    } else if (it.kind === 'event') {
+      if (it.at > latest) latest = it.at
+    }
   }
-  for (const e of task.events ?? []) {
-    if (e.createdAt > latest) latest = e.createdAt
+  for (const r of task.rides ?? []) {
+    // Skip the open ride (the in-flight turn); a settled turn contributes its
+    // start time, matching the old assistant message's `createdAt`.
+    if (open && r.id === open.id) continue
+    if (r.startedAt > latest) latest = r.startedAt
   }
   return latest
 }
@@ -32,29 +55,30 @@ export function taskAgentModelName(agent: Task['agent'], model?: string): string
   return formatAgentModelName(agentDisplayName(agent), model)
 }
 
-// The token usage of the task's most recent turn that reported any — the last
-// assistant message carrying a `usage`. A streaming turn reports its usage live
-// (summed across inferences so far), so this tracks the in-flight turn as it
-// grows rather than lagging a turn behind.
+// The token usage of the task's most recent ride that reported any — the last
+// ride carrying a `usage`. A streaming turn reports its usage live (summed across
+// inferences so far, moved onto the open ride), so this tracks the in-flight turn
+// as it grows rather than lagging a turn behind.
 export function latestUsage(task: Task): TokenUsage | undefined {
-  for (let i = task.messages.length - 1; i >= 0; i--) {
-    const u = task.messages[i].usage
+  const rides = task.rides ?? []
+  for (let i = rides.length - 1; i >= 0; i--) {
+    const u = rides[i].usage
     if (u) return u
   }
   return undefined
 }
 
-// Token usage summed across every turn of the task. The token counts and dollar
-// cost add up; the model is taken from the latest turn (the task's current
+// Token usage summed across every ride of the task. The token counts and dollar
+// cost add up; the model is taken from the latest ride (the task's current
 // model), matching what the per-turn view shows. Cost stays undefined until some
-// turn reports one (a turn still streaming hasn't). Undefined when no turn has
+// ride reports one (a turn still streaming hasn't). Undefined when no ride has
 // reported usage at all.
 export function totalUsage(task: Task): TokenUsage | undefined {
   const total = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 }
   let cost: number | undefined
   let any = false
-  for (const m of task.messages) {
-    const u = m.usage
+  for (const r of task.rides ?? []) {
+    const u = r.usage
     if (!u) continue
     any = true
     total.input += u.input

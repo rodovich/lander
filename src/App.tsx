@@ -40,21 +40,31 @@ import {
   totalUsage,
 } from './taskMeta'
 import { buildTimeline } from './timeline'
-import type { TimelineItem } from './timeline'
-import { Collapsible, StepView } from './toolStep'
+import type { TimelineEntry } from './timeline'
+import { Collapsible, ToolStep } from './toolStep'
 import { planTurnCollapse } from './turnCollapse'
 import { TelemetryItemView, TelemetryPanel } from './telemetry'
 import type {
+  AskItem,
   DateCategory,
-  Message,
   Project,
+  Ride,
   Task,
-  TaskEvent,
   TaskView,
   TaskWithProject,
   TimeFilter,
-  ToolStatus,
 } from './types'
+
+// The task's currently-open ride (the last one without an `endedAt`), if any —
+// the in-flight turn. Mirrors the server's openRide; drives the trailing spinner
+// and the stream-pinning signal.
+function openRide(task: { rides?: Ride[] } | null | undefined): Ride | undefined {
+  const rides = task?.rides
+  if (!rides) return undefined
+  for (let i = rides.length - 1; i >= 0; i--)
+    if (!rides[i].endedAt) return rides[i]
+  return undefined
+}
 
 export function App() {
   // Opt-in profiling (see perf.ts): count every App render. The whole
@@ -174,12 +184,12 @@ export function App() {
   }, [])
 
   // The set of tool chips whose detail (a diff or captured output) is revealed,
-  // keyed the same "<messageIndex>:<stepIndex>". Details start closed and several
-  // can be open at once (option/shift-click toggles a whole message's worth).
+  // keyed by the tool item's stable id. Details start closed and several can be
+  // open at once (option/shift-click toggles a whole ride's worth).
   const [openDetails, setOpenDetails] = useState<Set<string>>(new Set())
 
   // Toggle one chip's detail, or — when option/shift was held — every detail in
-  // its message together, driving them all to this chip's new (opposite) state.
+  // its ride together, driving them all to this chip's new (opposite) state.
   function toggleDetail(key: string, messageKeys: string[]) {
     setOpenDetails((prev) => {
       const next = new Set(prev)
@@ -193,16 +203,16 @@ export function App() {
   }
 
   // Assistant turns (other than the most recent) collapse their middle stretch of
-  // message steps behind a disclosure; this holds the message indices the viewer
-  // has expanded. It's cleared on task switch, so each task opens with its history
-  // folded down again.
-  const [expandedTurns, setExpandedTurns] = useState<Set<number>>(new Set())
+  // items behind a disclosure; this holds the ride ids the viewer has expanded.
+  // It's cleared on task switch, so each task opens with its history folded down
+  // again.
+  const [expandedTurns, setExpandedTurns] = useState<Set<string>>(new Set())
 
-  function toggleTurn(messageIndex: number) {
+  function toggleTurn(rideId: string) {
     setExpandedTurns((prev) => {
       const next = new Set(prev)
-      if (next.has(messageIndex)) next.delete(messageIndex)
-      else next.add(messageIndex)
+      if (next.has(rideId)) next.delete(rideId)
+      else next.add(rideId)
       return next
     })
   }
@@ -492,35 +502,35 @@ export function App() {
   const currentLatest = current ? latestUpdateAt(current) : ''
   const activelyViewing = !!current && tabActive && atBottom
 
-  // The open task's conversation as a single stream: its messages in turn order,
-  // merged with its lifecycle events by timestamp. The ordering rules (turn
-  // grouping, read-time anchoring, queued sinking, event splicing) all live in
-  // buildTimeline; `queuedIndices` rides back out so the render can dim the
-  // follow-ups the agent hasn't read yet. `now` anchors any in-flight turn.
-  const { items: timeline, queuedIndices } = current
+  // The open task's conversation as a single stream: user bubbles, ride turns,
+  // and lifecycle events in order. The ordering rules (ride grouping, queued
+  // sinking, in-flight anchoring) all live in buildTimeline; `now` anchors any
+  // in-flight turn. Queued follow-ups carry their own `queued` flag on the item.
+  const { items: timeline } = current
     ? timed(
         'buildTimeline',
         () => buildTimeline(current, new Date().toISOString()),
-        `${current.messages.length} msgs`,
+        `${current.items?.length ?? 0} items`,
       )
-    : {
-        items: [] as TimelineItem<Message, TaskEvent>[],
-        queuedIndices: new Set<number>(),
-      }
+    : { items: [] as TimelineEntry[] }
 
-  // A wedged task's open ask renders as the footer of the assistant message it
-  // belongs to (the message is the question, the form is the answer), so find
-  // that message. There's at most one open ask at a time. When the task has no
-  // assistant message to anchor to, askAnchorIndex stays -1 and the form renders
-  // standalone below the conversation (see the fallback near the composer).
-  const openAsk = current?.asks?.find((a) => a.state === 'open')
-  let askAnchorIndex = -1
-  if (openAsk && current)
-    for (let i = current.messages.length - 1; i >= 0; i--)
-      if (current.messages[i].role === 'assistant') {
-        askAnchorIndex = i
-        break
-      }
+  // The task's open ask renders as the footer of the message item that raised it
+  // (the message is the question, the form is the answer). There's at most one
+  // open ask. `askAnchorId` is its `parentId` — the flow message item to hang it
+  // under; when absent (a platform ask, or converted history with no anchor) the
+  // form renders standalone below the conversation (see the fallback near the
+  // composer).
+  const openAsk = current?.items?.find(
+    (it): it is AskItem => it.kind === 'ask' && it.state === 'open',
+  )
+  const askAnchorId = openAsk?.parentId
+
+  // Whether the in-flight ride has already produced any item. When it has, the
+  // ride block renders its own trailing "working…" spinner; when it hasn't (the
+  // run was just handed off), the standalone "starting…" row stands in.
+  const openR = openRide(current)
+  const openRideHasItems =
+    !!openR && (current?.items?.some((it) => it.rideId === openR.id) ?? false)
 
   // Roving-tabindex bookkeeping for the task list: the selected row is the one
   // reachable with Tab, and arrow keys move DOM focus between rows.
@@ -945,19 +955,26 @@ export function App() {
     setAtBottom(bottom)
   }
 
-  // Changes whenever the open task's last (typically streaming) message grows,
-  // even when the message count stays the same, so the effect re-pins as an
-  // assistant turn fills in. The trailing fields track the two agent-working
-  // working…" spinners (the per-message pending one and the standalone riding
-  // one); they add and remove a row, so the timeline's height changes without
-  // any message text changing and the effect must re-pin for those too.
-  const lastMessage = current?.messages[current.messages.length - 1]
-  const streamSignal = lastMessage
-    ? `${lastMessage.steps?.length ?? 0}:` +
-      `${lastMessage.steps?.reduce((n, s) => n + (s.text?.length ?? 0), 0) ?? 0}:` +
-      `${lastMessage.text?.length ?? 0}:` +
-      `${lastMessage.pending ? 1 : 0}:${current?.status}`
-    : ''
+  // Changes whenever the open task's in-flight ride grows — a new item, or the
+  // last item's text/output filling in — so the effect re-pins as an assistant
+  // turn streams. The open-ride flag tracks the trailing working-spinner row,
+  // which adds and removes a row (changing the timeline's height) without any
+  // item text changing, so the effect must re-pin for that too.
+  const itemCount = current?.items?.length ?? 0
+  const streamLen =
+    current?.items?.reduce(
+      (n, it) =>
+        n +
+        (it.kind === 'message'
+          ? it.text.length
+          : it.kind === 'tool'
+            ? it.input.length + (it.output?.length ?? 0)
+            : 0),
+      0,
+    ) ?? 0
+  const streamSignal = `${itemCount}:${streamLen}:${current?.status}:${
+    openRide(current) ? 1 : 0
+  }`
 
   useEffect(() => {
     const el = messagesRef.current
@@ -971,7 +988,7 @@ export function App() {
       // active-viewing logic reads (a no-op when already true).
       setAtBottom(true)
     }
-  }, [selected, current?.messages.length, current?.events?.length, streamSignal])
+  }, [selected, current?.items?.length, streamSignal])
 
   // Move the open task's seen marker per the viewing rules. When the viewer
   // starts actively viewing a task (switches to it, focuses the tab, or scrolls
@@ -1846,282 +1863,234 @@ export function App() {
               </div>
             </div>
             <div className="messages" ref={messagesRef} onScroll={onMessagesScroll}>
-              {timeline.map((item) => {
-                if (item.kind === 'event') {
+              {timeline.map((entry) => {
+                if (entry.kind === 'event') {
                   return (
                     <StatusTransition
-                      key={`e-${item.event.kind}-${item.at}`}
-                      event={item.event}
+                      key={`e-${entry.event.id}`}
+                      event={entry.event}
                       slug={current.projectSlug}
                       linkTask={resolveTaskLink}
                     />
                   )
                 }
-                const m = item.message
-                const i = item.index
+                if (entry.kind === 'user') {
+                  const m = entry.item
+                  return (
+                    <div
+                      className={`message message-user${m.queued ? ' message-queued' : ''}`}
+                      key={`u-${m.id}`}
+                    >
+                      <div className="message-head">
+                        <span className="message-role">user</span>
+                        <span className="message-time">
+                          {formatTimestamp(m.at)}
+                        </span>
+                      </div>
+                      <MessageText text={m.text} linkTask={resolveTaskLink} />
+                      {m.attachments && m.attachments.length > 0 && (
+                        <MessageAttachments
+                          attachments={m.attachments}
+                          slug={current.projectSlug}
+                        />
+                      )}
+                    </div>
+                  )
+                }
+                // A ride — one assistant turn, carrying all its items.
+                const ride = entry.ride
+                const items = entry.items
+                const settled = !!ride.endedAt
                 return (
-                <div
-                  className={`message message-${m.role}${queuedIndices.has(i) ? ' message-queued' : ''}`}
-                  key={`m-${i}`}
-                >
+                <div className="message message-assistant" key={`r-${ride.id}`}>
                   <div className="message-head">
-                    <span className="message-role">{m.role}</span>
+                    <span className="message-role">assistant</span>
                     <span className="message-time">
-                      {formatTimestamp(m.createdAt)}
+                      {formatTimestamp(ride.startedAt)}
                     </span>
                   </div>
-                  {/* Streamed assistant turns render their live activity trace;
-                      user and legacy messages just render their text. */}
-                  {m.steps && m.steps.length > 0 ? (
-                    <div className="steps">
-                      {(() => {
-                        // Map each tool call's id to its result outcome so a
-                        // tool_use chip can show whether it was allowed/blocked,
-                        // and fold the result's text/error in so the chip can
-                        // reveal it as collapsible detail.
-                        const outcomes = new Map<string, boolean>()
-                        const resultById = new Map<
-                          string,
-                          { text?: string; isError?: boolean }
-                        >()
-                        const hasToolUse = new Set<string>()
-                        // A subagent's steps (tagged with their spawning call's id)
-                        // don't render inline — they fold into that call's chip. Map
-                        // each spawning id to its direct children's step indices so
-                        // renderStep can nest them; the links go arbitrarily deep, so
-                        // rendering a child recurses on its own children in turn.
-                        const childrenByParent = new Map<string, number[]>()
-                        m.steps.forEach((s, j) => {
-                          if (s.kind === 'tool_result' && s.toolUseId) {
-                            outcomes.set(s.toolUseId, !!s.blocked)
-                            resultById.set(s.toolUseId, {
-                              text: s.text,
-                              isError: s.isError,
-                            })
-                          }
-                          if (s.kind === 'tool_use' && s.toolUseId)
-                            hasToolUse.add(s.toolUseId)
-                          if (s.parentToolUseId) {
-                            const sibs = childrenByParent.get(s.parentToolUseId)
-                            if (sibs) sibs.push(j)
-                            else childrenByParent.set(s.parentToolUseId, [j])
-                          }
-                        })
-                        // Keys of every chip with revealable detail (a diff, a
-                        // result with text, or a nested subagent trace) in this
-                        // message, so an option/shift-click on one toggles them all
-                        // together — nested chips included, since their keys index
-                        // the same flat step array.
-                        const detailKeys = m.steps!
-                          .map((s, j) =>
-                            s.kind === 'tool_use' &&
-                            (s.inputFull ||
-                              s.input?.includes('\n') ||
-                              s.edits?.length ||
-                              (s.toolUseId &&
-                                (resultById.get(s.toolUseId)?.text ||
-                                  childrenByParent.has(s.toolUseId))))
-                              ? `${i}:${j}`
-                              : null,
-                          )
-                          .filter((k): k is string => k !== null)
-                        // Group consecutive step indices by the model inference
-                        // that produced them: a text/tool_use step whose
-                        // inferenceId differs from the last one seen opens a new
-                        // group. Only those steps carry an id, so a turn's
-                        // interleaved tool_results stay with the current group. Each
-                        // group is one inference — ruled apart from the next. Serves
-                        // both the main trace and, recursively, each subagent's own
-                        // (see renderSubSteps).
-                        const groupByInference = (idxs: number[]): number[][] => {
-                          const gs: number[][] = []
-                          let last: string | undefined
-                          for (const j of idxs) {
-                            const s = m.steps![j]
-                            if (
-                              gs.length === 0 ||
-                              (s.inferenceId &&
-                                last !== undefined &&
-                                s.inferenceId !== last)
-                            )
-                              gs.push([])
-                            gs[gs.length - 1].push(j)
-                            if (s.inferenceId) last = s.inferenceId
-                          }
-                          return gs
+                  <div className="steps">
+                    {(() => {
+                      // Subagent items (parentId set) don't render inline — they
+                      // fold into their spawning tool chip. Map each spawning tool
+                      // id to its direct children's indices so renderItem can nest
+                      // them; the links go arbitrarily deep, so rendering a child
+                      // recurses on its own children in turn.
+                      const childrenByParent = new Map<string, number[]>()
+                      items.forEach((it, j) => {
+                        if (it.parentId) {
+                          const sibs = childrenByParent.get(it.parentId)
+                          if (sibs) sibs.push(j)
+                          else childrenByParent.set(it.parentId, [j])
                         }
-                        // The main trace omits subagent steps entirely — they're
-                        // folded under their spawning chip — so their inference ids
-                        // never open a main-trace group nor feed collapse/copy
-                        // controls.
-                        const mainIdxs = m.steps
-                          .map((_, j) => j)
-                          .filter((j) => !m.steps![j].parentToolUseId)
-                        const renderStep = (j: number) => {
-                          const s = m.steps![j]
-                          const key = `${i}:${j}`
-                          // The chip's result (if it has landed) and whether the
-                          // call is in the turn's permission_denials.
-                          const res =
-                            s.kind === 'tool_use' && s.toolUseId
-                              ? resultById.get(s.toolUseId)
-                              : undefined
-                          // Whether this call is in the turn's permission_denials
-                          // (reconciled onto the tool_result at turn end); a denied
-                          // call reads "blocked", any other errored call "failed".
-                          const inDenials =
-                            s.kind === 'tool_use' && s.toolUseId
-                              ? outcomes.get(s.toolUseId) === true
-                              : false
-                          const status: ToolStatus =
-                            s.kind !== 'tool_use'
-                              ? 'running'
-                              : inDenials
-                                ? 'blocked'
-                                : res?.isError
-                                  ? 'failed'
-                                  : res
-                                    ? 'ok'
-                                    : 'running'
-                          // A result owned by a tool_use chip is now revealed from
-                          // that chip — skip the standalone peek. Orphan/legacy
-                          // results (no matching chip) still render inline.
+                      })
+                      // The main thread: items with no parent. Subagent items are
+                      // folded under their spawning chip, so they never open a
+                      // main-thread group nor feed collapse/copy controls.
+                      const mainIdxs = items
+                        .map((_, j) => j)
+                        .filter((j) => !items[j].parentId)
+                      // Ids of every tool chip with revealable detail (full input, a
+                      // diff, captured output, or a nested subagent trace) in this
+                      // ride, so an option/shift-click on one toggles them all
+                      // together — nested chips included, since ids are ride-wide.
+                      const detailKeys = items
+                        .map((it) =>
+                          it.kind === 'tool' &&
+                          (it.inputFull ||
+                            it.input.includes('\n') ||
+                            it.edits?.length ||
+                            it.output ||
+                            childrenByParent.has(it.id))
+                            ? it.id
+                            : null,
+                        )
+                        .filter((k): k is string => k !== null)
+                      // Group consecutive main items by the groupId that produced
+                      // them: an item whose groupId differs from the last opens a
+                      // new group. Items without one stay with the current group.
+                      // Each group is one inference — ruled apart from the next.
+                      const groupByGroup = (idxs: number[]): number[][] => {
+                        const gs: number[][] = []
+                        let last: string | undefined
+                        for (const j of idxs) {
+                          const it = items[j]
                           if (
-                            s.kind === 'tool_result' &&
-                            s.toolUseId &&
-                            hasToolUse.has(s.toolUseId)
+                            gs.length === 0 ||
+                            (it.groupId &&
+                              last !== undefined &&
+                              it.groupId !== last)
                           )
-                            return null
+                            gs.push([])
+                          gs[gs.length - 1].push(j)
+                          if (it.groupId) last = it.groupId
+                        }
+                        return gs
+                      }
+                      const renderItem = (j: number) => {
+                        const it = items[j]
+                        if (it.kind === 'tool') {
                           // A subagent spawner (Agent/Explore) carries its
-                          // subagent's steps as children; render them as the chip's
-                          // nested trace. renderStep recurses, so a sub-subagent's
+                          // subagent's items as children; render them as the chip's
+                          // nested trace. renderItem recurses, so a sub-subagent's
                           // own chips nest in turn.
-                          const childIdxs =
-                            s.kind === 'tool_use' && s.toolUseId
-                              ? childrenByParent.get(s.toolUseId)
-                              : undefined
-                          const subSteps = childIdxs?.length
-                            ? renderSubSteps(childIdxs)
+                          const childIdxs = childrenByParent.get(it.id)
+                          const subItems = childIdxs?.length
+                            ? renderSubItems(childIdxs)
                             : undefined
                           return (
-                            <StepView
-                              key={j}
-                              step={s}
-                              status={status}
-                              result={res}
-                              detailOpen={openDetails.has(key)}
+                            <ToolStep
+                              key={it.id}
+                              item={it}
+                              detailOpen={openDetails.has(it.id)}
                               onToggleDetail={(all) =>
-                                toggleDetail(key, all ? detailKeys : [key])
+                                toggleDetail(it.id, all ? detailKeys : [it.id])
                               }
-                              linkTask={resolveTaskLink}
-                              subSteps={subSteps}
+                              subItems={subItems}
                             />
                           )
                         }
-                        const renderStepList = (
-                          idxs: number[],
-                          initialSep = false,
-                          keyPrefix = 'steps',
-                        ) =>
-                          groupByInference(idxs).map((groupIdxs, k) => (
-                            <Fragment
-                              key={`${keyPrefix}-${k}-${groupIdxs[0] ?? 'empty'}`}
-                            >
-                              {(initialSep || k > 0) && (
-                                <hr className="turn-sep" />
-                              )}
-                              <div className="inference">
-                                {groupIdxs.map(renderStep)}
-                              </div>
-                            </Fragment>
-                          ))
-                        // A subagent's folded trace, grouped into its own turns the
-                        // same way the main trace is — ruled apart by a turn-sep so
-                        // its inferences read as distinct turns. Mutually recursive
-                        // with renderStep (a nested subagent nests in turn).
-                        const renderSubSteps = (childIdxs: number[]) =>
-                          renderStepList(
-                            childIdxs,
-                            false,
-                            `sub-${childIdxs[0] ?? 'empty'}`,
+                        if (it.kind === 'message') {
+                          // A flow message item: its prose. The open ask renders
+                          // as the whole turn's footer (below), not inline — its
+                          // parentId is the last flow item at wedge time, which
+                          // may sit before later prose in the same turn.
+                          return (
+                            <MessageText
+                              key={it.id}
+                              text={it.text}
+                              linkTask={resolveTaskLink}
+                            />
                           )
-                        // Assistant turns fold down by assistant text messages,
-                        // independent of inference boundaries: keep the opening
-                        // prose before the first tool, the longest text sequence,
-                        // and the last text sequence, and collapse each flat step
-                        // range between them (see planTurnCollapse). A turn still
-                        // being written renders in full (its shape isn't settled
-                        // yet), as does any turn too short to have a gap.
-                        const collapse = planTurnCollapse(m.steps!, mainIdxs)
-                        const folds =
-                          m.role === 'assistant' &&
-                          !m.pending &&
-                          collapse.segments.some((seg) => seg.hidden)
-                        if (!folds) return renderStepList(mainIdxs)
-                        const open = expandedTurns.has(i)
-                        return (
-                          <>
-                            {collapse.segments.map((seg, si) => {
-                              const sep = si > 0 && (
-                                <hr className="turn-sep" />
-                              )
-                              if (!seg.hidden)
-                                return (
-                                  <Fragment key={`seg-${si}`}>
-                                    {sep}
-                                    {renderStepList(
-                                      seg.indices,
-                                      false,
-                                      `seg-${si}`,
-                                    )}
-                                  </Fragment>
-                                )
-                              const toolCount = seg.indices.filter(
-                                (j) => m.steps![j].kind === 'tool_use',
-                              ).length
+                        }
+                        return null
+                      }
+                      const renderItemList = (
+                        idxs: number[],
+                        keyPrefix = 'items',
+                      ) =>
+                        groupByGroup(idxs).map((groupIdxs, k) => (
+                          <Fragment
+                            key={`${keyPrefix}-${k}-${groupIdxs[0] ?? 'empty'}`}
+                          >
+                            {k > 0 && <hr className="turn-sep" />}
+                            <div className="inference">
+                              {groupIdxs.map(renderItem)}
+                            </div>
+                          </Fragment>
+                        ))
+                      // A subagent's folded trace, grouped into its own turns the
+                      // same way the main thread is. Mutually recursive with
+                      // renderItem (a nested subagent nests in turn).
+                      const renderSubItems = (childIdxs: number[]) =>
+                        renderItemList(childIdxs, `sub-${childIdxs[0] ?? 'empty'}`)
+                      // Settled turns fold down by their flow messages, independent
+                      // of group boundaries: keep the opening prose before the first
+                      // tool, the longest text sequence, and the last, collapsing
+                      // the ranges between (see planTurnCollapse). An open ride
+                      // renders in full (its shape isn't settled yet), as does any
+                      // turn too short to have a gap.
+                      const collapse = planTurnCollapse(items, mainIdxs)
+                      const folds =
+                        settled && collapse.segments.some((seg) => seg.hidden)
+                      if (!folds) return renderItemList(mainIdxs)
+                      return (
+                        <>
+                          {collapse.segments.map((seg, si) => {
+                            const sep = si > 0 && <hr className="turn-sep" />
+                            if (!seg.hidden)
                               return (
                                 <Fragment key={`seg-${si}`}>
                                   {sep}
-                                  <Collapsible
-                                    open={open}
-                                    onToggle={() => toggleTurn(i)}
-                                    label={
-                                      <span className="collapsible-label">
-                                        {seg.indices.length} step
-                                        {seg.indices.length === 1 ? '' : 's'}
-                                        {toolCount > 0 &&
-                                          `, ${toolCount} tool${
-                                            toolCount === 1 ? '' : 's'
-                                          }`}
-                                        …
-                                      </span>
-                                    }
-                                  >
-                                    {renderStepList(
-                                      seg.indices,
-                                      false,
-                                      `hidden-${si}`,
-                                    )}
-                                  </Collapsible>
+                                  {renderItemList(seg.indices, `seg-${si}`)}
                                 </Fragment>
                               )
-                            })}
-                          </>
-                        )
-                      })()}
-                    </div>
-                  ) : (
-                    <MessageText text={m.text} linkTask={resolveTaskLink} />
-                  )}
-                  {/* A finished assistant turn's confirmed denials, distilled into
-                      a review surface. Only at turn end (denials are authoritative
-                      on the terminal result event, so a pending message shows
-                      nothing) and only when there are any — a task whose agent
-                      never reports denials simply has no line. */}
-                  {m.role === 'assistant' &&
-                    !m.pending &&
+                            // Each hidden segment folds independently, keyed by
+                            // ride + segment index.
+                            const segKey = `${ride.id}:${si}`
+                            const open = expandedTurns.has(segKey)
+                            // Summarize as the model's actions: one "step" per
+                            // inference group (the runs a turn-sep rules apart, so
+                            // groups = turn-seps + 1), plus the tool count.
+                            const stepCount = groupByGroup(seg.indices).length
+                            const toolCount = seg.indices.filter(
+                              (j) => items[j].kind === 'tool',
+                            ).length
+                            return (
+                              <Fragment key={`seg-${si}`}>
+                                {sep}
+                                <Collapsible
+                                  open={open}
+                                  onToggle={() => toggleTurn(segKey)}
+                                  label={
+                                    <span className="collapsible-label">
+                                      {stepCount} step
+                                      {stepCount === 1 ? '' : 's'}
+                                      {toolCount > 0 &&
+                                        `, ${toolCount} tool${
+                                          toolCount === 1 ? '' : 's'
+                                        }`}
+                                      …
+                                    </span>
+                                  }
+                                >
+                                  {renderItemList(seg.indices, `hidden-${si}`)}
+                                </Collapsible>
+                              </Fragment>
+                            )
+                          })}
+                        </>
+                      )
+                    })()}
+                  </div>
+                  {/* A finished turn's confirmed denials, distilled into a review
+                      surface. Only when the ride is settled (denials are
+                      authoritative at ride end, so an open ride shows nothing) and
+                      only when there are any — a task whose agent never reports
+                      denials simply has no line. */}
+                  {settled &&
                     (() => {
-                      const requests = blockedRequests(m.steps ?? [])
+                      const requests = blockedRequests(items)
                       return requests.length > 0 ? (
                         <BlockedSummary
                           requests={requests}
@@ -2130,64 +2099,71 @@ export function App() {
                         />
                       ) : null
                     })()}
-                  {m.attachments && m.attachments.length > 0 && (
-                    <MessageAttachments
-                      attachments={m.attachments}
-                      slug={current.projectSlug}
-                    />
-                  )}
-                  {m.pending && (
+                  {/* The in-flight turn's working spinner, after the ride's last
+                      item — an open ride (no endedAt) is streaming. */}
+                  {!settled && (
                     <div className="message-pending">
                       <span className="spinner" aria-hidden />
-                      {`${taskAgentModelName(current.agent, m.usage?.model)} is working…`}
+                      {`${taskAgentModelName(current.agent, ride.usage?.model)} is working…`}
                     </div>
                   )}
-                  {m.artifacts && m.artifacts.length > 0 && (
-                    <MessageArtifacts
-                      artifacts={m.artifacts}
-                      taskId={current.id}
-                      slug={current.projectSlug}
-                    />
-                  )}
-                  {/* The open ask's controls hang off the message that raised it:
-                      the message is the question, these are the answer. */}
-                  {openAsk && i === askAnchorIndex && (
+                  {/* Artifacts the turn published, gathered from its flow items and
+                      shown at the bottom — below the working spinner, as before. */}
+                  {(() => {
+                    const arts = items.flatMap((it) =>
+                      it.kind === 'message' ? (it.artifacts ?? []) : [],
+                    )
+                    return arts.length > 0 ? (
+                      <MessageArtifacts
+                        artifacts={arts}
+                        taskId={current.id}
+                        slug={current.projectSlug}
+                      />
+                    ) : null
+                  })()}
+                  {/* The open ask's controls hang off the turn that raised it, as
+                      its footer — at the very bottom of the bubble (its parentId
+                      item may sit before later prose in the same turn). */}
+                  {openAsk &&
+                    openAsk.parentId !== undefined &&
+                    items.some((it) => it.id === openAsk.parentId) && (
+                      <AskForm
+                        ask={openAsk}
+                        linkTask={resolveTaskLink}
+                        disabled={answeringBy[current.id] ?? false}
+                        onAnswer={(body) => void answerAsk(openAsk.id, body)}
+                      />
+                    )}
+                </div>
+                )
+              })}
+              {/* No ride output yet but the task is riding: the assistant has been
+                  launched and we're waiting for its first item. The model isn't
+                  known until that output arrives, so this stays model-agnostic. */}
+              {current.status === 'riding' && !openRideHasItems && (
+                <div className="message">
+                  <div className="message-pending">
+                    <span className="spinner" aria-hidden />
+                    {`${taskAgentModelName(current.agent)} is starting…`}
+                  </div>
+                </div>
+              )}
+              {/* Fallback: an open ask with no message item to anchor to (a
+                  platform ask, or converted history) renders its form standalone. */}
+              {openAsk &&
+                !(
+                  askAnchorId &&
+                  current.items?.some((it) => it.id === askAnchorId)
+                ) && (
+                  <div className="message message-assistant">
                     <AskForm
                       ask={openAsk}
                       linkTask={resolveTaskLink}
                       disabled={answeringBy[current.id] ?? false}
                       onAnswer={(body) => void answerAsk(openAsk.id, body)}
                     />
-                  )}
-                </div>
-                )
-              })}
-              {/* No assistant message yet but the task is riding: the assistant
-                  has been launched and we're waiting for its first output. The
-                  turn's model isn't known until that output arrives, so this
-                  stays model-agnostic rather than guessing the prior turn's. */}
-              {current.status === 'riding' &&
-                current.messages[current.messages.length - 1]?.role ===
-                  'user' && (
-                  <div className="message">
-                    <div className="message-pending">
-                      <span className="spinner" aria-hidden />
-                      {`${taskAgentModelName(current.agent)} is starting…`}
-                    </div>
                   </div>
                 )}
-              {/* Fallback: an open ask with no assistant message to anchor to
-                  (a task wedged before any reply) renders its form standalone. */}
-              {openAsk && askAnchorIndex === -1 && (
-                <div className="message message-assistant">
-                  <AskForm
-                    ask={openAsk}
-                    linkTask={resolveTaskLink}
-                    disabled={answeringBy[current.id] ?? false}
-                    onAnswer={(body) => void answerAsk(openAsk.id, body)}
-                  />
-                </div>
-              )}
             </div>
             <ResizeHandle
               height={composerHeight}

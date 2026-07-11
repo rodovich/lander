@@ -1,102 +1,74 @@
 import { describe, it, expect } from 'vitest'
-import { blockedRequests, type BlockedStep } from './permissions'
+import { blockedRequests, type BlockedItem } from './permissions'
 
-const AT = '2026-01-01T00:00:00.000Z'
-
-const use = (
-  toolUseId: string,
-  tool: string,
+const tool = (
+  name: string,
   rule: string | undefined,
-  parentToolUseId?: string,
-): BlockedStep => ({
-  kind: 'tool_use',
-  tool,
+  status: string,
+): BlockedItem => ({
+  kind: 'tool',
+  name,
   ...(rule !== undefined ? { rule } : {}),
-  toolUseId,
-  ...(parentToolUseId ? { parentToolUseId } : {}),
-})
-
-const result = (
-  toolUseId: string,
-  blocked: boolean,
-  parentToolUseId?: string,
-): BlockedStep => ({
-  kind: 'tool_result',
-  toolUseId,
-  blocked,
-  ...(parentToolUseId ? { parentToolUseId } : {}),
+  status,
 })
 
 describe('blockedRequests', () => {
-  it('returns nothing when no result is blocked', () => {
-    const steps = [use('t1', 'Bash', 'Bash(ls)'), result('t1', false)]
-    expect(blockedRequests(steps)).toEqual([])
+  it('returns nothing when no tool is blocked', () => {
+    expect(blockedRequests([tool('Bash', 'Bash(ls)', 'ok')])).toEqual([])
   })
 
-  it('pairs a blocked result to its call and surfaces the rule', () => {
-    const steps = [
-      use('t1', 'Bash', 'Bash(git push)'),
-      result('t1', true),
-    ]
-    expect(blockedRequests(steps)).toEqual([
+  it('surfaces a blocked tool’s rule', () => {
+    expect(blockedRequests([tool('Bash', 'Bash(git push)', 'blocked')])).toEqual([
       { key: 'Bash(git push)', rule: 'Bash(git push)', tool: 'Bash' },
     ])
   })
 
   it('dedupes by rule — the same denied command thrice is one row', () => {
-    const steps = [
-      use('t1', 'Bash', 'Bash(git push)'),
-      result('t1', true),
-      use('t2', 'Bash', 'Bash(git push)'),
-      result('t2', true),
-      use('t3', 'Bash', 'Bash(git push)'),
-      result('t3', true),
+    const items = [
+      tool('Bash', 'Bash(git push)', 'blocked'),
+      tool('Bash', 'Bash(git push)', 'blocked'),
+      tool('Bash', 'Bash(git push)', 'blocked'),
     ]
-    expect(blockedRequests(steps)).toEqual([
+    expect(blockedRequests(items)).toEqual([
       { key: 'Bash(git push)', rule: 'Bash(git push)', tool: 'Bash' },
     ])
   })
 
   it('keeps distinct rules as separate rows, in first-seen order', () => {
-    const steps = [
-      use('t1', 'Bash', 'Bash(git push)'),
-      result('t1', true),
-      use('t2', 'WebFetch', 'WebFetch(https://x)'),
-      result('t2', true),
+    const items = [
+      tool('Bash', 'Bash(git push)', 'blocked'),
+      tool('WebFetch', 'WebFetch(https://x)', 'blocked'),
     ]
-    expect(blockedRequests(steps).map((r) => r.rule)).toEqual([
+    expect(blockedRequests(items).map((r) => r.rule)).toEqual([
       'Bash(git push)',
       'WebFetch(https://x)',
     ])
   })
 
-  it('includes a subagent denial (parentToolUseId set)', () => {
-    const steps = [
-      use('sub', 'Bash', 'Bash(rm -rf /)', 'spawner'),
-      result('sub', true, 'spawner'),
-    ]
-    expect(blockedRequests(steps)).toEqual([
+  it('counts a subagent denial the same as a main-thread one', () => {
+    // Nesting no longer matters: a blocked tool item is grantable whether or not
+    // it was a subagent's, since there's no use/result pairing to trip over.
+    expect(blockedRequests([tool('Bash', 'Bash(rm -rf /)', 'blocked')])).toEqual([
       { key: 'Bash(rm -rf /)', rule: 'Bash(rm -rf /)', tool: 'Bash' },
     ])
   })
 
   it('falls back to the bare tool name for a call recorded before the rule field', () => {
-    const steps = [use('t1', 'Bash', undefined), result('t1', true)]
-    expect(blockedRequests(steps)).toEqual([
+    expect(blockedRequests([tool('Bash', undefined, 'blocked')])).toEqual([
       { key: 'Bash', rule: 'Bash', tool: 'Bash' },
     ])
   })
 
-  it('ignores an isError result that was not a permission denial', () => {
-    const steps = [
-      use('t1', 'Bash', 'Bash(flaky)'),
-      { kind: 'tool_result', toolUseId: 't1', blocked: false } as BlockedStep,
-    ]
-    expect(blockedRequests(steps)).toEqual([])
+  it('ignores a failed tool that was not a permission denial', () => {
+    expect(blockedRequests([tool('Bash', 'Bash(flaky)', 'failed')])).toEqual([])
   })
 
-  it('skips a blocked result with no matching call', () => {
-    const steps = [result('orphan', true)]
-    expect(blockedRequests(steps)).toEqual([])
+  it('ignores running and ok tools, and non-tool items', () => {
+    const items: BlockedItem[] = [
+      tool('Bash', 'Bash(ls)', 'running'),
+      tool('Read', 'Read(f)', 'ok'),
+      { kind: 'message' },
+    ]
+    expect(blockedRequests(items)).toEqual([])
   })
 })

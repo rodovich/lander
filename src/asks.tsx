@@ -7,7 +7,7 @@ import { useState } from 'react'
 import { retryResetTime } from './format'
 import { Markdown } from './markdown'
 import type { TaskLinkResolver } from './markdown'
-import type { Ask, AskOption } from './types'
+import type { AskItem, AskOption } from './types'
 
 // An option's display label, appending its scheduled clock time while that time
 // is still in the future (e.g. "Retry when the limit resets (3:00 PM)"); once
@@ -24,7 +24,7 @@ export function AskForm({
   disabled,
   onAnswer,
 }: {
-  ask: Ask
+  ask: AskItem
   linkTask: TaskLinkResolver
   // True while an answer to this task's ask is in flight (the same per-task
   // in-flight disabling the composer uses), so the buttons can't double-submit.

@@ -389,17 +389,17 @@ describe('migrateTask ordering matches buildTimeline', () => {
   it('places events among messages exactly as the renderer interleaves them', () => {
     const v1 = richV1()
     const out = run(v1)
-    // buildTimeline over the v1 arrays (settled — last message is an assistant, so
-    // `now` is irrelevant to ordering).
-    const timeline = buildTimeline(v1, AT(9)).items.map((it) =>
+    // buildTimeline over the migrated v2 task: its entries (user bubbles, ride
+    // turns, events) in order — the renderer now reads the converter's own items.
+    const timeline = buildTimeline(out, AT(9)).items.map((it) =>
       it.kind === 'event'
-        ? `event:${it.event.createdAt}`
-        : (it.message as Message).role === 'user'
+        ? `event:${it.event.at}`
+        : it.kind === 'user'
           ? 'user'
           : 'asst',
     )
     // Collapse the finer item log to the same granularity: a ride's contiguous
-    // items → one 'asst', user items → 'user', events by createdAt, asks dropped.
+    // items → one 'asst', user items → 'user', events by `at`, asks dropped.
     const collapsed: string[] = []
     let lastRide: string | undefined
     for (const it of out.items) {
@@ -443,7 +443,7 @@ describe('toLegacyShape round-trips a converted v1', () => {
     expect(renderProjection(legacy.messages)).toEqual(renderProjection(v1.messages))
   })
 
-  it('projects a natively-written v2 task so buildTimeline renders it correctly', () => {
+  it('renders a natively-written v2 task and still round-trips it to legacy', () => {
     // Build a v2 task the way the server now does — item log + rides, no messages.
     const t: { items?: Item[]; rides?: Ride[] } = { items: [], rides: [] }
     pushEventItem(t, { eventKind: 'launched', title: 't' }, AT(0))
@@ -453,13 +453,20 @@ describe('toLegacyShape round-trips a converted v1', () => {
     closeRide(t, 'done', AT(3))
     pushEventItem(t, { eventKind: 'wedged', title: 't' }, AT(4))
 
-    const legacy = toLegacyShape(t)
-    const timeline = buildTimeline(legacy, AT(9)).items
+    // The UI reads the native item log directly.
+    const timeline = buildTimeline(t, AT(9)).items
     expect(
       timeline.map((it) =>
-        it.kind === 'event' ? `event:${it.event.kind}` : it.message.role,
+        it.kind === 'event'
+          ? `event:${it.event.eventKind}`
+          : it.kind === 'user'
+            ? 'user'
+            : 'assistant',
       ),
     ).toEqual(['event:launched', 'user', 'assistant', 'event:wedged'])
+    // And the legacy projection (the converter's test harness) still reproduces
+    // the v1 assistant message from the same items.
+    const legacy = toLegacyShape(t)
     const asst = legacy.messages.find((m) => m.role === 'assistant')!
     expect(asst.text).toBe('hi there')
     expect(asst.steps?.[0]).toMatchObject({ kind: 'text', text: 'hi there' })

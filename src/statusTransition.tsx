@@ -1,9 +1,9 @@
 import { formatTimestamp } from './format'
 import type { TaskLinkResolver } from './markdown'
-import type { TaskEvent } from './types'
+import type { EventItem } from './types'
 
 // How each lifecycle event verb reads in the timeline.
-const EVENT_VERB: Record<TaskEvent['kind'], string> = {
+const EVENT_VERB: Record<EventItem['eventKind'], string> = {
   launched: 'launched',
   scheduled: 'scheduled',
   awaiting: 'awaiting',
@@ -27,7 +27,7 @@ export function StatusTransition({
   slug,
   linkTask,
 }: {
-  event: TaskEvent
+  event: EventItem
   slug: string
   linkTask: TaskLinkResolver
 }) {
@@ -35,7 +35,7 @@ export function StatusTransition({
   // linked; with several, it reads "<name> awaiting <N> tasks" and lists them as
   // links below. Any time fallback the task also has isn't shown — the condition
   // is the point.
-  if (event.kind === 'awaiting') {
+  if (event.eventKind === 'awaiting') {
     const tasks = event.awaiting ?? []
     const single = tasks.length === 1
     // Tint each awaited link by its task's current status (when resolvable),
@@ -64,7 +64,7 @@ export function StatusTransition({
             {single && link(tasks[0])}
           </span>
           <span className="status-transition-time">
-            {formatTimestamp(event.createdAt)}
+            {formatTimestamp(event.at)}
           </span>
         </div>
         {!single && (
@@ -83,11 +83,12 @@ export function StatusTransition({
         {event.title && (
           <span className="status-transition-name">{event.title}</span>
         )}
-        <span className={`status-transition-label ${event.kind}`}>
-          {EVENT_VERB[event.kind]}
+        <span className={`status-transition-label ${event.eventKind}`}>
+          {EVENT_VERB[event.eventKind]}
           {/* A 'scheduled' rest and an armed scheduled 'relaunch' both show the
               time they'll fire beside the verb. */}
-          {(event.kind === 'scheduled' || event.kind === 'relaunched') &&
+          {(event.eventKind === 'scheduled' ||
+            event.eventKind === 'relaunched') &&
             event.scheduledFor && (
               <span className="status-transition-when">
                 {' '}
@@ -97,7 +98,7 @@ export function StatusTransition({
         </span>
       </span>
       <span className="status-transition-time">
-        {formatTimestamp(event.createdAt)}
+        {formatTimestamp(event.at)}
       </span>
     </div>
   )

@@ -1,6 +1,4 @@
-import type { TaskLinkResolver } from './markdown'
-import { MessageText } from './messageText'
-import type { Step, ToolStatus } from './types'
+import type { ToolItem } from './types'
 
 // The before/after hunks of a file-writing tool call, rendered as a unified
 // diff: the old text as removed (red) lines, the new text as added (green) ones.
@@ -84,51 +82,47 @@ export function Collapsible({
 }
 
 // A tool call in the activity trace: a chip (red when the call was blocked or
-// failed) beside its one-line input. When the chip has revealable detail — the
-// full input, a file-writing tool's diff, any other tool's captured output, or a
-// nested subagent trace — it becomes a disclosure: a triangle to its left and a
+// failed) beside its one-line input. The tool item carries its own outcome
+// (`status`) and captured output, folded in from the result — no use/result
+// pairing anymore. When the chip has revealable detail — the full input, a
+// file-writing tool's diff, any other tool's captured output, or a nested
+// subagent trace — it becomes a disclosure: a triangle to its left and a
 // clickable chip both toggle it (default closed), and option/shift-clicking
-// toggles every such chip in the message at once. A chip with no detail is a
-// plain, non-interactive label. Grants moved to the per-turn blocked summary and
-// the always-available control, so the chip no longer opens anything on its own.
+// toggles every such chip in the ride at once. A chip with no detail is a plain,
+// non-interactive label. Grants moved to the per-turn blocked summary and the
+// always-available control, so the chip no longer opens anything on its own.
 export function ToolStep({
-  step,
-  status,
-  result,
+  item,
   detailOpen,
   onToggleDetail,
-  subSteps,
+  subItems,
 }: {
-  step: Step
-  status: ToolStatus
-  // The matching tool_result's text/error, folded in so the chip can reveal it.
-  result?: { text?: string; isError?: boolean }
+  item: ToolItem
   detailOpen: boolean
   // `all` is set when the user option/shift-clicked, asking to toggle every
-  // detail in the message rather than just this one.
+  // detail in the ride rather than just this one.
   onToggleDetail: (all: boolean) => void
   // A subagent-spawning call (Agent/Explore) gets its subagent's whole activity
   // trace as its revealable detail, pre-rendered by the caller. Absent otherwise.
-  subSteps?: React.ReactNode
+  subItems?: React.ReactNode
 }) {
   // Whether the input alone makes the chip a disclosure: it does when the server
   // captured an untruncated copy, or when the raw input is multi-line — either way
   // there's more to see than the one-line chip shows. A plain single-line input
-  // has nothing extra, so it stays a non-expanding label (older steps predate
+  // has nothing extra, so it stays a non-expanding label (older items predate
   // inputFull; a codex command is the multi-line case there).
-  const hasInput =
-    !!step.inputFull || !!(step.input && step.input.includes('\n'))
+  const hasInput = !!item.inputFull || item.input.includes('\n')
   // What the open body wraps: the server's untruncated capture, else the chip's
   // own input. It replaces the one-line copy on the chip once expanded.
-  const fullInput = step.inputFull ?? step.input
-  const hasDiff = !!step.edits && step.edits.length > 0
+  const fullInput = item.inputFull ?? item.input
+  const hasDiff = !!item.edits && item.edits.length > 0
   // A subagent spawner reveals the nested trace; an edit reveals its diff;
   // everything else reveals its captured output (if any — a still-running call has
   // none yet). The trace subsumes the call's result text (it ends with the
   // subagent's final reply), and the diff wins over an Edit's noisy confirmation.
   // The full input, when present, rides above whichever of these the chip has.
-  const hasChildren = !!subSteps
-  const hasResult = !hasDiff && !hasChildren && !!result?.text
+  const hasChildren = !!subItems
+  const hasResult = !hasDiff && !hasChildren && !!item.output
   const hasDetail = hasInput || hasDiff || hasChildren || hasResult
   const noun = hasDiff
     ? 'diff'
@@ -137,7 +131,7 @@ export function ToolStep({
       : hasResult
         ? 'output'
         : 'input'
-  const errored = status === 'blocked' || status === 'failed'
+  const errored = item.status === 'blocked' || item.status === 'failed'
 
   // The chip: a button that toggles the detail when there's detail to reveal (a
   // second hinge beside the triangle), else a plain label — never a dead button.
@@ -150,18 +144,18 @@ export function ToolStep({
           aria-expanded={detailOpen}
           onClick={(e) => onToggleDetail(e.altKey || e.shiftKey)}
         >
-          {step.tool}
+          {item.name}
         </button>
       ) : (
         <span className={'step-tool-name plain' + (errored ? ' errored' : '')}>
-          {step.tool}
+          {item.name}
         </span>
       )}
       {/* The one-line, ellipsized input rides the chip until the disclosure opens,
           when it moves into the body to wrap in full below. A plain chip has no
           body, so its input always stays here. */}
-      {step.input && !(hasDetail && detailOpen) && (
-        <span className="step-tool-input">{step.input}</span>
+      {item.input && !(hasDetail && detailOpen) && (
+        <span className="step-tool-input">{item.input}</span>
       )}
     </>
   )
@@ -175,14 +169,16 @@ export function ToolStep({
           toggleLabel={`${detailOpen ? 'Hide' : 'Show'} ${noun}`}
           toggleTitle={`${detailOpen ? 'Hide' : 'Show'} ${noun} (⌥/⇧ for all)`}
         >
-          {step.input && <div className="step-input">{fullInput}</div>}
-          {hasDiff && <DiffView edits={step.edits!} />}
-          {hasChildren && <div className="steps sub-steps">{subSteps}</div>}
+          {item.input && <div className="step-input">{fullInput}</div>}
+          {hasDiff && <DiffView edits={item.edits!} />}
+          {hasChildren && <div className="steps sub-steps">{subItems}</div>}
           {hasResult && (
             <div
-              className={'step-result' + (result!.isError ? ' errored' : '')}
+              className={
+                'step-result' + (errored ? ' errored' : '')
+              }
             >
-              {result!.text}
+              {item.output}
             </div>
           )}
         </Collapsible>
@@ -191,43 +187,4 @@ export function ToolStep({
       )}
     </div>
   )
-}
-
-// One entry in a streamed assistant turn: prose as markdown, a tool call as a
-// chip, or a dimmed peek at a tool result.
-export function StepView({
-  step,
-  status,
-  result,
-  detailOpen,
-  onToggleDetail,
-  linkTask,
-  subSteps,
-}: {
-  step: Step
-  status: ToolStatus
-  result?: { text?: string; isError?: boolean }
-  detailOpen: boolean
-  onToggleDetail: (all: boolean) => void
-  linkTask: TaskLinkResolver
-  // A subagent spawner's nested trace, pre-rendered by the caller; passed through
-  // to ToolStep as the chip's revealable detail.
-  subSteps?: React.ReactNode
-}) {
-  if (step.kind === 'tool_use') {
-    return (
-      <ToolStep
-        step={step}
-        status={status}
-        result={result}
-        detailOpen={detailOpen}
-        onToggleDetail={onToggleDetail}
-        subSteps={subSteps}
-      />
-    )
-  }
-  if (step.kind === 'tool_result') {
-    return step.text ? <div className="step-result">{step.text}</div> : null
-  }
-  return <MessageText text={step.text ?? ''} linkTask={linkTask} />
 }

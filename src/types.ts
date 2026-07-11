@@ -149,6 +149,94 @@ export type Ask = {
   origin?: 'retry'
 }
 
+// A ride: one activation of the task's flow (today an agent turn, mapped 1:1
+// onto the daemon run whose runId it borrows). Mirrors the server's Ride. An
+// absent `endedAt` marks an open ride — the task is actively riding, and the
+// spinner renders after its last item. A closed ride carries an `outcome` and
+// the turn's `usage`.
+export type Ride = {
+  id: string
+  startedAt: string
+  endedAt?: string
+  outcome?: 'done' | 'interrupted' | 'error'
+  usage?: TokenUsage
+}
+
+// One entry in the unified item log that replaces the parallel messages/events/
+// asks arrays (see docs/conversation-model.md). A discriminated union on `kind`
+// mirroring the server's Item; the common fields sit on every kind.
+type ItemCommon = {
+  // Stable id: tool items reuse the provider toolUseId, ask items keep their
+  // `ask-…` id, message/event items mint `itm-…`.
+  id: string
+  at: string
+  // Absent for out-of-ride items (user messages, most events); present on every
+  // item a ride produced (flow messages, tools).
+  rideId?: string
+  // Nesting: a subagent's items point at the spawning tool item; a natively-
+  // written ask points at its raising message item. Generalizes parentToolUseId.
+  parentId?: string
+  // Grouping key (renamed from inferenceId): items emitted in one atomic burst.
+  // Not 1:1 with items — one inference fans out into a text block plus a parallel
+  // tool batch. A change between consecutive items rules a collapse line.
+  groupId?: string
+}
+
+export type MessageItem = ItemCommon & {
+  kind: 'message'
+  role: 'user' | 'flow'
+  text: string
+  attachments?: Attachment[]
+  artifacts?: Artifact[]
+  // Set on a user message once a queued batch delivers it: the ride that
+  // consumed it. Absent on converted history.
+  deliveredIn?: string
+  // Client-facing only: set by publicTask on a trailing user item the agent
+  // hasn't read yet (the item analog of the old Message.queued). We dim it and
+  // sink it in the timeline.
+  queued?: boolean
+}
+
+export type ToolItem = ItemCommon & {
+  kind: 'tool'
+  name: string
+  input: string
+  // The untruncated, newline-preserving input revealed under the chip's
+  // disclosure; absent for short inputs and older items.
+  inputFull?: string
+  // The call as a settings.json permission rule, e.g. `Bash(ls)`.
+  rule?: string
+  // Folded in from the tool_result: the result peek and the call's outcome.
+  // `running` until the result lands.
+  output?: string
+  status: 'running' | 'ok' | 'failed' | 'blocked'
+  // For the file-writing tools (Edit/Write/MultiEdit): the change as before/
+  // after hunks, revealed as a diff under the chip's disclosure.
+  edits?: { old: string; new: string }[]
+}
+
+export type EventItem = ItemCommon & {
+  kind: 'event'
+  // Today's TaskEvent.kind, renamed to avoid clashing with the item's own `kind`.
+  eventKind: TaskEvent['kind']
+  title?: string
+  scheduledFor?: string
+  awaiting?: { id: string; title: string }[]
+}
+
+export type AskItem = ItemCommon & {
+  kind: 'ask'
+  // Today's Ask payload minus `createdAt` (the item's `at` carries it).
+  prompt?: string
+  form: AskForm
+  blocking: Ask['blocking']
+  state: Ask['state']
+  answer?: NonNullable<Ask['answer']>
+  origin?: 'retry'
+}
+
+export type Item = MessageItem | ToolItem | EventItem | AskItem
+
 export type Task = {
   // The task's own short id (a nanoid; legacy tasks carry the uuid they were
   // keyed by). Distinct from the provider session that backs its turns, which
@@ -192,6 +280,15 @@ export type Task = {
     waitFor?: string[]
     repeat?: unknown
   }[]
+  // The unified item log and its ride headers — the native v2 shape the UI now
+  // renders. `items` is one flat ordered log (message/tool/event/ask), `rides`
+  // the turn headers keyed by id. Absent on tasks that predate the migration
+  // until the server converts them (it always serves both once read).
+  items?: Item[]
+  rides?: Ride[]
+  // Legacy dual-shape projection, still served through step 5 so this flip is
+  // its own reviewable commit; dropped from the wire in step 6. Nothing in the
+  // UI reads these anymore.
   messages: Message[]
   events?: TaskEvent[]
   // Questions raised on this task, interleaved with messages/events by createdAt.

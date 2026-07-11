@@ -917,7 +917,6 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 8px;
 }
 .attachment-chip {
   display: flex;
@@ -1672,9 +1671,9 @@ body {
 .collapsible-body {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   margin-left: 4px;
-  padding-left: 10px;
+  padding: 4px 0 4px 10px;
   border-left: 2px solid var(--border);
 }
 
@@ -1801,7 +1800,6 @@ body {
 /* The per-turn denial-review summary at the foot of an assistant message. */
 .blocked-summary {
   position: relative;
-  margin-top: 4px;
 }
 
 /* The muted "N permissions blocked this turn" line — quiet (it's a review
@@ -2023,10 +2021,6 @@ body {
 /* An open ask's controls, rendered as a footer of the assistant message that
    raised it — the message is the question, so the form hangs directly off it
    with a little top gap rather than in its own card. */
-.ask {
-  margin-top: 8px;
-}
-
 .ask-prompt {
   margin-bottom: 8px;
 }
