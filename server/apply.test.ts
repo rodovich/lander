@@ -77,6 +77,92 @@ describe('applyUpdate', () => {
     })
   })
 
+  it('folds a reused tool id only within the current ride', () => {
+    const prior: ToolItem = {
+      id: 'item_1',
+      at: AT,
+      rideId: 'r0',
+      kind: 'tool',
+      name: 'Bash',
+      input: 'old command',
+      output: 'old output',
+      status: 'ok',
+    }
+    const t = task({
+      items: [
+        { id: 'u0', at: AT, kind: 'message', role: 'user', text: 'do it' },
+        prior,
+      ],
+      rides: [
+        { id: 'r0', startedAt: AT, endedAt: AT, outcome: 'done' },
+        { id: 'r1', startedAt: AT },
+      ],
+    })
+
+    applyUpdate(
+      t,
+      update({
+        steps: [
+          step({ kind: 'tool_use', tool: 'Bash', input: 'new command', toolUseId: 'item_1' }),
+          step({ kind: 'tool_result', toolUseId: 'item_1', text: 'new output' }),
+        ],
+        cursor: 1,
+      }),
+    )
+
+    expect(prior).toMatchObject({ output: 'old output', status: 'ok' })
+    expect(rideItems(t, 'r1').filter((i) => i.kind === 'tool')).toEqual([
+      expect.objectContaining({
+        id: 'item_1',
+        input: 'new command',
+        output: 'new output',
+        status: 'ok',
+      }),
+    ])
+  })
+
+  it('keeps a result-only reused id as an orphan in the current ride', () => {
+    const prior: ToolItem = {
+      id: 'item_2',
+      at: AT,
+      rideId: 'r0',
+      kind: 'tool',
+      name: 'Read',
+      input: 'old input',
+      output: 'old output',
+      status: 'ok',
+    }
+    const t = task({
+      items: [
+        { id: 'u0', at: AT, kind: 'message', role: 'user', text: 'do it' },
+        prior,
+      ],
+      rides: [
+        { id: 'r0', startedAt: AT, endedAt: AT, outcome: 'done' },
+        { id: 'r1', startedAt: AT },
+      ],
+    })
+
+    applyUpdate(
+      t,
+      update({
+        steps: [
+          step({ kind: 'tool_result', toolUseId: 'item_2', text: 'failed', isError: true }),
+        ],
+        cursor: 1,
+      }),
+    )
+
+    expect(prior).toMatchObject({ output: 'old output', status: 'ok' })
+    expect(rideItems(t, 'r1').filter((i) => i.kind === 'tool')).toEqual([
+      expect.objectContaining({
+        id: 'item_2',
+        output: 'failed',
+        status: 'failed',
+      }),
+    ])
+  })
+
   it('reconciles blocked tool calls via blockedIds across the whole ride', () => {
     const t = task()
     applyUpdate(

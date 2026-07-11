@@ -117,7 +117,8 @@ export function applyUpdate(task: ApplyTask, update: ApplyUpdate): void {
       let firstAt: string | undefined
       const toolItem = (id: string) =>
         items.find(
-          (it): it is ToolItem => it.kind === 'tool' && it.id === id,
+          (it): it is ToolItem =>
+            it.kind === 'tool' && it.rideId === rideId && it.id === id,
         )
       for (const s of steps) {
         if (s.kind === 'tool_use') {
