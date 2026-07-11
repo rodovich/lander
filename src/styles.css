@@ -2021,8 +2021,20 @@ body {
 /* An open ask's controls, rendered as a footer of the assistant message that
    raised it — the message is the question, so the form hangs directly off it
    with a little top gap rather than in its own card. */
-.ask-prompt {
-  margin-bottom: 8px;
+.ask {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Markdown blocks carry their own vertical margins. Trim only the prompt's
+   outer edges; the parent gap above owns the prompt-to-form spacing. */
+.ask-prompt > *:first-child {
+  margin-top: 0;
+}
+
+.ask-prompt > *:last-child {
+  margin-bottom: 0;
 }
 
 .ask-form {
