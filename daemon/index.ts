@@ -10,12 +10,9 @@
 //        LANDER_DAEMON_TOKEN (must match the server's)
 //        LANDER_IDLE_TIMEOUT_MS (per-run idle kill, default 10m — start-run wins)
 
-import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import type { AgentAdapter } from './agent'
-import { createClaudeAdapter } from './claude'
-import { codexOptionsFromEnv, createCodexAdapter } from './codex'
+import { buildAdapters, ROOT } from './adapters'
 import { projectSlug } from '../server/projects'
 import { fetchUsage, usageTelemetry, type UsageBody } from '../server/usage'
 import type {
@@ -24,7 +21,6 @@ import type {
   RegisterMessage,
   TelemetryMessage,
   ProjectGrantResultMessage,
-  AgentKind,
 } from '../server/protocol'
 import { createRunManager, type RunManagerMessage } from './run'
 import { resolveRunCwd } from './paths'
@@ -61,23 +57,8 @@ for (const p of projectDirs) pathBySlug.set(projectSlug(p), p)
 const WS_URL = process.env.LANDER_WS?.trim() || 'ws://localhost:6181/daemon'
 const TOKEN = process.env.LANDER_DAEMON_TOKEN?.trim() || ''
 const DEFAULT_IDLE_MS = Number(process.env.LANDER_IDLE_TIMEOUT_MS ?? 10 * 60_000)
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const TASK_PROMPT_TEMPLATE = readFileSync(
-  path.join(ROOT, 'server', 'task-prompt.md'),
-  'utf8',
-).trim()
-const CLAUDE_ADAPTER = createClaudeAdapter({
-  landerBin: path.join(ROOT, 'bin', 'lander'),
-  taskPromptTemplate: TASK_PROMPT_TEMPLATE,
-})
-const CODEX_ADAPTER = createCodexAdapter({
-  taskPromptTemplate: TASK_PROMPT_TEMPLATE,
-  ...codexOptionsFromEnv(process.env),
-})
-const ADAPTERS = {
-  claude: CLAUDE_ADAPTER,
-  codex: CODEX_ADAPTER,
-} satisfies Record<AgentKind, AgentAdapter>
+const ADAPTERS = buildAdapters({ root: ROOT, env: process.env })
+const CLAUDE_ADAPTER = ADAPTERS.claude
 
 let ws: WebSocket | null = null
 // Set by SIGUSR1 (the dev supervisor's drain signal): finish the runs we're
