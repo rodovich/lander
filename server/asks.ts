@@ -1,10 +1,12 @@
 // The Ask primitive: a stored question (a choice of options) the platform or a
-// task raises, and the pure helpers that create, answer, and withdraw them. An
-// ask interleaves with messages/events in the client timeline by `createdAt`,
-// exactly like a TaskEvent — a third parallel array on the task. Kept pure and
-// structurally typed (like tasks.ts) so it unit-tests without the server: the
-// endpoints in index.ts own the wedge/queue/schedule side-effects, these own the
-// ask shape and the routing decisions.
+// task raises, and the pure helpers that create, answer, and withdraw them. Asks
+// are stored as `ask` items in the unified item log (task.items); the `Ask` type
+// below stays the *wire* shape publicTask projects them back to. These helpers
+// operate on the ask items directly and are kept pure/structurally typed (like
+// tasks.ts) so they unit-test without the server: the endpoints in index.ts own
+// the wedge/queue/schedule side-effects, these own the ask shape and routing.
+
+import type { AskItem, Item } from './tasks'
 
 // One option in a `choice` form. `at` (only meaningful on a choice option) makes
 // answering schedule the delivery for that time via the task's `scheduledFor`
@@ -54,10 +56,14 @@ export type Ask = {
 export const RETRY_NOW = 'retry-now'
 export const RETRY_AT_RESET = 'retry-at-reset'
 
-// The task slice the ask helpers read and write. index.ts's Task satisfies this
-// structurally, so it passes its own value; the structural shape also lets the
-// helpers be tested against minimal fixtures.
-export type AskTask = { asks?: Ask[] }
+// The task slice the ask helpers read and write: the unified item log, in which
+// asks live as `ask` items. index.ts's Task satisfies this structurally.
+export type AskTask = { items?: Item[] }
+
+// The ask items on a task, in order (the v2 analog of the old `task.asks`).
+export function askItems(task: AskTask): AskItem[] {
+  return (task.items ?? []).filter((it): it is AskItem => it.kind === 'ask')
+}
 
 // Validate a form's shape for the create endpoint. Returns an error string (for
 // a 400) or null when well-formed. Guards exactly what the renderer/answer path
@@ -87,13 +93,14 @@ export function validateAskForm(form: unknown): string | null {
 // Mint the id for the next ask on a task: `ask-<epoch36>-<seq>`, where seq is the
 // task's current ask count (so ids stay stable and ordered within a task).
 export function nextAskId(task: AskTask, nowMs: number): string {
-  return `ask-${Math.floor(nowMs).toString(36)}-${task.asks?.length ?? 0}`
+  return `ask-${Math.floor(nowMs).toString(36)}-${askItems(task).length}`
 }
 
-// Build an open ask and append it to the task, returning it. Assumes the form
-// has already passed validateAskForm (the create endpoint checks and 400s first;
-// createAsk is the plumbing that stamps state and pushes). `origin` marks a
-// platform retry ask.
+// Build an open ask item and append it to the task's item log, returning it.
+// Assumes the form has already passed validateAskForm (the create endpoint checks
+// and 400s first; createAsk is the plumbing that stamps state and pushes).
+// `origin` marks a platform retry ask; `parentId` anchors an agent-raised ask to
+// the message that raised it (the form renders as that message's footer).
 export function createAsk(
   task: AskTask,
   opts: {
@@ -102,19 +109,22 @@ export function createAsk(
     form: AskForm
     blocking: Ask['blocking']
     origin?: 'retry'
+    parentId?: string
     at: string
   },
-): Ask {
-  const ask: Ask = {
+): AskItem {
+  const ask: AskItem = {
     id: opts.id,
-    createdAt: opts.at,
+    at: opts.at,
+    kind: 'ask',
     form: opts.form,
     blocking: opts.blocking,
     state: 'open',
     ...(opts.prompt ? { prompt: opts.prompt } : {}),
     ...(opts.origin ? { origin: opts.origin } : {}),
+    ...(opts.parentId ? { parentId: opts.parentId } : {}),
   }
-  ;(task.asks ??= []).push(ask)
+  ;(task.items ??= []).push(ask)
   return ask
 }
 
@@ -128,7 +138,7 @@ export function createAsk(
 export function createRetryAsk(
   task: AskTask,
   opts: { id: string; committed: boolean; resetsAt?: string; at: string },
-): Ask {
+): AskItem {
   const form: AskForm = opts.resetsAt
     ? {
         type: 'choice',
@@ -156,20 +166,35 @@ export function createRetryAsk(
   })
 }
 
+// Project an ask item back to the `Ask` wire shape (`createdAt` from the item's
+// `at`, dropping the item-log fields), for the endpoints that echo a single ask.
+export function wireAsk(item: AskItem): Ask {
+  return {
+    id: item.id,
+    createdAt: item.at,
+    form: item.form,
+    blocking: item.blocking,
+    state: item.state,
+    ...(item.prompt !== undefined ? { prompt: item.prompt } : {}),
+    ...(item.answer !== undefined ? { answer: item.answer } : {}),
+    ...(item.origin !== undefined ? { origin: item.origin } : {}),
+  }
+}
+
 // The task's single open task-blocking ask, if any — what a wedged task is
 // waiting on. Used by the CLI/view and to decide whether a fresh create/answer
 // collides with one already open.
-export function openTaskAsk(task: AskTask): Ask | undefined {
-  return task.asks?.find((a) => a.state === 'open' && a.blocking === 'task')
+export function openTaskAsk(task: AskTask): AskItem | undefined {
+  return askItems(task).find((a) => a.state === 'open' && a.blocking === 'task')
 }
 
-export function findAsk(task: AskTask, askId: string): Ask | undefined {
-  return task.asks?.find((a) => a.id === askId)
+export function findAsk(task: AskTask, askId: string): AskItem | undefined {
+  return askItems(task).find((a) => a.id === askId)
 }
 
 // The option the answer selected, for reading its `at` (scheduling) and its
 // label/value (delivery). Undefined for an unanswered ask or an unmatched id.
-export function chosenOption(ask: Ask): AskOption | undefined {
+export function chosenOption(ask: AskItem): AskOption | undefined {
   const optionId = ask.answer?.optionId
   return optionId ? ask.form.options.find((o) => o.id === optionId) : undefined
 }
@@ -183,7 +208,7 @@ export function answerAsk(
   task: AskTask,
   askId: string,
   answer: { optionId?: string; text?: string; at: string },
-): { ok: true; ask: Ask } | { ok: false; error: string; status: 404 | 409 | 400 } {
+): { ok: true; ask: AskItem } | { ok: false; error: string; status: 404 | 409 | 400 } {
   const ask = findAsk(task, askId)
   if (!ask) return { ok: false, error: 'ask not found', status: 404 }
   if (ask.state !== 'open')
@@ -213,7 +238,7 @@ function firstLine(prompt: string): string {
 // The value an answer conveys, in prose: the edited value of an editable option,
 // else the chosen option's label. Used both for the delivered user message and
 // anywhere an answer is echoed.
-export function answerValue(ask: Ask): string {
+export function answerValue(ask: AskItem): string {
   const a = ask.answer
   if (!a) return ''
   const opt = chosenOption(ask)
@@ -230,7 +255,7 @@ export function answerValue(ask: Ask): string {
 // delivers the bare value — the agent's own message was the question, so the
 // answer reads naturally as the user's reply; a prompted ask names it. Assumes
 // the ask has been answered.
-export function answerDelivery(ask: Ask): string | null {
+export function answerDelivery(ask: AskItem): string | null {
   if (ask.origin === 'retry') return null
   const value = answerValue(ask)
   return ask.prompt ? `Answer to "${firstLine(ask.prompt)}": ${value}` : value
@@ -240,5 +265,5 @@ export function answerDelivery(ask: Ask): string | null {
 // intent supersedes a pending ask — a fresh /messages send, applyRelaunch, or a
 // manual status change away from wedged — so a stale ask stops reading as open.
 export function withdrawOpenAsks(task: AskTask): void {
-  for (const a of task.asks ?? []) if (a.state === 'open') a.state = 'withdrawn'
+  for (const a of askItems(task)) if (a.state === 'open') a.state = 'withdrawn'
 }

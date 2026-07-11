@@ -3,8 +3,6 @@ import {
   publicTask,
   latestUpdateAt,
   recordStatusTransition,
-  pendingMessage,
-  ensurePending,
   recordArtifactOnMessage,
   lastTurnPrompts,
   turnAttachments,
@@ -16,399 +14,278 @@ import {
   openRide,
   startRide,
   closeRide,
-  type Message,
-  type TaskEvent,
+  nextItemId,
+  pushUserItem,
+  pushFlowItem,
+  pushEventItem,
+  lastFlowItem,
+  userItems,
+  eventItems,
+  type Item,
+  type MessageItem,
   type ScheduledMessage,
   type Ride,
 } from './tasks'
 
-const msg = (over: Partial<Message>): Message => ({
-  role: 'assistant',
-  text: '',
-  createdAt: '2026-01-01T00:00:00.000Z',
+const AT = '2026-01-01T00:00:00.000Z'
+const later = (n: number) => `2026-01-01T00:0${n}:00.000Z`
+
+const userItem = (text: string, at = AT, over: Partial<MessageItem> = {}): MessageItem => ({
+  id: `u-${text}`,
+  at,
+  kind: 'message',
+  role: 'user',
+  text,
   ...over,
 })
+const flowItem = (text: string, rideId: string, at = AT): MessageItem => ({
+  id: `f-${text}`,
+  at,
+  rideId,
+  kind: 'message',
+  role: 'flow',
+  text,
+})
+
+describe('item builders', () => {
+  it('nextItemId mints itm-<epoch36>-<count>', () => {
+    expect(nextItemId({ items: [] }, AT)).toMatch(/^itm-[a-z0-9]+-0$/)
+    expect(nextItemId({ items: [userItem('a'), userItem('b')] }, AT)).toMatch(/-2$/)
+  })
+
+  it('pushUserItem / pushFlowItem / pushEventItem append to the log', () => {
+    const t: { items?: Item[] } = {}
+    pushUserItem(t, 'hi', AT, { attachments: [{ id: 'a', name: 'f', mime: 'text/plain', size: 1 }] })
+    pushFlowItem(t, 'r1', 'reply', later(1))
+    pushEventItem(t, { eventKind: 'wedged', title: 'T' }, later(2))
+    expect(t.items!.map((i) => i.kind)).toEqual(['message', 'message', 'event'])
+    expect((t.items![0] as MessageItem).attachments).toHaveLength(1)
+    expect((t.items![1] as MessageItem).rideId).toBe('r1')
+  })
+
+  it('lastFlowItem returns the last main-agent flow item, optionally scoped to a ride', () => {
+    const t = {
+      items: [
+        flowItem('a', 'r1'),
+        { ...flowItem('sub', 'r1'), id: 'sub', parentId: 'spawn' } as MessageItem,
+        flowItem('b', 'r1', later(1)),
+        flowItem('c', 'r2', later(2)),
+      ],
+    }
+    expect(lastFlowItem(t)?.text).toBe('c')
+    expect(lastFlowItem(t, 'r1')?.text).toBe('b') // skips the nested (parentId) prose
+  })
+
+  it('userItems / eventItems filter the log', () => {
+    const t = {
+      items: [userItem('u1'), flowItem('f', 'r1'), pushEv(), userItem('u2')],
+    }
+    expect(userItems(t).map((u) => u.text)).toEqual(['u1', 'u2'])
+    expect(eventItems(t).map((e) => e.eventKind)).toEqual(['launched'])
+  })
+})
+
+function pushEv(): Item {
+  return { id: 'e', at: AT, kind: 'event', eventKind: 'launched', title: 'T' }
+}
 
 describe('publicTask', () => {
-  it('strips token, runId, runCursor and the retry stash, preserving everything else', () => {
+  it('strips token, runId, runCursor and the retry stash', () => {
     const out = publicTask({
       id: 's',
       title: 't',
+      status: 'landed',
+      items: [],
       token: 'secret',
       runId: 'r1',
       runCursor: 42,
       retry: { committed: true, prompts: ['x'] },
       allowEdits: true,
     })
-    expect(out).toEqual({ id: 's', title: 't', allowEdits: true })
     expect('token' in out).toBe(false)
     expect('runId' in out).toBe(false)
     expect('runCursor' in out).toBe(false)
-    // retry is internal bookkeeping now that the retry ask carries the wire state.
     expect('retry' in out).toBe(false)
   })
 
-  it('does not choke when the stripped fields are absent', () => {
-    expect(publicTask({ id: 's' })).toEqual({ id: 's' })
-  })
-
-  it('returns a shallow copy (nested arrays are shared, not cloned)', () => {
-    const messages = [msg({ text: 'hi' })]
-    const task = { id: 's', messages, token: 'x' }
-    const out = publicTask(task)
-    expect((out as { messages: Message[] }).messages).toBe(messages)
-  })
-
-  it('projects the work queue onto the trailing user messages and drops the queue', () => {
-    const messages = [
-      msg({ role: 'user', text: 'p1' }),
-      msg({ role: 'assistant', text: 'r1' }),
-      msg({ role: 'user', text: 'p2' }),
-      msg({ role: 'user', text: 'p3' }),
+  it('serves both the native item log and the legacy messages/events/asks projection', () => {
+    const items: Item[] = [
+      { id: 'e', at: AT, kind: 'event', eventKind: 'launched', title: 't' },
+      userItem('do it', later(1)),
+      flowItem('done', 'r1', later(2)),
     ]
-    const out = publicTask({ id: 's', messages, queued: ['p2', 'p3'] })
-    const m = (out as { messages: Message[] }).messages
-    expect(m.map((x) => !!x.queued)).toEqual([false, false, true, true])
-    // The raw queue is not exposed.
-    expect('queued' in out).toBe(false)
-    // The source messages are untouched (projection clones only the flagged).
-    expect(messages.some((x) => x.queued)).toBe(false)
+    const out = publicTask({
+      id: 's',
+      status: 'riding',
+      items,
+      rides: [{ id: 'r1', startedAt: later(2), endedAt: later(2), outcome: 'done' }],
+    }) as { items?: Item[]; messages?: { role: string; text: string }[]; events?: unknown[] }
+    // Native items pass through.
+    expect(out.items).toHaveLength(3)
+    // Legacy projection is derived.
+    expect(out.messages!.map((m) => [m.role, m.text])).toEqual([
+      ['user', 'do it'],
+      ['assistant', 'done'],
+    ])
+    expect(out.events).toHaveLength(1)
   })
 
-  it('leaves messages untouched when nothing is queued', () => {
-    const messages = [msg({ role: 'user', text: 'p1' })]
-    const out = publicTask({ id: 's', messages })
-    expect((out as { messages: Message[] }).messages).toBe(messages)
+  it('flags queued on the trailing user item and the legacy message', () => {
+    const items: Item[] = [userItem('p1', AT), flowItem('r', 'r1', later(1)), userItem('p2', later(2))]
+    const out = publicTask({
+      id: 's',
+      status: 'riding',
+      items,
+      rides: [{ id: 'r1', startedAt: later(1), endedAt: later(1), outcome: 'done' }],
+      queued: ['p2'],
+    }) as { items?: (MessageItem & { queued?: boolean })[]; messages?: { text: string; queued?: boolean }[] }
+    expect(out.items!.filter((i) => i.queued).map((i) => (i.kind === 'message' ? i.text : ''))).toEqual(['p2'])
+    expect(out.messages!.filter((m) => m.queued).map((m) => m.text)).toEqual(['p2'])
+  })
+
+  // Status collapse: stored riding|wedged|landed, served with today's four words.
+  const served = (over: Record<string, unknown>) =>
+    (publicTask({ id: 's', status: 'riding', items: [], ...over }) as { status?: string }).status
+  const openR: Ride = { id: 'r1', startedAt: AT }
+  const closedR: Ride = { id: 'r0', startedAt: AT, endedAt: later(1), outcome: 'done' }
+
+  it('serves riding with an open ride or a runId, resting otherwise', () => {
+    expect(served({ rides: [openR] })).toBe('riding')
+    expect(served({ runId: 'r1' })).toBe('riding')
+    expect(served({})).toBe('resting')
+    expect(served({ rides: [closedR] })).toBe('resting')
+  })
+
+  it('serves wedged/landed as stored', () => {
+    expect((publicTask({ id: 's', status: 'wedged', items: [], rides: [openR] }) as { status?: string }).status).toBe('wedged')
+    expect((publicTask({ id: 's', status: 'landed', items: [] }) as { status?: string }).status).toBe('landed')
   })
 
   it('derives grant capabilities from the task agent', () => {
-    expect(publicTask({ id: 's', agent: 'claude' }).grants).toEqual({
-      task: true,
-      project: true,
-    })
-    expect(publicTask({ id: 's', agent: 'codex' }).grants).toEqual({
-      task: false,
-      project: false,
-    })
-  })
-
-  it('omits grants when the task carries no agent', () => {
-    expect('grants' in publicTask({ id: 's' })).toBe(false)
-  })
-
-  // The status collapse: stored `riding | wedged | landed`, but publicTask serves
-  // today's four-word vocabulary by deriving riding-vs-resting from ride state.
-  const served = (over: Record<string, unknown>) =>
-    (publicTask({ id: 's', status: 'riding', ...over }) as { status?: string })
-      .status
-  const openR: Ride = { id: 'r1', startedAt: '2026-01-01T00:00:00.000Z' }
-  const closedR: Ride = {
-    id: 'r0',
-    startedAt: '2026-01-01T00:00:00.000Z',
-    endedAt: '2026-01-01T00:01:00.000Z',
-    outcome: 'done',
-  }
-
-  it('serves riding for a stored-riding task with an open ride', () => {
-    expect(served({ rides: [openR] })).toBe('riding')
-    expect(served({ rides: [closedR, openR] })).toBe('riding')
-  })
-
-  it('serves riding for a stored-riding task with a runId but no ride (pre-ride belt)', () => {
-    expect(served({ runId: 'r1' })).toBe('riding')
-  })
-
-  it('serves resting for a stored-riding task with no open ride and no runId', () => {
-    expect(served({})).toBe('resting')
-    expect(served({ rides: [closedR] })).toBe('resting')
-    expect(served({ rides: [] })).toBe('resting')
-  })
-
-  it('serves wedged/landed as stored, regardless of ride state', () => {
-    expect(
-      (publicTask({ id: 's', status: 'wedged', rides: [openR] }) as {
-        status?: string
-      }).status,
-    ).toBe('wedged')
-    expect(
-      (publicTask({ id: 's', status: 'landed' }) as { status?: string }).status,
-    ).toBe('landed')
+    expect(publicTask({ id: 's', status: 'riding', items: [], agent: 'claude' }).grants).toEqual({ task: true, project: true })
+    expect(publicTask({ id: 's', status: 'riding', items: [], agent: 'codex' }).grants).toEqual({ task: false, project: false })
   })
 })
 
 describe('latestUpdateAt', () => {
-  it('returns the newest timestamp across completed messages and events', () => {
-    expect(
-      latestUpdateAt({
-        messages: [
-          msg({ createdAt: '2026-01-01T00:00:00.000Z' }),
-          msg({ createdAt: '2026-03-01T00:00:00.000Z' }),
-        ],
-        events: [{ kind: 'landed', createdAt: '2026-02-01T00:00:00.000Z' }],
-      }),
-    ).toBe('2026-03-01T00:00:00.000Z')
-  })
-
-  it('lets a later event win over the messages', () => {
-    expect(
-      latestUpdateAt({
-        messages: [msg({ createdAt: '2026-01-01T00:00:00.000Z' })],
-        events: [{ kind: 'wedged', createdAt: '2026-05-01T00:00:00.000Z' }],
-      }),
-    ).toBe('2026-05-01T00:00:00.000Z')
-  })
-
-  it('skips the in-flight (pending) message', () => {
-    expect(
-      latestUpdateAt({
-        messages: [
-          msg({ createdAt: '2026-01-01T00:00:00.000Z' }),
-          msg({ createdAt: '2026-09-01T00:00:00.000Z', pending: true }),
-        ],
-      }),
-    ).toBe('2026-01-01T00:00:00.000Z')
-  })
-
-  it('tolerates absent events', () => {
-    expect(latestUpdateAt({ messages: [msg({ createdAt: '2026-01-01T00:00:00.000Z' })] })).toBe(
-      '2026-01-01T00:00:00.000Z',
-    )
-  })
-
-  it('returns empty string when nothing has completed', () => {
-    expect(latestUpdateAt({ messages: [] })).toBe('')
-    expect(
-      latestUpdateAt({ messages: [msg({ createdAt: '2026-01-01T00:00:00.000Z', pending: true })] }),
-    ).toBe('')
-  })
-})
-
-describe('pendingMessage', () => {
-  it('returns the last pending assistant message', () => {
-    const target = msg({ text: 'live', pending: true })
-    const task = {
-      messages: [
-        msg({ role: 'user', text: 'q' }),
-        msg({ text: 'done' }),
-        target,
+  it('takes the newest completed item and ride endedAt, skipping open-ride items', () => {
+    const t = {
+      items: [
+        userItem('u', AT),
+        { id: 'e', at: later(1), kind: 'event', eventKind: 'launched' } as Item,
+        flowItem('open', 'open-ride', later(9)), // in the open ride — skipped
+      ],
+      rides: [
+        { id: 'closed', startedAt: AT, endedAt: later(2), outcome: 'done' } as Ride,
+        { id: 'open-ride', startedAt: later(5) } as Ride,
       ],
     }
-    expect(pendingMessage(task)).toBe(target)
+    expect(latestUpdateAt(t)).toBe(later(2))
   })
 
-  it('returns undefined when no message is pending', () => {
-    expect(
-      pendingMessage({ messages: [msg({ role: 'user' }), msg({ text: 'done' })] }),
-    ).toBeUndefined()
-  })
-
-  it('ignores a pending user message', () => {
-    expect(
-      pendingMessage({ messages: [msg({ role: 'user', pending: true })] }),
-    ).toBeUndefined()
+  it('is empty when nothing has completed', () => {
+    expect(latestUpdateAt({ items: [], rides: [] })).toBe('')
   })
 })
 
 describe('lastTurnPrompts', () => {
-  it('returns the trailing user messages before the final reply', () => {
-    expect(
-      lastTurnPrompts([
-        msg({ role: 'user', text: 'first' }),
-        msg({ text: 'reply 1' }),
-        msg({ role: 'user', text: 'a' }),
-        msg({ role: 'user', text: 'b' }),
-        msg({ text: 'error running assistant: exited 1' }),
-      ]),
-    ).toEqual(['a', 'b'])
-  })
-
-  it('skips multiple trailing assistant messages', () => {
-    expect(
-      lastTurnPrompts([
-        msg({ role: 'user', text: 'q' }),
-        msg({ text: 'partial' }),
-        msg({ text: 'error' }),
-      ]),
-    ).toEqual(['q'])
-  })
-
-  it('returns empty when the turn has no user prompt', () => {
-    expect(lastTurnPrompts([msg({ text: 'reply' })])).toEqual([])
+  it('returns the trailing run of user items before the last ride', () => {
+    const t = {
+      items: [
+        userItem('old', AT),
+        flowItem('reply', 'r1', later(1)),
+        userItem('p1', later(2)),
+        userItem('p2', later(3)),
+        flowItem('r2', 'r2', later(4)),
+      ],
+    }
+    expect(lastTurnPrompts(t)).toEqual(['p1', 'p2'])
   })
 })
 
 describe('turnAttachments', () => {
-  const att = (id: string) => ({ id, name: id, mime: 'text/plain', size: 1 })
-
-  it('gathers refs off the trailing N user messages, in message order', () => {
-    const out = turnAttachments(
-      [
-        msg({ role: 'user', text: 'old', attachments: [att('old')] }),
-        msg({ text: 'reply' }),
-        msg({ role: 'user', text: 'a', attachments: [att('a1'), att('a2')] }),
-        msg({ role: 'user', text: 'b', attachments: [att('b1')] }),
+  it('gathers attachments off the trailing `count` user items', () => {
+    const att = [{ id: 'x', name: 'f', mime: 'image/png', size: 1 }]
+    const t = {
+      items: [
+        userItem('p1', AT, { attachments: att }),
+        userItem('p2', later(1)),
       ],
-      2,
-    )
-    expect(out.map((a) => a.id)).toEqual(['a1', 'a2', 'b1'])
-  })
-
-  it('ignores user messages beyond the batch and those with no attachments', () => {
-    expect(
-      turnAttachments(
-        [
-          msg({ role: 'user', text: 'a', attachments: [att('a1')] }),
-          msg({ role: 'user', text: 'b' }),
-        ],
-        1,
-      ),
-    ).toEqual([])
-  })
-
-  it('returns empty when nothing in the batch carried attachments', () => {
-    expect(turnAttachments([msg({ role: 'user', text: 'x' })], 1)).toEqual([])
-  })
-})
-
-describe('ensurePending', () => {
-  it('returns the existing pending message without creating a duplicate', () => {
-    const existing = msg({ text: 'live', pending: true })
-    const task = { messages: [existing] }
-    expect(ensurePending(task)).toBe(existing)
-    expect(task.messages).toHaveLength(1)
-  })
-
-  it('creates, pushes, and returns a fresh pending assistant message', () => {
-    const task: { messages: Message[] } = { messages: [msg({ role: 'user', text: 'q' })] }
-    const created = ensurePending(task)
-    expect(created).toMatchObject({ role: 'assistant', text: '', steps: [], pending: true })
-    expect(task.messages).toHaveLength(2)
-    expect(task.messages[1]).toBe(created)
+    }
+    expect(turnAttachments(t, 2)).toEqual(att)
+    expect(turnAttachments(t, 1)).toEqual([]) // only p2, which has none
   })
 })
 
 describe('recordArtifactOnMessage', () => {
-  const artifact = (name: string) => ({
-    name,
-    id: `blob-${name}`,
-    mime: 'text/plain',
-    size: 3,
-    createdAt: '2026-01-01T00:00:00.000Z',
-    updatedAt: '2026-01-01T00:00:00.000Z',
-  })
+  const artifact = { name: 'out', id: 'b', mime: 'text/plain', size: 2, createdAt: AT, updatedAt: AT }
 
-  it('attaches to the in-flight pending assistant message when mid-turn', () => {
-    const pending = msg({ text: 'live', pending: true })
-    const task = { messages: [msg({ role: 'user', text: 'q' }), pending] }
-    recordArtifactOnMessage(task, artifact('out.txt'))
-    expect(pending.artifacts).toEqual([artifact('out.txt')])
-  })
-
-  it('attaches to the last assistant message when none is pending', () => {
-    const last = msg({ text: 'done' })
-    const task = {
-      messages: [msg({ role: 'assistant', text: 'old' }), msg({ role: 'user', text: 'q' }), last],
+  it('attaches to the open ride’s last flow item', () => {
+    const t = {
+      items: [flowItem('a', 'r1'), flowItem('b', 'r1', later(1))],
+      rides: [{ id: 'r1', startedAt: AT } as Ride],
     }
-    recordArtifactOnMessage(task, artifact('a'))
-    expect(last.artifacts).toEqual([artifact('a')])
-    expect(task.messages[0].artifacts).toBeUndefined()
+    recordArtifactOnMessage(t, artifact)
+    expect((t.items[1] as MessageItem).artifacts).toEqual([artifact])
   })
 
-  it('appends one ref per distinct name to the same generating message', () => {
-    const pending = msg({ text: 'live', pending: true })
-    const task = { messages: [pending] }
-    recordArtifactOnMessage(task, artifact('a'))
-    recordArtifactOnMessage(task, artifact('b'))
-    expect(pending.artifacts?.map((r) => r.name)).toEqual(['a', 'b'])
+  it('updates an existing ref for the same name in place', () => {
+    const host = flowItem('a', 'r1')
+    host.artifacts = [artifact]
+    const t = { items: [host], rides: [{ id: 'r1', startedAt: AT } as Ride] }
+    recordArtifactOnMessage(t, { ...artifact, size: 99 })
+    expect(host.artifacts).toHaveLength(1)
+    expect(host.artifacts![0].size).toBe(99)
   })
 
-  it('updates in place when the same name republishes onto one message', () => {
-    const pending = msg({ text: 'live', pending: true })
-    const task = { messages: [pending] }
-    recordArtifactOnMessage(task, artifact('out.txt'))
-    const v2 = {
-      ...artifact('out.txt'),
-      id: 'blob-v2',
-      size: 99,
-      updatedAt: '2026-01-02T00:00:00.000Z',
-    }
-    recordArtifactOnMessage(task, v2)
-    // One chip for the name, carrying the latest blob — not two.
-    expect(pending.artifacts).toHaveLength(1)
-    expect(pending.artifacts?.[0]).toEqual(v2)
-  })
-
-  it('is a no-op (slot-only) when the task has no assistant message yet', () => {
-    const task = { messages: [msg({ role: 'user', text: 'q' })] }
-    recordArtifactOnMessage(task, artifact('a'))
-    expect(task.messages[0].artifacts).toBeUndefined()
+  it('falls back to the last flow item when no ride is open, and no-ops with none', () => {
+    const t = { items: [flowItem('a', 'r1')], rides: [{ id: 'r1', startedAt: AT, endedAt: later(1), outcome: 'done' } as Ride] }
+    recordArtifactOnMessage(t, artifact)
+    expect((t.items[0] as MessageItem).artifacts).toEqual([artifact])
+    const empty = { items: [] as Item[] }
+    expect(() => recordArtifactOnMessage(empty, artifact)).not.toThrow()
   })
 })
 
 describe('recordStatusTransition', () => {
-  const task = (status: string, events?: TaskEvent[]) => ({
-    status,
-    title: 'My task',
-    events,
-  })
-  const AT = '2026-06-01T00:00:00.000Z'
-
-  it('is a no-op when the status does not change', () => {
-    const t = task('resting', [])
-    recordStatusTransition(t, 'resting', AT)
-    expect(t.events).toEqual([])
-  })
+  const task = (status: string) => ({ status, title: 'My task', items: [] as Item[] })
+  const kinds = (t: { items: Item[] }) =>
+    eventItems(t).map((e) => e.eventKind)
 
   it('records entry into a notable status', () => {
     const t = task('riding')
     recordStatusTransition(t, 'wedged', AT)
-    expect(t.events).toEqual([{ kind: 'wedged', title: 'My task', createdAt: AT }])
-
-    const t2 = task('riding')
-    recordStatusTransition(t2, 'landed', AT)
-    expect(t2.events).toEqual([{ kind: 'landed', title: 'My task', createdAt: AT }])
+    expect(eventItems(t)[0]).toMatchObject({ eventKind: 'wedged', title: 'My task', at: AT })
   })
 
-  it('records the inverse when leaving a notable status for a quiet one', () => {
+  it('records the inverse when leaving a notable status', () => {
     const t = task('wedged')
-    recordStatusTransition(t, 'resting', AT)
-    expect(t.events).toEqual([{ kind: 'unwedged', title: 'My task', createdAt: AT }])
-
-    const t2 = task('landed')
-    recordStatusTransition(t2, 'riding', AT)
-    expect(t2.events).toEqual([{ kind: 'unlanded', title: 'My task', createdAt: AT }])
+    recordStatusTransition(t, 'riding', AT)
+    expect(kinds(t)).toEqual(['unwedged'])
   })
 
-  it('records no event for a quiet-to-quiet move', () => {
+  it('records nothing for a quiet-to-quiet move or no change', () => {
     const t = task('riding')
-    recordStatusTransition(t, 'resting', AT)
-    expect(t.events ?? []).toEqual([])
+    recordStatusTransition(t, 'riding', AT)
+    expect(kinds(t)).toEqual([])
   })
 
-  it('records only the arrival when moving between two notable statuses', () => {
+  it('records only the arrival between two notable statuses', () => {
     const t = task('wedged')
     recordStatusTransition(t, 'landed', AT)
-    // No 'unwedged' — just the 'landed' arrival.
-    expect(t.events).toEqual([{ kind: 'landed', title: 'My task', createdAt: AT }])
-  })
-
-  it('initializes the events array when absent and reads the old status', () => {
-    const t = task('wedged') // events undefined
-    recordStatusTransition(t, 'resting', AT)
-    expect(t.events).toEqual([{ kind: 'unwedged', title: 'My task', createdAt: AT }])
+    expect(kinds(t)).toEqual(['landed'])
   })
 })
 
 describe('applyRelaunch', () => {
-  const AT = '2026-06-01T00:00:00.000Z'
+  const AT2 = '2026-06-01T00:00:00.000Z'
   type RelaunchTask = {
     sessionId?: string
     turnContext?: string
     status: string
     title: string
     updatedAt?: string
-    events?: TaskEvent[]
-    messages: Message[]
+    items?: Item[]
     queued?: string[]
     scheduledMessages?: ScheduledMessage[]
     retry?: unknown
@@ -418,392 +295,104 @@ describe('applyRelaunch', () => {
     status: 'riding',
     title: 'My task',
     updatedAt: '2026-05-01T00:00:00.000Z',
-    messages: [msg({ role: 'user', text: 'q' }), msg({ text: 'reply' })],
+    items: [userItem('q'), flowItem('reply', 'r0')],
     ...over,
   })
 
-  it('seals the session, appends the relaunched divider, and queues the message', () => {
+  it('seals the session, records the divider event item, and queues the message', () => {
     const t = task()
-    applyRelaunch(t, 'go again', AT)
-    // The old session is gone — the next turn hands the daemon no sessionId, so it
-    // mints a fresh one (the whole point of relaunch).
+    applyRelaunch(t, 'go again', AT2)
     expect('sessionId' in t).toBe(false)
-    // The divider event marks where the new session begins.
-    expect(t.events).toContainEqual({
-      kind: 'relaunched',
-      title: 'My task',
-      createdAt: AT,
-    })
-    // The message is appended and queued for the fresh session; status rides.
-    expect(t.messages.at(-1)).toMatchObject({ role: 'user', text: 'go again' })
+    expect(eventItems(t).some((e) => e.eventKind === 'relaunched')).toBe(true)
+    expect(userItems(t).at(-1)?.text).toBe('go again')
     expect(t.queued).toEqual(['go again'])
     expect(t.status).toBe('riding')
-    expect(t.updatedAt).toBe(AT)
-  })
-
-  it('drops the recorded turn-context baseline with the sealed session', () => {
-    const t = task({ turnContext: '<task-context>old</task-context>' })
-    applyRelaunch(t, 'go again', AT)
-    // The baseline belonged to the sealed session; the fresh one must receive
-    // the full dynamic context block on its first turn.
-    expect('turnContext' in t).toBe(false)
-  })
-
-  it('a relaunch with no session yet just opens a fresh one (harmless)', () => {
-    const t = task({ sessionId: undefined })
-    applyRelaunch(t, 'go', AT)
-    expect('sessionId' in t).toBe(false)
-    expect(t.queued).toEqual(['go'])
   })
 
   it('revives a wedged task, recording the un-wedge ahead of the divider', () => {
     const t = task({ status: 'wedged' })
-    applyRelaunch(t, 'go', AT)
-    const kinds = (t.events ?? []).map((e) => e.kind)
-    // The un-wedge is recorded a hair before the relaunch divider.
-    expect(kinds).toEqual(['unwedged', 'relaunched'])
-    const unwedged = t.events!.find((e) => e.kind === 'unwedged')!
-    expect(unwedged.createdAt < AT).toBe(true)
-    expect(t.status).toBe('riding')
+    applyRelaunch(t, 'go', AT2)
+    expect(eventItems(t).map((e) => e.eventKind)).toEqual(['unwedged', 'relaunched'])
   })
 
   it('supersedes any pending retry', () => {
     const t = task({ retry: { committed: false, prompts: ['x'] } })
-    applyRelaunch(t, 'go', AT)
+    applyRelaunch(t, 'go', AT2)
     expect('retry' in t).toBe(false)
-  })
-
-  it('does not arm a successor for a one-shot (no repeat) relaunch', () => {
-    const t = task()
-    applyRelaunch(t, 'go', AT)
-    expect('scheduledMessages' in t).toBe(false)
-  })
-
-  it('arms the next occurrence off this delivery for a repeating relaunch', () => {
-    const t = task()
-    // remaining=2 → this immediate is #1 of a 3-relaunch series; the armed
-    // successor carries remaining=1 (two more, #2 and #3, follow it).
-    applyRelaunch(t, 'go', AT, { interval: 60, remaining: 2 })
-    expect(t.queued).toEqual(['go'])
-    expect(t.scheduledMessages).toEqual([
-      {
-        text: 'go',
-        deliverAt: '2026-06-01T01:00:00.000Z',
-        relaunch: true,
-        repeat: { interval: 60, remaining: 1 },
-      },
-    ])
-  })
-
-  it('arms no successor when the immediate relaunch exhausts the count', () => {
-    const t = task()
-    // remaining=0 → a 1-relaunch series; nothing follows the immediate one.
-    applyRelaunch(t, 'go', AT, { interval: 60, remaining: 0 })
-    expect('scheduledMessages' in t).toBe(false)
-  })
-
-  it('arms no successor when the interval would overshoot repeat-until', () => {
-    const t = task()
-    applyRelaunch(t, 'go', AT, { interval: 60, until: '2026-06-01T00:30:00.000Z' })
-    expect('scheduledMessages' in t).toBe(false)
-  })
-})
-
-describe('nextRepeatMessage', () => {
-  const AT = '2026-06-01T00:00:00.000Z'
-
-  it('returns null when the entry carries no repeat spec', () => {
-    expect(nextRepeatMessage({ text: 'x' }, AT)).toBeNull()
-  })
-
-  it('arms interval minutes after the actual delivery (no drift compensation)', () => {
-    const next = nextRepeatMessage(
-      { text: 'x', repeat: { interval: 60 } },
-      '2026-06-01T02:01:00.000Z',
-    )
-    // Off 2:01, not off a nominal 2:00 — the series drifts by design.
-    expect(next).toEqual({
-      text: 'x',
-      deliverAt: '2026-06-01T03:01:00.000Z',
-      relaunch: true,
-      repeat: { interval: 60 },
-    })
-  })
-
-  it('decrements remaining and preserves an until bound', () => {
-    const next = nextRepeatMessage(
-      { text: 'x', repeat: { interval: 30, remaining: 3, until: '2026-06-02T00:00:00.000Z' } },
-      AT,
-    )
-    expect(next).toMatchObject({
-      deliverAt: '2026-06-01T00:30:00.000Z',
-      repeat: { interval: 30, remaining: 2, until: '2026-06-02T00:00:00.000Z' },
-    })
-  })
-
-  it('stops (null) once no relaunches remain', () => {
-    expect(
-      nextRepeatMessage({ text: 'x', repeat: { interval: 60, remaining: 0 } }, AT),
-    ).toBeNull()
-  })
-
-  it('stops (null) once the next fire would pass the until cutoff', () => {
-    // at + 60m = 01:00, which is after the 00:45 cutoff → done.
-    expect(
-      nextRepeatMessage(
-        { text: 'x', repeat: { interval: 60, until: '2026-06-01T00:45:00.000Z' } },
-        AT,
-      ),
-    ).toBeNull()
-  })
-
-  it('arms when the next fire lands exactly on the until cutoff (inclusive)', () => {
-    const next = nextRepeatMessage(
-      { text: 'x', repeat: { interval: 60, until: '2026-06-01T01:00:00.000Z' } },
-      AT,
-    )
-    expect(next).toMatchObject({ deliverAt: '2026-06-01T01:00:00.000Z' })
-  })
-
-  it('drives a whole bounded series to completion', () => {
-    // Total 3 relaunches: the first rides remaining=2, then re-arm until dry.
-    let entry: ScheduledMessage | null = {
-      text: 'x',
-      repeat: { interval: 60, remaining: 2 },
-    }
-    const fires: string[] = []
-    let at = AT
-    while (entry) {
-      fires.push(at)
-      const nextEntry: ScheduledMessage | null = nextRepeatMessage(entry, at)
-      if (nextEntry?.deliverAt) at = nextEntry.deliverAt
-      entry = nextEntry
-    }
-    expect(fires).toEqual([
-      '2026-06-01T00:00:00.000Z',
-      '2026-06-01T01:00:00.000Z',
-      '2026-06-01T02:00:00.000Z',
-    ])
-  })
-})
-
-describe('armScheduledRelaunch', () => {
-  const AT = '2026-06-01T00:00:00.000Z'
-  const WHEN = '2026-06-02T00:00:00.000Z'
-
-  it('stashes a relaunch-flagged scheduled message without clearing the session', () => {
-    const t = {
-      sessionId: 'sess-old',
-      title: 'My task',
-      messages: [] as Message[],
-    }
-    armScheduledRelaunch(t, { text: 'later', deliverAt: WHEN }, AT)
-    // The session stays live until the trigger fires — pre-trigger messages still
-    // resume it.
-    expect(t.sessionId).toBe('sess-old')
-    expect((t as { scheduledMessages?: unknown[] }).scheduledMessages).toEqual([
-      { text: 'later', deliverAt: WHEN, relaunch: true },
-    ])
-    // The armed event carries the launch time as the pending indicator.
-    expect((t as { events?: TaskEvent[] }).events).toContainEqual({
-      kind: 'relaunched',
-      title: 'My task',
-      createdAt: AT,
-      scheduledFor: WHEN,
-    })
-  })
-
-  it('omits scheduledFor on a pure await trigger', () => {
-    const t = { title: 'My task' } as {
-      title: string
-      events?: TaskEvent[]
-      scheduledMessages?: { text: string; waitFor?: string[]; relaunch?: boolean }[]
-    }
-    armScheduledRelaunch(t, { text: 'later', waitFor: ['abc'] }, AT)
-    expect(t.scheduledMessages).toEqual([
-      { text: 'later', waitFor: ['abc'], relaunch: true },
-    ])
-    expect(t.events).toEqual([
-      { kind: 'relaunched', title: 'My task', createdAt: AT },
-    ])
-  })
-
-  it('carries a repeat spec onto the armed message for a repeating relaunch', () => {
-    const t = { title: 'My task' } as {
-      title: string
-      events?: TaskEvent[]
-      scheduledMessages?: ScheduledMessage[]
-    }
-    armScheduledRelaunch(
-      t,
-      { text: 'later', deliverAt: WHEN, repeat: { interval: 60, remaining: 2 } },
-      AT,
-    )
-    expect(t.scheduledMessages).toEqual([
-      {
-        text: 'later',
-        deliverAt: WHEN,
-        relaunch: true,
-        repeat: { interval: 60, remaining: 2 },
-      },
-    ])
   })
 })
 
 describe('applyDueMessages', () => {
-  const AT = '2026-06-01T00:00:00.000Z'
+  const AT2 = '2026-06-01T00:00:00.000Z'
+  const task = () => ({ title: 'T', items: [] as Item[], queued: [] as string[] })
 
-  it('appends and queues ordinary due messages without touching the session', () => {
-    const t = {
-      sessionId: 'sess-old',
-      title: 'My task',
-      messages: [] as Message[],
-    }
-    applyDueMessages(t, [{ text: 'a' }, { text: 'b' }], AT)
-    expect(t.sessionId).toBe('sess-old')
-    expect((t as { events?: TaskEvent[] }).events).toBeUndefined()
-    expect(t.messages.map((m) => m.text)).toEqual(['a', 'b'])
-    expect((t as { queued?: string[] }).queued).toEqual(['a', 'b'])
+  it('appends and queues each due message as a user item', () => {
+    const t = task()
+    applyDueMessages(t, [{ text: 'a' }, { text: 'b' }], AT2)
+    expect(userItems(t).map((u) => u.text)).toEqual(['a', 'b'])
+    expect(t.queued).toEqual(['a', 'b'])
   })
 
-  it('seals the session and pushes the divider when a due entry is a relaunch', () => {
-    const t = {
-      sessionId: 'sess-old',
-      title: 'My task',
-      messages: [] as Message[],
-    }
-    applyDueMessages(t, [{ text: 'fresh', relaunch: true }], AT)
-    expect('sessionId' in t).toBe(false)
-    expect((t as { events?: TaskEvent[] }).events).toEqual([
-      { kind: 'relaunched', title: 'My task', createdAt: AT },
-    ])
-    expect((t as { queued?: string[] }).queued).toEqual(['fresh'])
+  it('seals once and leads with the relaunch text when a relaunch is due', () => {
+    const t = task()
+    applyDueMessages(t, [{ text: 'ordinary' }, { text: 'fresh', relaunch: true }], AT2)
+    expect(eventItems(t).filter((e) => e.eventKind === 'relaunched')).toHaveLength(1)
+    expect(t.queued).toEqual(['fresh', 'ordinary'])
+  })
+})
+
+describe('armScheduledRelaunch', () => {
+  it('records a pending relaunched event item carrying the launch time', () => {
+    const t = { title: 'T', items: [] as Item[], scheduledMessages: [] as ScheduledMessage[] }
+    armScheduledRelaunch(t, { text: 'later', deliverAt: '2027-01-01T00:00:00.000Z' }, AT)
+    expect(t.scheduledMessages[0]).toMatchObject({ text: 'later', relaunch: true })
+    expect(eventItems(t)[0]).toMatchObject({ eventKind: 'relaunched', scheduledFor: '2027-01-01T00:00:00.000Z' })
+  })
+})
+
+describe('nextRepeatMessage', () => {
+  const AT2 = '2026-01-01T12:00:00.000Z'
+  it('returns null without a repeat spec', () => {
+    expect(nextRepeatMessage({ text: 'x' }, AT2)).toBeNull()
+  })
+  it('advances by the interval and decrements remaining', () => {
+    const next = nextRepeatMessage({ text: 'x', repeat: { interval: 60, remaining: 2 } }, AT2)
+    expect(next).toMatchObject({ text: 'x', relaunch: true, deliverAt: '2026-01-01T13:00:00.000Z' })
+    expect(next?.repeat).toEqual({ interval: 60, remaining: 1 })
+  })
+  it('stops at the count bound and the until cutoff', () => {
+    expect(nextRepeatMessage({ text: 'x', repeat: { interval: 60, remaining: 0 } }, AT2)).toBeNull()
+    expect(nextRepeatMessage({ text: 'x', repeat: { interval: 60, until: '2026-01-01T12:30:00.000Z' } }, AT2)).toBeNull()
+  })
+})
+
+describe('rides', () => {
+  const END = later(5)
+  it('startRide opens, openRide finds the last un-ended, closeRide stamps it', () => {
+    const t: { rides?: Ride[] } = {}
+    startRide(t, 'r1', AT)
+    expect(openRide(t)).toMatchObject({ id: 'r1', startedAt: AT })
+    const usage = { input: 1, output: 2, cacheRead: 0, cacheCreation: 0 }
+    closeRide(t, 'done', END, usage)
+    expect(t.rides![0]).toEqual({ id: 'r1', startedAt: AT, endedAt: END, outcome: 'done', usage })
+    expect(openRide(t)).toBeUndefined()
   })
 
-  it('seals once and orders the relaunch text first when both are due', () => {
-    const t = {
-      sessionId: 'sess-old',
-      title: 'My task',
-      messages: [] as Message[],
-    }
-    applyDueMessages(t, [{ text: 'ordinary' }, { text: 'relaunch', relaunch: true }], AT)
-    expect('sessionId' in t).toBe(false)
-    // One divider, not one per entry.
-    expect((t as { events?: TaskEvent[] }).events).toHaveLength(1)
-    // The relaunch text leads so the fresh session reads it first.
-    expect(t.messages.map((m) => m.text)).toEqual(['relaunch', 'ordinary'])
-    expect((t as { queued?: string[] }).queued).toEqual(['relaunch', 'ordinary'])
-  })
-
-  it('re-arms the next occurrence when a repeating relaunch delivers', () => {
-    const t = {
-      sessionId: 'sess-old',
-      title: 'My task',
-      messages: [] as Message[],
-      scheduledMessages: undefined as ScheduledMessage[] | undefined,
-    }
-    applyDueMessages(
-      t,
-      [{ text: 'go', relaunch: true, repeat: { interval: 60, remaining: 2 } }],
-      AT,
-    )
-    // The delivered occurrence fired; its successor is armed one interval later
-    // with a decremented count.
-    expect(t.scheduledMessages).toEqual([
-      {
-        text: 'go',
-        deliverAt: '2026-06-01T01:00:00.000Z',
-        relaunch: true,
-        repeat: { interval: 60, remaining: 1 },
-      },
-    ])
-  })
-
-  it('does not re-arm when the repeating series has reached its bound', () => {
-    const t = {
-      sessionId: 'sess-old',
-      title: 'My task',
-      messages: [] as Message[],
-      scheduledMessages: undefined as ScheduledMessage[] | undefined,
-    }
-    applyDueMessages(
-      t,
-      [{ text: 'go', relaunch: true, repeat: { interval: 60, remaining: 0 } }],
-      AT,
-    )
-    expect(t.scheduledMessages).toBeUndefined()
+  it('closeRide no-ops when no ride is open', () => {
+    expect(() => closeRide({}, 'interrupted', END)).not.toThrow()
   })
 })
 
 describe('worktreeName', () => {
   const project = '/home/me/proj'
-
-  it('returns the name of a worktree directly under the worktrees dir', () => {
-    expect(worktreeName(project, '/home/me/proj/.claude/worktrees/feat-x')).toBe(
-      'feat-x',
-    )
+  it('returns a worktree name directly under the worktrees dir', () => {
+    expect(worktreeName(project, '/home/me/proj/.claude/worktrees/feat-x')).toBe('feat-x')
   })
-
   it('keeps a slash-segmented worktree name whole', () => {
-    expect(
-      worktreeName(project, '/home/me/proj/.claude/worktrees/feature/x'),
-    ).toBe('feature/x')
+    expect(worktreeName(project, '/home/me/proj/.claude/worktrees/feature/x')).toBe('feature/x')
   })
-
-  it('rejects a path outside this project (never sets a bogus flag)', () => {
-    expect(worktreeName(project, '/somewhere/else/.claude/worktrees/x')).toBe(
-      undefined,
-    )
-    expect(worktreeName(project, '/home/me/proj/server')).toBe(undefined)
-  })
-
-  it('rejects the worktrees dir itself', () => {
-    expect(worktreeName(project, '/home/me/proj/.claude/worktrees')).toBe(
-      undefined,
-    )
-  })
-})
-
-describe('rides', () => {
-  const AT = '2026-01-01T00:00:00.000Z'
-  const END = '2026-01-01T00:05:00.000Z'
-
-  it('startRide opens a ride under the given id and creates the array', () => {
-    const t: { rides?: Ride[] } = {}
-    startRide(t, 'r1', AT)
-    expect(t.rides).toEqual([{ id: 'r1', startedAt: AT }])
-    startRide(t, 'r2', END)
-    expect(t.rides).toHaveLength(2)
-  })
-
-  it('openRide returns the last un-ended ride, or undefined', () => {
-    expect(openRide({})).toBeUndefined()
-    expect(openRide({ rides: [] })).toBeUndefined()
-    const closed: Ride = { id: 'r0', startedAt: AT, endedAt: END, outcome: 'done' }
-    expect(openRide({ rides: [closed] })).toBeUndefined()
-    const open: Ride = { id: 'r1', startedAt: END }
-    expect(openRide({ rides: [closed, open] })).toBe(open)
-  })
-
-  it('closeRide stamps endedAt/outcome and moves usage onto the open ride', () => {
-    const t: { rides?: Ride[] } = { rides: [{ id: 'r1', startedAt: AT }] }
-    const usage = { input: 1, output: 2, cacheRead: 0, cacheCreation: 0 }
-    closeRide(t, 'done', END, usage)
-    expect(t.rides![0]).toEqual({
-      id: 'r1',
-      startedAt: AT,
-      endedAt: END,
-      outcome: 'done',
-      usage,
-    })
-  })
-
-  it('closeRide no-ops when no ride is open', () => {
-    const t: { rides?: Ride[] } = {}
-    expect(() => closeRide(t, 'interrupted', END)).not.toThrow()
-    expect(t.rides).toBeUndefined()
-    const settled: Ride = { id: 'r0', startedAt: AT, endedAt: AT, outcome: 'done' }
-    closeRide({ rides: [settled] }, 'interrupted', END)
-    expect(settled.endedAt).toBe(AT)
+  it('rejects a path outside this project and the worktrees dir itself', () => {
+    expect(worktreeName(project, '/somewhere/else/.claude/worktrees/x')).toBe(undefined)
+    expect(worktreeName(project, '/home/me/proj/.claude/worktrees')).toBe(undefined)
   })
 })

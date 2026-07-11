@@ -581,7 +581,11 @@ async function viewTask(args) {
   // it (or decide what to send). Prompt plus each choice option's id → label.
   for (const ask of task.asks ?? []) {
     if (ask.state !== 'open') continue
-    console.log(`\nasking: ${clip(ask.prompt)}`)
+    // An agent-raised ask is promptless — its own message (shown below) is the
+    // question — so don't assume a prompt string is present.
+    console.log(
+      `\nasking:${ask.prompt ? ` ${clip(ask.prompt)}` : ' (the message below is the question)'}`,
+    )
     if (ask.form?.type === 'choice')
       for (const o of ask.form.options) console.log(`  - ${o.id}: ${o.label}`)
     else if (ask.form?.type === 'text') console.log('  (free-text answer)')

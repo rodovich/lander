@@ -92,13 +92,14 @@ export function mutateTask<T>(
   file: string,
   fn: (task: T) => void,
   revive?: (raw: T) => T,
+  isLegacy?: (raw: T) => boolean,
 ): Promise<void> {
   const prior = chains.get(file) ?? Promise.resolve()
   // Sequence after the prior op whether it resolved or rejected, so one failed
   // mutation doesn't wedge the file's queue.
   const run = prior.then(
-    () => applyMutation<T>(file, fn, revive),
-    () => applyMutation<T>(file, fn, revive),
+    () => applyMutation<T>(file, fn, revive, isLegacy),
+    () => applyMutation<T>(file, fn, revive, isLegacy),
   )
   // The tail swallows outcomes so the next waiter only sequences on it; the
   // caller still observes this op's real result/error via `run`. Drop the map
@@ -118,12 +119,26 @@ async function applyMutation<T>(
   file: string,
   fn: (task: T) => void,
   revive?: (raw: T) => T,
+  isLegacy?: (raw: T) => boolean,
 ): Promise<void> {
   // Revive on the read (before the mutation) so a v1 file is converted first,
   // and the fn — and the write below — operate on the current shape. This is what
   // persists the conversion: the first mutation of a legacy record rewrites it.
-  const parsed = JSON.parse(await readFile(file, 'utf8')) as T
+  const rawText = await readFile(file, 'utf8')
+  const parsed = JSON.parse(rawText) as T
+  const legacy = isLegacy?.(parsed) ?? false
   const task = revive ? revive(parsed) : parsed
+  // Before the first write that persists a shape conversion, stash the exact
+  // pre-conversion bytes as a one-time `<file>.v1.bak` (the `wx` flag no-ops if it
+  // already exists). readTasks ignores non-`.json` names, so the backup is inert;
+  // the two-week cleanup deletes them.
+  if (legacy) {
+    try {
+      await writeFile(`${file}.v1.bak`, rawText, { flag: 'wx' })
+    } catch {
+      // already backed up (or unwritable) — leave the existing one
+    }
+  }
   fn(task)
   await writeTask(file, task)
 }

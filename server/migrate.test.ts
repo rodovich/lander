@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import { normalizeStatus, reviveTask, migrateTask, toLegacyShape } from './migrate'
 import { buildTimeline } from '../src/timeline'
+import {
+  pushUserItem,
+  pushFlowItem,
+  pushEventItem,
+  startRide,
+  closeRide,
+} from './tasks'
 import type { Step } from './stream'
 import type { Message, TaskEvent, Item, Ride } from './tasks'
 import type { Ask } from './asks'
@@ -434,6 +441,28 @@ describe('toLegacyShape round-trips a converted v1', () => {
     }
     const legacy = toLegacyShape(run(v1))
     expect(renderProjection(legacy.messages)).toEqual(renderProjection(v1.messages))
+  })
+
+  it('projects a natively-written v2 task so buildTimeline renders it correctly', () => {
+    // Build a v2 task the way the server now does — item log + rides, no messages.
+    const t: { items?: Item[]; rides?: Ride[] } = { items: [], rides: [] }
+    pushEventItem(t, { eventKind: 'launched', title: 't' }, AT(0))
+    pushUserItem(t, 'hello', AT(1))
+    startRide(t, 'r1', AT(2))
+    pushFlowItem(t, 'r1', 'hi there', AT(2))
+    closeRide(t, 'done', AT(3))
+    pushEventItem(t, { eventKind: 'wedged', title: 't' }, AT(4))
+
+    const legacy = toLegacyShape(t)
+    const timeline = buildTimeline(legacy, AT(9)).items
+    expect(
+      timeline.map((it) =>
+        it.kind === 'event' ? `event:${it.event.kind}` : it.message.role,
+      ),
+    ).toEqual(['event:launched', 'user', 'assistant', 'event:wedged'])
+    const asst = legacy.messages.find((m) => m.role === 'assistant')!
+    expect(asst.text).toBe('hi there')
+    expect(asst.steps?.[0]).toMatchObject({ kind: 'text', text: 'hi there' })
   })
 
   it('preserves usage, pending, and artifacts through the round-trip', () => {

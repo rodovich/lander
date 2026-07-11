@@ -7,17 +7,27 @@
 // NOT refresh usage (that trigger stays in the caller). Kept import-light (tasks
 // + stream + protocol types only) so neither side of the split depends on
 // index.ts.
+//
+// Storage is the v2 item log (rides + items). The daemon still sends the frozen
+// wire shape (Step[] deltas); these functions translate steps → items at apply
+// time — a tool_use step becomes a running tool item, its tool_result folds onto
+// that item by id, and a text step becomes a flow message item. The fold-by-id
+// keys on the provider toolUseId, which is exactly the id the migrate converter
+// mints too, so a turn that streamed half its steps under v1 and half under v2
+// reconciles seamlessly.
 
 import type { Step, Usage } from './stream'
 import type { UpdateMessage, DoneMessage } from './protocol'
 import {
-  ensurePending,
-  pendingMessage,
+  openRide,
+  closeRide,
+  pushFlowItem,
+  lastFlowItem,
+  nextItemId,
   recordStatusTransition,
   lastTurnPrompts,
-  closeRide,
-  type Message,
-  type TaskEvent,
+  type Item,
+  type ToolItem,
   type Ride,
 } from './tasks'
 import { createRetryAsk, type Ask } from './asks'
@@ -29,10 +39,9 @@ import { createRetryAsk, type Ask } from './asks'
 export type ApplyTask = {
   status: string
   title: string
-  messages: Message[]
-  events?: TaskEvent[]
-  asks?: Ask[]
+  items?: Item[]
   rides?: Ride[]
+  asks?: Ask[]
   updatedAt: string
   runId?: string
   runCursor?: number
@@ -49,7 +58,7 @@ export type ApplyUpdate = Pick<
   UpdateMessage,
   'steps' | 'finalText' | 'blockedIds' | 'drivingModel'
 > & {
-  // The resolved running usage to set on the message (the caller's accumulated
+  // The resolved running usage to set on the ride (the caller's accumulated
   // `liveUsage`), applied only when `usageChanged`.
   usage?: Usage
   usageChanged: boolean
@@ -77,10 +86,14 @@ export type ApplyDoneOpts = {
   askId: string
 }
 
-// Apply one reduced batch onto the task: append its steps, reconcile blocked
-// tool_result steps, carry the running reply text and usage, advance the run
-// cursor. Mutates the task in place. Behavior-identical to the per-batch UPDATE
-// apply that lived inline in reduceRun.
+// The tool_result outcome → the folded tool item status.
+function resultStatus(step: Step): ToolItem['status'] {
+  return step.blocked ? 'blocked' : step.isError ? 'failed' : 'ok'
+}
+
+// Apply one reduced batch onto the task: fold its steps into the open ride's item
+// log, reconcile blocked tool calls, carry the running reply text and usage,
+// advance the run cursor. Mutates the task in place.
 export function applyUpdate(task: ApplyTask, update: ApplyUpdate): void {
   const { steps, finalText, blockedIds, usage, usageChanged, drivingModel, cursor } =
     update
@@ -90,89 +103,153 @@ export function applyUpdate(task: ApplyTask, update: ApplyUpdate): void {
     (blockedIds?.length ?? 0) ||
     usageChanged
   ) {
-    // Bump updatedAt only on the batch that begins the assistant message
-    // (creates the pending one), not on every streamed batch: streaming
-    // churn shouldn't keep reordering the sidebar.
-    const begun = !pendingMessage(task)
-    const msg = ensurePending(task)
-    if (steps.length) msg.steps = [...(msg.steps ?? []), ...steps]
-    // The turn's terminal result event names the tool calls that were
-    // refused; flag their tool_result steps blocked. The result lands
-    // after those steps streamed (often in an earlier batch), so reconcile
-    // across the whole message, not just this batch.
-    if (blockedIds?.length && msg.steps) {
-      const denied = new Set(blockedIds)
-      for (const s of msg.steps)
-        if (s.kind === 'tool_result' && s.toolUseId && denied.has(s.toolUseId))
-          s.blocked = true
+    const ride = openRide(task)
+    // A run always opens a ride before it streams (runTurn), and a run that began
+    // under v1 is converted to an open ride keyed by its runId — so a batch should
+    // always find one. Guard defensively rather than throw.
+    if (ride) {
+      const rideId = ride.id
+      const items = (task.items ??= [])
+      // Bump updatedAt only on the batch that begins the ride's activity (adds its
+      // first item), not on every streamed batch — streaming churn shouldn't keep
+      // reordering the sidebar (the old "begun" rule).
+      const begun = !items.some((it) => it.rideId === rideId)
+      let firstAt: string | undefined
+      const toolItem = (id: string) =>
+        items.find(
+          (it): it is ToolItem => it.kind === 'tool' && it.id === id,
+        )
+      for (const s of steps) {
+        if (s.kind === 'tool_use') {
+          items.push({
+            id: s.toolUseId ?? nextItemId(task, s.createdAt),
+            at: s.createdAt,
+            rideId,
+            kind: 'tool',
+            name: s.tool ?? '',
+            input: s.input ?? '',
+            status: 'running',
+            ...(s.inputFull ? { inputFull: s.inputFull } : {}),
+            ...(s.rule ? { rule: s.rule } : {}),
+            ...(s.edits ? { edits: s.edits } : {}),
+            ...(s.inferenceId ? { groupId: s.inferenceId } : {}),
+            ...(s.parentToolUseId ? { parentId: s.parentToolUseId } : {}),
+          })
+          firstAt ??= s.createdAt
+        } else if (s.kind === 'tool_result') {
+          const target = s.toolUseId ? toolItem(s.toolUseId) : undefined
+          if (target) {
+            if (s.text !== undefined) target.output = s.text
+            target.status = resultStatus(s)
+          } else {
+            // Orphan result — keep it as a standalone tool item rather than dropping.
+            items.push({
+              id: s.toolUseId ?? nextItemId(task, s.createdAt),
+              at: s.createdAt,
+              rideId,
+              kind: 'tool',
+              name: '',
+              input: '',
+              status: resultStatus(s),
+              ...(s.text !== undefined ? { output: s.text } : {}),
+              ...(s.parentToolUseId ? { parentId: s.parentToolUseId } : {}),
+            })
+            firstAt ??= s.createdAt
+          }
+        } else {
+          // text step → flow message item (a subagent's prose nests via parentId).
+          items.push({
+            id: nextItemId(task, s.createdAt),
+            at: s.createdAt,
+            rideId,
+            kind: 'message',
+            role: 'flow',
+            text: s.text ?? '',
+            ...(s.inferenceId ? { groupId: s.inferenceId } : {}),
+            ...(s.parentToolUseId ? { parentId: s.parentToolUseId } : {}),
+          })
+          firstAt ??= s.createdAt
+        }
+      }
+      // The terminal result event names the refused tool calls; flag those tool
+      // items blocked. The result lands after the steps streamed (often an earlier
+      // batch), so reconcile across the whole ride, not just this batch.
+      if (blockedIds?.length) {
+        const denied = new Set(blockedIds)
+        for (const it of items)
+          if (it.kind === 'tool' && it.rideId === rideId && denied.has(it.id))
+            it.status = 'blocked'
+      }
+      // Carry the running reply text: update the ride's last main-agent flow item
+      // in place (for a live turn finalText mirrors the last text step, so this is
+      // the same text), creating one only if the turn streamed no prose at all.
+      if (finalText !== undefined) {
+        const last = lastFlowItem(task, rideId)
+        if (last) last.text = finalText
+        else {
+          const at = firstAt ?? ride.startedAt
+          pushFlowItem(task, rideId, finalText, at)
+          firstAt ??= at
+        }
+      }
+      // Record the turn's running usage on the ride, stamped with the session's
+      // driving model (not a tool-heavy subagent's cheaper model).
+      if (usageChanged && usage)
+        ride.usage = drivingModel ? { ...usage, model: drivingModel } : usage
+      if (begun) task.updatedAt = firstAt ?? ride.startedAt
     }
-    // Carry the running reply text onto the message as it lands so it
-    // survives a restart (the cursor won't replay it).
-    if (finalText !== undefined) msg.text = finalText
-    // Record the turn's running token usage as it streams (summed across
-    // inferences, finalized by the result event) so the UI's corner
-    // readout updates live, not just at turn end. Always attribute it to
-    // the session's driving model — not the per-inference or dominant
-    // model, which a tool-heavy subagent on a cheaper model would skew.
-    if (usageChanged && usage)
-      msg.usage = drivingModel ? { ...usage, model: drivingModel } : usage
-    if (begun) task.updatedAt = msg.createdAt
   }
   task.runCursor = cursor
 }
 
-// Finalize the run on its done marker: land the pending message, write the
-// error/interrupted text, and on a real assistant error wedge the task and stash
-// what a retry needs. Mutates the task in place. Does NOT refresh usage — that
-// side-effect stays in the caller. Behavior-identical to the DONE apply that
-// lived inline in reduceRun.
+// Finalize the run on its done marker: close the ride, write the error/interrupted
+// text when nothing streamed, and on a real assistant error wedge the task and
+// stash what a retry needs. Mutates the task in place. Does NOT refresh usage.
 export function applyDone(
   task: ApplyTask,
   done: ApplyDone,
   opts: ApplyDoneOpts,
 ): void {
   const { at, rateLimitResetsAt, askId } = opts
-  const msg = ensurePending(task)
-  // Whether the assistant had begun replying before the run ended: real streamed
-  // content (steps or text) on the pending message, captured before we
-  // overwrite an empty one with the error below. On an assistant error this is
-  // our proxy for "the user's turn reached the session and was committed" — if
-  // a reply had started, the agent had accepted and recorded the prompt.
-  const hadOutput = (msg.steps?.length ?? 0) > 0 || msg.text.trim().length > 0
-  // A non-zero exit with no reply text is an error to surface; otherwise
-  // the reduced text stands as the reply. A deliberate interrupt (the task
-  // was wedged mid-run) is not an error — keep the partial reply, and note
-  // the stop if nothing had streamed yet.
-  if (!msg.text && done.interrupted) msg.text = '_(interrupted)_'
-  else if (!msg.text && done.exitCode !== 0)
-    msg.text =
-      `error running assistant: exited ${done.exitCode}` +
-      (done.stderr?.trim() ? `\n${done.stderr.trim()}` : '')
-  msg.pending = false
-  // An assistant error — a non-zero exit that isn't a deliberate interrupt,
-  // most often an error HTTP response from the assistant — needs the
-  // user's attention, so wedge the task rather than letting driveTask
-  // quietly bring it to rest. We only override a still-riding task: if the
-  // agent already moved itself (its own `lander wedge`, or `lander land`),
-  // that stands. driveTask's finally only demotes riding→resting, so a
-  // wedge set here survives it.
+  const ride = openRide(task)
+  const rideId = ride?.id
+  // The ride's own items, snapshotted before we append any error line below.
+  const rideItems = rideId
+    ? (task.items ?? []).filter((it) => it.rideId === rideId)
+    : []
+  const streamedText = rideItems.some(
+    (it) => it.kind === 'message' && it.text.trim().length > 0,
+  )
+  // Whether the assistant had begun replying before the run ended (streamed a tool
+  // or non-empty reply). On an assistant error this is our proxy for "the user's
+  // turn reached the session and was committed".
+  const hadOutput = rideItems.some((it) => it.kind === 'tool') || streamedText
+  // A non-zero exit with no reply is an error to surface; a deliberate interrupt
+  // (the task was wedged mid-run) is not — note the stop only if nothing streamed.
+  if (rideId && !streamedText) {
+    if (done.interrupted) pushFlowItem(task, rideId, '_(interrupted)_', at)
+    else if (done.exitCode !== 0)
+      pushFlowItem(
+        task,
+        rideId,
+        `error running assistant: exited ${done.exitCode}` +
+          (done.stderr?.trim() ? `\n${done.stderr.trim()}` : ''),
+        at,
+      )
+  }
+  // An assistant error — a non-zero exit that isn't a deliberate interrupt — needs
+  // the user's attention, so wedge the task. Only override a still-riding task: a
+  // self-wedge/land the agent set stands.
   if (done.exitCode !== 0 && !done.interrupted && task.status === 'riding') {
     recordStatusTransition(task, 'wedged', at)
     task.status = 'wedged'
-    // Stash what a retry needs: whether the failed turn was committed, and
-    // its prompt(s) for the re-send path. The error reply is now the
-    // trailing message, so the prompt(s) sit just before it. A session-limit
-    // rejection also carries its reset time, so the retry can be scheduled
-    // for then rather than fired into the same wall.
     task.retry = {
       committed: hadOutput,
-      prompts: lastTurnPrompts(task.messages),
+      prompts: lastTurnPrompts(task),
       ...(rateLimitResetsAt ? { resetsAt: rateLimitResetsAt } : {}),
     }
-    // Raise the platform ask the UI renders over the wedge: a usage-limit ask
-    // (with a schedule-at-reset option) when the run carried a reset time, else
-    // a generic error ask. origin:'retry' routes the answer back through the
-    // retry-recovery machinery, which reads the `retry` stash above.
+    // Raise the platform retry ask the UI renders over the wedge (usage-limit or
+    // generic error). origin:'retry' routes the answer back through recovery.
     createRetryAsk(task, {
       id: askId,
       committed: hadOutput,
@@ -180,18 +257,15 @@ export function applyDone(
       at,
     })
   }
-  // Close the ride this run opened: interrupted on a deliberate stop, error on a
-  // non-zero non-interrupt exit, else done. Move the turn's final usage (already
-  // accumulated onto the message) onto the ride too — the UI still reads
-  // Message.usage until the UI flip, so it stays written there as well. Tolerates
-  // a missing ride: a run started before rides existed (or before this commit)
-  // has none, and closeRide no-ops rather than throwing.
+  // Close the ride: interrupted on a deliberate stop, error on a non-zero
+  // non-interrupt exit, else done. Usage already rides on it (applyUpdate). A run
+  // started before rides existed has none — closeRide no-ops.
   const outcome: Ride['outcome'] = done.interrupted
     ? 'interrupted'
     : done.exitCode !== 0
       ? 'error'
       : 'done'
-  closeRide(task, outcome, at, msg.usage)
+  closeRide(task, outcome, at)
   task.updatedAt = at
   delete task.runId
   delete task.runCursor

@@ -82,7 +82,8 @@ describe('createAsk', () => {
   it('appends an open ask and returns it', () => {
     const { task, ask } = seed(choice)
     expect(ask.state).toBe('open')
-    expect(task.asks).toEqual([ask])
+    // Asks live in the item log now (as `ask` items).
+    expect(task.items).toEqual([ask])
     expect(openTaskAsk(task)).toBe(ask)
   })
 

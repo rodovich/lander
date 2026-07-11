@@ -10,6 +10,7 @@ import type { Step, Usage } from './stream'
 import type { Attachment } from './attachments'
 import type { Artifact } from './artifacts'
 import type { Ask, AskForm } from './asks'
+import { toLegacyShape } from './migrate'
 
 export type Message = {
   role: 'user' | 'assistant'
@@ -164,6 +165,10 @@ export type MessageItem = ItemCommon & {
   // Set on a user message once a queued batch delivers it: the ride that consumed
   // it, making the batching visible. Absent on converted history.
   deliveredIn?: string
+  // Client-facing only: set by publicTask on a trailing user item still in the
+  // task's work queue (the agent hasn't read it yet), the item analog of the old
+  // Message.queued. Derived at projection time, never stored.
+  queued?: boolean
 }
 
 export type ToolItem = ItemCommon & {
@@ -200,6 +205,142 @@ export type AskItem = ItemCommon & {
 }
 
 export type Item = MessageItem | ToolItem | EventItem | AskItem
+
+// ── Item-log builders (v2 storage) ──────────────────────────────────────────
+
+// Mint a message/event item id: `itm-<epoch36>-<seq>` (seq = the task's current
+// item count), the same scheme as nextAskId. Tool items reuse the provider
+// toolUseId and ask items keep their `ask-…` id instead, so those don't go through
+// here.
+export function nextItemId(task: { items?: Item[] }, at: string): string {
+  return `itm-${Math.floor(Date.parse(at) || 0).toString(36)}-${
+    task.items?.length ?? 0
+  }`
+}
+
+// Append a user message item (out of any ride). `deliveredIn` is stamped later,
+// when a queued batch is drained into a ride.
+export function pushUserItem(
+  task: { items?: Item[] },
+  text: string,
+  at: string,
+  opts: { attachments?: Attachment[]; deliveredIn?: string } = {},
+): MessageItem {
+  const item: MessageItem = {
+    id: nextItemId(task, at),
+    at,
+    kind: 'message',
+    role: 'user',
+    text,
+    ...(opts.attachments?.length ? { attachments: opts.attachments } : {}),
+    ...(opts.deliveredIn ? { deliveredIn: opts.deliveredIn } : {}),
+  }
+  ;(task.items ??= []).push(item)
+  return item
+}
+
+// Append a flow (assistant/host) message item to a ride.
+export function pushFlowItem(
+  task: { items?: Item[] },
+  rideId: string,
+  text: string,
+  at: string,
+): MessageItem {
+  const item: MessageItem = {
+    id: nextItemId(task, at),
+    at,
+    rideId,
+    kind: 'message',
+    role: 'flow',
+    text,
+  }
+  ;(task.items ??= []).push(item)
+  return item
+}
+
+// Append a lifecycle event item (out of any ride, like a user message).
+export function pushEventItem(
+  task: { items?: Item[] },
+  ev: {
+    eventKind: TaskEvent['kind']
+    title?: string
+    scheduledFor?: string
+    awaiting?: { id: string; title: string }[]
+  },
+  at: string,
+): EventItem {
+  const item: EventItem = {
+    id: nextItemId(task, at),
+    at,
+    kind: 'event',
+    eventKind: ev.eventKind,
+    ...(ev.title !== undefined ? { title: ev.title } : {}),
+    ...(ev.scheduledFor !== undefined ? { scheduledFor: ev.scheduledFor } : {}),
+    ...(ev.awaiting !== undefined ? { awaiting: ev.awaiting } : {}),
+  }
+  ;(task.items ??= []).push(item)
+  return item
+}
+
+// The last main-agent flow message item (a `flow` message with no `parentId`, so
+// not a subagent's nested prose), optionally scoped to one ride. The anchor for
+// finalText updates (applyUpdate) and artifact refs (recordArtifactOnMessage).
+export function lastFlowItem(
+  task: { items?: Item[] },
+  rideId?: string,
+): MessageItem | undefined {
+  const items = task.items ?? []
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i]
+    if (
+      it.kind === 'message' &&
+      it.role === 'flow' &&
+      it.parentId === undefined &&
+      (rideId === undefined || it.rideId === rideId)
+    )
+      return it
+  }
+  return undefined
+}
+
+// The user message items in order (out-of-ride `message` items with role `user`).
+// The v2 analog of filtering `messages` to role user — used by lastTurnPrompts and
+// turnAttachments.
+export function userItems(task: { items?: Item[] }): MessageItem[] {
+  return (task.items ?? []).filter(
+    (it): it is MessageItem => it.kind === 'message' && it.role === 'user',
+  )
+}
+
+// The lifecycle event items in order (the v2 analog of the old `task.events`).
+export function eventItems(task: { items?: Item[] }): EventItem[] {
+  return (task.items ?? []).filter((it): it is EventItem => it.kind === 'event')
+}
+
+// Record an assistant error/interrupt reply on the task. If a ride is open, fill
+// its last empty flow item (or append one) with `text`; otherwise the run never
+// opened a ride (an unreadable task file, or no daemon) — synthesize a one-item
+// closed error ride so the failure still shows as an assistant turn.
+export function recordAssistantError(
+  task: { items?: Item[]; rides?: Ride[] },
+  text: string,
+  at: string,
+): void {
+  let ride = openRide(task)
+  if (!ride) {
+    const id = `ride-${Math.floor(Date.parse(at) || 0).toString(36)}-e${
+      task.rides?.length ?? 0
+    }`
+    startRide(task, id, at)
+    ride = openRide(task) as Ride
+    pushFlowItem(task, ride.id, text, at)
+    closeRide(task, 'error', at)
+    return
+  }
+  const last = lastFlowItem(task, ride.id)
+  if (last && !last.text) last.text = text
+  else pushFlowItem(task, ride.id, text, at)
+}
 
 // A repeating-relaunch spec carried on a scheduled relaunch message (`lander
 // relaunch --interval <minutes>`): when the message delivers, the scheduler arms
@@ -251,17 +392,42 @@ export function agentGrantCaps(agent: AgentKind): GrantCaps {
     : { task: true, project: true }
 }
 
+// Flag the trailing-N user entries (N = queue length) as `queued`, cloning only
+// the flagged ones. The unread follow-ups are the trailing user messages, one
+// queue entry each, in order — so the client can dim what the agent hasn't read
+// without seeing the server's queue. Shared by the native items and the legacy
+// messages projections.
+function flagQueued<M extends { role: 'user' | 'flow' | 'assistant' }>(
+  list: M[],
+  queueLen: number,
+): M[] {
+  if (!queueLen) return list
+  const flagged = new Set<number>()
+  let remaining = queueLen
+  for (let i = list.length - 1; i >= 0 && remaining > 0; i--) {
+    if (list[i].role === 'user') {
+      flagged.add(i)
+      remaining--
+    }
+  }
+  return list.map((m, i) => (flagged.has(i) ? { ...m, queued: true } : m))
+}
+
 // Strip the secret `token` (and the server-internal run pointers / retry stash)
 // before sending a task over HTTP, so the UI — and any task scraping the API —
 // can't read another task's token and impersonate it. `retry` is internal
 // bookkeeping the wedge's retry ask supersedes on the wire, so it's stripped too.
-// Also attaches the derived `grants` capability flags (see agentGrantCaps). A
-// shallow copy: the messages/events arrays are shared with the source, not
-// deep-cloned.
+// Serves the v2 item log natively (`items`/`rides`) *and* the v1 legacy projection
+// (`messages`/`events`/`asks`, via toLegacyShape) so the currently-loaded UI and
+// the CLI keep working through the storage flip — dual-shape serving, dropped in
+// step 6. Also derives the served `status` and attaches the `grants` flags.
 export function publicTask<T extends object>(
   task: T,
 ): Omit<T, 'token' | 'runId' | 'runCursor' | 'queued' | 'retry'> & {
   grants?: GrantCaps
+  messages?: Message[]
+  events?: TaskEvent[]
+  asks?: Ask[]
 } {
   const {
     token: _t,
@@ -276,29 +442,20 @@ export function publicTask<T extends object>(
     runCursor?: unknown
     retry?: unknown
     queued?: string[]
-    messages?: Message[]
+    items?: Item[]
+    rides?: Ride[]
   }
-  // Project the internal work queue onto the messages it refers to, then drop the
-  // queue itself. The unread follow-ups are the trailing N user messages (the
-  // queue holds one entry per unread follow-up, in order), so flag those. The
-  // client renders the flag — dimming what the agent hasn't read — without seeing
-  // the server's queue or having to know that trailing-N rule. When nothing is
-  // queued we return the messages array untouched (shared, not cloned).
-  const slot = rest as { messages?: Message[] }
-  const messages = slot.messages
-  if (messages && queued?.length) {
-    const flagged = new Set<number>()
-    let remaining = queued.length
-    for (let i = messages.length - 1; i >= 0 && remaining > 0; i--) {
-      if (messages[i].role === 'user') {
-        flagged.add(i)
-        remaining--
-      }
-    }
-    slot.messages = messages.map((m, i) =>
-      flagged.has(i) ? { ...m, queued: true } : m,
-    )
-  }
+  const restT = rest as { items?: Item[]; rides?: Ride[]; status?: string }
+  const queueLen = queued?.length ?? 0
+
+  // Native items, with the queued flag projected onto trailing user items.
+  if (restT.items) restT.items = flagQueued(restT.items as MessageItem[], queueLen)
+
+  // Legacy dual-shape projection: rebuild v1 messages/events/asks from the item
+  // log, flagging queued on its trailing user messages the same way.
+  const legacy = toLegacyShape({ rides: restT.rides, items: restT.items })
+  const legacyMessages = flagQueued(legacy.messages, queueLen)
+
   // Derive the served `status` from the collapsed stored vocabulary
   // (`riding | wedged | landed`), so the public wire keeps today's four-word
   // vocabulary byte-for-byte. A stored `riding` task is actively *riding* only
@@ -308,21 +465,29 @@ export function publicTask<T extends object>(
   const storedStatus = (task as { status?: string }).status
   if (typeof storedStatus === 'string') {
     const hasLiveRun = !!openRide(task as { rides?: Ride[] }) || _r != null
-    ;(rest as { status?: string }).status =
-      storedStatus === 'riding'
-        ? hasLiveRun
-          ? 'riding'
-          : 'resting'
-        : storedStatus
+    restT.status =
+      storedStatus === 'riding' ? (hasLiveRun ? 'riding' : 'resting') : storedStatus
   }
+
   // Attach the derived grant capabilities when the task carries an agent (real
   // tasks always do; the structurally-typed test fixtures may not).
   const agent = (task as { agent?: AgentKind }).agent
-  const withGrants = agent ? { ...rest, grants: agentGrantCaps(agent) } : rest
-  return withGrants as Omit<
+  const out = {
+    ...rest,
+    messages: legacyMessages,
+    events: legacy.events,
+    asks: legacy.asks,
+    ...(agent ? { grants: agentGrantCaps(agent) } : {}),
+  }
+  return out as Omit<
     T,
     'token' | 'runId' | 'runCursor' | 'queued' | 'retry'
-  > & { grants?: GrantCaps }
+  > & {
+    grants?: GrantCaps
+    messages?: Message[]
+    events?: TaskEvent[]
+    asks?: Ask[]
+  }
 }
 
 // The timestamp of a task's most recent *completed* update: the newest of its
@@ -332,16 +497,20 @@ export function publicTask<T extends object>(
 // lexicographically, so the string max is a chronological max. Empty string
 // when nothing has completed yet (e.g. only an in-flight message exists).
 export function latestUpdateAt(task: {
-  messages: Message[]
-  events?: TaskEvent[]
+  items?: Item[]
+  rides?: Ride[]
 }): string {
+  // Items belonging to the still-open ride are the in-flight turn — skip them, the
+  // v2 analog of skipping the pending message. A ride's completion timestamp is its
+  // endedAt (there's no single "message" carrying it now).
+  const open = openRide(task)
   let latest = ''
-  for (const m of task.messages) {
-    if (m.pending) continue
-    if (m.createdAt > latest) latest = m.createdAt
+  for (const it of task.items ?? []) {
+    if (open && it.rideId === open.id) continue
+    if (it.at > latest) latest = it.at
   }
-  for (const e of task.events ?? []) {
-    if (e.createdAt > latest) latest = e.createdAt
+  for (const r of task.rides ?? []) {
+    if (r.endedAt && r.endedAt > latest) latest = r.endedAt
   }
   return latest
 }
@@ -355,21 +524,23 @@ export function latestUpdateAt(task: {
 // straight between two notable statuses (wedged↔landed) records the arrival
 // only. Call before assigning the new status, while task.status holds the old.
 export function recordStatusTransition(
-  task: { status: string; title: string; events?: TaskEvent[] },
+  task: { status: string; title: string; items?: Item[] },
   next: string,
   at: string,
 ): void {
   const prev = task.status
   if (prev === next) return
-  const events = (task.events ??= [])
   if (next === 'wedged' || next === 'landed')
-    events.push({ kind: next, title: task.title, createdAt: at })
+    pushEventItem(task, { eventKind: next, title: task.title }, at)
   else if (prev === 'wedged' || prev === 'landed')
-    events.push({
-      kind: prev === 'wedged' ? 'unwedged' : 'unlanded',
-      title: task.title,
-      createdAt: at,
-    })
+    pushEventItem(
+      task,
+      {
+        eventKind: prev === 'wedged' ? 'unwedged' : 'unlanded',
+        title: task.title,
+      },
+      at,
+    )
 }
 
 // Seal a task's assistant session so its next turn mints a fresh provider session,
@@ -386,7 +557,7 @@ export function sealForRelaunch(
     sessionId?: string
     turnContext?: string
     title: string
-    events?: TaskEvent[]
+    items?: Item[]
   },
   at: string,
 ): void {
@@ -394,7 +565,7 @@ export function sealForRelaunch(
   // The recorded context baseline belongs to the sealed session; drop it so the
   // fresh session's first turn gets the full dynamic context block again.
   delete task.turnContext
-  ;(task.events ??= []).push({ kind: 'relaunched', title: task.title, createdAt: at })
+  pushEventItem(task, { eventKind: 'relaunched', title: task.title }, at)
 }
 
 // The immediate `lander relaunch <message>` mutation: seal the session, then
@@ -411,8 +582,7 @@ export function applyRelaunch(
     status: string
     title: string
     updatedAt?: string
-    events?: TaskEvent[]
-    messages: Message[]
+    items?: Item[]
     queued?: string[]
     scheduledMessages?: ScheduledMessage[]
     retry?: unknown
@@ -423,7 +593,7 @@ export function applyRelaunch(
 ): void {
   recordStatusTransition(task, 'riding', new Date(Date.parse(at) - 1).toISOString())
   sealForRelaunch(task, at)
-  task.messages.push({ role: 'user', text: message, createdAt: at })
+  pushUserItem(task, message, at)
   ;(task.queued ??= []).push(message)
   task.status = 'riding'
   task.updatedAt = at
@@ -477,8 +647,7 @@ export function applyDueMessages(
   task: {
     sessionId?: string
     title: string
-    events?: TaskEvent[]
-    messages: Message[]
+    items?: Item[]
     queued?: string[]
     scheduledMessages?: ScheduledMessage[]
   },
@@ -490,10 +659,7 @@ export function applyDueMessages(
   // Seal once even if several relaunch entries are due in the same sweep.
   if (relaunch.length) sealForRelaunch(task, at)
   for (const m of [...relaunch, ...rest]) {
-    task.messages.push({
-      role: 'user',
-      text: m.text,
-      createdAt: at,
+    pushUserItem(task, m.text, at, {
       ...(m.attachments?.length ? { attachments: m.attachments } : {}),
     })
     ;(task.queued ??= []).push(m.text)
@@ -519,16 +685,22 @@ export function applyDueMessages(
 export function armScheduledRelaunch(
   task: {
     title: string
-    events?: TaskEvent[]
+    items?: Item[]
     scheduledMessages?: ScheduledMessage[]
   },
   entry: { text: string; deliverAt?: string; waitFor?: string[]; repeat?: RepeatSpec },
   at: string,
 ): void {
   ;(task.scheduledMessages ??= []).push({ ...entry, relaunch: true })
-  const event: TaskEvent = { kind: 'relaunched', title: task.title, createdAt: at }
-  if (entry.deliverAt) event.scheduledFor = entry.deliverAt
-  ;(task.events ??= []).push(event)
+  pushEventItem(
+    task,
+    {
+      eventKind: 'relaunched',
+      title: task.title,
+      ...(entry.deliverAt ? { scheduledFor: entry.deliverAt } : {}),
+    },
+    at,
+  )
 }
 
 // Recover a task wedged on an assistant error (the shared body of the retry ask
@@ -543,8 +715,7 @@ export function applyRetryRecovery(
     status: string
     title: string
     updatedAt?: string
-    events?: TaskEvent[]
-    messages: Message[]
+    items?: Item[]
     queued?: string[]
     scheduledFor?: string
     retry?: { committed: boolean; prompts: string[]; resetsAt?: string }
@@ -555,7 +726,7 @@ export function applyRetryRecovery(
   if (!task.retry) return
   const resend = task.retry.prompts.filter((p) => p.trim())
   if (task.retry.committed || !resend.length) {
-    task.messages.push({ role: 'user', text: 'try again', createdAt: now })
+    pushUserItem(task, 'try again', now)
     task.queued = [...(task.queued ?? []), 'try again']
   } else {
     task.queued = [...(task.queued ?? []), ...resend]
@@ -564,12 +735,11 @@ export function applyRetryRecovery(
     // Scheduling is not an un-wedge: stay wedged (the moon shows via
     // scheduledFor) until launchTask fires and drains the queued recovery.
     task.scheduledFor = resetsAt
-    ;(task.events ??= []).push({
-      kind: 'scheduled',
-      title: task.title,
-      scheduledFor: resetsAt,
-      createdAt: now,
-    })
+    pushEventItem(
+      task,
+      { eventKind: 'scheduled', title: task.title, scheduledFor: resetsAt },
+      now,
+    )
   } else {
     recordStatusTransition(task, 'riding', new Date(Date.parse(now) - 1).toISOString())
     task.status = 'riding'
@@ -583,12 +753,15 @@ export function applyRetryRecovery(
 // turn ends (or errors) the assistant's reply is the last message, with that
 // turn's prompt(s) just before it — a batched turn carries several. Used by the
 // retry path to re-send a turn whose prompt never reached the session.
-export function lastTurnPrompts(messages: Message[]): string[] {
-  let i = messages.length - 1
-  while (i >= 0 && messages[i].role === 'assistant') i--
+export function lastTurnPrompts(task: { items?: Item[] }): string[] {
+  const items = task.items ?? []
+  const isUser = (it: Item) => it.kind === 'message' && it.role === 'user'
+  let i = items.length - 1
+  // Skip the trailing assistant turn (the last ride's items) and any events.
+  while (i >= 0 && !isUser(items[i])) i--
   const prompts: string[] = []
-  while (i >= 0 && messages[i].role === 'user') {
-    prompts.unshift(messages[i].text)
+  while (i >= 0 && isUser(items[i])) {
+    prompts.unshift((items[i] as MessageItem).text)
     i--
   }
   return prompts
@@ -601,79 +774,42 @@ export function lastTurnPrompts(messages: Message[]): string[] {
 // exactly this turn's attachments (not the task's whole history). Returns [] when
 // none of those messages carried any.
 export function turnAttachments(
-  messages: Message[],
+  task: { items?: Item[] },
   count: number,
 ): Attachment[] {
-  const picked: number[] = []
+  const items = task.items ?? []
+  const picked: MessageItem[] = []
   let remaining = count
-  for (let i = messages.length - 1; i >= 0 && remaining > 0; i--) {
-    if (messages[i].role === 'user') {
-      picked.push(i)
+  for (let i = items.length - 1; i >= 0 && remaining > 0; i--) {
+    const it = items[i]
+    if (it.kind === 'message' && it.role === 'user') {
+      picked.push(it)
       remaining--
     }
   }
   picked.reverse()
   const out: Attachment[] = []
-  for (const i of picked) {
-    const atts = messages[i].attachments
-    if (atts?.length) out.push(...atts)
+  for (const it of picked) {
+    if (it.attachments?.length) out.push(...it.attachments)
   }
   return out
 }
 
-// Locate the in-flight assistant message (the one a run is streaming into).
-export function pendingMessage(task: {
-  messages: Message[]
-}): Message | undefined {
-  for (let i = task.messages.length - 1; i >= 0; i--) {
-    const m = task.messages[i]
-    if (m.role === 'assistant' && m.pending) return m
-  }
-  return undefined
-}
-
-// Get the in-flight assistant message, creating it on first use. We hold off on
-// adding it until the assistant actually starts responding so its `createdAt` reflects
-// when the agent began — not when the turn was queued — and so the UI can show a
-// spinner under the user's message during the wait. Until then a riding task has
-// no trailing assistant message.
-export function ensurePending(task: { messages: Message[] }): Message {
-  let msg = pendingMessage(task)
-  if (!msg) {
-    msg = {
-      role: 'assistant',
-      text: '',
-      createdAt: new Date().toISOString(),
-      steps: [],
-      pending: true,
-    }
-    task.messages.push(msg)
-  }
-  return msg
-}
-
-// Record an artifact ref on the assistant message that generated it, so the UI
-// renders the output row under that message. Prefers the in-flight (pending)
-// assistant message when the task is mid-turn (the common publish-during-a-run
-// case), else the last assistant message; if the task has no assistant message
-// yet, this is a no-op and the task's slot registry alone holds the artifact.
-// Republishing a name onto the same message updates that message's ref in place —
-// one chip per output name, always the latest blob — rather than stacking a
-// second, now-stale chip. A ref left on an *earlier* message keeps its old size
-// but stays correct to click: downloads resolve by slot name and serve the latest.
+// Record an artifact ref on the flow message item that generated it, so the UI
+// renders the output row under it. Prefers the open ride's last main-agent flow
+// item (the common publish-during-a-run case), else the last flow item overall; if
+// the task has none yet, this is a no-op and the task's slot registry alone holds
+// the artifact. Republishing a name updates that item's ref in place — one chip per
+// output name, always the latest blob. A ref left on an earlier item keeps its old
+// size but stays correct to click: downloads resolve by slot name, serving latest.
 export function recordArtifactOnMessage(
-  task: { messages: Message[] },
+  task: { items?: Item[]; rides?: Ride[] },
   artifact: Artifact,
 ): void {
-  let msg = pendingMessage(task)
-  if (!msg)
-    for (let i = task.messages.length - 1; i >= 0; i--)
-      if (task.messages[i].role === 'assistant') {
-        msg = task.messages[i]
-        break
-      }
-  if (!msg) return
-  const refs = (msg.artifacts ??= [])
+  const ride = openRide(task)
+  const host = (ride && lastFlowItem(task, ride.id)) ?? lastFlowItem(task)
+  if (!host) return
+  const refs = (host.artifacts ??= [])
   const existing = refs.findIndex((r) => r.name === artifact.name)
   if (existing >= 0) refs[existing] = artifact
   else refs.push(artifact)

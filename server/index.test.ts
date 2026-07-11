@@ -287,9 +287,10 @@ describe('artifacts', () => {
           updatedAt: AT,
           allowEdits: false,
           token: `token-${id}`,
+          runId: `run-${id}`,
           messages: [
             { role: 'user', text: 'make a file', createdAt: AT },
-            { role: 'assistant', text: '', createdAt: AT, pending: true },
+            { role: 'assistant', text: 'working', createdAt: AT, pending: true },
           ],
           ...over,
         },
@@ -330,9 +331,12 @@ describe('artifacts', () => {
     )
     expect(raw.artifacts).toHaveLength(1)
     expect(raw.artifacts[0].name).toBe('out.txt')
-    // The ref lands on the pending assistant message.
-    expect(raw.messages[1].artifacts).toHaveLength(1)
-    expect(raw.messages[1].artifacts[0].name).toBe('out.txt')
+    // The ref lands on the open ride's flow message item.
+    const flow = (raw.items as { role?: string; artifacts?: { name: string }[] }[]).find(
+      (i) => i.role === 'flow' && i.artifacts,
+    )!
+    expect(flow.artifacts).toHaveLength(1)
+    expect(flow.artifacts![0].name).toBe('out.txt')
 
     const dl = await app.request(`/api/${slug}/tasks/${id}/artifacts/out.txt`, {
       headers: { 'x-lander-ui-token': UI_TOKEN },
@@ -368,10 +372,13 @@ describe('artifacts', () => {
     expect(raw.artifacts[0].id).not.toBe(firstBlob)
     expect(raw.artifacts[0].createdAt).toBe(first.artifacts[0].createdAt)
     expect(raw.artifacts[0].size).toBe(3)
-    // The generating message keeps a single ref for the name (updated in place),
+    // The generating flow item keeps a single ref for the name (updated in place),
     // not a second stale chip from the republish.
-    expect(raw.messages[1].artifacts).toHaveLength(1)
-    expect(raw.messages[1].artifacts[0].id).toBe(raw.artifacts[0].id)
+    const flow = (raw.items as { role?: string; artifacts?: { id: string }[] }[]).find(
+      (i) => i.role === 'flow' && i.artifacts,
+    )!
+    expect(flow.artifacts).toHaveLength(1)
+    expect(flow.artifacts![0].id).toBe(raw.artifacts[0].id)
 
     // The superseded blob (+ sidecar) is gone: only the current one remains.
     const entries = await readdir(attachmentsDir())
@@ -455,6 +462,16 @@ describe('asks', () => {
   const taskFile = (id: string) => path.join(tasksDir, `${id}.json`)
   const readRaw = async (id: string): Promise<Raw> =>
     JSON.parse(await readFile(taskFile(id), 'utf8'))
+  // Storage is the v2 item log now; project the ask/event/user-message items out
+  // for assertions that used to read the parallel asks[]/events[]/messages[].
+  const asksOf = (raw: Raw): Raw[] =>
+    ((raw.items as Raw[]) ?? []).filter((i) => i.kind === 'ask')
+  const eventsOf = (raw: Raw): Raw[] =>
+    ((raw.items as Raw[]) ?? []).filter((i) => i.kind === 'event')
+  const userMsgsOf = (raw: Raw): Raw[] =>
+    ((raw.items as Raw[]) ?? []).filter(
+      (i) => i.kind === 'message' && (i as Raw).role === 'user',
+    )
 
   // Seed a wedged task on disk with a token, so a create/answer has an owner and
   // (for answer tests) an ask already open.
@@ -542,9 +559,9 @@ describe('asks', () => {
 
     const raw = await readRaw(id)
     expect(raw.status).toBe('wedged')
-    expect((raw.asks as Raw[]).map((a) => a.id)).toEqual([ask.id])
+    expect(asksOf(raw).map((a) => a.id)).toEqual([ask.id])
     // The wedge crossing is recorded so it surfaces in the timeline.
-    expect((raw.events as Raw[]).some((e) => e.kind === 'wedged')).toBe(true)
+    expect(eventsOf(raw).some((e) => e.eventKind === 'wedged')).toBe(true)
   })
 
   it('lets the task itself raise its ask but rejects a foreign task and anon', async () => {
@@ -599,9 +616,7 @@ describe('asks', () => {
     // No status transition — the task rests with the question attached, and the
     // wedge crossing that a task-blocking ask records is absent.
     expect(raw.status).toBe('riding')
-    expect(
-      ((raw.events as Raw[]) ?? []).some((e) => e.kind === 'wedged'),
-    ).toBe(false)
+    expect(eventsOf(raw).some((e) => e.eventKind === 'wedged')).toBe(false)
   })
 
   it('withdraws the prior open ask when a fresh one supersedes it (last-in-turn wins)', async () => {
@@ -609,7 +624,7 @@ describe('asks', () => {
     await seedTask(id, { status: 'wedged', asks: [openAsk()] })
     const res = await create(id, { form: choiceForm, blocking: 'none' })
     expect(res.status).toBe(201)
-    const asks = (await readRaw(id)).asks as Raw[]
+    const asks = asksOf(await readRaw(id))
     // The seeded ask is withdrawn; only the fresh one stays open — at most one
     // open ask, so the UI's single-open-ask finder still holds.
     expect(asks).toHaveLength(2)
@@ -689,9 +704,9 @@ describe('asks', () => {
     // Stays wedged, with a scheduled wakeup and the delivery queued for it.
     expect(raw.status).toBe('wedged')
     expect(raw.scheduledFor).toBe(resetsAt)
-    expect((raw.events as Raw[]).some((e) => e.kind === 'scheduled')).toBe(true)
+    expect(eventsOf(raw).some((e) => e.eventKind === 'scheduled')).toBe(true)
     expect(raw.queued).toEqual(['Answer to "Pick one": Later'])
-    expect((raw.asks as Raw[])[0].state).toBe('answered')
+    expect(asksOf(raw)[0].state).toBe('answered')
   })
 
   it('gates answering to the UI, 404s an unknown ask, and 409s a non-open one', async () => {
@@ -715,7 +730,7 @@ describe('asks', () => {
     })
     expect(res.status).toBe(200)
     const raw = await readRaw(id)
-    expect((raw.asks as Raw[])[0].state).toBe('withdrawn')
+    expect(asksOf(raw)[0].state).toBe('withdrawn')
     expect(raw.status).toBe('riding')
   })
 
@@ -729,7 +744,7 @@ describe('asks', () => {
     })
     expect(res.status).toBe(200)
     const raw = await readRaw(id)
-    expect((raw.asks as Raw[])[0].state).toBe('withdrawn')
+    expect(asksOf(raw)[0].state).toBe('withdrawn')
   })
 
   it('withdraws an open ask when the task is relaunched', async () => {
@@ -740,7 +755,7 @@ describe('asks', () => {
     })
     expect(res.status).toBe(200)
     const raw = await readRaw(id)
-    expect((raw.asks as Raw[])[0].state).toBe('withdrawn')
+    expect(asksOf(raw)[0].state).toBe('withdrawn')
   })
 
   // A platform retry ask (origin:'retry') routes the answer through the
@@ -770,9 +785,9 @@ describe('asks', () => {
     // Committed → a "try again" nudge (re-sending would duplicate the turn).
     expect(raw.queued).toEqual(['try again'])
     expect(raw.retry).toBeUndefined()
-    expect((raw.asks as Raw[])[0].state).toBe('answered')
+    expect(asksOf(raw)[0].state).toBe('answered')
     // No generic "Answer to …" delivery message for a retry ask.
-    const texts = (raw.messages as { text: string }[]).map((m) => m.text)
+    const texts = userMsgsOf(raw).map((m) => m.text as string)
     expect(texts.some((t) => t.startsWith('Answer to'))).toBe(false)
   })
 
@@ -822,7 +837,7 @@ describe('asks', () => {
     expect(raw.status).toBe('wedged')
     expect(raw.scheduledFor).toBe(resetsAt)
     expect(raw.queued).toEqual(['try again'])
-    expect((raw.events as Raw[]).some((e) => e.kind === 'scheduled')).toBe(true)
-    expect((raw.asks as Raw[])[0].state).toBe('answered')
+    expect(eventsOf(raw).some((e) => e.eventKind === 'scheduled')).toBe(true)
+    expect(asksOf(raw)[0].state).toBe('answered')
   })
 })

@@ -39,7 +39,6 @@ import {
   publicTask,
   latestUpdateAt,
   recordStatusTransition,
-  pendingMessage,
   recordArtifactOnMessage,
   lastTurnPrompts,
   turnAttachments,
@@ -51,13 +50,19 @@ import {
   startRide,
   closeRide,
   openRide,
-  type Message,
-  type TaskEvent,
+  pushUserItem,
+  pushFlowItem,
+  pushEventItem,
+  lastFlowItem,
+  userItems,
+  eventItems,
+  recordAssistantError,
   type ScheduledMessage,
   type RepeatSpec,
   type Ride,
+  type Item,
 } from './tasks'
-import { reviveTask } from './migrate'
+import { migrateTask } from './migrate'
 import {
   saveAttachment,
   readAttachmentMeta,
@@ -78,6 +83,7 @@ import {
 import {
   createAsk,
   createRetryAsk,
+  wireAsk,
   answerAsk,
   answerDelivery,
   chosenOption,
@@ -178,30 +184,27 @@ type Task = {
   // to Claude as --allowedTools on every future turn for this task. Absent on
   // tasks saved before this field existed — treat undefined as empty.
   allow?: string[]
-  messages: Message[]
+  // The unified item log (v2 storage): messages, tool calls, lifecycle events, and
+  // asks, in one flat ordered array (see docs/conversation-model.md). Replaces the
+  // old parallel messages[]/events[]/asks[]. publicTask serves this natively *and*
+  // projects it back to the v1 messages/events/asks shape for the current UI/CLI
+  // (dual-shape, dropped in step 6). Legacy files are converted on read (migrate).
+  items: Item[]
   // Rides: one record per run (agent turn) this task has driven, opened when the
   // run is handed to the daemon and closed when it finishes. `endedAt`-less ⇒ the
-  // ride is open (the task is actively riding). Additive for now — the UI still
-  // reads Message.usage/steps; see docs/rides-plan.md. Absent on tasks that
-  // predate rides.
+  // ride is open (the task is actively riding). Absent on tasks that predate rides.
   rides?: Ride[]
+  // Marks a record migrated to the v2 shape (rides + items). Absent on legacy v1
+  // records until the reviver/boot-sweep converts them.
+  shape?: number
   // Named output slots this task has published (`lander artifact put`), latest
   // version only — the slot registry, upserted by name. Each points at its
   // current blob in the project's attachmentsDir (shared with input attachments);
   // republishing a name mints a fresh blob and supersedes the old. The generating
-  // assistant message also carries a point-in-time ref (Message.artifacts), but
-  // this is the source of truth for the current version, and downloads resolve
-  // against it by name. Absent on tasks that have published none.
+  // flow message item also carries a point-in-time ref, but this is the source of
+  // truth for the current version, and downloads resolve against it by name.
+  // Absent on tasks that have published none.
   artifacts?: Artifact[]
-  // Lifecycle events (launch, rename, wedged/un-wedged, landed/un-landed),
-  // interleaved with messages by timestamp in the UI. Absent on tasks saved
-  // before this existed.
-  events?: TaskEvent[]
-  // Questions raised on this task (`POST /asks`, or the platform's usage-limit/
-  // error retry ask), interleaved with messages/events by `createdAt` in the UI
-  // exactly like events. A task-blocking ask wedges until answered. Passed
-  // through by publicTask (nothing secret in an ask). Absent when none raised.
-  asks?: Ask[]
   // Follow-up prompts sent while a run was in flight, awaiting their turn.
   // Persisted so they survive a server restart; drained by driveTask when the
   // current run finishes — the whole queue joins into one turn (see driveTask).
@@ -309,16 +312,18 @@ type Task = {
 
 // Bind the generic task store (server/store.ts) to the concrete Task type, so
 // the rest of the server keeps the same typed call sites.
-// Bind the store to the concrete Task type and thread the versioned reader
+// Bind the store to the concrete Task type and thread the full v1→v2 migration
 // (server/migrate.ts) through every read path, so a task read off disk is always
-// migrated to the current shape — and mutateTask persists that migration on the
-// task's next write (see applyMutation).
-const readTasks = (dataDir: string) => readTasksStore<Task>(dataDir, reviveTask)
+// converted to the current shape — and mutateTask persists that conversion on the
+// task's next write (see applyMutation). `isLegacy` gates the one-time
+// `<id>.json.v1.bak` backup mutateTask drops before it first overwrites a v1 file.
+const isLegacy = (t: Task) => t.shape !== 2
+const readTasks = (dataDir: string) => readTasksStore<Task>(dataDir, migrateTask)
 const readTask = (dataDir: string, id: string) =>
-  readTaskStore<Task>(dataDir, id, reviveTask)
+  readTaskStore<Task>(dataDir, id, migrateTask)
 const writeTask = (file: string, task: Task) => writeTaskStore(file, task)
 const mutateTask = (file: string, fn: (task: Task) => void) =>
-  mutateTaskStore(file, fn, reviveTask)
+  mutateTaskStore(file, fn, migrateTask, isLegacy)
 
 async function setTitle(
   dataDir: string,
@@ -332,7 +337,7 @@ async function setTitle(
     // A manual rename (which records a 'renamed' event) wins over a late-arriving
     // generated name — the user's choice stands. Guards the narrow window between
     // a rename and a generation that was already in flight.
-    if (task.events?.some((e) => e.kind === 'renamed')) return
+    if (eventItems(task).some((e) => e.eventKind === 'renamed')) return
     task.title = title
     // Naming succeeded, so a prior failure no longer needs retrying on the next
     // wakeup (see ensureTitle / driveTask).
@@ -340,8 +345,8 @@ async function setTitle(
     // This is the first generated name for a task created untitled: fill it into
     // the creation event (a launch, or a "scheduled" event for a deferred task)
     // rather than recording it as a rename.
-    const created = task.events?.find(
-      (e) => e.kind === 'launched' || e.kind === 'scheduled',
+    const created = eventItems(task).find(
+      (e) => e.eventKind === 'launched' || e.eventKind === 'scheduled',
     )
     if (created && !created.title) created.title = title
   })
@@ -395,7 +400,7 @@ async function ensureTitle(
   }
   const file = path.join(project.dataDir, `${id}.json`)
   await mutateTask(file, (t) => {
-    if (!t.events?.some((e) => e.kind === 'renamed')) t.titlePending = true
+    if (!eventItems(t).some((e) => e.eventKind === 'renamed')) t.titlePending = true
   }).catch(() => {})
 }
 
@@ -446,17 +451,11 @@ async function runTurn(
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     await mutateTask(file, (t) => {
-      const msg = pendingMessage(t)
-      if (msg) {
-        msg.text = `error running assistant: ${message}`
-        msg.pending = false
-      } else {
-        t.messages.push({
-          role: 'assistant',
-          text: `error running assistant: ${message}`,
-          createdAt: new Date().toISOString(),
-        })
-      }
+      recordAssistantError(
+        t,
+        `error running assistant: ${message}`,
+        new Date().toISOString(),
+      )
     }).catch(() => {})
     return 'crashed'
   }
@@ -483,7 +482,6 @@ async function runTurn(
   if (!(await awaitDaemonServing(project.slug))) {
     await mutateTask(file, (t) => {
       const at = new Date().toISOString()
-      const msg = pendingMessage(t)
       // Distinguish the two ways this fails: no daemon at all vs. a daemon that
       // is connected but doesn't serve this project's slug (a path/slug mismatch
       // between how the daemon was launched and how the task is keyed). The
@@ -492,12 +490,7 @@ async function runTurn(
       const text = daemonConnected()
         ? `error running assistant: a daemon is connected but does not serve this project (slug '${project.slug}'); daemon serves: ${daemonSlugs().join(', ') || '(none)'}`
         : 'error running assistant: no daemon connected for this project'
-      if (msg) {
-        msg.text = text
-        msg.pending = false
-      } else {
-        t.messages.push({ role: 'assistant', text, createdAt: at })
-      }
+      recordAssistantError(t, text, at)
       recordStatusTransition(t, 'wedged', at)
       t.status = 'wedged'
       t.updatedAt = at
@@ -505,7 +498,7 @@ async function runTurn(
       // prompt(s) so the user can just retry once a daemon is back (a transient
       // daemon outage is the expected cause), and raise the generic retry ask so
       // the wedge carries a button just like an assistant-error wedge does.
-      t.retry = { committed: false, prompts: lastTurnPrompts(t.messages) }
+      t.retry = { committed: false, prompts: lastTurnPrompts(t) }
       createRetryAsk(t, {
         id: nextAskId(t, Date.parse(at)),
         committed: false,
@@ -599,15 +592,22 @@ async function reduceRunWs(
       const ev = await channel.next()
       if (ev.kind === 'crashed') {
         await mutateTask(file, (t) => {
-          const msg = pendingMessage(t)
-          if (msg) {
-            if (!msg.text) msg.text = 'error running assistant: run interrupted'
-            msg.pending = false
-            t.updatedAt = new Date().toISOString()
+          const at = new Date().toISOString()
+          const ride = openRide(t)
+          if (ride) {
+            const streamed = (t.items ?? []).some(
+              (it) =>
+                it.rideId === ride.id &&
+                it.kind === 'message' &&
+                it.text.trim().length > 0,
+            )
+            if (!streamed)
+              recordAssistantError(t, 'error running assistant: run interrupted', at)
+            t.updatedAt = at
           }
           // The run was abandoned (the daemon stayed gone past the grace) — close
           // its open ride interrupted, paired with the runId delete below.
-          closeRide(t, 'interrupted', new Date().toISOString(), msg?.usage)
+          closeRide(t, 'interrupted', at)
           delete t.runId
           delete t.runCursor
         }).catch(() => {})
@@ -703,7 +703,7 @@ async function driveTask(project: Project, id: string): Promise<void> {
     // message. Fire-and-forget so it never holds up the turn; ensureTitle no-ops
     // once the user has named the task themselves.
     if (existing?.titlePending) {
-      const opening = existing.messages.find((m) => m.role === 'user')?.text
+      const opening = userItems(existing)[0]?.text
       if (opening) void ensureTitle(project, id, opening).catch(() => {})
     }
     while (true) {
@@ -714,23 +714,26 @@ async function driveTask(project: Project, id: string): Promise<void> {
       // collapses — so the UI still shows them as separate messages under one
       // reply. The loop repeats because more can arrive while this batch runs;
       // those become the next batched turn.
+      // Mint the run id here, at queue-drain time, so the ride id is in hand to
+      // stamp the batch's user items with `deliveredIn` (making the batching
+      // visible). runTurn opens the ride under this id when it hands off the run.
+      const runId = randomUUID()
       let batch: string[] = []
       let atts: Attachment[] = []
       await mutateTask(file, (t) => {
         if (t.queued && t.queued.length) {
           batch = t.queued
-          // Gather the attachments off the trailing user messages this batch is
-          // made of, under the same lock, so the run carries exactly this turn's
-          // files (see turnAttachments).
-          atts = turnAttachments(t.messages, batch.length)
+          // Gather the attachments off the trailing user items this batch is made
+          // of, under the same lock, so the run carries exactly this turn's files.
+          atts = turnAttachments(t, batch.length)
+          // Stamp deliveredIn = this ride on the batch's trailing user items.
+          const users = userItems(t)
+          for (const u of users.slice(-batch.length)) u.deliveredIn = runId
           delete t.queued
         }
       }).catch(() => {})
       if (!batch.length) break
-      // Mint the run id here, at queue-drain time, so the ride id is in hand as
-      // the turn is assembled (a later step stamps the batch's messages with it).
-      // runTurn opens the ride under this id when it hands the run to the daemon.
-      await runTurn(project, id, batch.join('\n\n'), randomUUID(), atts)
+      await runTurn(project, id, batch.join('\n\n'), runId, atts)
     }
   } finally {
     running.delete(id)
@@ -770,7 +773,10 @@ async function launchTask(project: Project, id: string): Promise<boolean> {
     // the scheduler only calls us once one has fired. Clear both so the OR
     // fallback doesn't re-fire the task after it's running.
     if ((!t.scheduledFor && !t.waitingFor) || running.has(id)) return
-    everRan = t.messages.some((m) => m.role === 'assistant')
+    // "Ever ran" = has driven at least one ride (established a session), so a
+    // rested task gets the synthetic resume prompt while a deferred new task drives
+    // its still-queued opening message instead.
+    everRan = (t.rides?.length ?? 0) > 0
     delete t.scheduledFor
     delete t.waitingFor
     const at = new Date().toISOString()
@@ -779,7 +785,7 @@ async function launchTask(project: Project, id: string): Promise<boolean> {
     // it surfaces in the timeline before the queued recovery prompt that the
     // wakeup is about to drive. A no-op for a merely-resting scheduled task.
     recordStatusTransition(t, 'riding', new Date(Date.parse(at) - 1).toISOString())
-    ;(t.events ??= []).push({ kind: 'launched', title: t.title, createdAt: at })
+    pushEventItem(t, { eventKind: 'launched', title: t.title }, at)
     t.status = 'riding'
     t.updatedAt = at
     // A task put to rest with `lander rest` has already run its opening turn, so
@@ -788,7 +794,7 @@ async function launchTask(project: Project, id: string): Promise<boolean> {
     // message queued and drives that instead, so skip the synthetic prompt.
     if (everRan && !(t.queued && t.queued.length)) {
       const text = `Resumed at ${new Date(at).toLocaleString()}.`
-      t.messages.push({ role: 'user', text, createdAt: at })
+      pushUserItem(t, text, at)
       ;(t.queued ??= []).push(text)
     }
     go = true
@@ -1490,22 +1496,12 @@ app.post('/api/:project/tasks', async (c) => {
     // name the task in the background so creation never blocks on it.
     const id = newTaskId()
     const now = new Date().toISOString()
-    // The creation event, timestamped a hair before the opening message so the
-    // timeline shows it ahead of that message. A task awaiting other tasks gets
-    // an "awaiting" event (carrying them, for links) even if it also has a time
-    // fallback — the condition is what's shown; a purely time-deferred task gets
-    // "scheduled"; an immediate task gets "launched". The matching "launched"
-    // event is recorded later, when it actually runs.
-    const createdEvent: TaskEvent = {
-      kind: !deferred ? 'launched' : waitingFor ? 'awaiting' : 'scheduled',
-      title: title || undefined,
-      ...(deferred && waitingFor
-        ? { awaiting: await describeAwaited(project, waitingFor) }
-        : deferred && scheduledFor
-          ? { scheduledFor }
-          : {}),
-      createdAt: new Date(Date.parse(now) - 1).toISOString(),
-    }
+    // The creation event's snapshot of any awaited tasks (for links), computed
+    // before we build the record (the readTask calls are async).
+    const createdAwaiting =
+      deferred && waitingFor
+        ? await describeAwaited(project, waitingFor)
+        : undefined
     const task: Task = {
       id,
       agent,
@@ -1533,24 +1529,37 @@ app.post('/api/:project/tasks', async (c) => {
         : {}),
       // Authenticates this task's own callbacks (see Task.token).
       token: randomUUID(),
-      messages: [
-        {
-          role: 'user',
-          text: message,
-          createdAt: now,
-          ...(attachments ? { attachments } : {}),
-        },
-      ],
-      events: [createdEvent],
-      // The opening message rides the same queue as follow-ups; driveTask
-      // drains it (immediately, or when the scheduler launches a deferred task).
-      // It stays in `messages` above for display.
+      // A fresh record is born at the current shape.
+      shape: 2,
+      items: [],
+      // The opening message rides the same queue as follow-ups; driveTask drains
+      // it (immediately, or when the scheduler launches a deferred task). It stays
+      // as a user item in the log above for display.
       queued: message.trim() ? [message] : [],
       // Both triggers persist when deferred; the scheduler fires on whichever
       // comes first. Omitted entirely on an immediate task.
       ...(deferred && scheduledFor ? { scheduledFor } : {}),
       ...(deferred && waitingFor ? { waitingFor } : {}),
     }
+    // The creation event, a hair before the opening message so the timeline shows
+    // it ahead of that message. A task awaiting other tasks gets an "awaiting"
+    // event (carrying them, for links) even with a time fallback — the condition is
+    // what's shown; a purely time-deferred task gets "scheduled"; an immediate task
+    // gets "launched" (the matching launch is re-recorded when it runs).
+    pushEventItem(
+      task,
+      {
+        eventKind: !deferred ? 'launched' : waitingFor ? 'awaiting' : 'scheduled',
+        ...(title ? { title } : {}),
+        ...(createdAwaiting
+          ? { awaiting: createdAwaiting }
+          : deferred && scheduledFor
+            ? { scheduledFor }
+            : {}),
+      },
+      new Date(Date.parse(now) - 1).toISOString(),
+    )
+    pushUserItem(task, message, now, attachments ? { attachments } : {})
 
     await mkdir(project.dataDir, { recursive: true })
     await writeFile(
@@ -1651,11 +1660,7 @@ app.patch('/api/:project/tasks/:id', async (c) => {
         // changes the title. The initial generated name goes through setTitle,
         // which amends the launch event instead — so it never lands here.
         if (next !== t.title) {
-          (t.events ??= []).push({
-            kind: 'renamed',
-            title: next,
-            createdAt: new Date().toISOString(),
-          })
+          pushEventItem(t, { eventKind: 'renamed', title: next }, new Date().toISOString())
           t.updatedAt = new Date().toISOString()
         }
         t.title = next
@@ -1789,10 +1794,12 @@ app.post('/api/:project/tasks/:id/rest', async (c) => {
       else delete t.waitingFor
       // An await condition is what's shown (with its links) even alongside a time
       // fallback; a pure time rest keeps the scheduled event.
-      ;(t.events ??= []).push(
+      pushEventItem(
+        t,
         waitingFor
-          ? { kind: 'awaiting', title: t.title, awaiting, createdAt: at }
-          : { kind: 'scheduled', title: t.title, scheduledFor, createdAt: at },
+          ? { eventKind: 'awaiting', title: t.title, awaiting }
+          : { eventKind: 'scheduled', title: t.title, scheduledFor },
+        at,
       )
       // Stored status collapses to `riding`; publicTask serves `resting`
       // (decorated with the scheduledFor/waitingFor set above) since no ride is
@@ -2105,18 +2112,13 @@ app.post('/api/:project/tasks/:id/retitle', async (c) => {
     if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
     const file = path.join(project.dataDir, `${id}.json`)
 
-    let task: Task
-    try {
-      task = JSON.parse(await readFile(file, 'utf8')) as Task
-    } catch {
-      return c.json({ error: 'task not found' }, 404)
-    }
+    const task = await readTask(project.dataDir, id)
+    if (!task) return c.json({ error: 'task not found' }, 404)
 
     // Title from the user's own messages only. The goal lives in what the user
     // asked for; the assistant's replies are execution detail that dominates the
     // transcript by volume and pulls titles off-goal and over-length.
-    const goal = task.messages
-      .filter((m) => m.role === 'user')
+    const goal = userItems(task)
       .map((m) => m.text)
       .join('\n\n')
     const next = await generateTitle(project.path, goal)
@@ -2132,11 +2134,7 @@ app.post('/api/:project/tasks/:id/retitle', async (c) => {
       // A deliberate re-title (the "suggest a title" button), so record it as a
       // rename — unlike the automatic first naming, which amends the launch event.
       if (next !== t.title) {
-        (t.events ??= []).push({
-          kind: 'renamed',
-          title: next,
-          createdAt: new Date().toISOString(),
-        })
+        pushEventItem(t, { eventKind: 'renamed', title: next }, new Date().toISOString())
         t.updatedAt = new Date().toISOString()
       }
       t.title = next
@@ -2235,12 +2233,7 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
       // "un-wedged"/"un-landed" transition a hair before the message's own
       // timestamp so the timeline shows it ahead of the message that caused it.
       recordStatusTransition(t, 'riding', new Date(Date.parse(now) - 1).toISOString())
-      t.messages.push({
-        role: 'user',
-        text: message,
-        createdAt: now,
-        ...(attachments ? { attachments } : {}),
-      })
+      pushUserItem(t, message, now, attachments ? { attachments } : {})
       t.updatedAt = now
       // Queue the prompt for the session and go "riding". driveTask clears it to
       // "resting" once the queue drains.
@@ -2328,13 +2321,18 @@ app.post('/api/:project/tasks/:id/asks', async (c) => {
         t.status = 'wedged'
       }
       t.updatedAt = at
-      created = createAsk(t, {
-        id: askId,
-        ...(prompt ? { prompt } : {}),
-        form,
-        blocking,
-        at,
-      })
+      // Agent-raised asks anchor to the message that raised them — the ride's last
+      // flow message item — so the form renders as that message's footer.
+      created = wireAsk(
+        createAsk(t, {
+          id: askId,
+          ...(prompt ? { prompt } : {}),
+          form,
+          blocking,
+          ...(lastFlowItem(t)?.id ? { parentId: lastFlowItem(t)!.id } : {}),
+          at,
+        }),
+      )
     })
     return c.json({ ask: created }, 201)
   } catch (e) {
@@ -2393,7 +2391,7 @@ app.post('/api/:project/tasks/:id/asks/:askId/answer', async (c) => {
       // re-entry prompt; a plain answer's text is queued for the session.
       const delivery = answerDelivery(ask)
       if (delivery != null) {
-        t.messages.push({ role: 'user', text: delivery, createdAt: now })
+        pushUserItem(t, delivery, now)
         t.queued = [...(t.queued ?? []), delivery]
       }
       if (defer && scheduleAt) {
@@ -2401,12 +2399,11 @@ app.post('/api/:project/tasks/:id/asks/:askId/answer', async (c) => {
         // scheduledFor) until launchTask fires the wakeup and drains the
         // queued delivery — mirrors the deferred retry exactly.
         t.scheduledFor = scheduleAt
-        ;(t.events ??= []).push({
-          kind: 'scheduled',
-          title: t.title,
-          scheduledFor: scheduleAt,
-          createdAt: now,
-        })
+        pushEventItem(
+          t,
+          { eventKind: 'scheduled', title: t.title, scheduledFor: scheduleAt },
+          now,
+        )
       } else {
         recordStatusTransition(t, 'riding', before)
         t.status = 'riding'
@@ -2588,16 +2585,15 @@ async function recoverQueues(): Promise<void> {
       if (!name.endsWith('.json')) continue
       const id = name.slice(0, -'.json'.length)
       const file = path.join(project.dataDir, name)
-      let task: Task
-      try {
-        task = JSON.parse(await readFile(file, 'utf8')) as Task
-      } catch {
-        continue
-      }
+      // Revive on read so the interrupted-detection below works uniformly over the
+      // v2 item log regardless of the file's on-disk shape (the boot sweep converts
+      // the rest of the backlog separately).
+      const task = await readTask(project.dataDir, id)
+      if (!task) continue
       // A scheduled task waits for its launch time — launchScheduled owns it,
       // not the queue recovery (it carries a queued opening message too).
       if (task.scheduledFor) continue
-      const everRan = task.messages.some((m) => m.role === 'assistant')
+      const everRan = (task.rides?.length ?? 0) > 0
 
       // A tracked run: hand it to driveTask, whose reattach asks the daemon to
       // replay from the persisted cursor (or aborts it if the daemon is gone past
@@ -2612,33 +2608,34 @@ async function recoverQueues(): Promise<void> {
       // A turn interrupted by the previous process dying, with nothing driving it
       // now. Under the status collapse an idle (resting) task is stored `riding`
       // too, so "riding" no longer means "mid-run" — the real signal is unfinished
-      // work with no live run: a stale pending assistant message, or a trailing
-      // user message that never got its reply (its queue was drained before the
-      // crash). A tracked run (runId) was handled above; wedged/landed are left
-      // alone (their stored status isn't `riding`).
-      const lastMsg = task.messages[task.messages.length - 1]
+      // work with no live run: a still-open ride, or a trailing user item that
+      // never got its reply (its queue was drained before the crash). A tracked run
+      // (runId) was handled above; wedged/landed are left alone.
+      const lastItem = task.items[task.items.length - 1]
+      const trailingUser =
+        lastItem?.kind === 'message' && lastItem.role === 'user'
       const interrupted =
         task.status === 'riding' &&
         !hasQueue &&
-        (task.messages.some((m) => m.pending) || lastMsg?.role === 'user')
+        (!!openRide(task) || trailingUser)
       if (!hasQueue && !interrupted) continue
       await mutateTask(file, (t) => {
-        for (const m of t.messages) if (m.pending) m.pending = false
+        // Close any ride the dead process left open (the v2 analog of clearing a
+        // stale pending flag) so the task doesn't read as live.
+        if (openRide(t)) closeRide(t, 'interrupted', new Date().toISOString())
         if (interrupted) {
           if (everRan) {
             const at = new Date().toISOString()
             const text = `Resumed at ${new Date(at).toLocaleString()} after the previous run was interrupted.`
-            t.messages.push({ role: 'user', text, createdAt: at })
+            pushUserItem(t, text, at)
             ;(t.queued ??= []).push(text)
             t.updatedAt = at
           } else {
             // The opening run died before any reply. Replay the original opening
-            // prompt (the last/only user message) without adding a duplicate
-            // display message; driveTask runs it as a fresh turn (no sessionId
-            // persisted yet, so the daemon mints one).
-            const opening = [...t.messages]
-              .reverse()
-              .find((m) => m.role === 'user')
+            // prompt (the last user item) without adding a duplicate display item;
+            // driveTask runs it as a fresh turn (no sessionId persisted yet, so the
+            // daemon mints one).
+            const opening = userItems(t).at(-1)
             if (opening) (t.queued ??= []).push(opening.text)
           }
         }
@@ -2716,6 +2713,41 @@ async function backfillAgents(): Promise<void> {
 // too, since the UI reads those back. Idempotent: a file already in the new shape
 // is left untouched.
 type LegacyAwait = { id?: string; session?: string; title: string }
+// One-time boot sweep: convert every not-yet-migrated task file (in each
+// project's tasks/ and archived/ dirs) to the v2 shape (rides + item log), so the
+// reader's ongoing per-file conversion is bounded to files that appear later
+// (restores, other checkouts — what the two-week cleanup window covers). Each
+// shape-less file is mutated with a no-op — the reviver converts it, the write
+// persists it and drops a one-time `.v1.bak`. Best-effort and sequential; logs a
+// count. Runs after the server is already serving (in-flight runs are unaffected).
+async function migrateSweep(): Promise<void> {
+  let converted = 0
+  for (const project of PROJECTS) {
+    for (const dir of [project.dataDir, project.archiveDir]) {
+      let names: string[]
+      try {
+        names = await readdir(dir)
+      } catch {
+        continue
+      }
+      for (const name of names) {
+        if (!name.endsWith('.json')) continue
+        const file = path.join(dir, name)
+        try {
+          const raw = JSON.parse(await readFile(file, 'utf8')) as { shape?: number }
+          if (raw.shape === 2) continue
+          // The no-op mutation triggers reviver conversion + persistence + backup.
+          await mutateTask(file, () => {})
+          converted++
+        } catch {
+          // skip unreadable/invalid files
+        }
+      }
+    }
+  }
+  if (converted) console.log(`migrated ${converted} task file(s) to shape 2`)
+}
+
 async function backfillIds(): Promise<void> {
   for (const project of PROJECTS) {
     for (const dir of [project.dataDir, project.archiveDir]) {
@@ -2730,8 +2762,11 @@ async function backfillIds(): Promise<void> {
         const file = path.join(dir, name)
         const stem = name.slice(0, -'.json'.length)
         try {
-          const task = JSON.parse(await readFile(file, 'utf8')) as Task
-          const legacyAwaits = (task.events ?? []).some((e) =>
+          // Revive on read so the awaiting scan runs over v2 event items (the
+          // converter carries any legacy `awaiting` verbatim onto them).
+          const task = await readTask(dir, stem)
+          if (!task) continue
+          const legacyAwaits = eventItems(task).some((e) =>
             (e.awaiting as LegacyAwait[] | undefined)?.some(
               (a) => a.id === undefined && a.session !== undefined,
             ),
@@ -2739,7 +2774,7 @@ async function backfillIds(): Promise<void> {
           if (task.id !== undefined && !legacyAwaits) continue
           await mutateTask(file, (t) => {
             if (t.id === undefined) t.id = stem
-            for (const e of t.events ?? []) {
+            for (const e of eventItems(t)) {
               for (const a of (e.awaiting as LegacyAwait[] | undefined) ?? []) {
                 if (a.id === undefined && a.session !== undefined) {
                   a.id = a.session
@@ -2801,6 +2836,9 @@ if (process.env.NODE_ENV !== 'test' && process.env.VITEST !== 'true') {
   void backfillIds()
   void backfillAgents()
   void backfillSeen()
+  // Convert the whole task backlog to the v2 shape once, up front (per-file writes
+  // serialize with everything else via mutateTask).
+  void migrateSweep()
   void recoverQueues()
   // Launch due scheduled tasks on boot (catching any whose time passed while the
   // server was down), then sweep every 15s to launch each as it comes due.
