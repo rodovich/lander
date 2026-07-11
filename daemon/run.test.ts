@@ -1,27 +1,34 @@
 import { EventEmitter } from 'node:events'
-import type { ChildProcess, SpawnOptions } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 import { describe, expect, it, vi } from 'vitest'
 import { createClaudeAdapter } from './claude'
 import { createCodexAdapter } from './codex'
 import type { StartRunMessage } from '../server/protocol'
-import type { RunManagerMessage } from './run'
-import { createRunManager } from './run'
+import type { HostEvent, HostInput } from './run-agent'
+import {
+  createRunManager,
+  type RunManagerMessage,
+  type RunManagerOptions,
+} from './run'
 
-class FakeChild extends EventEmitter {
+// A stand-in for the flow-host subprocess. Its stdin captures the HostInput the
+// daemon writes; its stdout/stderr are pushed by the test to drive the supervisor;
+// `kill` records the group-kill (pid is undefined here, so killHost falls back to
+// the plain kill this mock records — no real process group is signaled in a test).
+class FakeHost extends EventEmitter {
+  pid: number | undefined = undefined
   stdout = new EventEmitter()
   stderr = new EventEmitter()
+  stdin = {
+    writes: [] as string[],
+    write(chunk: string) {
+      this.writes.push(String(chunk))
+      return true
+    },
+    end() {},
+    on() {},
+  }
   kill = vi.fn(() => true)
-}
-
-type SpawnCall = {
-  command: string
-  args: string[]
-  options: SpawnOptions
-  child: FakeChild
-}
-
-function line(event: unknown): Buffer {
-  return Buffer.from(`${JSON.stringify(event)}\n`)
 }
 
 function makeStart(over: Partial<StartRunMessage> = {}): StartRunMessage {
@@ -41,20 +48,21 @@ function makeStart(over: Partial<StartRunMessage> = {}): StartRunMessage {
   }
 }
 
-function harness() {
+function harness(opts: Partial<RunManagerOptions> = {}) {
   const messages: RunManagerMessage[] = []
-  const spawns: SpawnCall[] = []
-  const spawn = (command: string, args: string[], options: SpawnOptions) => {
-    const child = new FakeChild()
-    spawns.push({ command, args, options, child })
-    return child as unknown as ChildProcess
+  const hosts: FakeHost[] = []
+  const spawnHost = () => {
+    const host = new FakeHost()
+    hosts.push(host)
+    return host as unknown as ChildProcess
   }
   const manager = createRunManager({
+    // The daemon keeps a compiled-in *capability* view of the adapters (it no
+    // longer executes them — the host does), so real adapters serve fine here.
     adapters: {
       claude: createClaudeAdapter({
         landerBin: '/repo/bin/lander',
         taskPromptTemplate: 'Prompt: {{forwardable}}.',
-        readGitContext: () => 'Git status as of this message:\n\non branch test',
       }),
       codex: createCodexAdapter({
         taskPromptTemplate: 'Prompt: {{forwardable}}.',
@@ -62,22 +70,110 @@ function harness() {
     },
     resolveRunPaths: () => ({ root: '/repo', cwd: '/repo' }),
     send: (msg) => messages.push(msg),
+    resolveFilesDir: (msg) => `/files/${msg.project}/${msg.taskId}`,
     refreshUsage: () => {},
-    spawn,
-    mintSessionId: () => 'minted-session',
-    now: () => '2026-01-01T00:00:00.000Z',
+    spawnHost,
+    ...opts,
   })
-  return { manager, messages, spawns }
+  return { manager, messages, hosts }
+}
+
+// Push one neutral host event on the fake host's stdout, framed as line-JSON — the
+// same wire the real host writes.
+function push(host: FakeHost, event: HostEvent): void {
+  host.stdout.emit('data', Buffer.from(JSON.stringify(event) + '\n'))
+}
+
+// The HostInput the daemon wrote to the host's stdin.
+function hostInputOf(host: FakeHost): HostInput {
+  return JSON.parse(host.stdin.writes.join('').trim()) as HostInput
 }
 
 describe('daemon run manager', () => {
-  it('interrupts the child and emits an interrupted done', () => {
+  it('assigns seq and relays host events as run-manager messages', () => {
     const h = harness()
     h.manager.startRun(makeStart())
+    const host = h.hosts[0]
+
+    push(host, { kind: 'session', sessionId: 'sess-x' })
+    push(host, {
+      kind: 'update',
+      steps: [{ kind: 'text', text: 'hi', createdAt: 't' }],
+      finalText: 'hi',
+      blockedIds: [],
+      usageChanged: false,
+    })
+    push(host, { kind: 'done', exitCode: 0, stderr: '' })
+
+    expect(h.messages.map((m) => m.type)).toEqual(['session', 'update', 'done'])
+    expect(h.messages[0]).toMatchObject({
+      type: 'session',
+      runId: 'run-1',
+      sessionId: 'sess-x',
+    })
+    expect(h.messages[1]).toMatchObject({
+      type: 'update',
+      runId: 'run-1',
+      seq: 1,
+      finalText: 'hi',
+    })
+    expect(h.messages[2]).toMatchObject({
+      type: 'done',
+      runId: 'run-1',
+      exitCode: 0,
+      interrupted: false,
+      stderr: '',
+    })
+  })
+
+  it('hands the host a HostInput with the resolved paths and start fields', async () => {
+    const h = harness({
+      materialize: async () => ({
+        filesDir: '/mat',
+        images: ['/mat/img1'],
+        manifestBlock: '<task-attachments>\n…\n</task-attachments>',
+      }),
+    })
+
+    h.manager.startRun(
+      makeStart({
+        agent: 'codex',
+        prompt: 'look',
+        attachments: [{ id: 'img1', name: 'p.png', mime: 'image/png', size: 2 }],
+      }),
+    )
+    // Materialization is async: no host spawns on the same tick.
+    expect(h.hosts).toHaveLength(0)
+    await vi.waitFor(() => expect(h.hosts).toHaveLength(1))
+
+    const input = hostInputOf(h.hosts[0])
+    expect(input.start).toMatchObject({
+      runId: 'run-1',
+      agent: 'codex',
+      prompt: 'look',
+    })
+    expect(input.root).toBe('/repo')
+    expect(input.cwd).toBe('/repo')
+    // The persistent per-task store dir wins over the just-materialized one.
+    expect(input.filesDir).toBe('/files/proj/task-1')
+    expect(input.materialized).toMatchObject({ images: ['/mat/img1'] })
+  })
+
+  it('sets the files dir in the HostInput on a turn carrying no attachments', () => {
+    const h = harness()
+    h.manager.startRun(makeStart({ agent: 'codex' }))
+    expect(h.hosts).toHaveLength(1)
+    expect(hostInputOf(h.hosts[0]).filesDir).toBe('/files/proj/task-1')
+  })
+
+  it('interrupts by killing the host group and emitting an interrupted done', () => {
+    const h = harness()
+    h.manager.startRun(makeStart())
+    const host = h.hosts[0]
 
     h.manager.interrupt('run-1')
 
-    expect(h.spawns[0].child.kill).toHaveBeenCalledWith('SIGKILL')
+    expect(host.kill).toHaveBeenCalledWith('SIGKILL')
     expect(h.messages.at(-1)).toMatchObject({
       type: 'done',
       runId: 'run-1',
@@ -86,26 +182,90 @@ describe('daemon run manager', () => {
     })
   })
 
-  it('replays buffered session, update, and done messages until acked', () => {
+  it('idle-kills the host and synthesizes a non-interrupted failed done', () => {
+    vi.useFakeTimers()
+    try {
+      const h = harness()
+      h.manager.startRun(makeStart({ idleTimeoutMs: 50 }))
+      const host = h.hosts[0]
+
+      vi.advanceTimersByTime(50)
+      expect(host.kill).toHaveBeenCalledWith('SIGKILL')
+
+      // The killed host closes without ever emitting a natural done.
+      host.emit('close', 137)
+      expect(h.messages.at(-1)).toMatchObject({
+        type: 'done',
+        runId: 'run-1',
+        exitCode: 1,
+        interrupted: false,
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('synthesizes a failed done when the host closes without a done', () => {
     const h = harness()
     h.manager.startRun(makeStart())
-    const child = h.spawns[0].child
-    child.stdout.emit(
-      'data',
-      Buffer.concat([
-        line({ type: 'thread.started', thread_id: 'thread-1' }),
-        line({
-          type: 'item.completed',
-          item: { id: 'item-1', type: 'agent_message', text: 'codex ok' },
-        }),
-      ]),
-    )
-    child.emit('close', 0)
+
+    h.hosts[0].emit('close', 1)
+
+    expect(h.messages).toEqual([
+      {
+        type: 'done',
+        runId: 'run-1',
+        exitCode: 1,
+        interrupted: false,
+        stderr: '',
+      },
+    ])
+  })
+
+  it('reports a host spawn error as a failed done', () => {
+    const h = harness()
+    h.manager.startRun(makeStart())
+
+    h.hosts[0].emit('error', new Error('spawn ENOENT'))
+
+    expect(h.messages).toEqual([
+      {
+        type: 'done',
+        runId: 'run-1',
+        exitCode: 1,
+        interrupted: false,
+        stderr: 'error spawning flow host: spawn ENOENT',
+      },
+    ])
+  })
+
+  it('replays buffered session, turn-context, update, and done until acked', () => {
+    const h = harness()
+    h.manager.startRun(makeStart())
+    const host = h.hosts[0]
+    push(host, { kind: 'session', sessionId: 'sess-x' })
+    push(host, { kind: 'turn-context', context: 'ctx' })
+    push(host, {
+      kind: 'update',
+      steps: [{ kind: 'text', text: 'hi', createdAt: 't' }],
+      finalText: 'hi',
+      blockedIds: [],
+      usageChanged: false,
+    })
+    push(host, { kind: 'done', exitCode: 0, stderr: '' })
     h.messages.length = 0
 
+    // A server reconnect replays the minted session, the turn-context baseline,
+    // buffered updates after its last seq, and the done.
     h.manager.resumeFrom('run-1', 0)
-    expect(h.messages.map((m) => m.type)).toEqual(['session', 'update', 'done'])
+    expect(h.messages.map((m) => m.type)).toEqual([
+      'session',
+      'turn-context',
+      'update',
+      'done',
+    ])
 
+    // After ack the buffer is dropped; a later resume finds no record.
     h.messages.length = 0
     h.manager.ack('run-1')
     h.manager.resumeFrom('run-1', 1)
@@ -120,137 +280,63 @@ describe('daemon run manager', () => {
     ])
   })
 
-  it('re-sends the turn context on resume-from, like the minted session', () => {
+  it('re-sends only what the run recorded on resume-from', () => {
     const h = harness()
-    h.manager.startRun(makeStart({ agent: 'claude' }))
+    h.manager.startRun(makeStart())
+    const host = h.hosts[0]
+    push(host, { kind: 'session', sessionId: 'sess-x' })
+    push(host, { kind: 'turn-context', context: 'ctx' })
     h.messages.length = 0
 
     h.manager.resumeFrom('run-1', 0)
 
-    expect(h.messages.map((m) => m.type)).toEqual(['session', 'turn-context'])
-  })
-
-  it('reports child spawn errors as failed done messages', () => {
-    const h = harness()
-    h.manager.startRun(makeStart())
-
-    h.spawns[0].child.emit('error', new Error('spawn ENOENT'))
-
     expect(h.messages).toEqual([
-      {
-        type: 'done',
-        runId: 'run-1',
-        exitCode: 1,
-        interrupted: false,
-        stderr: 'error running assistant: spawn ENOENT',
-      },
+      { type: 'session', runId: 'run-1', sessionId: 'sess-x' },
+      { type: 'turn-context', runId: 'run-1', context: 'ctx' },
     ])
   })
 
-  it('materializes attachments, injects LANDER_FILES_DIR, and passes image paths to Codex', async () => {
-    const messages: RunManagerMessage[] = []
-    const spawns: SpawnCall[] = []
-    const spawn = (command: string, args: string[], options: SpawnOptions) => {
-      const child = new FakeChild()
-      spawns.push({ command, args, options, child })
-      return child as unknown as ChildProcess
-    }
-    const manager = createRunManager({
-      adapters: {
-        codex: createCodexAdapter({ taskPromptTemplate: 'Prompt: {{forwardable}}.' }),
-      },
-      resolveRunPaths: () => ({ root: '/repo', cwd: '/repo' }),
-      send: (msg) => messages.push(msg),
-      materialize: async () => ({
-        filesDir: '/files/proj/task-1',
-        images: ['/files/proj/task-1/img1'],
-        manifestBlock: '<task-attachments>\n…\n</task-attachments>',
-      }),
-      spawn,
-      now: () => '2026-01-01T00:00:00.000Z',
-    })
+  it('triggers a usage refresh on done for a usage-snapshot flow', () => {
+    const refreshUsage = vi.fn()
+    const h = harness({ refreshUsage })
+    h.manager.startRun(makeStart({ agent: 'claude' }))
 
-    manager.startRun(
-      makeStart({
-        agent: 'codex',
-        prompt: 'look',
-        attachments: [{ id: 'img1', name: 'p.png', mime: 'image/png', size: 2 }],
-      }),
-    )
-    // Materialization is async: nothing spawns on the same tick.
-    expect(spawns).toHaveLength(0)
-    await vi.waitFor(() => expect(spawns).toHaveLength(1))
+    push(h.hosts[0], { kind: 'done', exitCode: 0, stderr: '' })
 
-    const [call] = spawns
-    // Fresh exec places `-i <path>` after the positional prompt.
-    const prompt = call.args[call.args.indexOf('-i') - 1]
-    expect(prompt).toContain('look')
-    expect(prompt).toContain('<task-attachments>')
-    expect(call.args.slice(-2)).toEqual(['-i', '/files/proj/task-1/img1'])
-    // The child env exposes the materialized files dir for `lander file cat/ls`.
-    expect((call.options.env as Record<string, string>).LANDER_FILES_DIR).toBe(
-      '/files/proj/task-1',
-    )
+    expect(refreshUsage).toHaveBeenCalled()
   })
 
-  it('sets LANDER_FILES_DIR every turn, even one carrying no new attachments', () => {
-    const spawns: SpawnCall[] = []
-    const manager = createRunManager({
-      adapters: {
-        codex: createCodexAdapter({ taskPromptTemplate: 'Prompt: {{forwardable}}.' }),
-      },
-      resolveRunPaths: () => ({ root: '/repo', cwd: '/repo' }),
-      send: () => {},
-      resolveFilesDir: (msg) => `/files/${msg.project}/${msg.taskId}`,
-      spawn: (command, args, options) => {
-        const child = new FakeChild()
-        spawns.push({ command, args, options, child })
-        return child as unknown as ChildProcess
-      },
-      now: () => '2026-01-01T00:00:00.000Z',
-    })
+  it('kills every held host group on killChildren', () => {
+    const h = harness()
+    h.manager.startRun(makeStart({ runId: 'run-1' }))
+    h.manager.startRun(makeStart({ runId: 'run-2' }))
 
-    // No attachments: spawns synchronously, but LANDER_FILES_DIR is still injected
-    // so `lander file cat/ls` can reach files from an earlier turn.
-    manager.startRun(makeStart({ agent: 'codex' }))
-    expect(spawns).toHaveLength(1)
-    expect(
-      (spawns[0].options.env as Record<string, string>).LANDER_FILES_DIR,
-    ).toBe('/files/proj/task-1')
+    h.manager.killChildren()
+
+    expect(h.hosts[0].kill).toHaveBeenCalledWith('SIGKILL')
+    expect(h.hosts[1].kill).toHaveBeenCalledWith('SIGKILL')
   })
 
   it('aborts a run interrupted while its attachments were still materializing', async () => {
-    const messages: RunManagerMessage[] = []
-    const spawns: SpawnCall[] = []
     let release!: () => void
     const gate = new Promise<void>((r) => (release = r))
-    const manager = createRunManager({
-      adapters: {
-        codex: createCodexAdapter({ taskPromptTemplate: 'Prompt: {{forwardable}}.' }),
-      },
-      resolveRunPaths: () => ({ root: '/repo', cwd: '/repo' }),
-      send: (msg) => messages.push(msg),
+    const h = harness({
       materialize: async () => {
         await gate
-        return { filesDir: '/files', images: [], manifestBlock: '' }
+        return { filesDir: '/mat', images: [], manifestBlock: '' }
       },
-      spawn: (command, args, options) => {
-        spawns.push({ command, args, options, child: new FakeChild() })
-        return new FakeChild() as unknown as ChildProcess
-      },
-      now: () => '2026-01-01T00:00:00.000Z',
     })
 
-    manager.startRun(
+    h.manager.startRun(
       makeStart({
         agent: 'codex',
         attachments: [{ id: 'a', name: 'a', mime: 'text/plain', size: 1 }],
       }),
     )
-    manager.interrupt('run-1')
+    h.manager.interrupt('run-1')
     release()
     await vi.waitFor(() =>
-      expect(messages).toContainEqual({
+      expect(h.messages).toContainEqual({
         type: 'done',
         runId: 'run-1',
         exitCode: 0,
@@ -258,6 +344,7 @@ describe('daemon run manager', () => {
         stderr: '',
       }),
     )
-    expect(spawns).toHaveLength(0)
+    // The interrupt landed before any host spawned.
+    expect(h.hosts).toHaveLength(0)
   })
 })

@@ -1,5 +1,5 @@
-import { spawn as nodeSpawn } from 'node:child_process'
-import { randomUUID as nodeRandomUUID } from 'node:crypto'
+import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process'
+import path from 'node:path'
 import type { AgentAdapter } from './agent'
 import type { AgentKind } from '../server/protocol'
 import type {
@@ -10,7 +10,16 @@ import type {
   UpdateMessage,
 } from '../server/protocol'
 import type { MaterializedFiles } from './attachments'
-import { runAgent, type HostEvent, type HostInput, type SpawnLike } from './run-agent'
+import { ROOT } from './adapters'
+import type { HostEvent, HostInput } from './run-agent'
+
+// Spawn a flow host for one run. Injectable so tests substitute a fake host
+// without spawning a real `tsx`; the default runs the compiled-in host entry.
+export type SpawnHostLike = () => ChildProcess
+
+// The host entry, resolved absolutely so the host process's own cwd is free to be
+// the repo root while the *agent* runs in the run's cwd (carried in the HostInput).
+const HOST_ENTRY = path.join(ROOT, 'daemon', 'flow-host.ts')
 
 export type RunManagerMessage =
   | UpdateMessage
@@ -69,9 +78,11 @@ export type RunManagerOptions = {
   refreshUsage?: () => void | Promise<void>
   defaultIdleMs?: number
   runBufferTtlMs?: number
-  spawn?: SpawnLike
-  mintSessionId?: () => string
-  now?: () => string
+  // Execution now lives in a per-run flow-host subprocess; the daemon supervises
+  // it (seq, buffer, resume, idle, interrupt, done gate) but no longer spawns the
+  // agent, mints sessions, or reduces streams itself — the host does. Session
+  // minting and stream timestamps moved into the host with runAgent.
+  spawnHost?: SpawnHostLike
   onEmpty?: () => void
 }
 
@@ -87,9 +98,18 @@ export function createRunManager({
   refreshUsage = () => {},
   defaultIdleMs = DEFAULT_IDLE_MS,
   runBufferTtlMs = DEFAULT_RUN_BUFFER_TTL_MS,
-  spawn = nodeSpawn,
-  mintSessionId = nodeRandomUUID,
-  now = () => new Date().toISOString(),
+  spawnHost = () =>
+    nodeSpawn('tsx', [HOST_ENTRY], {
+      // The host lives in its own process group (detached) so interrupt / idle /
+      // killChildren signal the *group* (`process.kill(-pid)`) and take the agent
+      // grandchild down with it — no orphans. cwd is the repo root; the agent's
+      // real cwd rides in the HostInput. The host inherits the daemon env (env
+      // scrubbing is a later step).
+      cwd: ROOT,
+      detached: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env },
+    }),
   onEmpty = () => {},
 }: RunManagerOptions): RunManager {
   const runs = new Map<string, Run>()
@@ -169,16 +189,33 @@ export function createRunManager({
     const filesDir = resolveFilesDir?.(msg) ?? materialized?.filesDir
     const hostInput: HostInput = { start: msg, root, cwd, filesDir, materialized }
 
+    // Spawn the flow host (its own process group). It reads the HostInput on
+    // stdin, runs the adapter, and streams neutral HostEvents back on stdout.
+    const host = spawnHost()
+
+    // Kill the host's whole process group so the agent grandchild dies with it —
+    // falling back to a plain pid kill if the group signal isn't available.
+    const killHost = (): void => {
+      try {
+        if (host.pid) process.kill(-host.pid, 'SIGKILL')
+        else host.kill('SIGKILL')
+      } catch {
+        try {
+          host.kill('SIGKILL')
+        } catch {}
+      }
+    }
+
     let seq = 0
     const buffer: UpdateMessage[] = []
     let settled = false
-    // The activity-armed idle watchdog. It kills the executor; the resulting
+    // The activity-armed idle watchdog acts *through* the boundary: it arms on any
+    // host output and, on fire, kills the host group. The resulting
     // close-without-a-natural-done is settled by the gate as exitCode 1.
-    let handle: { kill: () => void } | undefined
     let timer: ReturnType<typeof setTimeout> | undefined
     const arm = () => {
       if (timer) clearTimeout(timer)
-      timer = setTimeout(() => handle?.kill(), msg.idleTimeoutMs || defaultIdleMs)
+      timer = setTimeout(() => killHost(), msg.idleTimeoutMs || defaultIdleMs)
       timer.unref?.()
     }
 
@@ -262,25 +299,65 @@ export function createRunManager({
 
     const rec: Run = {
       buffer,
-      kill: () => handle?.kill(),
+      kill: killHost,
       interrupt: () => {
-        // Mirror today's rec.interrupt: settle an interrupted done at once (the
-        // gate wins over the executor's kill-triggered natural done), then kill.
+        // Mirror today's interrupt: settle an interrupted done at once (the gate
+        // wins over the host's kill-triggered close), then kill the host group.
         settle({ exitCode: 0, stderr: '', interrupted: true })
-        handle?.kill()
+        killHost()
       },
     }
     runs.set(msg.runId, rec)
 
-    handle = runAgent(hostInput, {
-      emit,
-      arm,
-      spawn,
-      mintSessionId,
-      now,
-      adapters,
+    // Hand the host its input as one JSON line on stdin, then close the pipe.
+    host.stdin?.on('error', () => {})
+    try {
+      host.stdin?.write(JSON.stringify(hostInput) + '\n')
+      host.stdin?.end()
+    } catch {}
+
+    // Parse the host's stdout as line-JSON HostEvents; every chunk (stdout or the
+    // relayed agent stderr) arms the idle watchdog. Route each event into the same
+    // supervisor wiring, seq-assigning and buffering updates.
+    let buf = ''
+    host.stdout?.on('data', (d: Buffer) => {
+      arm()
+      buf += d.toString()
+      let nl: number
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim()
+        buf = buf.slice(nl + 1)
+        if (!line) continue
+        let event: HostEvent
+        try {
+          event = JSON.parse(line) as HostEvent
+        } catch {
+          continue
+        }
+        emit(event)
+      }
     })
-    // Initial arm at spawn (executor data re-arms thereafter), matching today's
+    host.stderr?.on('data', (d: Buffer) => {
+      arm()
+      // The host relays agent stderr here (idle activity + diagnostics).
+      process.stderr.write(d)
+    })
+    host.on('error', (e) => {
+      // The host failed to spawn — synthesize a failed done.
+      settle({
+        exitCode: 1,
+        stderr: `error spawning flow host: ${e.message}`,
+        interrupted: false,
+      })
+    })
+    host.on('close', () => {
+      // A natural done (or a synthesized interrupt done) already settled the run.
+      // Otherwise the host was killed (idle) or crashed without emitting one —
+      // synthesize the same close-without-done the old direct spawn produced.
+      if (!settled) settle({ exitCode: 1, stderr: '', interrupted: false })
+    })
+
+    // Initial arm at spawn (host output re-arms thereafter), matching today's
     // arm-on-start idle countdown.
     arm()
   }
