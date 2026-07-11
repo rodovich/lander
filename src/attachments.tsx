@@ -2,6 +2,24 @@ import { useEffect, useRef, useState } from 'react'
 import { formatBytes } from './format'
 import type { Artifact, Attachment } from './types'
 
+// Re-encode an image blob as PNG, the only format browsers reliably accept for
+// clipboard writes. A PNG source is returned untouched; anything else is drawn
+// to a canvas and exported.
+async function toPng(b: Blob): Promise<Blob> {
+  if (b.type === 'image/png') return b
+  const bitmap = await createImageBitmap(b)
+  const canvas = document.createElement('canvas')
+  canvas.width = bitmap.width
+  canvas.height = bitmap.height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('no 2d context')
+  ctx.drawImage(bitmap, 0, 0)
+  bitmap.close()
+  return await new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob((out) => (out ? resolve(out) : reject(new Error('toBlob failed'))), 'image/png'),
+  )
+}
+
 // The paperclip control shown below a composer opens the file browser, then
 // shows the picked filename (single) or "N files" with an ✕ to clear. Its parent
 // composer is the drop target; this holds only the hidden <input type=file>.
@@ -132,6 +150,7 @@ export function MessageArtifacts({
 function FileChip({ file, url }: { file: Attachment; url: string }) {
   const isImage = file.mime.startsWith('image/')
   const [thumb, setThumb] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
 
   // The endpoint wants the UI token, which a bare <img src>/<a href> can't send,
   // so fetch the bytes with the header and hand back a blob URL. Used for the
@@ -172,12 +191,42 @@ function FileChip({ file, url }: { file: Attachment; url: string }) {
     URL.revokeObjectURL(obj)
   }
 
+  // Shift+click copies the chip's contents to the clipboard instead of
+  // downloading: images go in as a blob via ClipboardItem, everything else as
+  // text. Flash a checkmark on success; stay silent in insecure contexts where
+  // the Clipboard API is unavailable.
+  async function copy() {
+    try {
+      const canWriteImage =
+        isImage && 'write' in navigator.clipboard && typeof ClipboardItem !== 'undefined'
+      if (canWriteImage) {
+        // Two constraints: browsers only reliably accept image/png, so convert;
+        // and image writes require the caller's user-activation, which an `await`
+        // before write() would spend. So hand write() a pending promise (which it
+        // accepts) synchronously rather than awaiting the bytes first.
+        const png = fetchBlob().then((b) => {
+          if (!b) throw new Error('fetch failed')
+          return toPng(b)
+        })
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
+      } else {
+        const b = await fetchBlob()
+        if (!b) return
+        await navigator.clipboard.writeText(await b.text())
+      }
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // insecure context or unsupported type — nothing to do
+    }
+  }
+
   return (
     <button
       type="button"
       className={`attachment-chip${isImage ? ' attachment-chip-image' : ''}`}
-      onClick={() => void download()}
-      title={`${file.name} — ${formatBytes(file.size)} (click to download)`}
+      onClick={(e) => void (e.shiftKey ? copy() : download())}
+      title={`${file.name} — ${formatBytes(file.size)} (click to download, shift+click to copy)`}
     >
       {isImage && thumb ? (
         <img className="attachment-thumb" src={thumb} alt={file.name} />
@@ -188,7 +237,9 @@ function FileChip({ file, url }: { file: Attachment; url: string }) {
       )}
       <span className="attachment-chip-meta">
         <span className="attachment-chip-name">{file.name}</span>
-        <span className="attachment-chip-size">{formatBytes(file.size)}</span>
+        <span className="attachment-chip-size">
+          {copied ? 'copied ✓' : formatBytes(file.size)}
+        </span>
       </span>
     </button>
   )
