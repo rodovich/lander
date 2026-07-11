@@ -48,6 +48,10 @@ type Run = {
   // re-sent on resume-from — like mintedSession — so a server restart between
   // the announcement and its receipt can't lose the record.
   sentContext?: string
+  // step 3: buffer emitted state-patches here and re-send them on resume-from
+  // (like sentContext / mintedSession), so a server restart can't lose a flow's
+  // durable-state write; the server's applyStatePatch rev guard dedupes the replay.
+  // No producer exists in step 1, so there is nothing to buffer yet.
   done?: DoneMessage
   dropTimer?: ReturnType<typeof setTimeout>
 }

@@ -15,6 +15,7 @@ import { promisify } from 'node:util'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { applyUpdate, applyDone } from './apply'
+import { applyStatePatch } from './flowstate'
 import { defaultAgentFromEnv, isAgentKind } from './agent'
 import {
   attachDaemonServer,
@@ -308,6 +309,19 @@ type Task = {
   // worktree support their worktree flag; providers without it resume from
   // Task.cwd. Absent when the task isn't in a worktree.
   worktree?: string
+  // The flow's opaque durable state, folded here from `state-patch` batches by
+  // applyStatePatch. Convention (flow-inversion.md §Durable state): it records the
+  // flow's decisions, identities, and user-visible progress — the PR number, the
+  // CI run id, the approved message text, the phase — while bulk/derivable data
+  // goes to scratch or artifacts. The server never interprets it; it rides back
+  // out to the flow on start-run (StartRunMessage.flowState) and is cleared on
+  // relaunch (sealForRelaunch). Stripped from the public task (publicTask).
+  // Absent until a flow first writes it — no producer exists in step 1.
+  flowState?: Record<string, unknown>
+  // The revision counter applyStatePatch stamps, incremented once per applied
+  // `state-patch` op batch. Used to dedupe an idempotent replay of buffered
+  // patches on resume-from once a producer exists. Absent until the first write.
+  flowStateRev?: number
 }
 
 // Bind the generic task store (server/store.ts) to the concrete Task type, so
@@ -628,6 +642,19 @@ async function reduceRunWs(
         // against. Idempotent: a resume-from replay re-sends the same block.
         await mutateTask(file, (t) => {
           t.turnContext = ev.msg.context
+        }).catch(() => {})
+        continue
+      }
+      if (ev.kind === 'state-patch') {
+        // Fold the flow's durable-state batch onto task.flowState inside the
+        // serialized task mutation; the rev guard makes a replay idempotent.
+        // Mirrors the session/turn-context handling above. No producer emits this
+        // in step 1, so this branch is inert until the flow port (step 3).
+        // step 3: buffer + replay on resume-from once a producer exists (the
+        // daemon must re-send state-patches like session/turn-context; the rev
+        // guard here provides the dedupe).
+        await mutateTask(file, (t) => {
+          applyStatePatch(t, ev.msg.ops, ev.msg.rev)
         }).catch(() => {})
         continue
       }

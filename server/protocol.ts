@@ -91,6 +91,11 @@ export type StartRunMessage = {
   // when the turn carries none. Persisted on the message, so a retry/resume
   // rebuilds the same list for free.
   attachments?: AttachmentRef[]
+  // The flow's opaque durable state, so it "rides in on start-run" (see the
+  // flowState convention on the server Task / applyStatePatch). Additive — the
+  // current compiled-in adapters never read it; a ported flow (step 3) will.
+  // Absent until some flow has written state via a state-patch.
+  flowState?: Record<string, unknown>
   env: Record<string, string>
   idleTimeoutMs: number
 }
@@ -234,11 +239,34 @@ export type TelemetryMessage = {
   items: TelemetryItem[]
 }
 
+// One durable-state mutation a flow produces via `ctx.state.set/delete/push/patch`.
+// `path` walks into the opaque flowState tree (creating intermediate objects);
+// `value` is the operand (absent for `delete`). A minimal, literal op set mirroring
+// the ctx.state surface — the server folds these into task.flowState with
+// applyStatePatch, never interpreting what they mean.
+export type StatePatchOp = {
+  op: 'set' | 'delete' | 'push' | 'patch'
+  path: string[]
+  value?: unknown
+}
+
+// A batch of state ops a flow's producer emits (daemon→server). `rev` is the
+// producer's post-op revision counter; the server's applyStatePatch stores it and
+// no-ops a batch it has already folded in (idempotent replay dedupe once a producer
+// exists and re-sends buffered patches on resume-from). No producer in step 1.
+export type StatePatchMessage = {
+  type: 'state-patch'
+  runId: string
+  ops: StatePatchOp[]
+  rev: number
+}
+
 export type DaemonToServer =
   | RegisterMessage
   | UpdateMessage
   | DoneMessage
   | SessionMessage
   | TurnContextMessage
+  | StatePatchMessage
   | ProjectGrantResultMessage
   | TelemetryMessage

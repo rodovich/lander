@@ -422,7 +422,10 @@ function flagQueued<M extends { role: 'user' | 'flow' | 'assistant' }>(
 // `grants` flags.
 export function publicTask<T extends object>(
   task: T,
-): Omit<T, 'token' | 'runId' | 'runCursor' | 'queued' | 'retry'> & {
+): Omit<
+  T,
+  'token' | 'runId' | 'runCursor' | 'queued' | 'retry' | 'flowState' | 'flowStateRev'
+> & {
   grants?: GrantCaps
 } {
   const {
@@ -430,6 +433,10 @@ export function publicTask<T extends object>(
     runId: _r,
     runCursor: _c,
     retry: _retry,
+    // The flow's durable state is server-internal (like the run pointers) — it
+    // rides back to the flow on start-run, never over HTTP. Absent today.
+    flowState: _fs,
+    flowStateRev: _fsr,
     queued,
     ...rest
   } = task as T & {
@@ -437,6 +444,8 @@ export function publicTask<T extends object>(
     runId?: unknown
     runCursor?: unknown
     retry?: unknown
+    flowState?: unknown
+    flowStateRev?: unknown
     queued?: string[]
     items?: Item[]
     rides?: Ride[]
@@ -467,7 +476,10 @@ export function publicTask<T extends object>(
     ...rest,
     ...(agent ? { grants: agentGrantCaps(agent) } : {}),
   }
-  return out as Omit<T, 'token' | 'runId' | 'runCursor' | 'queued' | 'retry'> & {
+  return out as Omit<
+    T,
+    'token' | 'runId' | 'runCursor' | 'queued' | 'retry' | 'flowState' | 'flowStateRev'
+  > & {
     grants?: GrantCaps
   }
 }
@@ -538,6 +550,8 @@ export function sealForRelaunch(
   task: {
     sessionId?: string
     turnContext?: string
+    flowState?: Record<string, unknown>
+    flowStateRev?: number
     title: string
     items?: Item[]
   },
@@ -547,6 +561,11 @@ export function sealForRelaunch(
   // The recorded context baseline belongs to the sealed session; drop it so the
   // fresh session's first turn gets the full dynamic context block again.
   delete task.turnContext
+  // Relaunch = a fresh session with no memory, so clear the flow's durable state
+  // too (flow-inversion.md: "relaunch seal = clear the blob"), generalizing the
+  // session/context clear above. Inert in step 1 — no flow writes flowState yet.
+  delete task.flowState
+  delete task.flowStateRev
   pushEventItem(task, { eventKind: 'relaunched', title: task.title }, at)
 }
 

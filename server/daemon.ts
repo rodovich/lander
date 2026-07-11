@@ -15,6 +15,7 @@ import type {
   DoneMessage,
   SessionMessage,
   TurnContextMessage,
+  StatePatchMessage,
   AgentKind,
   TelemetryItem,
 } from './protocol'
@@ -28,6 +29,7 @@ export type RunEvent =
   | { kind: 'done'; msg: DoneMessage }
   | { kind: 'session'; msg: SessionMessage }
   | { kind: 'turn-context'; msg: TurnContextMessage }
+  | { kind: 'state-patch'; msg: StatePatchMessage }
   | { kind: 'crashed' }
 
 // A single-consumer async queue: events buffer until pulled, and a pull before
@@ -323,6 +325,7 @@ export function attachDaemonServer(
         case 'done':
         case 'session':
         case 'turn-context':
+        case 'state-patch':
           channels.get(msg.runId)?.push({ kind: msg.type, msg } as RunEvent)
           break
         case 'project-grant-result': {
