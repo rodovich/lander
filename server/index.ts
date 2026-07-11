@@ -38,6 +38,7 @@ import {
 import { parseProjects, type Project } from './projects'
 import {
   publicTask,
+  agentGrantCaps,
   latestUpdateAt,
   recordStatusTransition,
   recordArtifactOnMessage,
@@ -2498,7 +2499,11 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
       } catch {
         return c.json({ error: 'task not found' }, 404)
       }
-      if (grantAgent === 'codex') warning = CODEX_TASK_ALLOW_WARNING
+      // Key off the single caps map, not the agent name: an adapter that saves
+      // task rules for parity but doesn't honor them (task cap false) gets the
+      // "saved for parity" warning. agentGrantCaps('codex').task === false and
+      // ('claude').task === true, so this is byte-identical today.
+      if (!agentGrantCaps(grantAgent).task) warning = CODEX_TASK_ALLOW_WARNING
     }
     return c.json({ ok: true, rule, scope, ...(warning ? { warning } : {}) })
   } catch (e) {
