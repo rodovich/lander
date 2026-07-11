@@ -72,6 +72,12 @@ export type RunAgentDeps = {
   mintSessionId: () => string
   now: () => string
   adapters: Partial<Record<AgentKind, AgentAdapter>>
+  // Tee for the agent child's stderr. In-process (run.ts) this is unset — `arm()`
+  // already signals idle activity. In the flow host it relays to process.stderr,
+  // so agent-only stderr activity (no stdout event) still reaches the daemon's
+  // idle watchdog through the boundary (decision 6). runAgent still accumulates
+  // stderr for the done event regardless.
+  onStderr?: (chunk: string) => void
 }
 
 export function runAgent(
@@ -79,7 +85,15 @@ export function runAgent(
   deps: RunAgentDeps,
 ): { kill: () => void } {
   const { start, root, cwd, materialized } = input
-  const { emit, arm, spawn = nodeSpawn, mintSessionId, now, adapters } = deps
+  const {
+    emit,
+    arm,
+    spawn = nodeSpawn,
+    mintSessionId,
+    now,
+    adapters,
+    onStderr,
+  } = deps
 
   const adapter = adapters[start.agent]
   if (!adapter) {
@@ -243,7 +257,9 @@ export function runAgent(
   })
   child.stderr?.on('data', (d: Buffer) => {
     arm()
-    stderr += d.toString()
+    const text = d.toString()
+    stderr += text
+    onStderr?.(text)
   })
   child.on('error', (e) => {
     stderr += `error running assistant: ${e.message}`
