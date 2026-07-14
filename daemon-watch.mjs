@@ -47,9 +47,13 @@ const isDaemonSource = (name) => name.endsWith('.ts') && !name.endsWith('.test.t
 
 const sup = createSupervisor({
   spawn: () => spawn('tsx', [ENTRY], { cwd: ROOT, stdio: 'inherit', env: process.env }),
-  // How long to let a draining daemon finish before forcing it down. Past this a
-  // riding turn is presumed stuck; SIGTERM falls back to the daemon's hard-kill.
-  maxDrainMs: Number(process.env.LANDER_MAX_DRAIN_MS ?? 15 * 60_000),
+  // How long to let a draining daemon finish before forcing it down. A last
+  // resort, not a routine bound: the run-level idle watchdog (10m of silence)
+  // already ends hung runs, so a daemon still draining here is either serving a
+  // genuinely active long ride — which must not be killed — or stuck in a way
+  // the watchdog failed to catch. Sized accordingly; SIGTERM falls back to the
+  // daemon's hard-kill.
+  maxDrainMs: Number(process.env.LANDER_MAX_DRAIN_MS ?? 12 * 60 * 60_000),
   log: (m) => console.error(m),
 })
 

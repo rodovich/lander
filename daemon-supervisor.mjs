@@ -11,7 +11,7 @@
 
 export function createSupervisor({
   spawn,
-  maxDrainMs = 15 * 60_000,
+  maxDrainMs = 12 * 60 * 60_000,
   crashWindowMs = 3_000,
   respawnBackoffMs = 1_000,
   respawnBackoffMaxMs = 10_000,
