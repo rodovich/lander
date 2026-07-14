@@ -2,7 +2,7 @@
 // daemon/index.ts` in dev.mjs. On a daemon source change we must NOT kill the
 // running daemon: it owns the claude children for every riding task, so a hard
 // restart aborts each in-flight turn (the old "decision 2" behavior). Instead we
-// signal the running daemon to *drain* (SIGUSR1 — finish its turns, take no new
+// signal the running daemon to *drain* (SIGUSR2 — finish its turns, take no new
 // ones, exit when empty) and spawn a fresh daemon. The server adopts the newcomer
 // as primary and routes all future turns to it, while the draining one finishes
 // what it's riding. So a daemon edit takes effect at turn boundaries with no
@@ -46,7 +46,18 @@ const WATCHED_SERVER_FILES = [
 const isDaemonSource = (name) => name.endsWith('.ts') && !name.endsWith('.test.ts')
 
 const sup = createSupervisor({
-  spawn: () => spawn('tsx', [ENTRY], { cwd: ROOT, stdio: 'inherit', env: process.env }),
+  // Spawn the daemon as a DIRECT node child (`node --import tsx`), not via the
+  // `tsx` bin. The bin is a wrapper process that relays only SIGINT/SIGTERM to
+  // the real daemon underneath, so the supervisor's drain signal sent to the
+  // wrapper pid never reached the daemon — graceful drain silently never worked;
+  // every superseded daemon sat as a non-draining zombie until max-drain's
+  // SIGTERM. Direct spawn means kill() hits the daemon itself.
+  spawn: () =>
+    spawn(process.execPath, ['--import', 'tsx', ENTRY], {
+      cwd: ROOT,
+      stdio: 'inherit',
+      env: process.env,
+    }),
   // How long to let a draining daemon finish before forcing it down. A last
   // resort, not a routine bound: the run-level idle watchdog (10m of silence)
   // already ends hung runs, so a daemon still draining here is either serving a

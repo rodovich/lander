@@ -1,4 +1,4 @@
-// The drain state machine behind the dev supervisor's SIGUSR1 handoff, extracted
+// The drain state machine behind the dev supervisor's SIGUSR2 handoff, extracted
 // from daemon/index.ts so the exit condition is unit-testable. Once draining,
 // exit the moment no runs are held AND no settle-sweep is in flight — a sweep
 // that observed a stray but hasn't written its registry entry must finish
@@ -25,7 +25,7 @@ export type DrainDeps = {
 }
 
 export type Drain = {
-  // SIGUSR1: start draining (idempotent — the grace isn't re-armed). Stops the
+  // SIGUSR2: start draining (idempotent — the grace isn't re-armed). Stops the
   // watch timers and polls the exit condition until it fires.
   begin: () => void
   draining: () => boolean

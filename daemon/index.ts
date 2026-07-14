@@ -201,7 +201,7 @@ const runManager = createRunManager({
   onEmpty: () => drain.check(),
 })
 
-// The dev supervisor's drain handoff (daemon-watch.mjs sends SIGUSR1 on a daemon
+// The dev supervisor's drain handoff (daemon-watch.mjs sends SIGUSR2 on a daemon
 // source edit): finish the runs we're riding, take no new ones, and exit once
 // they're all done and no settle-sweep is mid-flight — so a code edit never
 // interrupts an in-flight turn. SIGTERM still hard-kills as the max-drain cap.
@@ -313,10 +313,11 @@ process.on('SIGINT', () => {
   process.exit(0)
 })
 
-// Graceful handoff: the dev supervisor sends SIGUSR1 on a daemon source edit
-// instead of killing us. The state machine (drain.ts) stops the watch timers,
-// keeps only our riding runs, and exits once drained.
-process.on('SIGUSR1', () => {
+// Graceful handoff: the dev supervisor sends SIGUSR2 on a daemon source edit
+// instead of killing us (SIGUSR1 is reserved by Node for the inspector). The
+// state machine (drain.ts) stops the watch timers, keeps only our riding runs,
+// and exits once drained.
+process.on('SIGUSR2', () => {
   if (drain.draining()) return
   console.log(`draining ${runManager.size()} run(s) before handoff`)
   drain.begin()

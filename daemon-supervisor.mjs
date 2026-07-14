@@ -83,7 +83,9 @@ export function createSupervisor({
       // fresh one. A max-drain timer forces the old one down if it never finishes.
       draining.add(old)
       try {
-        old.kill('SIGUSR1')
+        // SIGUSR2, not SIGUSR1: Node reserves SIGUSR1 for the inspector, so a
+        // drain signal must use the one conventionally-free user signal.
+        old.kill('SIGUSR2')
       } catch {}
       const force = setTimer(() => {
         try {

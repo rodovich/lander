@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createDrain } from './drain'
 
-// Unit tests for the drain exit condition daemon/index.ts wires to SIGUSR1:
+// Unit tests for the drain exit condition daemon/index.ts wires to SIGUSR2:
 // exit only when draining AND no runs are held AND no settle-sweep is in flight,
 // abandoning a stuck sweep once the grace lapses. Fake timers drive the tick
 // loop and the grace clock.
@@ -32,7 +32,7 @@ describe('drain', () => {
     expect(exit).not.toHaveBeenCalled()
   })
 
-  it('stops the watch timers at begin (SIGUSR1) and exits once, immediately, when idle', () => {
+  it('stops the watch timers at begin (SIGUSR2) and exits once, immediately, when idle', () => {
     vi.useFakeTimers()
     const { drain, stopTimers, exit } = make({ runs: 0, sweeping: false })
     drain.begin()
@@ -84,7 +84,7 @@ describe('drain', () => {
     const { drain, stopTimers, exit } = make(state, 5_000)
     drain.begin()
     vi.advanceTimersByTime(4_000)
-    drain.begin() // a second SIGUSR1 must not push the deadline out
+    drain.begin() // a second SIGUSR2 must not push the deadline out
     expect(stopTimers).toHaveBeenCalledTimes(1)
     vi.advanceTimersByTime(1_200)
     expect(exit).toHaveBeenCalledTimes(1)

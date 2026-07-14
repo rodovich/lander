@@ -68,7 +68,7 @@ const RECONNECT_GRACE_MS = 15_000
 
 // Daemon connections. Normally one, but a drain-handoff briefly runs two: a daemon
 // told to drain finishes its riding turns and exits (see the dev supervisor and
-// the daemon's SIGUSR1 handler) while a fresh daemon connects and becomes
+// the daemon's SIGUSR2 handler) while a fresh daemon connects and becomes
 // `primary` — the one new runs go to. `runOwner` maps each in-flight run to the
 // daemon holding it, rebuilt from what each daemon announces on `register`, so
 // interrupt/resume-from/ack reach the right one and a run is only ever resumed on
