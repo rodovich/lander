@@ -14,7 +14,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { applyUpdate, applyDone } from './apply'
+import { applyUpdate, applyDone, wedgeForRetry } from './apply'
 import { applyStatePatch } from './flowstate'
 import { defaultAgentFromEnv, isAgentKind } from './agent'
 import {
@@ -42,7 +42,6 @@ import {
   latestUpdateAt,
   recordStatusTransition,
   recordArtifactOnMessage,
-  lastTurnPrompts,
   turnAttachments,
   worktreeName,
   applyRelaunch,
@@ -88,7 +87,6 @@ import {
 } from './artifacts'
 import {
   createAsk,
-  createRetryAsk,
   wireAsk,
   answerAsk,
   answerDelivery,
@@ -510,19 +508,19 @@ async function runTurn(
         ? `error running assistant: a daemon is connected but does not serve this project (slug '${project.slug}'); daemon serves: ${daemonSlugs().join(', ') || '(none)'}`
         : 'error running assistant: no daemon connected for this project'
       recordAssistantError(t, text, at)
-      recordStatusTransition(t, 'wedged', at)
-      t.status = 'wedged'
-      t.updatedAt = at
-      // The turn never reached the agent, so nothing was committed — stash the
-      // prompt(s) so the user can just retry once a daemon is back (a transient
-      // daemon outage is the expected cause), and raise the generic retry ask so
-      // the wedge carries a button just like an assistant-error wedge does.
-      t.retry = { committed: false, prompts: lastTurnPrompts(t) }
-      createRetryAsk(t, {
-        id: nextAskId(t, Date.parse(at)),
+      // The turn never reached the agent, so nothing was committed — wedge and
+      // stash the prompt(s) so the user can just retry once a daemon is back (a
+      // transient daemon outage is the expected cause). The retry ask names the
+      // cause rather than reading as a generic assistant error.
+      wedgeForRetry(t, {
         committed: false,
+        askId: nextAskId(t, Date.parse(at)),
         at,
+        prompt: daemonConnected()
+          ? 'The connected daemon does not serve this project — retry?'
+          : 'No daemon is connected to run this task — retry?',
       })
+      t.updatedAt = at
     }).catch(() => {})
     return 'crashed'
   }
@@ -574,13 +572,23 @@ async function runTurn(
   return reduceRunWs(project, id, runId)
 }
 
+// The transcript line and retry-ask prompt for a platform kill: the daemon that
+// held an in-flight run died and stayed gone past the reconnect grace, so it never
+// settled its own done (unlike a user interrupt, which emits a clean interrupted
+// done). The `crashed` handler names the cause here so the wedge reads as a
+// platform kill to retry, not a silent interrupt or a generic assistant error.
+const PLATFORM_KILL_ERROR =
+  'error running assistant: the daemon running this task stopped before the turn finished'
+const PLATFORM_KILL_PROMPT =
+  'This ride was killed by a daemon update while work was in flight — retry?'
+
 // Drain the per-run channel the WS handler feeds (update/done/crashed) and fold
 // each event onto the task with the applyUpdate/applyDone consumer. The daemon
 // did the reduction and the cross-line usage accumulation, so an `update` maps
 // straight onto applyUpdate (seq becomes the run cursor); `done` finalizes;
-// `crashed` (the daemon stayed gone past the reconnect grace) finalizes the task
-// as an interrupted run. Returns 'done' on completion (success or assistant error)
-// or 'crashed'. `resume` reattaches to a run already in flight (a server
+// `crashed` (the daemon stayed gone past the reconnect grace) wedges the task
+// with a platform-kill retry ask. Returns 'done' on completion (success or
+// assistant error) or 'crashed'. `resume` reattaches to a run already in flight (a server
 // reload, or queue recovery): it seeds the cursor from disk and asks a connected
 // daemon to replay from there — the daemon either replays its buffer or aborts a
 // run it no longer holds.
@@ -614,19 +622,34 @@ async function reduceRunWs(
           const at = new Date().toISOString()
           const ride = openRide(t)
           if (ride) {
-            const streamed = (t.items ?? []).some(
-              (it) =>
-                it.rideId === ride.id &&
-                it.kind === 'message' &&
-                it.text.trim().length > 0,
+            const rideItems = (t.items ?? []).filter((it) => it.rideId === ride.id)
+            const streamedText = rideItems.some(
+              (it) => it.kind === 'message' && it.text.trim().length > 0,
             )
-            if (!streamed)
-              recordAssistantError(t, 'error running assistant: run interrupted', at)
+            // Whether the turn had begun committing before the daemon vanished —
+            // the same proxy applyDone uses to pick "try again" vs. re-send.
+            const hadOutput =
+              rideItems.some((it) => it.kind === 'tool') || streamedText
+            if (!streamedText) recordAssistantError(t, PLATFORM_KILL_ERROR, at)
+            // A platform kill — the daemon died mid-turn and never came back, so it
+            // could not settle its own done — needs the user's attention just like
+            // an assistant error. Wedge with a retry ask that names the cause (the
+            // stop-jobs choke point in mutateTask kills adopted jobs on the flip).
+            // Only override a still-riding task: a self-wedge/land the agent set
+            // stands, exactly as applyDone guards.
+            if (t.status === 'riding')
+              wedgeForRetry(t, {
+                committed: hadOutput,
+                askId: nextAskId(t, Date.parse(at)),
+                at,
+                prompt: PLATFORM_KILL_PROMPT,
+              })
             t.updatedAt = at
           }
           // The run was abandoned (the daemon stayed gone past the grace) — close
-          // its open ride interrupted, paired with the runId delete below.
-          closeRide(t, 'interrupted', at)
+          // its open ride as an error (a platform kill, not a user interrupt),
+          // paired with the runId delete below.
+          closeRide(t, 'error', at)
           delete t.runId
           delete t.runCursor
         }).catch(() => {})
