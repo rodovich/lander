@@ -23,6 +23,7 @@ import type {
   ProjectGrantResultMessage,
 } from '../server/protocol'
 import { createRunManager, type RunManagerMessage } from './run'
+import { createDrain } from './drain'
 import { resolveRunCwd } from './paths'
 import {
   materializeAttachments,
@@ -61,11 +62,6 @@ const ADAPTERS = buildAdapters({ root: ROOT, env: process.env })
 const CLAUDE_ADAPTER = ADAPTERS.claude
 
 let ws: WebSocket | null = null
-// Set by SIGUSR1 (the dev supervisor's drain signal): finish the runs we're
-// riding, take no new ones, and exit once they're all done — handing off to the
-// fresh daemon the supervisor spawned. A daemon source edit thus never interrupts
-// an in-flight turn. SIGTERM still hard-kills as the supervisor's max-drain cap.
-let draining = false
 
 function send(
   msg:
@@ -75,16 +71,6 @@ function send(
     | ProjectGrantResultMessage,
 ): void {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
-}
-
-// Once draining, exit cleanly the moment our last run is acked/dropped, so the
-// fresh daemon is the only one left. No-op until then — we keep relaying our
-// in-flight runs and honoring interrupts for them.
-function exitIfDrained(): void {
-  if (draining && runManager.size() === 0) {
-    console.log('drained; exiting for handoff')
-    process.exit(0)
-  }
 }
 
 // ── Usage (decision 6) ──────────────────────────────────────────────────────
@@ -212,7 +198,21 @@ const runManager = createRunManager({
   materialize,
   refreshUsage,
   defaultIdleMs: DEFAULT_IDLE_MS,
-  onEmpty: exitIfDrained,
+  onEmpty: () => drain.check(),
+})
+
+// The dev supervisor's drain handoff (daemon-watch.mjs sends SIGUSR1 on a daemon
+// source edit): finish the runs we're riding, take no new ones, and exit once
+// they're all done and no settle-sweep is mid-flight — so a code edit never
+// interrupts an in-flight turn. SIGTERM still hard-kills as the max-drain cap.
+const drain = createDrain({
+  runsHeld: () => runManager.size(),
+  sweepInFlight: () => false,
+  stopTimers: () => {},
+  exit: () => {
+    console.log('drained; exiting for handoff')
+    process.exit(0)
+  },
 })
 
 function onMessage(raw: string): void {
@@ -224,7 +224,7 @@ function onMessage(raw: string): void {
   }
   switch (msg.type) {
     case 'start-run':
-      if (draining) {
+      if (drain.draining()) {
         // We're handing off; the server routes new runs to the fresh primary, so
         // this shouldn't arrive — but if it does, abort cleanly rather than start
         // work we'd interrupt at exit.
@@ -313,15 +313,13 @@ process.on('SIGINT', () => {
   process.exit(0)
 })
 
-// Graceful handoff (drain): the dev supervisor (daemon-watch.mjs) sends SIGUSR1 on
-// a daemon source edit instead of killing us. Stop taking new runs (the server
-// already routes those to the fresh daemon), finish the turns we're riding, and
-// exit once they're done — so a code edit never interrupts an in-flight turn.
+// Graceful handoff: the dev supervisor sends SIGUSR1 on a daemon source edit
+// instead of killing us. The state machine (drain.ts) stops the watch timers,
+// keeps only our riding runs, and exits once drained.
 process.on('SIGUSR1', () => {
-  if (draining) return
-  draining = true
+  if (drain.draining()) return
   console.log(`draining ${runManager.size()} run(s) before handoff`)
-  exitIfDrained()
+  drain.begin()
 })
 
 // Dial the server, announce our projects, and reconnect with a fixed backoff if
@@ -341,7 +339,7 @@ function connect(): void {
       // and exactly which in-flight runs we still hold, so it resumes each only on
       // its real owner — and a reconnect mid-drain reclaims our runs instead of
       // losing them to the fresh primary.
-      draining,
+      draining: drain.draining(),
       runs: runManager.heldRunIds(),
     })
     // Prime the server's snapshot: re-push the last one we hold (so a reconnect
