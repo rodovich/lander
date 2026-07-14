@@ -84,7 +84,7 @@ describe('daemon supervisor', () => {
     sup.spawnDaemon()
     const d0 = sup.current as FakeChild
     sup.reload()
-    expect(d0.killed).toBe('SIGUSR1') // drained, not killed outright
+    expect(d0.killed).toBe('SIGUSR2') // drained, not killed outright
     const d1 = sup.current
     expect(d1).not.toBe(d0)
     expect(spawned).toHaveLength(2)
