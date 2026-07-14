@@ -7,7 +7,7 @@ import {
 } from './api'
 import { AskForm } from './asks'
 import { AttachButton, MessageArtifacts, MessageAttachments } from './attachments'
-import { dataTransferHasFiles } from './fileDrop'
+import { clipboardImageFiles, dataTransferHasFiles } from './fileDrop'
 import {
   DATE_CATEGORY_LABELS,
   dateCategory,
@@ -1735,6 +1735,13 @@ export function App() {
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={onMessageKeyDown}
+            onPaste={(e) => {
+              if (submitting) return
+              const images = clipboardImageFiles(e.clipboardData)
+              if (images.length === 0) return
+              e.preventDefault()
+              setNewFiles((prev) => [...prev, ...images])
+            }}
           />
           <div className="composer-actions">
             <AttachButton
@@ -2195,6 +2202,16 @@ export function App() {
                   }))
                 }
                 onKeyDown={onReplyKeyDown}
+                onPaste={(e) => {
+                  const images = clipboardImageFiles(e.clipboardData)
+                  if (images.length === 0) return
+                  e.preventDefault()
+                  const id = current.id
+                  setReplyFiles((prev) => ({
+                    ...prev,
+                    [id]: [...(prev[id] ?? []), ...images],
+                  }))
+                }}
               />
               <div className="allow-row">
                 {!current.archived && (

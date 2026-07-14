@@ -13,3 +13,23 @@ export function dataTransferHasFiles(
     (type) => type.toLowerCase() === 'files',
   )
 }
+
+// Pull pasted image files out of a clipboard payload. A screenshot or copied
+// image arrives as a file entry (kind 'file') whose type begins with 'image/';
+// plain or rich text carries no such entry, so an ordinary text paste yields an
+// empty list and is left to the textarea's default handling. Like
+// dataTransferHasFiles this reads both `items` and `files`, since engines
+// populate them unevenly — items exposes the type for filtering, while `files`
+// is the reliable fallback when items is empty.
+export function clipboardImageFiles(
+  clipboard: Pick<DataTransfer, 'items' | 'files'>,
+): File[] {
+  const fromItems = Array.from(clipboard.items)
+    .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file != null)
+  if (fromItems.length > 0) return fromItems
+  return Array.from(clipboard.files).filter((file) =>
+    file.type.startsWith('image/'),
+  )
+}
