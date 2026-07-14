@@ -91,6 +91,40 @@ function resultStatus(step: Step): ToolItem['status'] {
   return step.blocked ? 'blocked' : step.isError ? 'failed' : 'ok'
 }
 
+// Wedge a task for a retry and stash what recovery needs: flip to wedged, record
+// whether the failed turn committed (so recovery nudges vs. re-sends), its
+// prompts, and any rate-limit reset, then raise the origin:'retry' platform ask
+// that routes the answer back through applyRetryRecovery. The single place the
+// wedge + stash + retry-ask trio is assembled, so applyDone (assistant error),
+// the daemon-outage wedge, and the platform-kill (crashed) wedge stay identical
+// bar the ask's `prompt`, which names the cause. Callers own the "still riding"
+// precondition and any transcript/error line — this only mutates status/retry/ask.
+export function wedgeForRetry(
+  task: ApplyTask,
+  opts: {
+    committed: boolean
+    askId: string
+    at: string
+    resetsAt?: string
+    prompt?: string
+  },
+): void {
+  recordStatusTransition(task, 'wedged', opts.at)
+  task.status = 'wedged'
+  task.retry = {
+    committed: opts.committed,
+    prompts: lastTurnPrompts(task),
+    ...(opts.resetsAt ? { resetsAt: opts.resetsAt } : {}),
+  }
+  createRetryAsk(task, {
+    id: opts.askId,
+    committed: opts.committed,
+    ...(opts.resetsAt ? { resetsAt: opts.resetsAt } : {}),
+    ...(opts.prompt ? { prompt: opts.prompt } : {}),
+    at: opts.at,
+  })
+}
+
 // Apply one reduced batch onto the task: fold its steps into the open ride's item
 // log, reconcile blocked tool calls, carry the running reply text and usage,
 // advance the run cursor. Mutates the task in place.
@@ -239,23 +273,15 @@ export function applyDone(
       )
   }
   // An assistant error — a non-zero exit that isn't a deliberate interrupt — needs
-  // the user's attention, so wedge the task. Only override a still-riding task: a
-  // self-wedge/land the agent set stands.
+  // the user's attention, so wedge the task with the platform retry ask (usage-limit
+  // or generic error). Only override a still-riding task: a self-wedge/land the
+  // agent set stands.
   if (done.exitCode !== 0 && !done.interrupted && task.status === 'riding') {
-    recordStatusTransition(task, 'wedged', at)
-    task.status = 'wedged'
-    task.retry = {
+    wedgeForRetry(task, {
       committed: hadOutput,
-      prompts: lastTurnPrompts(task),
-      ...(rateLimitResetsAt ? { resetsAt: rateLimitResetsAt } : {}),
-    }
-    // Raise the platform retry ask the UI renders over the wedge (usage-limit or
-    // generic error). origin:'retry' routes the answer back through recovery.
-    createRetryAsk(task, {
-      id: askId,
-      committed: hadOutput,
-      resetsAt: rateLimitResetsAt,
+      askId,
       at,
+      ...(rateLimitResetsAt ? { resetsAt: rateLimitResetsAt } : {}),
     })
   }
   // Close the ride: interrupted on a deliberate stop, error on a non-zero

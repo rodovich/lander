@@ -133,11 +133,14 @@ export function createAsk(
 // options — retry now, or retry when the limit resets (carrying `at` so
 // answering schedules the wakeup); a generic error offers one, labelled by
 // whether the failed turn committed ("Try again" vs "Resend"). The single place
-// the retry ask's shape is defined, so applyDone and the daemon-outage wedge
-// agree. `id`/`at` are the caller's (kept injection-friendly for pure tests).
+// the retry ask's shape is defined, so applyDone, the daemon-outage wedge, and
+// the platform-kill wedge agree. `prompt` overrides the default text so a wedge
+// can name a specific cause (e.g. a platform kill); absent, it derives the
+// usage-limit / generic-error line. `id`/`at` are the caller's (kept
+// injection-friendly for pure tests).
 export function createRetryAsk(
   task: AskTask,
-  opts: { id: string; committed: boolean; resetsAt?: string; at: string },
+  opts: { id: string; committed: boolean; resetsAt?: string; prompt?: string; at: string },
 ): AskItem {
   const form: AskForm = opts.resetsAt
     ? {
@@ -158,7 +161,8 @@ export function createRetryAsk(
       }
   return createAsk(task, {
     id: opts.id,
-    prompt: opts.resetsAt ? 'Usage limit reached.' : 'The assistant run failed.',
+    prompt:
+      opts.prompt ?? (opts.resetsAt ? 'Usage limit reached.' : 'The assistant run failed.'),
     form,
     blocking: 'task',
     origin: 'retry',
