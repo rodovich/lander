@@ -1,8 +1,12 @@
 import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { createServer, type Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { WebSocket } from 'ws'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { attachDaemonServer, daemonConnected, daemonServes } from './daemon'
 import { normalizeProjectPath, projectSlug } from './projects'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -839,5 +843,195 @@ describe('asks', () => {
     expect(raw.queued).toEqual(['try again'])
     expect(eventsOf(raw).some((e) => e.eventKind === 'scheduled')).toBe(true)
     expect(asksOf(raw)[0].state).toBe('answered')
+  })
+})
+
+// A daemon that dies mid-turn (a supervisor max-drain SIGTERM, a crash) can't
+// settle its own runs; the server crashes the abandoned run once the reconnect
+// grace lapses. That platform kill must wedge the task with a retry ask — not
+// leave it silently resting like an interrupt would. Driven end to end over a real
+// attachDaemonServer with a fake daemon that HOLDS runs open (never sends a done),
+// so the only way its run ends is a crash. A user interrupt (the status PATCH
+// path) must keep its no-ask semantics.
+describe('platform-kill wedge (daemon vanishes mid-run)', () => {
+  let http: Server
+  let ws: WebSocket
+  const received: { type: string; runId?: string; taskId?: string; project?: string }[] = []
+  // The platform-kill retry ask's prompt (index.ts PLATFORM_KILL_PROMPT) and error
+  // line — pinned here as the user-facing contract.
+  const KILL_PROMPT =
+    'This ride was killed by a daemon update while work was in flight — retry?'
+  // When true, the fake daemon answers an interrupt with a clean interrupted done,
+  // mirroring the real daemon's SIGKILL → done{interrupted:true}. Off during the
+  // crash test (which ends the run by disconnecting, not interrupting).
+  let answerInterrupt = false
+
+  type Raw = Record<string, unknown>
+  const waitFor = async (pred: () => boolean, ms = 3000): Promise<void> => {
+    const start = Date.now()
+    while (Date.now() - start < ms) {
+      if (pred()) return
+      await new Promise((r) => setTimeout(r, 10))
+    }
+    throw new Error('waitFor timed out')
+  }
+  const readRaw = async (id: string): Promise<Raw> =>
+    JSON.parse(await readFile(path.join(tasksDir, `${id}.json`), 'utf8'))
+  // Poll the persisted task file until `pred` holds (real timers only).
+  const waitForRaw = async (
+    id: string,
+    pred: (raw: Raw) => boolean,
+    ms = 3000,
+  ): Promise<Raw> => {
+    const start = Date.now()
+    while (Date.now() - start < ms) {
+      const raw = await readRaw(id)
+      if (pred(raw)) return raw
+      await new Promise((r) => setTimeout(r, 10))
+    }
+    throw new Error('waitForRaw timed out')
+  }
+  const asksOf = (raw: Raw): Raw[] =>
+    ((raw.items as Raw[]) ?? []).filter((i) => i.kind === 'ask')
+  const startRuns = (id: string) =>
+    received.filter((m) => m.type === 'start-run' && m.taskId === id)
+
+  async function seed(id: string): Promise<void> {
+    await writeFile(
+      path.join(tasksDir, `${id}.json`),
+      JSON.stringify({
+        id,
+        title: 'Kill task',
+        status: 'riding',
+        createdAt: AT,
+        updatedAt: AT,
+        allowEdits: false,
+        shape: 2,
+        items: [],
+        rides: [],
+      }),
+    )
+  }
+
+  beforeAll(async () => {
+    await mkdir(tasksDir, { recursive: true })
+    http = createServer()
+    attachDaemonServer(http, { token: UI_TOKEN })
+    await new Promise<void>((r) => http.listen(0, r))
+    const port = (http.address() as AddressInfo).port
+    ws = new WebSocket(`ws://localhost:${port}/daemon?token=${UI_TOKEN}`)
+    await new Promise<void>((resolve, reject) => {
+      ws.on('error', reject)
+      ws.on('open', () => resolve())
+    })
+    ws.on('message', (d) => {
+      const msg = JSON.parse(d.toString()) as {
+        type: string
+        runId?: string
+        taskId?: string
+        project?: string
+      }
+      received.push(msg)
+      // Runs are held open (no done for start-run). Only interrupts get a reply,
+      // and only when the current test opts in.
+      if (msg.type === 'interrupt' && answerInterrupt)
+        ws.send(
+          JSON.stringify({
+            type: 'done',
+            runId: msg.runId,
+            exitCode: 0,
+            interrupted: true,
+            stderr: '',
+          }),
+        )
+    })
+    ws.send(
+      JSON.stringify({ type: 'register', projects: [{ slug }], draining: false, runs: [] }),
+    )
+    // The register handler records the slugs we serve — its landing confirms the
+    // server routes this project's runs to us.
+    await waitFor(() => daemonServes(slug))
+  })
+
+  afterAll(async () => {
+    vi.useRealTimers()
+    if (ws.readyState === ws.OPEN)
+      await new Promise<void>((r) => {
+        ws.on('close', () => r())
+        ws.close()
+      })
+    await new Promise<void>((r) => http.close(() => r()))
+  })
+
+  // Runs before the crash test, which disconnects the shared daemon.
+  it('a user PATCH interrupt wedges without a retry ask (semantics unchanged)', async () => {
+    const id = 'kill-user-interrupt'
+    await seed(id)
+    answerInterrupt = true
+
+    // Drive a turn; the daemon holds the run open, so the task is riding with a runId.
+    expect((await post(`/api/${slug}/tasks/${id}/messages`, { message: 'go' })).status).toBe(200)
+    await waitFor(() => startRuns(id).length === 1)
+    // runTurn writes riding + runId before handing off the run.
+    await waitForRaw(id, (raw) => !!raw.runId)
+
+    // The human wedges the riding task from the UI: it interrupts the run, the
+    // daemon answers a clean interrupted done, and the ride closes — no retry ask.
+    const res = await app.request(`/api/${slug}/tasks/${id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', 'x-lander-ui-token': UI_TOKEN },
+      body: JSON.stringify({ status: 'wedged' }),
+    })
+    expect(res.status).toBe(200)
+    const raw = await waitForRaw(id, (r) => !r.runId)
+    expect(raw.status).toBe('wedged')
+    expect(raw.retry).toBeUndefined()
+    expect(asksOf(raw).some((a) => a.origin === 'retry')).toBe(false)
+    answerInterrupt = false
+  })
+
+  it('crashes a run whose daemon vanished into a retry-ask wedge, and answering retries', async () => {
+    const id = 'kill-platform'
+    await seed(id)
+
+    // Drive a turn; the daemon holds the run open (never a done).
+    expect((await post(`/api/${slug}/tasks/${id}/messages`, { message: 'go' })).status).toBe(200)
+    await waitFor(() => startRuns(id).length === 1)
+    await waitForRaw(id, (raw) => !!raw.runId)
+
+    // Expire the reconnect grace under fake timers: only setTimeout is faked, so
+    // real WS/fs I/O still flows and setImmediate stays a genuine event-loop yield.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    // Disconnect the daemon: the server observes the drop and arms the (now fake)
+    // grace timer. Yield real I/O ticks until it's registered the disconnect.
+    ws.close()
+    for (let i = 0; i < 200 && daemonConnected(); i++)
+      await new Promise((r) => setImmediate(r))
+    // Past the grace, the run is unowned → crashed. reduceRunWs folds that in.
+    await vi.advanceTimersByTimeAsync(30_000)
+    vi.useRealTimers()
+
+    const raw = await waitForRaw(id, (r) => r.status === 'wedged')
+    expect(raw.status).toBe('wedged')
+    // The ride closed as an error (a platform kill, not a user interrupt).
+    expect((raw.rides as Raw[]).at(-1)?.outcome).toBe('error')
+    // Wedged with a platform-kill retry ask naming the cause; nothing streamed, so
+    // the turn is uncommitted and the ask offers a single Resend.
+    const ask = asksOf(raw).find((a) => a.origin === 'retry')
+    expect(ask).toBeTruthy()
+    expect(ask!.prompt).toBe(KILL_PROMPT)
+    expect(raw.retry).toMatchObject({ committed: false, prompts: ['go'] })
+
+    // Answering the retry re-drives: the un-received prompt is re-queued and the
+    // task goes riding (the retry stash is consumed).
+    const answer = await post(
+      `/api/${slug}/tasks/${id}/asks/${String(ask!.id)}/answer`,
+      { optionId: 'retry-now' },
+    )
+    expect(answer.status).toBe(200)
+    const after = await readRaw(id)
+    expect(after.status).toBe('riding')
+    expect(after.queued).toEqual(['go'])
+    expect(after.retry).toBeUndefined()
   })
 })
