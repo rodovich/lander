@@ -371,6 +371,15 @@ export function parseDelimiter(line: string): Align[] | null {
   return align
 }
 
+// Opens a fenced code block: three or more backticks, then an info string that
+// may not itself contain a backtick. That last rule is what tells a fence from
+// an inline code span that happens to start a line, as in ```a``b```.
+//
+// The block scan and its paragraph guard below must both use this: a line the
+// scan won't open a fence for, but the guard still treats as a block start,
+// belongs to no branch at all and stalls the scan on that line.
+const FENCE_OPEN = /^( {0,3})(`{3,})[^`]*$/
+
 // Group raw lines into block-level structures.
 export function parseBlocks(src: string): Block[] {
   const lines = src.replace(/\r\n?/g, '\n').split('\n')
@@ -382,12 +391,16 @@ export function parseBlocks(src: string): Block[] {
 
     // Fenced code block. CommonMark allows the opening fence to be indented up
     // to 3 spaces; strip that indent from the body so it aligns at column 0.
-    const fence = line.match(/^( {0,3})```/)
+    const fence = line.match(FENCE_OPEN)
     if (fence) {
       const dedent = new RegExp(`^ {0,${fence[1].length}}`)
+      // The closer is a run at least as long as the opener followed by nothing
+      // but spaces, so a shorter run — or one trailing an info string — is body
+      // text. That's what lets a block quoting ``` sit inside a ```` fence.
+      const close = new RegExp(`^ {0,3}\`{${fence[2].length},}\\s*$`)
       const body: string[] = []
       i++
-      while (i < lines.length && !/^ {0,3}```/.test(lines[i])) {
+      while (i < lines.length && !close.test(lines[i])) {
         body.push(lines[i].replace(dedent, ''))
         i++
       }
@@ -493,7 +506,8 @@ export function parseBlocks(src: string): Block[] {
     while (
       i < lines.length &&
       lines[i].trim() !== '' &&
-      !/^ {0,3}```|^\s*>|^(#{1,6})\s|^\s*[-*+]\s|^\s*\d+[.)]\s/.test(lines[i]) &&
+      !FENCE_OPEN.test(lines[i]) &&
+      !/^\s*>|^(#{1,6})\s|^\s*[-*+]\s|^\s*\d+[.)]\s/.test(lines[i]) &&
       !(lines[i].includes('|') && i + 1 < lines.length && parseDelimiter(lines[i + 1]))
     ) {
       para.push(lines[i])
