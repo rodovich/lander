@@ -57,10 +57,10 @@ maps Lander's edit flag to Codex sandboxing:
 - `allowEdits=true` uses workspace-write execution.
 
 The Codex JSONL reducer currently handles text replies, command executions, file
-change events, failed commands or failed turns, sandbox-denial messages, resumed
-sessions, and per-turn token usage. The UI can show Codex as the task agent,
-display Codex turn activity, show Codex token usage, and label missing cost data
-as unavailable for Codex.
+change events, failed commands or failed turns, resumed sessions, and per-turn
+token usage. The UI can show Codex as the task agent, display Codex turn
+activity, show Codex token usage, and label missing cost data as unavailable for
+Codex.
 
 Codex tasks can call back into Lander with `lander land`, `lander wedge`,
 `lander rest`, `lander launch`, `lander send`, and related commands when the
@@ -102,6 +102,16 @@ current reducer handles the common event shapes Lander has fixtures for, but it
 does not provide all Claude-specific fields such as authoritative permission
 denial ids, Claude subagent parent metadata, Claude model/cost data, or
 subscription reset events.
+
+Codex's `exec --json` stream does not export dynamic/custom tool-call items.
+Most shell activity still appears because a nested shell invocation emits a
+separate `command_execution` item. However, a shell invocation denied by the
+sandbox can return its error only as the enclosing custom-tool result without
+emitting that `command_execution`. Codex records the call and result in its
+private rollout log, but Lander intentionally consumes only the public JSONL
+stream, so neither the tool chip nor errors such as `Operation not permitted`
+appear in the task UI. Ordinary nonzero `command_execution` results are not
+affected and remain visible as failed tools.
 
 Task auto-title generation still uses the Claude Haiku helper independently of
 the task's selected provider. A Codex task can run through Codex while its
