@@ -371,15 +371,15 @@ describe('Codex adapter reducer', () => {
     expect(r.usageFinal).toBe(true)
   })
 
-  it('reduces command executions into Bash tool use and result steps', () => {
+  it('reduces command executions using Codex\'s reported tool name', () => {
     const r = reduceFixture('command-execution.jsonl')
     expect(r.steps).toEqual([
       {
         kind: 'tool_use',
-        tool: 'Bash',
+        tool: 'command_execution',
         input: "/bin/zsh -lc 'printf codex-command-fixture'",
         toolUseId: 'item_0',
-        rule: "Bash(/bin/zsh -lc 'printf codex-command-fixture')",
+        rule: "command_execution(/bin/zsh -lc 'printf codex-command-fixture')",
         createdAt: AT,
       },
       {
@@ -408,11 +408,11 @@ describe('Codex adapter reducer', () => {
     )
     expect(multi.steps[0]).toEqual({
       kind: 'tool_use',
-      tool: 'Bash',
+      tool: 'command_execution',
       input: 'echo one\necho two',
       inputFull: 'echo one\necho two',
       toolUseId: 'item_0',
-      rule: 'Bash(echo one\necho two)',
+      rule: 'command_execution(echo one\necho two)',
       createdAt: AT,
     })
     const short = reduceCodexStreamLine(
@@ -438,15 +438,15 @@ describe('Codex adapter reducer', () => {
     expect(r.finalText).toContain('Command failed with exit code `7`')
   })
 
-  it('reduces file changes into a tool use step without inventing edit hunks', () => {
+  it('reduces file changes using Codex\'s reported tool name without inventing edit hunks', () => {
     const r = reduceFixture('file-change.jsonl')
     expect(r.steps).toEqual([
       {
         kind: 'tool_use',
-        tool: 'FileChange',
+        tool: 'file_change',
         input: 'add /repo/codex_patch_fixture.txt',
         toolUseId: 'item_0',
-        rule: 'FileChange(/repo/codex_patch_fixture.txt)',
+        rule: 'file_change(/repo/codex_patch_fixture.txt)',
         createdAt: AT,
       },
       {

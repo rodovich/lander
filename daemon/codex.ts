@@ -186,6 +186,7 @@ export function reduceCodexStreamLine(
         finalText = item.text
       } else if (item.type === 'command_execution') {
         const id = typeof item.id === 'string' ? item.id : undefined
+        const tool = item.type
         const command = typeof item.command === 'string' ? item.command : ''
         if (ev.type === 'item.started') {
           // A multi-line or long command reads on the chip as one clipped line;
@@ -195,13 +196,13 @@ export function reduceCodexStreamLine(
           const inputFull = fullToolInput({ command })
           steps.push({
             kind: 'tool_use',
-            tool: 'Bash',
+            tool,
             input: command,
             ...(inputFull && inputFull !== summarizeToolInput({ command })
               ? { inputFull }
               : {}),
             toolUseId: id,
-            rule: toolRule('Bash', { command }),
+            rule: toolRule(tool, { command }),
             createdAt: at,
           })
         } else {
@@ -215,13 +216,14 @@ export function reduceCodexStreamLine(
         }
       } else if (item.type === 'file_change' && ev.type === 'item.started') {
         const id = typeof item.id === 'string' ? item.id : undefined
+        const tool = item.type
         const path = firstChangePath(item)
         steps.push({
           kind: 'tool_use',
-          tool: 'FileChange',
+          tool,
           input: summarizeFileChange(item),
           toolUseId: id,
-          rule: path ? toolRule('FileChange', { path }) : 'FileChange',
+          rule: path ? toolRule(tool, { path }) : tool,
           createdAt: at,
         })
       }
