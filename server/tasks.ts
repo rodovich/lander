@@ -9,7 +9,10 @@ import type { AgentKind } from './agent'
 import type { Step, Usage } from './stream'
 import type { Attachment } from './attachments'
 import type { Artifact } from './artifacts'
-import type { Ask, AskForm } from './asks'
+// The one value we import (the rest of this module's imports are types):
+// recordStatusTransition settles open asks on the crossing. asks.ts imports only
+// types from here, so the runtime edge stays one-way — this module → asks.ts.
+import { withdrawOpenAsks, type Ask, type AskForm } from './asks'
 
 export type Message = {
   role: 'user' | 'assistant'
@@ -530,6 +533,26 @@ export function latestUpdateAt(task: {
 // quiet statuses (e.g. riding↔resting) or that don't change status. Moving
 // straight between two notable statuses (wedged↔landed) records the arrival
 // only. Call before assigning the new status, while task.status holds the old.
+//
+// A crossing also settles any ask left open, because a task-blocking ask is only
+// live while the task sits where the ask put it: the wedge ending IS the end of
+// the ask, by whatever route the task left — answering, a fresh message, a manual
+// un-wedge, a scheduled wakeup, a rest, a land. Entering `wedged` is the one
+// exception, and the reason is that it's the crossing that *raises* an ask
+// (`lander wedge`, wedgeForRetry): settling one on the way in would eat the ask
+// being raised.
+//
+// This lives on the crossing rather than in the callers because every route that
+// moves a task must come through here to record the move — so the rule can't be
+// forgotten by the next one. It used to be the callers' job, and of the six paths
+// that needed it, three had quietly missed it.
+//
+// Note what this deliberately does NOT cover: a riding↔resting move isn't a
+// crossing (both store as `riding`, so this returns early), which is exactly
+// right for an advisory `lander ask` — it never wedged, so resting with the
+// question still on screen is the point. Superseding one of those is a different
+// rule, about new user intent rather than status, and stays with the paths that
+// carry it.
 export function recordStatusTransition(
   task: { status: string; title: string; items?: Item[] },
   next: string,
@@ -537,8 +560,14 @@ export function recordStatusTransition(
 ): void {
   const prev = task.status
   if (prev === next) return
-  if (next === 'wedged' || next === 'landed')
-    pushEventItem(task, { eventKind: next, title: task.title }, at)
+  // Entering a notable status records the arrival (and only the arrival, when
+  // moving straight between two notable ones).
+  if (next === 'wedged') {
+    pushEventItem(task, { eventKind: 'wedged', title: task.title }, at)
+    return
+  }
+  if (next === 'landed')
+    pushEventItem(task, { eventKind: 'landed', title: task.title }, at)
   else if (prev === 'wedged' || prev === 'landed')
     pushEventItem(
       task,
@@ -548,6 +577,7 @@ export function recordStatusTransition(
       },
       at,
     )
+  withdrawOpenAsks(task)
 }
 
 // The migration seam for a task's provider thread state (its resumable session id

@@ -751,6 +751,60 @@ describe('asks', () => {
     expect(asksOf(raw)[0].state).toBe('withdrawn')
   })
 
+  // A task can rest with a wakeup armed and *then* wedge (a platform kill, an
+  // assistant error) before it fires. The wakeup resumes the task by its own
+  // route, so the ask it left open is moot — it must not linger over the resumed
+  // conversation.
+  it('withdraws an open ask when a scheduled wakeup resumes the task', async () => {
+    const id = 'ask-withdraw-launch'
+    await seedTask(id, {
+      status: 'wedged',
+      scheduledFor: AT,
+      // A turn already ran (the assistant message converts to a settled ride), so
+      // the wakeup drives the synthetic resume prompt rather than a queued
+      // opening message — the `lander rest` path, not a deferred `new`.
+      messages: [
+        { role: 'user', text: 'go', createdAt: AT },
+        { role: 'assistant', text: 'on it', createdAt: AT },
+      ],
+      asks: [openAsk()],
+    })
+    const res = await post(`/api/${slug}/tasks/${id}/launch`, {})
+    expect(res.status).toBe(200)
+    const raw = await readRaw(id)
+    expect(asksOf(raw)[0].state).toBe('withdrawn')
+    expect(raw.status).toBe('riding')
+    // The wakeup still drives its synthetic resume prompt — withdrawing the ask
+    // doesn't swallow the turn the launch exists to start.
+    expect(userMsgsOf(raw).at(-1)!.text).toMatch(/^Resumed at /)
+  })
+
+  // Withdrawal rides on the status crossing (recordStatusTransition, unit-tested
+  // in tasks.test.ts), so it reaches paths that never call withdrawOpenAsks
+  // themselves. `rest` from a wedge is one that used to miss it.
+  it('withdraws an open ask when a wedged task rests', async () => {
+    const id = 'ask-withdraw-rest'
+    await seedTask(id, { status: 'wedged', asks: [openAsk()] })
+    const res = await post(`/api/${slug}/tasks/${id}/rest`, { time: 30 })
+    expect(res.status).toBe(200)
+    const raw = await readRaw(id)
+    expect(asksOf(raw)[0].state).toBe('withdrawn')
+  })
+
+  // The mirror image: an advisory `lander ask` never wedged, so resting with the
+  // question still up is the whole point of it — no crossing, no withdrawal.
+  it('keeps an advisory ask open when a riding task rests', async () => {
+    const id = 'ask-advisory-rest'
+    await seedTask(id, {
+      status: 'riding',
+      asks: [openAsk({ blocking: 'none' })],
+    })
+    const res = await post(`/api/${slug}/tasks/${id}/rest`, { time: 30 })
+    expect(res.status).toBe(200)
+    const raw = await readRaw(id)
+    expect(asksOf(raw)[0].state).toBe('open')
+  })
+
   it('withdraws an open ask when the task is relaunched', async () => {
     const id = 'ask-withdraw-relaunch'
     await seedTask(id, { status: 'wedged', asks: [openAsk()] })
@@ -858,9 +912,13 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
   let ws: WebSocket
   const received: { type: string; runId?: string; taskId?: string; project?: string }[] = []
   // The platform-kill retry ask's prompt (index.ts PLATFORM_KILL_PROMPT) and error
-  // line — pinned here as the user-facing contract.
+  // line — pinned here as the user-facing contract. The prompt states the kill
+  // rather than asking about it: the options are the question, and the prompt
+  // stays behind as the record once they're gone.
   const KILL_PROMPT =
-    'This ride was killed by a daemon update while work was in flight — retry?'
+    'This ride was killed by a daemon update while work was in flight.'
+  const KILL_ERROR =
+    'error running assistant: the daemon running this task stopped before the turn finished'
   // When true, the fake daemon answers an interrupt with a clean interrupted done,
   // mirroring the real daemon's SIGKILL → done{interrupted:true}. Off during the
   // crash test (which ends the run by disconnecting, not interrupting).
@@ -913,11 +971,10 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     )
   }
 
-  beforeAll(async () => {
-    await mkdir(tasksDir, { recursive: true })
-    http = createServer()
-    attachDaemonServer(http, { token: UI_TOKEN })
-    await new Promise<void>((r) => http.listen(0, r))
+  // Connect (or reconnect) the fake daemon and wait until the server routes this
+  // project's runs to it. Called once up front, and again by the tests that end by
+  // disconnecting it to stage a crash.
+  async function connectDaemon(): Promise<void> {
     const port = (http.address() as AddressInfo).port
     ws = new WebSocket(`ws://localhost:${port}/daemon?token=${UI_TOKEN}`)
     await new Promise<void>((resolve, reject) => {
@@ -951,6 +1008,28 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     // The register handler records the slugs we serve — its landing confirms the
     // server routes this project's runs to us.
     await waitFor(() => daemonServes(slug))
+  }
+
+  // Disconnect the daemon and expire the reconnect grace, so the server gives up
+  // on the run it abandoned and crashes it. Only setTimeout is faked, so real
+  // WS/fs I/O still flows and setImmediate stays a genuine event-loop yield.
+  async function killDaemon(): Promise<void> {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    // Yield real I/O ticks until the server has registered the disconnect and
+    // armed the (now fake) grace timer.
+    ws.close()
+    for (let i = 0; i < 200 && daemonConnected(); i++)
+      await new Promise((r) => setImmediate(r))
+    await vi.advanceTimersByTimeAsync(30_000)
+    vi.useRealTimers()
+  }
+
+  beforeAll(async () => {
+    await mkdir(tasksDir, { recursive: true })
+    http = createServer()
+    attachDaemonServer(http, { token: UI_TOKEN })
+    await new Promise<void>((r) => http.listen(0, r))
+    await connectDaemon()
   })
 
   afterAll(async () => {
@@ -999,22 +1078,20 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     await waitFor(() => startRuns(id).length === 1)
     await waitForRaw(id, (raw) => !!raw.runId)
 
-    // Expire the reconnect grace under fake timers: only setTimeout is faked, so
-    // real WS/fs I/O still flows and setImmediate stays a genuine event-loop yield.
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-    // Disconnect the daemon: the server observes the drop and arms the (now fake)
-    // grace timer. Yield real I/O ticks until it's registered the disconnect.
-    ws.close()
-    for (let i = 0; i < 200 && daemonConnected(); i++)
-      await new Promise((r) => setImmediate(r))
     // Past the grace, the run is unowned → crashed. reduceRunWs folds that in.
-    await vi.advanceTimersByTimeAsync(30_000)
-    vi.useRealTimers()
+    await killDaemon()
 
     const raw = await waitForRaw(id, (r) => r.status === 'wedged')
     expect(raw.status).toBe('wedged')
     // The ride closed as an error (a platform kill, not a user interrupt).
     expect((raw.rides as Raw[]).at(-1)?.outcome).toBe('error')
+    // Nothing streamed, so the turn's ride would render blank — the error line
+    // fills it (the one case that still needs it; a turn that streamed keeps its
+    // text and leaves the record to the ask prompt).
+    const flow = ((raw.items as Raw[]) ?? []).filter(
+      (i) => i.kind === 'message' && i.role === 'flow',
+    )
+    expect(flow.map((i) => i.text)).toEqual([KILL_ERROR])
     // Wedged with a platform-kill retry ask naming the cause; nothing streamed, so
     // the turn is uncommitted and the ask offers a single Resend.
     const ask = asksOf(raw).find((a) => a.origin === 'retry')
@@ -1033,5 +1110,59 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     expect(after.status).toBe('riding')
     expect(after.queued).toEqual(['go'])
     expect(after.retry).toBeUndefined()
+  })
+
+  // A kill that lands mid-reply leaves the streamed text standing, so there's no
+  // empty turn to fill and no synthetic error line — the ask's prompt carries the
+  // record on its own (buildTimeline keeps rendering it once the form is gone).
+  it('leaves a mid-reply kill to the ask prompt, with no error line over the streamed text', async () => {
+    const id = 'kill-streamed'
+    await seed(id)
+    await connectDaemon()
+
+    expect((await post(`/api/${slug}/tasks/${id}/messages`, { message: 'go' })).status).toBe(200)
+    await waitFor(() => startRuns(id).length === 1)
+    const raw0 = await waitForRaw(id, (r) => !!r.runId)
+
+    // The turn streams a partial reply, then the daemon vanishes before its done.
+    ws.send(
+      JSON.stringify({
+        type: 'update',
+        runId: String(raw0.runId),
+        seq: 1,
+        steps: [],
+        finalText: 'partial reply',
+        usageChanged: false,
+      }),
+    )
+    await waitForRaw(id, (r) =>
+      ((r.items as Raw[]) ?? []).some((i) => i.text === 'partial reply'),
+    )
+    await killDaemon()
+
+    const raw = await waitForRaw(id, (r) => r.status === 'wedged')
+    // The streamed text stands alone: no error line appended over it, and none
+    // written into it.
+    const flow = ((raw.items as Raw[]) ?? []).filter(
+      (i) => i.kind === 'message' && i.role === 'flow',
+    )
+    expect(flow.map((i) => i.text)).toEqual(['partial reply'])
+    // Text streamed, so the turn counts as committed: the ask offers a nudge
+    // rather than a re-send, and its prompt is the kill's record.
+    expect(raw.retry).toMatchObject({ committed: true })
+    const ask = asksOf(raw).find((a) => a.origin === 'retry')
+    expect(ask!.prompt).toBe(KILL_PROMPT)
+    expect((ask!.form as { options: Raw[] }).options[0].label).toBe('Try again')
+
+    // Answering settles the form but must not erase the prompt — it's the only
+    // account of the kill the conversation has.
+    const answer = await post(
+      `/api/${slug}/tasks/${id}/asks/${String(ask!.id)}/answer`,
+      { optionId: 'retry-now' },
+    )
+    expect(answer.status).toBe(200)
+    const settled = asksOf(await readRaw(id)).find((a) => a.origin === 'retry')!
+    expect(settled.state).toBe('answered')
+    expect(settled.prompt).toBe(KILL_PROMPT)
   })
 })

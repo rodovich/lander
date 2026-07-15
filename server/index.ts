@@ -517,8 +517,8 @@ async function runTurn(
         askId: nextAskId(t, Date.parse(at)),
         at,
         prompt: daemonConnected()
-          ? 'The connected daemon does not serve this project — retry?'
-          : 'No daemon is connected to run this task — retry?',
+          ? 'The connected daemon does not serve this project.'
+          : 'No daemon is connected to run this task.',
       })
       t.updatedAt = at
     }).catch(() => {})
@@ -577,10 +577,13 @@ async function runTurn(
 // settled its own done (unlike a user interrupt, which emits a clean interrupted
 // done). The `crashed` handler names the cause here so the wedge reads as a
 // platform kill to retry, not a silent interrupt or a generic assistant error.
+// The prompt states what happened rather than asking ("— retry?"): the options
+// below it are the question, and the prompt outlives them as the conversation's
+// record of the kill once the ask is answered or withdrawn.
 const PLATFORM_KILL_ERROR =
   'error running assistant: the daemon running this task stopped before the turn finished'
 const PLATFORM_KILL_PROMPT =
-  'This ride was killed by a daemon update while work was in flight — retry?'
+  'This ride was killed by a daemon update while work was in flight.'
 
 // Drain the per-run channel the WS handler feeds (update/done/crashed) and fold
 // each event onto the task with the applyUpdate/applyDone consumer. The daemon
@@ -630,6 +633,9 @@ async function reduceRunWs(
             // the same proxy applyDone uses to pick "try again" vs. re-send.
             const hadOutput =
               rideItems.some((it) => it.kind === 'tool') || streamedText
+            // Only fill an otherwise-empty turn: the ask's prompt is the kill's
+            // durable record (it outlives the form), so a turn that streamed
+            // needs no synthetic line saying the same thing twice.
             if (!streamedText) recordAssistantError(t, PLATFORM_KILL_ERROR, at)
             // A platform kill — the daemon died mid-turn and never came back, so it
             // could not settle its own done — needs the user's attention just like
@@ -1727,13 +1733,12 @@ app.patch('/api/:project/tasks/:id', async (c) => {
         // of a `riding` task with no open ride, so store `riding`. publicTask
         // serves `resting` back. wedged/landed store as sent.
         const next = body.status === 'resting' ? 'riding' : body.status
+        // A manual land/resume supersedes any open ask; a fresh wedge keeps it.
+        // Both fall out of the crossing itself — recordStatusTransition settles
+        // open asks on every crossing but the one into `wedged`.
         recordStatusTransition(t, next, at)
         if (next !== t.status) t.updatedAt = at
         t.status = next
-        // Moving off wedged (a manual land/resume) supersedes any open ask; a
-        // fresh wedge keeps it. (When not previously wedged there's no open
-        // task-blocking ask to touch, so this only bites the intended case.)
-        if (next !== 'wedged') withdrawOpenAsks(t)
       }
     })
 
@@ -1987,8 +1992,9 @@ app.post('/api/:project/tasks/:id/relaunch', async (c) => {
     // repeat spec arms the first successor off this delivery.
     await mutateTask(file, (t) => {
       applyRelaunch(t, rawMessage, at, repeat)
-      // The relaunch is the user's new intent; withdraw any open ask it
-      // supersedes (parity with the retry it already drops in applyRelaunch).
+      // Same as /messages: the crossing inside applyRelaunch covers a
+      // wedged/landed task, and this covers the advisory ask on a task that was
+      // riding all along, where there's no crossing to carry the rule.
       withdrawOpenAsks(t)
     })
     // The normal path is a mid-turn call, where running.has(id) is already true:
@@ -2294,9 +2300,12 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
       t.queued = [...(t.queued ?? []), message]
       t.status = 'riding'
       // A fresh message is the user's new intent; drop any pending retry so its
-      // button doesn't linger over the revived conversation, and withdraw any
-      // open ask the message supersedes.
+      // button doesn't linger over the revived conversation.
       delete t.retry
+      // Reviving a wedged/landed task already withdrew its ask on the crossing
+      // above. This is for the case with no crossing to ride: an advisory
+      // `lander ask` left a question open on a task that never stopped riding,
+      // and answering it by just typing instead is the documented way out.
       withdrawOpenAsks(t)
     })
 

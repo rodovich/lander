@@ -26,7 +26,7 @@
 //   - `now` anchors an open ride's entry so the in-flight turn sorts by the wall
 //     clock, not the timestamp of whatever it happens to have streamed first.
 
-import type { Item, MessageItem, EventItem, Ride } from './types'
+import type { Item, MessageItem, EventItem, AskItem, Ride } from './types'
 
 export type TimelineEntry =
   // A user message bubble (out of any ride). `queued` rides on the item.
@@ -37,6 +37,9 @@ export type TimelineEntry =
   | { kind: 'ride'; at: string; ride: Ride; items: Item[] }
   // A lifecycle event (launch, wedge, schedule, …).
   | { kind: 'event'; at: string; event: EventItem }
+  // An unanchored (platform) ask, standing on its own where it was raised. Its
+  // prompt is the entry's substance; the form renders only while it's open.
+  | { kind: 'ask'; at: string; ask: AskItem }
 
 export function buildTimeline(
   task: { items?: Item[]; rides?: Ride[] },
@@ -44,16 +47,14 @@ export function buildTimeline(
 ): { items: TimelineEntry[] } {
   const all = task.items ?? []
   const rideById = new Map((task.rides ?? []).map((r) => [r.id, r]))
+  const itemIds = new Set(all.map((it) => it.id))
 
   // Hold aside the queued follow-ups (trailing user items the server flagged) so
   // they sink below everything — including any items of a still-open ride that
-  // were appended after the user hit send. Ask items don't take a slot in this
-  // stream: an open ask renders as the footer of the ride that raised it (or
-  // standalone), so it's filtered out here and rendered by the App directly.
+  // were appended after the user hit send.
   const sunk: MessageItem[] = []
   const kept: Item[] = []
   for (const it of all) {
-    if (it.kind === 'ask') continue
     if (it.kind === 'message' && it.role === 'user' && it.queued) sunk.push(it)
     else kept.push(it)
   }
@@ -63,6 +64,21 @@ export function buildTimeline(
   // reused for later items so an interleaving event can't split the bubble.
   const rideEntry = new Map<string, { kind: 'ride'; at: string; ride: Ride; items: Item[] }>()
   for (const it of kept) {
+    if (it.kind === 'ask') {
+      // An ask anchored to a message it can actually reach is that message's
+      // footer (the App renders it there), so it takes no slot of its own. Every
+      // other ask — a platform ask, or converted history whose anchor didn't
+      // survive — stands on its own here, where it was raised.
+      //
+      // It STAYS in the stream once answered or withdrawn: its prompt says what
+      // happened (a kill, a daemon outage), and that's history the conversation
+      // keeps even though the buttons are gone. Drop only an ask with nothing
+      // left to show — no prompt to stand as a record, and no live form.
+      const anchored = it.parentId !== undefined && itemIds.has(it.parentId)
+      if (!anchored && (it.prompt || it.state === 'open'))
+        out.push({ kind: 'ask', at: it.at, ask: it })
+      continue
+    }
     if (it.rideId) {
       let entry = rideEntry.get(it.rideId)
       if (!entry) {

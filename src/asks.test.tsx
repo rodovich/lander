@@ -76,4 +76,19 @@ describe('AskForm rendering', () => {
     const html = render(ask(), true)
     expect(html).toContain('disabled')
   })
+
+  // The prompt and the form have different lifetimes: a platform prompt states
+  // what happened and is the conversation's record of it, so it outlives the
+  // buttons it was raised with.
+  it.each(['answered', 'withdrawn'] as const)(
+    'keeps the prompt but drops the form once %s',
+    (state) => {
+      const html = render(
+        ask({ state, prompt: 'This ride was killed by a daemon update.' }),
+      )
+      expect(html).toContain('This ride was killed by a daemon update.')
+      expect(html).not.toContain('ask-form')
+      expect(html).not.toContain('Alpha')
+    },
+  )
 })

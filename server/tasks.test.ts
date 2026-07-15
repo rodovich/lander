@@ -26,6 +26,7 @@ import {
   type ScheduledMessage,
   type Ride,
 } from './tasks'
+import { askItems, createAsk } from './asks'
 
 const AT = '2026-01-01T00:00:00.000Z'
 const later = (n: number) => `2026-01-01T00:0${n}:00.000Z`
@@ -279,6 +280,56 @@ describe('recordStatusTransition', () => {
     const t = task('wedged')
     recordStatusTransition(t, 'landed', AT)
     expect(kinds(t)).toEqual(['landed'])
+  })
+
+  // The crossing settles any open ask, so that no caller has to remember to. The
+  // rule is stated once here and every path that moves a task inherits it.
+  describe('settling open asks on the crossing', () => {
+    const asking = (status: string) => {
+      const t = task(status)
+      createAsk(t, {
+        id: 'ask-0',
+        form: { type: 'choice', options: [{ id: 'a', label: 'Alpha' }] },
+        blocking: 'task',
+        at: AT,
+      })
+      return t
+    }
+    const askState = (t: { items: Item[] }) => askItems(t)[0].state
+
+    it.each([
+      ['wedged', 'riding'],
+      ['wedged', 'landed'],
+      ['landed', 'riding'],
+      ['riding', 'landed'],
+    ])('withdraws an open ask crossing %s → %s', (prev, next) => {
+      const t = asking(prev)
+      recordStatusTransition(t, next, AT)
+      expect(askState(t)).toBe('withdrawn')
+    })
+
+    // The exception, and the reason for it: this is the crossing that raises an
+    // ask, so settling one here would eat the ask being raised.
+    it('keeps an open ask crossing into wedged', () => {
+      const t = asking('riding')
+      recordStatusTransition(t, 'wedged', AT)
+      expect(askState(t)).toBe('open')
+    })
+
+    // riding↔resting isn't a crossing at all (both store as `riding`), which is
+    // what lets an advisory `lander ask` rest with its question still up.
+    it('keeps an open ask when the status does not actually change', () => {
+      const t = asking('riding')
+      recordStatusTransition(t, 'riding', AT)
+      expect(askState(t)).toBe('open')
+    })
+
+    it('leaves an already-settled ask alone', () => {
+      const t = asking('wedged')
+      askItems(t)[0].state = 'answered'
+      recordStatusTransition(t, 'riding', AT)
+      expect(askState(t)).toBe('answered')
+    })
   })
 })
 

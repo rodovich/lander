@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { buildTimeline } from './timeline'
-import type { EventItem, Item, MessageItem, Ride, ToolItem } from './types'
+import type { AskItem, EventItem, Item, MessageItem, Ride, ToolItem } from './types'
 
 // Pick clearly-ordered ISO timestamps without hand-writing the date each time.
 const T = (clock: string) => `2026-06-26T${clock}.000Z`
@@ -42,6 +42,15 @@ const ride = (id: string, startedAt: string, endedAt?: string): Ride => ({
   startedAt,
   ...(endedAt ? { endedAt, outcome: 'done' } : {}),
 })
+const ask = (id: string, at: string, over: Partial<AskItem> = {}): AskItem => ({
+  id,
+  at,
+  kind: 'ask',
+  form: { type: 'choice', options: [{ id: 'a', label: 'Alpha' }] },
+  blocking: 'task',
+  state: 'open',
+  ...over,
+})
 
 const build = (
   task: { items: Item[]; rides: Ride[] },
@@ -49,14 +58,17 @@ const build = (
 ) => buildTimeline(task, now)
 
 // Render each timeline entry as a short tag so order assertions stay readable:
-// `user:p1` for a user bubble, `asst:r1` for a ride turn, `event:wedged`.
+// `user:p1` for a user bubble, `asst:r1` for a ride turn, `event:wedged`,
+// `ask:ask-0` for a standalone (platform) ask.
 const seq = (items: ReturnType<typeof buildTimeline>['items']) =>
   items.map((it) =>
     it.kind === 'event'
       ? `event:${it.event.eventKind}`
       : it.kind === 'user'
         ? `user:${it.item.id}`
-        : `asst:${it.ride.id}`,
+        : it.kind === 'ask'
+          ? `ask:${it.ask.id}`
+          : `asst:${it.ride.id}`,
   )
 
 describe('buildTimeline ride grouping', () => {
@@ -213,5 +225,62 @@ describe('buildTimeline in-flight anchoring', () => {
     const open = out.find((e) => e.kind === 'ride' && e.ride.id === 'r1')
     expect(settled?.at).toBe(T('10:00:00'))
     expect(open?.at).toBe(T('10:05:00'))
+  })
+})
+
+// A platform ask (a kill, a daemon outage) has no message to anchor to, so it
+// stands as its own entry — and stays there once settled, because its prompt is
+// the conversation's record of what happened.
+describe('buildTimeline ask placement', () => {
+  it('gives an unanchored ask its own entry, in the position it was raised', () => {
+    const items = [
+      user('p1', T('10:00:00')),
+      flow('r1a', 'r1', T('10:00:05')),
+      ask('ask-0', T('10:00:10'), { prompt: 'This ride was killed.' }),
+      user('p2', T('10:01:00')),
+    ]
+    const rides = [ride('r1', T('10:00:05'), T('10:00:06'))]
+    expect(seq(build({ items, rides }).items)).toEqual([
+      'user:p1',
+      'asst:r1',
+      'ask:ask-0',
+      'user:p2',
+    ])
+  })
+
+  it('keeps a settled ask that still carries a prompt, and drops one that does not', () => {
+    const items = [
+      // A settled platform ask: the prompt is the record, so it stays.
+      ask('ask-kill', T('10:00:00'), {
+        state: 'withdrawn',
+        prompt: 'This ride was killed.',
+      }),
+      // Promptless and settled: no record to keep, no form to press.
+      ask('ask-spent', T('10:01:00'), { state: 'answered' }),
+      // Promptless but open: the form is still live, so it must render.
+      ask('ask-live', T('10:02:00')),
+    ]
+    expect(seq(build({ items, rides: [] }).items)).toEqual([
+      'ask:ask-kill',
+      'ask:ask-live',
+    ])
+  })
+
+  it('leaves an ask anchored to a real message to the ride bubble that renders it', () => {
+    const items = [
+      flow('r1a', 'r1', T('10:00:00')),
+      ask('ask-wedge', T('10:00:05'), { parentId: 'r1a' }),
+    ]
+    const rides = [ride('r1', T('10:00:00'), T('10:00:06'))]
+    expect(seq(build({ items, rides }).items)).toEqual(['asst:r1'])
+  })
+
+  it('stands an ask up on its own when its anchor did not survive conversion', () => {
+    const items = [
+      flow('r1a', 'r1', T('10:00:00')),
+      ask('ask-orphan', T('10:00:05'), { parentId: 'gone' }),
+    ]
+    const rides = [ride('r1', T('10:00:00'), T('10:00:06'))]
+    expect(seq(build({ items, rides }).items)).toEqual(['asst:r1', 'ask:ask-orphan'])
   })
 })

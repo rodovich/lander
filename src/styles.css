@@ -1243,6 +1243,13 @@ body {
   color: var(--muted);
 }
 
+/* A platform notice (a kill, a daemon outage) is the app speaking, not the
+   assistant — it gets the attention colour it wedged the task with, and keeps it
+   once the form is answered/withdrawn and only the record remains. */
+.message-platform .message-role {
+  color: var(--wedged);
+}
+
 .message-time {
   color: var(--muted);
   font-size: 12px;

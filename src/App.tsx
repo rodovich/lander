@@ -516,14 +516,12 @@ export function App() {
 
   // The task's open ask renders as the footer of the message item that raised it
   // (the message is the question, the form is the answer). There's at most one
-  // open ask. `askAnchorId` is its `parentId` — the flow message item to hang it
-  // under; when absent (a platform ask, or converted history with no anchor) the
-  // form renders standalone below the conversation (see the fallback near the
-  // composer).
+  // open ask. An ask with no reachable `parentId` to hang under — a platform ask,
+  // or converted history — isn't handled here at all: buildTimeline gives it its
+  // own entry in the stream.
   const openAsk = current?.items?.find(
     (it): it is AskItem => it.kind === 'ask' && it.state === 'open',
   )
-  const askAnchorId = openAsk?.parentId
 
   // Whether the in-flight ride has already produced any item. When it has, the
   // ride block renders its own trailing "working…" spinner; when it hasn't (the
@@ -1881,6 +1879,33 @@ export function App() {
                     />
                   )
                 }
+                if (entry.kind === 'ask') {
+                  // A platform ask, standing where it was raised: its prompt is
+                  // the account of what happened, and AskForm drops the buttons
+                  // once it's no longer open. It carries a head like every other
+                  // row because it outlives its form — a bare sentence with no
+                  // time on it reads as floating loose in the conversation rather
+                  // than as the record of a moment.
+                  return (
+                    <div
+                      className="message message-platform"
+                      key={`a-${entry.ask.id}`}
+                    >
+                      <div className="message-head">
+                        <span className="message-role">lander</span>
+                        <span className="message-time">
+                          {formatTimestamp(entry.ask.at)}
+                        </span>
+                      </div>
+                      <AskForm
+                        ask={entry.ask}
+                        linkTask={resolveTaskLink}
+                        disabled={answeringBy[current.id] ?? false}
+                        onAnswer={(body) => void answerAsk(entry.ask.id, body)}
+                      />
+                    </div>
+                  )
+                }
                 if (entry.kind === 'user') {
                   const m = entry.item
                   return (
@@ -2155,22 +2180,6 @@ export function App() {
                   </div>
                 </div>
               )}
-              {/* Fallback: an open ask with no message item to anchor to (a
-                  platform ask, or converted history) renders its form standalone. */}
-              {openAsk &&
-                !(
-                  askAnchorId &&
-                  current.items?.some((it) => it.id === askAnchorId)
-                ) && (
-                  <div className="message message-assistant">
-                    <AskForm
-                      ask={openAsk}
-                      linkTask={resolveTaskLink}
-                      disabled={answeringBy[current.id] ?? false}
-                      onAnswer={(body) => void answerAsk(openAsk.id, body)}
-                    />
-                  </div>
-                )}
             </div>
             <ResizeHandle
               height={composerHeight}

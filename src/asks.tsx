@@ -1,7 +1,14 @@
-// The ask form: the controls for an open ask, rendered inline under the assistant
-// message it belongs to (not as a separate card). An agent wedge carries no
-// prompt — its own message is the question — so this usually renders just the
-// buttons; a platform ask (the retry ask) carries a prompt line above them.
+// The ask form: an ask's prompt and, while it's open, the controls to answer it.
+// Rendered inline under the assistant message it belongs to (not as a separate
+// card). An agent wedge carries no prompt — its own message is the question — so
+// this usually renders just the buttons; a platform ask (the retry ask) carries a
+// prompt line above them.
+//
+// The two halves have different lifetimes. The buttons are live only while the
+// ask is open: answered or withdrawn, there's nothing left to press. The prompt
+// is the platform's own account of what happened ("This ride was killed…") and
+// outlives them — it's the conversation's record of the event, so it keeps
+// rendering after the form is gone rather than taking the history with it.
 
 import { useState } from 'react'
 import { retryResetTime } from './format'
@@ -45,43 +52,45 @@ export function AskForm({
           <Markdown text={ask.prompt} linkTask={linkTask} />
         </div>
       )}
-      <div className="ask-form">
-        {ask.form.options.map((opt) =>
-          opt.editable ? (
-            <div className="ask-editable" key={opt.id}>
-              <input
-                className="ask-input"
-                value={edited[opt.id] ?? ''}
-                disabled={disabled}
-                onChange={(e) =>
-                  setEdited((prev) => ({ ...prev, [opt.id]: e.target.value }))
-                }
-              />
+      {ask.state === 'open' && (
+        <div className="ask-form">
+          {ask.form.options.map((opt) =>
+            opt.editable ? (
+              <div className="ask-editable" key={opt.id}>
+                <input
+                  className="ask-input"
+                  value={edited[opt.id] ?? ''}
+                  disabled={disabled}
+                  onChange={(e) =>
+                    setEdited((prev) => ({ ...prev, [opt.id]: e.target.value }))
+                  }
+                />
+                <button
+                  type="button"
+                  className={optionClass(opt)}
+                  disabled={disabled || !(edited[opt.id] ?? '').trim()}
+                  onClick={() =>
+                    onAnswer({ optionId: opt.id, text: edited[opt.id] ?? '' })
+                  }
+                >
+                  {askOptionLabel(opt)}
+                </button>
+              </div>
+            ) : (
               <button
                 type="button"
                 className={optionClass(opt)}
-                disabled={disabled || !(edited[opt.id] ?? '').trim()}
-                onClick={() =>
-                  onAnswer({ optionId: opt.id, text: edited[opt.id] ?? '' })
-                }
+                key={opt.id}
+                disabled={disabled}
+                title={opt.detail}
+                onClick={() => onAnswer({ optionId: opt.id })}
               >
                 {askOptionLabel(opt)}
               </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              className={optionClass(opt)}
-              key={opt.id}
-              disabled={disabled}
-              title={opt.detail}
-              onClick={() => onAnswer({ optionId: opt.id })}
-            >
-              {askOptionLabel(opt)}
-            </button>
-          ),
-        )}
-      </div>
+            ),
+          )}
+        </div>
+      )}
     </div>
   )
 }
