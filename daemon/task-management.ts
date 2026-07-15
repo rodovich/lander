@@ -30,11 +30,11 @@ export function promptWithTaskManagement(
 
 export function forwardableAccess(task: AgentTaskView): string {
   if (task.agent === 'codex') {
-    const sandbox = task.allowEdits
-      ? 'workspace-write sandbox for file edits'
-      : 'read-only sandbox'
+    const permissions = task.allowEdits
+      ? 'workspace-scoped edit permission profile'
+      : 'workspace-scoped read-only permission profile'
     return (
-      `This Codex turn runs with the ${sandbox}. ` +
+      `This Codex turn runs with the ${permissions}. ` +
       'Task allow rules are stored by Lander but do not affect Codex runs yet'
     )
   }

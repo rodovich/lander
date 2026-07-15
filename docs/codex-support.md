@@ -51,10 +51,19 @@ uses it for follow-up turns.
 
 The Codex adapter supports first turns and resumed turns, including explicit
 `--cd` handling so resumed Codex turns launch from the daemon-resolved cwd. It
-maps Lander's edit flag to Codex sandboxing:
+maps Lander's edit flag to named Codex permission profiles:
 
-- `allowEdits=false` uses read-only execution.
-- `allowEdits=true` uses workspace-write execution.
+- `allowEdits=false` extends Codex's built-in `:read-only` profile.
+- `allowEdits=true` extends Codex's built-in `:workspace` profile and changes
+  the workspace's `.git` rule from read to write. The daemon also resolves and
+  grants the Git common directory so linked worktrees can update their shared
+  index, objects, and refs.
+
+The editable profile otherwise preserves Codex's workspace-write semantics:
+filesystem reads are unrestricted, writes are limited to the workspace, its
+resolved Git common directory, `/tmp`, and `$TMPDIR`, and the usual `.agents`
+and `.codex` metadata protections remain in place. Both profiles allow network
+access, including the local Lander API used by in-task self-management commands.
 
 The Codex JSONL reducer currently handles text replies, command executions, file
 change events, failed commands or failed turns, resumed sessions, and per-turn
@@ -71,13 +80,13 @@ Codex shell environment receives the injected `LANDER_*` values.
 Codex support is useful for basic task execution and resume, but it is not at
 Claude feature parity.
 
-Permission grants are coarse. Lander maps edit access to Codex sandbox modes, but
-Codex runs do not honor task allow rules or Claude-style per-tool
-`--allowedTools`. The UI stores Codex task rules for future parity and returns a
-warning, but those rules do not change Codex argv or runtime behavior. There is
-also no separate git gate on Codex: `read-only` blocks all writes, while
-`workspace-write` (edit access) lets a turn run git as an ordinary shell command
-— it can't be narrowed the way a Claude project's `.claude` settings narrow git.
+Permission grants are coarse. Lander selects a read-only or editable Codex
+permission profile, but Codex runs do not honor task allow rules or Claude-style
+per-tool `--allowedTools`. The UI stores Codex task rules for future parity and
+returns a warning, but those rules do not change Codex argv or runtime behavior.
+There is also no separate git gate on Codex: edit access includes writes to the
+repository's Git metadata so Git runs as an ordinary shell command. It cannot be
+narrowed the way a Claude project's `.claude` settings narrow git.
 
 Project permission grants are unsupported for Codex. A project-scope grant for a
 Codex task is routed to the daemon, and the Codex adapter reports that project
@@ -85,13 +94,15 @@ permission grants are not supported yet.
 
 Codex worktree integration is cwd-based only. Lander can keep provider-neutral
 cwd/worktree metadata on the task, and the Codex adapter passes the resolved cwd
-with `--cd`, but Codex does not use Claude's `--worktree` flag,
-`.claude/worktrees` session convention, or EnterWorktree/ExitWorktree hook flow.
+with `--cd`. When that cwd is already in a linked Git worktree, the adapter
+grants its resolved Git common directory to the edit profile. Codex still does
+not use Claude's `--worktree` flag, `.claude/worktrees` session convention, or
+EnterWorktree/ExitWorktree hook flow.
 
 Codex hooks are not wired into Lander. Claude still has provider-specific hooks
 for background-shell advisory context, cwd recording, and worktree bookkeeping.
-Codex currently relies on explicit launch cwd, prompt instructions, sandboxing,
-and environment config rather than equivalent per-turn hooks.
+Codex currently relies on explicit launch cwd, prompt instructions, permission
+profiles, and environment config rather than equivalent per-turn hooks.
 
 Codex usage data is per-turn only. Lander can parse token usage from Codex JSONL,
 but Codex tasks do not have Claude-style subscription-window usage, cost

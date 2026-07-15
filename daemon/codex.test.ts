@@ -21,6 +21,28 @@ const adapter = createCodexAdapter({
   taskPromptTemplate: TASK_PROMPT_TEMPLATE,
 })
 
+function permissionArgs(
+  allowEdits: boolean,
+  projectRoot = '/repo',
+  gitCommonDir?: string,
+): string[] {
+  const profileId = allowEdits ? 'lander-edit' : 'lander-read-only'
+  const description = allowEdits
+    ? 'Lander workspace edit access'
+    : 'Lander workspace read-only access'
+  const commonDirRule =
+    allowEdits && gitCommonDir ? `,"${gitCommonDir}"="write"` : ''
+  const profile = allowEdits
+    ? `description="${description}",extends=":workspace",workspace_roots={"${projectRoot}"=true},filesystem={":workspace_roots"={".git"="write"}${commonDirRule}},network={enabled=true,allow_local_binding=true}`
+    : `description="${description}",extends=":read-only",network={enabled=true,allow_local_binding=true}`
+  return [
+    '--config',
+    `default_permissions="${profileId}"`,
+    '--config',
+    `permissions.${profileId}={${profile}}`,
+  ]
+}
+
 function fixtureLines(name: string): string[] {
   return readFileSync(path.join(FIXTURES, name), 'utf8').trim().split('\n')
 }
@@ -60,7 +82,7 @@ describe('Codex adapter reducer', () => {
     expect(adapter.supportsRateLimitRetryScheduling).toBe(false)
   })
 
-  it('builds first-turn Codex exec args with conservative sandboxing', () => {
+  it('builds first-turn Codex exec args with workspace-scoped read access', () => {
     const launch = adapter.buildLaunch({
       task: {
         allowEdits: false,
@@ -87,8 +109,7 @@ describe('Codex adapter reducer', () => {
     expect(launch.args).toEqual([
       'exec',
       '--json',
-      '--config',
-      'sandbox_workspace_write.network_access=true',
+      ...permissionArgs(false),
       '--config',
       'shell_environment_policy.inherit=all',
       '--config',
@@ -97,18 +118,19 @@ describe('Codex adapter reducer', () => {
       'shell_environment_policy.include_only=["PATH","LANDER_*"]',
       '--cd',
       '/repo/subdir',
-      '--sandbox',
-      'read-only',
       managedPrompt(
         'hello codex',
-        'This Codex turn runs with the read-only sandbox. Task allow rules are stored by Lander but do not affect Codex runs yet',
+        'This Codex turn runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
       ),
     ])
     expect(launch.args.join('\0')).not.toContain('secret-token')
     expect(launch.args).not.toContain('--skip-git-repo-check')
+    expect(launch.args).not.toContain('--sandbox')
+    expect(launch.args.join('\0')).not.toContain('sandbox_mode')
+    expect(launch.args.join('\0')).toContain('extends=":read-only"')
   })
 
-  it('maps editable first-turn Codex tasks to workspace-write', () => {
+  it('maps editable first-turn Codex tasks to a workspace edit profile', () => {
     const launch = adapter.buildLaunch({
       task: {
         allowEdits: true,
@@ -122,8 +144,7 @@ describe('Codex adapter reducer', () => {
     expect(launch.args).toEqual([
       'exec',
       '--json',
-      '--config',
-      'sandbox_workspace_write.network_access=true',
+      ...permissionArgs(true),
       '--config',
       'shell_environment_policy.inherit=all',
       '--config',
@@ -132,11 +153,47 @@ describe('Codex adapter reducer', () => {
       'shell_environment_policy.include_only=["PATH","LANDER_*"]',
       '--cd',
       '/repo',
-      '--sandbox',
-      'workspace-write',
       managedPrompt(
         'edit files',
-        'This Codex turn runs with the workspace-write sandbox for file edits. Task allow rules are stored by Lander but do not affect Codex runs yet',
+        'This Codex turn runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
+      ),
+    ])
+    expect(launch.args.join('\0')).toContain('extends=":workspace"')
+    expect(launch.args.join('\0')).toContain('":workspace_roots"={".git"="write"}')
+  })
+
+  it('grants editable worktrees access to the resolved Git common directory', () => {
+    const worktreeAdapter = createCodexAdapter({
+      taskPromptTemplate: TASK_PROMPT_TEMPLATE,
+      resolveGitCommonDir: (cwd) => {
+        expect(cwd).toBe('/worktrees/feature')
+        return '/repo/.git'
+      },
+    })
+
+    const launch = worktreeAdapter.buildLaunch({
+      task: { allowEdits: true },
+      prompt: 'edit worktree',
+      root: '/worktrees/feature',
+      cwd: '/worktrees/feature',
+      landerEnv: {},
+    })
+
+    expect(launch.args).toEqual([
+      'exec',
+      '--json',
+      ...permissionArgs(true, '/worktrees/feature', '/repo/.git'),
+      '--config',
+      'shell_environment_policy.inherit=all',
+      '--config',
+      'shell_environment_policy.ignore_default_excludes=true',
+      '--config',
+      'shell_environment_policy.include_only=["PATH","LANDER_*"]',
+      '--cd',
+      '/worktrees/feature',
+      managedPrompt(
+        'edit worktree',
+        'This Codex turn runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
       ),
     ])
   })
@@ -156,28 +213,25 @@ describe('Codex adapter reducer', () => {
     expect(launch.args).toEqual([
       'exec',
       '--json',
-      '--config',
-      'sandbox_workspace_write.network_access=true',
+      ...permissionArgs(false),
       '--config',
       'shell_environment_policy.inherit=all',
       '--config',
       'shell_environment_policy.ignore_default_excludes=true',
       '--config',
       'shell_environment_policy.include_only=["PATH","LANDER_*"]',
-      '--config',
-      'sandbox_mode="read-only"',
       '--cd',
       '/repo/subdir',
       'resume',
       '019f0000-0000-7000-8000-000000000001',
       managedPrompt(
         'follow up',
-        'This Codex turn runs with the read-only sandbox. Task allow rules are stored by Lander but do not affect Codex runs yet',
+        'This Codex turn runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
       ),
     ])
   })
 
-  it('maps editable Codex resume tasks to workspace-write config', () => {
+  it('maps editable Codex resume tasks to the same workspace edit profile', () => {
     const launch = adapter.buildLaunch({
       task: {
         sessionId: '019f0000-0000-7000-8000-000000000001',
@@ -192,23 +246,20 @@ describe('Codex adapter reducer', () => {
     expect(launch.args).toEqual([
       'exec',
       '--json',
-      '--config',
-      'sandbox_workspace_write.network_access=true',
+      ...permissionArgs(true),
       '--config',
       'shell_environment_policy.inherit=all',
       '--config',
       'shell_environment_policy.ignore_default_excludes=true',
       '--config',
       'shell_environment_policy.include_only=["PATH","LANDER_*"]',
-      '--config',
-      'sandbox_mode="workspace-write"',
       '--cd',
       '/repo',
       'resume',
       '019f0000-0000-7000-8000-000000000001',
       managedPrompt(
         'follow up with edits',
-        'This Codex turn runs with the workspace-write sandbox for file edits. Task allow rules are stored by Lander but do not affect Codex runs yet',
+        'This Codex turn runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
       ),
     ])
   })
@@ -239,23 +290,20 @@ describe('Codex adapter reducer', () => {
       'model="gpt-5-codex"',
       '--config',
       'approval_policy="never"',
-      '--config',
-      'sandbox_workspace_write.network_access=true',
+      ...permissionArgs(true),
       '--config',
       'shell_environment_policy.inherit=all',
       '--config',
       'shell_environment_policy.ignore_default_excludes=true',
       '--config',
       'shell_environment_policy.include_only=["PATH","LANDER_*"]',
-      '--config',
-      'sandbox_mode="workspace-write"',
       '--cd',
       '/repo/subdir',
       'resume',
       '019f0000-0000-7000-8000-000000000001',
       managedPrompt(
         'configured follow up',
-        'This Codex turn runs with the workspace-write sandbox for file edits. Task allow rules are stored by Lander but do not affect Codex runs yet',
+        'This Codex turn runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
       ),
     ])
   })
@@ -285,8 +333,7 @@ describe('Codex adapter reducer', () => {
       'model="gpt-5-codex"',
       '--config',
       'approval_policy="never"',
-      '--config',
-      'sandbox_workspace_write.network_access=true',
+      ...permissionArgs(true),
       '--config',
       'shell_environment_policy.inherit=all',
       '--config',
@@ -295,11 +342,9 @@ describe('Codex adapter reducer', () => {
       'shell_environment_policy.include_only=["PATH","LANDER_*"]',
       '--cd',
       '/repo',
-      '--sandbox',
-      'workspace-write',
       managedPrompt(
         'use configured codex',
-        'This Codex turn runs with the workspace-write sandbox for file edits. Task allow rules are stored by Lander but do not affect Codex runs yet',
+        'This Codex turn runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
       ),
     ])
   })

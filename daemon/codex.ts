@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process'
+import path from 'node:path'
 import type { AgentAdapter, AgentLineUpdate, AgentTaskView } from './agent'
 import type { Usage } from '../server/stream'
 import { fullToolInput, summarizeToolInput, summarizeToolResult, toolRule } from '../server/stream'
@@ -7,6 +9,7 @@ export type CodexAdapterOptions = {
   taskPromptTemplate: string
   profile?: string
   configOverrides?: string[]
+  resolveGitCommonDir?: (cwd: string) => string | undefined
 }
 
 const CODEX_SHELL_ENV_INCLUDE_ONLY = [
@@ -18,16 +21,19 @@ export function createCodexAdapter({
   taskPromptTemplate,
   profile,
   configOverrides = [],
+  resolveGitCommonDir = resolveGitCommonDirWithGit,
 }: CodexAdapterOptions): AgentAdapter {
   return {
     kind: 'codex',
     command: 'codex',
-    buildLaunch({ task, prompt, cwd, landerEnv, images }) {
+    buildLaunch({ task, prompt, root, cwd, landerEnv, images }) {
       return {
         args: buildCodexArgs(task, prompt, cwd, {
           taskPromptTemplate,
           profile,
           configOverrides,
+          projectRoot: root,
+          gitCommonDir: task.allowEdits ? resolveGitCommonDir(cwd) : undefined,
           images: images ?? [],
         }),
         env: landerEnv,
@@ -59,21 +65,21 @@ function buildCodexArgs(
     taskPromptTemplate,
     profile,
     configOverrides,
+    projectRoot,
+    gitCommonDir,
     images,
   }: {
     taskPromptTemplate: string
     profile?: string
     configOverrides: string[]
+    projectRoot: string
+    gitCommonDir?: string
     images: string[]
   },
 ): string[] {
-  const sandboxMode = task.allowEdits ? 'workspace-write' : 'read-only'
   const configOverridesWithLanderDefaults = [
     ...configOverrides,
-    // `lander` self-management commands call back to the local Lander API.
-    // Codex keeps workspace-write network access off by default, so opt in per
-    // Lander-run without requiring a user profile.
-    'sandbox_workspace_write.network_access=true',
+    ...codexPermissionConfigOverrides(task.allowEdits, projectRoot, gitCommonDir),
     ...codexShellEnvConfigOverrides(),
   ]
   const managedPrompt = promptWithTaskManagement(
@@ -90,10 +96,7 @@ function buildCodexArgs(
     return [
       'exec',
       '--json',
-      ...codexConfigArgs(profile, [
-        ...configOverridesWithLanderDefaults,
-        `sandbox_mode=${tomlString(sandboxMode)}`,
-      ]),
+      ...codexConfigArgs(profile, configOverridesWithLanderDefaults),
       '--cd',
       cwd,
       'resume',
@@ -108,11 +111,62 @@ function buildCodexArgs(
     ...configArgs,
     '--cd',
     cwd,
-    '--sandbox',
-    sandboxMode,
     managedPrompt,
     ...imageArgs,
   ]
+}
+
+function codexPermissionConfigOverrides(
+  allowEdits: boolean,
+  projectRoot: string,
+  gitCommonDir: string | undefined,
+): string[] {
+  const profileId = allowEdits ? 'lander-edit' : 'lander-read-only'
+  const baseProfile = allowEdits ? ':workspace' : ':read-only'
+  const filesystemRules = allowEdits
+    ? [
+        `${tomlString(':workspace_roots')}={${tomlEntry('.git', 'write')}}`,
+        ...(gitCommonDir
+          ? [tomlEntry(path.resolve(gitCommonDir), 'write')]
+          : []),
+      ].join(',')
+    : undefined
+  const profileValue = [
+    `description=${tomlString(
+      allowEdits
+        ? 'Lander workspace edit access'
+        : 'Lander workspace read-only access',
+    )}`,
+    `extends=${tomlString(baseProfile)}`,
+    ...(allowEdits
+      ? [
+          `workspace_roots={${tomlString(path.resolve(projectRoot))}=true}`,
+          `filesystem={${filesystemRules}}`,
+        ]
+      : []),
+    'network={enabled=true,allow_local_binding=true}',
+  ].join(',')
+
+  return [
+    `default_permissions=${tomlString(profileId)}`,
+    `permissions.${profileId}={${profileValue}}`,
+  ]
+}
+
+function resolveGitCommonDirWithGit(cwd: string): string | undefined {
+  try {
+    const commonDir = execFileSync(
+      'git',
+      ['-C', cwd, 'rev-parse', '--git-common-dir'],
+      {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      },
+    ).trim()
+    return commonDir ? path.resolve(cwd, commonDir) : undefined
+  } catch {
+    return undefined
+  }
 }
 
 export function codexOptionsFromEnv(env: {
@@ -151,6 +205,10 @@ function codexShellEnvConfigOverrides(): string[] {
 
 function tomlString(value: string): string {
   return JSON.stringify(value)
+}
+
+function tomlEntry(key: string, value: string): string {
+  return `${tomlString(key)}=${tomlString(value)}`
 }
 
 function tomlArray(values: readonly string[]): string {

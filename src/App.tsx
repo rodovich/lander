@@ -829,7 +829,7 @@ export function App() {
           agent: newTaskAgent,
           // Human-launched tasks always get edit access; git and other Bash
           // are governed by the project's .claude permissions (Claude) or the
-          // workspace-write sandbox (Codex). A read-only task is only ever
+          // workspace-scoped edit profile (Codex). A read-only task is only ever
           // produced by a spawner declining to forward edits, and the human
           // can grant edits from the task header.
           allowEdits: true,
