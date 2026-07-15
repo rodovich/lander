@@ -633,8 +633,7 @@ async function reduceRunWs(
             if (!streamedText) recordAssistantError(t, PLATFORM_KILL_ERROR, at)
             // A platform kill — the daemon died mid-turn and never came back, so it
             // could not settle its own done — needs the user's attention just like
-            // an assistant error. Wedge with a retry ask that names the cause (the
-            // stop-jobs choke point in mutateTask kills adopted jobs on the flip).
+            // an assistant error. Wedge with a retry ask that names the cause.
             // Only override a still-riding task: a self-wedge/land the agent set
             // stands, exactly as applyDone guards.
             if (t.status === 'riding')

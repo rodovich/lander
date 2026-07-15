@@ -203,12 +203,10 @@ const runManager = createRunManager({
 
 // The dev supervisor's drain handoff (daemon-watch.mjs sends SIGUSR2 on a daemon
 // source edit): finish the runs we're riding, take no new ones, and exit once
-// they're all done and no settle-sweep is mid-flight — so a code edit never
-// interrupts an in-flight turn. SIGTERM still hard-kills as the max-drain cap.
+// they're all done — so a code edit never interrupts an in-flight turn. SIGTERM
+// still hard-kills as the max-drain cap.
 const drain = createDrain({
   runsHeld: () => runManager.size(),
-  sweepInFlight: () => false,
-  stopTimers: () => {},
   exit: () => {
     console.log('drained; exiting for handoff')
     process.exit(0)
