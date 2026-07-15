@@ -244,7 +244,7 @@ function CodeBlock({ text }: { text: string }): JSX.Element {
 
 type Block =
   | { type: 'heading'; level: number; text: string }
-  | { type: 'list'; ordered: boolean; items: string[] }
+  | { type: 'list'; ordered: boolean; start?: number; items: string[] }
   | { type: 'quote'; lines: string[] }
   | { type: 'code'; text: string }
   | { type: 'hr' }
@@ -353,9 +353,12 @@ export function parseBlocks(src: string): Block[] {
     }
 
     const ulMatch = line.match(/^\s*[-*+]\s+/)
-    const olMatch = line.match(/^\s*\d+[.)]\s+/)
+    const olMatch = line.match(/^\s*(\d+)[.)]\s+/)
     if (ulMatch || olMatch) {
       const ordered = !!olMatch
+      // Per CommonMark only the first marker's number counts; the rest are
+      // renumbered from it, so the browser's own counter takes over from here.
+      const start = olMatch ? Number(olMatch[1]) : undefined
       const markerRe = ordered ? /^\s*\d+[.)]\s+/ : /^\s*[-*+]\s+/
       const items: string[] = []
       while (i < lines.length) {
@@ -391,7 +394,7 @@ export function parseBlocks(src: string): Block[] {
         }
         items.push(itemLines.join('\n').replace(/\n+$/, ''))
       }
-      blocks.push({ type: 'list', ordered, items })
+      blocks.push({ type: 'list', ordered, start, items })
       continue
     }
 
@@ -458,7 +461,7 @@ function renderBlocks(
           }
           case 'list':
             return b.ordered ? (
-              <ol key={key}>
+              <ol key={key} start={b.start !== 1 ? b.start : undefined}>
                 {b.items.map((it, j) => (
                   <li key={j}>{renderListItem(it, `${key}-${j}`, linkTask)}</li>
                 ))}

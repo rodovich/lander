@@ -123,7 +123,25 @@ describe('parseBlocks', () => {
       { type: 'list', ordered: false, items: ['a', 'b'] },
     ])
     expect(parseBlocks('1. a\n2. b')).toEqual([
-      { type: 'list', ordered: true, items: ['a', 'b'] },
+      { type: 'list', ordered: true, start: 1, items: ['a', 'b'] },
+    ])
+  })
+
+  it('keeps the first marker as the ordered list start', () => {
+    expect(parseBlocks('3. a\n4. b')).toEqual([
+      { type: 'list', ordered: true, start: 3, items: ['a', 'b'] },
+    ])
+    // Only the first marker counts — later ones are renumbered from it.
+    expect(parseBlocks('2. a\n9. b')).toEqual([
+      { type: 'list', ordered: true, start: 2, items: ['a', 'b'] },
+    ])
+  })
+
+  it('starts each list split by a paragraph at its own marker', () => {
+    expect(parseBlocks('1. a\n\npara\n\n2. b')).toEqual([
+      { type: 'list', ordered: true, start: 1, items: ['a'] },
+      { type: 'paragraph', text: 'para' },
+      { type: 'list', ordered: true, start: 2, items: ['b'] },
     ])
   })
 
