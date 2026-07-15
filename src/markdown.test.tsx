@@ -6,10 +6,14 @@ import {
   splitRow,
   parseDelimiter,
   parseBlocks,
+  findCodeSpans,
   Markdown,
 } from './markdown'
 
 const render = (text: string) => renderToStaticMarkup(<Markdown text={text} />)
+
+// Backtick runs are hard to read inline, so build them by name.
+const B = '`'
 
 describe('safeHref', () => {
   it('allows http(s) and mailto, case-insensitively', () => {
@@ -91,6 +95,32 @@ describe('parseDelimiter', () => {
 
   it('parses a pipe-less run of dashes as a single column (documented)', () => {
     expect(parseDelimiter('---')).toEqual([null])
+  })
+})
+
+describe('findCodeSpans', () => {
+  it('finds single and multi-backtick spans', () => {
+    expect(findCodeSpans('a `x` b')).toEqual([
+      { start: 2, end: 5, content: 'x' },
+    ])
+    expect(findCodeSpans(B.repeat(2) + ' ' + B + 'x' + B + ' ' + B.repeat(2))).toEqual(
+      [{ start: 0, end: 9, content: '`x`' }],
+    )
+  })
+
+  it('ignores a run that never closes', () => {
+    expect(findCodeSpans(B.repeat(2) + 'a' + B)).toEqual([])
+    expect(findCodeSpans('no backticks here')).toEqual([])
+  })
+
+  it('never returns adjacent spans, which the NUL mapping relies on', () => {
+    // Two spans always have a non-backtick between them: touching spans would
+    // mean the first one's closing run wasn't maximal.
+    const spans = findCodeSpans('`a` `b` `c`')
+    expect(spans).toHaveLength(3)
+    for (let i = 1; i < spans.length; i++) {
+      expect(spans[i].start).toBeGreaterThan(spans[i - 1].end)
+    }
   })
 })
 
@@ -199,6 +229,73 @@ describe('Markdown rendering', () => {
     // rather than splitting the "**" off as literal text.
     expect(render('**a *b* c**')).toContain('<strong>a <em>b</em> c</strong>')
     expect(render('**a *b* c**')).not.toContain('**')
+  })
+
+  it('closes a code span on a backtick run of the same length', () => {
+    // A longer run is how a backtick gets *inside* code.
+    expect(render(B.repeat(2) + ' ' + B + 'x' + B + ' ' + B.repeat(2))).toContain(
+      '<code>`x`</code>',
+    )
+    expect(render(B.repeat(2) + 'a' + B + 'b' + B.repeat(2))).toContain(
+      '<code>a`b</code>',
+    )
+    // A shorter run inside a longer span is just content, not a closer.
+    expect(render(B + 'a' + B.repeat(2) + 'b' + B)).toContain(
+      '<code>a``b</code>',
+    )
+  })
+
+  it('leaves an opening run with no equal-length closer literal', () => {
+    // Not a span: the run of 2 never closes. It must not be read as a run of 1
+    // plus a stray, which would shift every later backtick onto a wrong partner.
+    const html = render(B.repeat(2) + 'a' + B)
+    expect(html).not.toContain('<code>')
+    expect(html).toContain('``a`')
+  })
+
+  it('strips one space of padding from a code span', () => {
+    expect(render(B + ' x ' + B)).toContain('<code>x</code>')
+    // All-spaces content keeps its spaces, else there'd be nothing left.
+    expect(render(B + '   ' + B)).toContain('<code>   </code>')
+  })
+
+  it('keeps a delimiter inside a code span from opening emphasis', () => {
+    // The "*" inside the code span must not close the italic. Regression: it
+    // did, and every later backtick then paired with the wrong partner —
+    // rendering the prose as code and the commands as prose.
+    const html = render(
+      '*a rule like `Bash(safe-cmd *)` won\'t run `safe-cmd && other-cmd`*',
+    )
+    expect(html).toContain(
+      '<em>a rule like <code>Bash(safe-cmd *)</code> won&#x27;t run' +
+        ' <code>safe-cmd &amp;&amp; other-cmd</code></em>',
+    )
+    // Same class of bug for the other three delimiters.
+    expect(render('**bold `a ** b` end**')).toContain(
+      '<strong>bold <code>a ** b</code> end</strong>',
+    )
+    expect(render('_a `x_y` b_')).toContain('<em>a <code>x_y</code> b</em>')
+    expect(render('__a `x__y` b__')).toContain(
+      '<strong>a <code>x__y</code> b</strong>',
+    )
+  })
+
+  it('still emphasizes around a backtick that opens no code span', () => {
+    expect(render('*a ` b*')).toContain('<em>a ` b</em>')
+  })
+
+  it('renders a NUL in the source as text, not as a code span', () => {
+    // Code spans are blanked with NUL before the other patterns scan, so a NUL
+    // already in the text must not be mistaken for one.
+    const html = render('a\0b')
+    expect(html).not.toContain('<code>')
+  })
+
+  it('does not blow up on a long backtick run with no closing delimiter', () => {
+    const evil = '*' + '`x'.repeat(400) + ' no close'
+    const t0 = performance.now()
+    render(evil)
+    expect(performance.now() - t0).toBeLessThan(500)
   })
 
   it('does not emphasize intraword underscores, but does intraword asterisks', () => {

@@ -24,6 +24,47 @@ export function safeHref(url: string): string | undefined {
   return undefined
 }
 
+type CodeSpan = { start: number; end: number; content: string }
+
+// CommonMark strips one space from each end of a code span's content when it is
+// padded on both sides. That padding is what lets a span hold a backtick at its
+// own edge, as in `` `x` ``.
+function stripCodePad(text: string): string {
+  const padded = text.length > 1 && text.startsWith(' ') && text.endsWith(' ')
+  return padded && /[^ ]/.test(text) ? text.slice(1, -1) : text
+}
+
+// Locate every code span. A span opens with a *run* of backticks and closes on
+// the next run of the same length, which is how a backtick gets inside code:
+// `` `x` `` is one span whose content is `x`. Both runs must be maximal — the
+// lookarounds — so ``a` stays literal (its opening run of 2 never closes)
+// rather than being read as a shorter run plus a stray.
+export function findCodeSpans(text: string): CodeSpan[] {
+  if (!text.includes('`')) return []
+  const re = /(?<!`)(`+)(?!`)([\s\S]*?)(?<!`)\1(?!`)/g
+  const spans: CodeSpan[] = []
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    spans.push({
+      start: m.index,
+      end: m.index + m[0].length,
+      content: stripCodePad(m[2]),
+    })
+  }
+  return spans
+}
+
+// Blank each code span out, preserving length so indices still address `text`.
+function maskCodeSpans(text: string, spans: CodeSpan[]): string {
+  if (!spans.length) return text
+  let out = ''
+  let at = 0
+  for (const s of spans) {
+    out += text.slice(at, s.start) + '\0'.repeat(s.end - s.start)
+    at = s.end
+  }
+  return out + text.slice(at)
+}
+
 // Parse inline spans (bold, italic, code, links) into React nodes. Operates on
 // plain text, so anything it doesn't recognize stays literal.
 function renderInline(
@@ -34,32 +75,60 @@ function renderInline(
   const nodes: ReactNode[] = []
   let key = 0
 
-  // Ordered by precedence: code first so its contents aren't reparsed. Every
-  // regex is global so the scan below can resume from a saved lastIndex instead
-  // of re-matching the whole tail each step — see the loop's cache comment.
+  // Code binds tighter than every other inline span, so it is resolved up front
+  // rather than competing in the scan below — which picks the earliest match and
+  // so can't express "code wins wherever it starts". Each span is blanked out of
+  // `masked`, making a delimiter *inside* code inert: the "*" in
+  // `Bash(safe-cmd *)` can no longer close an italic opened before it. Emphasis
+  // can still span a code span, since the blanks are ordinary body characters.
+  const codeSpans = findCodeSpans(text)
+  const masked = maskCodeSpans(text, codeSpans)
+  const codeAt = new Map(codeSpans.map((s) => [s.start, s.content]))
+
+  // Patterns match against `masked`, so any group whose text gets rendered must
+  // be re-sliced from `text` to restore what was blanked. Indices agree because
+  // masking preserves length.
+  const src = (m: RegExpExecArray) => text.slice(m.index, m.index + m[0].length)
+  const group = (m: RegExpExecArray, i: number): string | undefined => {
+    const at = m.indices?.[i]
+    return at && text.slice(at[0], at[1])
+  }
+
+  // Every regex is global so the scan below can resume from a saved lastIndex
+  // instead of re-matching the whole tail each step — see the loop's cache
+  // comment. The "d" flag is what makes `group` above work.
+  //
+  // Matches always come from `.exec` below, so `index` is always present —
+  // RegExpMatchArray would leave it optional and `src`/`group` need it.
   const patterns: {
     re: RegExp
-    render: (m: RegExpMatchArray, k: string) => ReactNode
+    render: (m: RegExpExecArray, k: string) => ReactNode
     // Optional gate: a match the predicate rejects is skipped during scanning as
     // if it never matched, so it neither renders nor splits the surrounding
     // literal text into extra nodes. Used by the task-mention pattern so the vast
     // majority of 8+ char tokens (ordinary words that name no task) stay part of
     // one contiguous text node instead of becoming tens of thousands of
     // Fragments — the dominant render/DOM cost on a long pasted log.
-    accept?: (m: RegExpMatchArray) => boolean
+    accept?: (m: RegExpExecArray) => boolean
   }[] = [
     {
-      re: /`([^`]+)`/g,
-      render: (m, k) => <code key={k}>{m[1]}</code>,
+      // One blanked run is exactly one code span: two spans can never be
+      // adjacent, since that would leave the first one's closing run non-maximal.
+      // So a run's start index finds its content. `accept` covers the one case
+      // that breaks the mapping — a NUL already present in the text — leaving it
+      // to render as the ordinary character it is.
+      re: /\0+/g,
+      accept: (m) => codeAt.has(m.index),
+      render: (m, k) => <code key={k}>{codeAt.get(m.index)}</code>,
     },
     {
-      re: /\[([^\]]+)\]\(([^)\s]+)\)/g,
+      re: /\[([^\]]+)\]\(([^)\s]+)\)/gd,
       render: (m, k) => {
-        const href = safeHref(m[2])
-        if (!href) return <Fragment key={k}>{m[0]}</Fragment>
+        const href = safeHref(group(m, 2) ?? '')
+        if (!href) return <Fragment key={k}>{src(m)}</Fragment>
         return (
           <a key={k} href={href} target="_blank" rel="noopener noreferrer">
-            {m[1]}
+            {group(m, 1)}
           </a>
         )
       },
@@ -72,15 +141,19 @@ function renderInline(
       // (e.g. **bold *italic* bold**) is kept inside the bold and reparsed by the
       // recursive renderInline below, rather than splitting the "**" off as
       // literal text.
-      re: /\*\*([\s\S]+?)\*\*|(?<![\p{L}\p{N}])__([^_]+)__(?![\p{L}\p{N}])/gu,
+      re: /\*\*([\s\S]+?)\*\*|(?<![\p{L}\p{N}])__([^_]+)__(?![\p{L}\p{N}])/gud,
       render: (m, k) => (
-        <strong key={k}>{renderInline(m[1] ?? m[2], k, linkTask)}</strong>
+        <strong key={k}>
+          {renderInline(group(m, 1) ?? group(m, 2) ?? '', k, linkTask)}
+        </strong>
       ),
     },
     {
-      re: /\*([^*]+)\*|(?<![\p{L}\p{N}])_([^_]+)_(?![\p{L}\p{N}])/gu,
+      re: /\*([^*]+)\*|(?<![\p{L}\p{N}])_([^_]+)_(?![\p{L}\p{N}])/gud,
       render: (m, k) => (
-        <em key={k}>{renderInline(m[1] ?? m[2], k, linkTask)}</em>
+        <em key={k}>
+          {renderInline(group(m, 1) ?? group(m, 2) ?? '', k, linkTask)}
+        </em>
       ),
     },
     {
@@ -89,7 +162,7 @@ function renderInline(
       // win over this since their "[" sits at an earlier index.
       re: /(?:https?:\/\/|www\.)[^\s]*[^\s.,;:!?)\]}'"]/gi,
       render: (m, k) => {
-        const raw = m[0]
+        const raw = src(m)
         const href = safeHref(raw.startsWith('www.') ? `https://${raw}` : raw)
         if (!href) return <Fragment key={k}>{raw}</Fragment>
         return (
@@ -158,13 +231,13 @@ function renderInline(
       if (m === undefined || (m !== null && m.index < cursor)) {
         const { re, accept } = patterns[pi]
         re.lastIndex = cursor
-        m = re.exec(text)
+        m = re.exec(masked)
         // Skip matches the pattern rejects (e.g. a token that names no task),
         // advancing past each so the scan resumes after it — the rejected span
         // stays literal rather than becoming its own node.
         while (m && accept && !accept(m)) {
           re.lastIndex = m.index + m[0].length
-          m = re.exec(text)
+          m = re.exec(masked)
         }
         cache[pi] = m
       }
