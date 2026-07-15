@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { AgentAdapter, AgentTaskView } from './agent'
 import { reduceStreamLine } from '../server/stream'
@@ -128,13 +130,32 @@ function buildClaudeArgs(
   // an attached image sitting outside the task's cwd (see buildLaunch). Only set
   // when the turn has images.
   const filesDirArgs = filesDir ? ['--add-dir', filesDir] : []
-  // Edit access is the only grant Lander injects into --allowedTools; git and
-  // other Bash follow the project's normal .claude permissions (settings.json /
-  // settings.local.json) plus any per-task allow rules below.
+  // Edit access rides on --permission-mode acceptEdits rather than an
+  // --allowedTools grant. An Edit/Write allow rule is "explicit permission", so
+  // it escapes the working-directory boundary entirely (a granted Write can
+  // create /tmp/anything); acceptEdits instead auto-approves file edits and the
+  // filesystem Bash commands (mkdir/touch/rm/rmdir/mv/cp/sed) only for paths in
+  // the cwd or an --add-dir root, and never for protected paths (.git, .claude).
+  // That both closes the escape and gives edit-capable tasks the delete access a
+  // bare Edit/Write grant can't express. It widens nothing else: python3, node,
+  // curl and friends still follow the project's normal .claude permissions
+  // (settings.json / settings.local.json) plus any per-task allow rules below.
+  const editModeArgs = task.allowEdits ? ['--permission-mode', 'acceptEdits'] : []
+  // Shared scratch roots. Agents reach for /tmp constantly for probe scripts and
+  // diff dumps; without it they burn turns getting blocked and then route around
+  // the block anyway. Grant BOTH the literal /tmp (what agents type by name) and
+  // os.tmpdir() — on macOS those differ: tmpdir() resolves $TMPDIR to a per-user
+  // /var/folders/<hash>/T, so granting only one leaves the other blocked. Deduped
+  // for Linux, where they're the same path, and existence-filtered because
+  // --add-dir rejects a path that isn't a directory (no /tmp on Windows). In
+  // acceptEdits every --add-dir root is writable, so gate on edit access.
+  const scratchRoots = task.allowEdits
+    ? [...new Set(['/tmp', tmpdir()])].filter((dir) => existsSync(dir))
+    : []
+  const tmpDirArgs = scratchRoots.flatMap((dir) => ['--add-dir', dir])
   const allowed: string[] = ['Bash(lander:*)']
-  if (task.allowEdits) allowed.push('Edit', 'Write', 'MultiEdit')
   if (task.allow?.length) allowed.push(...task.allow)
-  const editArgs = allowed.length ? ['--allowedTools', ...allowed] : []
+  const editArgs = ['--allowedTools', ...allowed]
 
   const hookSettings = JSON.stringify({
     // Keep the git status snapshot (and built-in git workflow instructions) out
@@ -187,8 +208,10 @@ function buildClaudeArgs(
 
   return [
     ...worktreeArgs,
+    ...editModeArgs,
     ...editArgs,
     ...filesDirArgs,
+    ...tmpDirArgs,
     '--settings',
     hookSettings,
     '--append-system-prompt',

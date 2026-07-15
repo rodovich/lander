@@ -11,6 +11,14 @@ const adapter = createClaudeAdapter({
   readGitContext: (cwd) => `Git status as of this message:\n\ncwd ${cwd}`,
 })
 
+// Every --add-dir value in argv order, so a test can assert the granted roots
+// without pinning their position among the other flags.
+const addDirsOf = (args: string[]) =>
+  args.flatMap((a, i) => (a === '--add-dir' ? [args[i + 1]] : []))
+
+// /tmp and os.tmpdir() are the same path on Linux and differ on macOS.
+const SCRATCH_ROOTS = [...new Set(['/tmp', tmpdir()])]
+
 const tempDirs: string[] = []
 
 afterEach(async () => {
@@ -32,19 +40,21 @@ describe('Claude adapter', () => {
     })
 
     expect(launch.env).toEqual({ LANDER_TASK: 'task-1' })
-    // git is no longer injected into --allowedTools: it follows the project's
-    // .claude permissions now. Only the edit tools and the per-task allow rule
-    // ride the allowlist.
+    // Edit access rides --permission-mode, not the allowlist: only Bash(lander:*)
+    // and the per-task allow rule ride --allowedTools. git and other Bash follow
+    // the project's .claude permissions.
     expect(launch.args.slice(0, 8)).toEqual([
       '--worktree',
       'feature',
+      '--permission-mode',
+      'acceptEdits',
       '--allowedTools',
       'Bash(lander:*)',
-      'Edit',
-      'Write',
-      'MultiEdit',
       'Bash(npm test)',
+      '--add-dir',
     ])
+    // The scratch roots ride along with edit access.
+    expect(addDirsOf(launch.args)).toEqual(SCRATCH_ROOTS)
     expect(launch.args.slice(-6)).toEqual([
       '--output-format',
       'stream-json',
@@ -99,7 +109,7 @@ describe('Claude adapter', () => {
     expect(launch.args[i + 1]).toBe('/files/proj/t')
   })
 
-  it('omits --add-dir when the task has no attachment store', () => {
+  it('omits --add-dir when a read-only task has no attachment store', () => {
     const launch = adapter.buildLaunch({
       task: { allowEdits: false },
       prompt: 'no files',
@@ -108,6 +118,37 @@ describe('Claude adapter', () => {
       landerEnv: { LANDER_TASK: 't' },
     })
     expect(launch.args).not.toContain('--add-dir')
+    expect(launch.args).not.toContain('--permission-mode')
+  })
+
+  // The scratch grant is scoped to edit access: acceptEdits auto-approves writes
+  // to every --add-dir root, so handing a read-only task a writable scratch root
+  // would be the one way it could still mutate the filesystem. Both roots are
+  // granted because os.tmpdir() is not /tmp on macOS — it resolves $TMPDIR to a
+  // per-user /var/folders/<hash>/T — and agents write to the literal /tmp.
+  it('grants both scratch roots with edit access even without attachments', () => {
+    const launch = adapter.buildLaunch({
+      task: { allowEdits: true },
+      prompt: 'no files',
+      root: '/repo',
+      cwd: '/repo',
+      landerEnv: { LANDER_TASK: 't' },
+    })
+    expect(addDirsOf(launch.args)).toEqual(SCRATCH_ROOTS)
+    expect(launch.args.slice(0, 2)).toEqual(['--permission-mode', 'acceptEdits'])
+  })
+
+  it('grants the scratch roots alongside the attachment store', () => {
+    const launch = adapter.buildLaunch({
+      task: { allowEdits: true },
+      prompt: 'look at this',
+      root: '/repo',
+      cwd: '/repo',
+      landerEnv: { LANDER_TASK: 't', LANDER_FILES_DIR: '/files/proj/t' },
+      images: ['/files/proj/t/img1'],
+      filesDir: '/files/proj/t',
+    })
+    expect(addDirsOf(launch.args)).toEqual(['/files/proj/t', ...SCRATCH_ROOTS])
   })
 
   it('builds the per-turn context block from grants and the git snapshot', () => {

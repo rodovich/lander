@@ -325,8 +325,9 @@ async function launchTask(rest) {
   }
   // The server caps the requested --edits to what this (spawning) task holds,
   // authenticating us by the caller headers `call` attaches; a task can't grant
-  // a child edit access it lacks. Git and other Bash follow the project's normal
-  // .claude permissions, not a Lander grant.
+  // a child edit access it lacks. --edits covers file edits plus the filesystem
+  // Bash commands (rm/mv/cp/…) within the task's roots; git and every other Bash
+  // follow the project's normal .claude permissions, not a Lander grant.
   o.message ??= pos.shift()
   if (o.message === '-') o.message = await readStdin()
   if (!o.message?.trim()) die('usage: lander launch <message>')
