@@ -39,6 +39,7 @@ import {
   taskUsageTelemetry,
   totalUsage,
 } from './taskMeta'
+import { buildTaskRows } from './taskRows'
 import { buildTimeline } from './timeline'
 import type { TimelineEntry } from './timeline'
 import { Collapsible, ToolStep } from './toolStep'
@@ -333,140 +334,26 @@ export function App() {
   // tasks can be intermixed; with a single project shown it's just noise.
   const showProjectLabels = shown.length > 1
 
-  // The update-time bound the time filter imposes, in ms (local time), or null
-  // for 'any'. 'today'/'week' keep tasks at or after the start of today / this
-  // week (Sunday); 'older' keeps tasks strictly before the start of this week.
-  // Recomputed each render so it tracks the wall clock.
-  const timeCutoff = (() => {
-    if (timeFilter === 'any') return null
-    const now = new Date()
-    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    if (timeFilter === 'week' || timeFilter === 'older')
-      start.setDate(now.getDate() - now.getDay())
-    return { ms: start.getTime(), before: timeFilter === 'older' }
-  })()
-
-  // Filter by time window, then by title (case-insensitive), before grouping.
+  // Shape the sidebar list from the raw tasks and the active filters (see
+  // taskRows.ts). Recomputed each render so the time bucketing tracks the
+  // wall clock.
   const query = filter.trim().toLowerCase()
-  const matchedTasks = tasks.filter((t) => {
-    if (timeCutoff != null) {
-      const ts = Date.parse(t.updatedAt ?? t.createdAt)
-      if (!Number.isNaN(ts)) {
-        if (timeCutoff.before ? ts >= timeCutoff.ms : ts < timeCutoff.ms)
-          return false
-      }
-    }
-    if (view === 'unread' && !isUnread(t) && !stickyUnread.has(t.id))
-      return false
-    return query ? t.title.toLowerCase().includes(query) : true
+  const {
+    orderedTasks,
+    taskRows,
+    statusCounts,
+    countByStatus,
+    countByStatusDate,
+    dateCatsByStatus,
+    todayStart,
+    weekStart,
+  } = buildTaskRows(tasks, {
+    view,
+    timeFilter,
+    query,
+    stickyUnread,
+    now: new Date(),
   })
-
-  // Group tasks by status — wedged (needs the user) first, then riding,
-  // resting, and landed last — preserving each group's recency order within it
-  // (matchedTasks is already sorted by updatedAt, and sort is stable). Unknown
-  // statuses sort just ahead of landed.
-  const STATUS_RANK: Record<string, number> = {
-    wedged: 0,
-    riding: 1,
-    resting: 2,
-    landed: 4,
-  }
-  const orderedTasks = [...matchedTasks].sort(
-    (a, b) => (STATUS_RANK[a.status] ?? 3) - (STATUS_RANK[b.status] ?? 3),
-  )
-
-  // Flatten orderedTasks into a list of rows interleaved with sticky headers:
-  // a status header at every status change and, within a status whose tasks
-  // span more than one date bucket, a date subheader at every bucket change.
-  // Each task row keeps its orderedTasks index so the roving-tabindex refs and
-  // keyboard navigation stay aligned with that array.
-  const dayNow = new Date()
-  const todayStart = new Date(
-    dayNow.getFullYear(),
-    dayNow.getMonth(),
-    dayNow.getDate(),
-  ).getTime()
-  const weekStart = (() => {
-    const s = new Date(todayStart)
-    s.setDate(s.getDate() - s.getDay())
-    return s.getTime()
-  })()
-
-  const dateCatsByStatus = new Map<string, Set<DateCategory>>()
-  // Tasks per status+date bucket, keyed `${status}|${category}`, for the count a
-  // date subheader's archive menu shows (and archives).
-  const countByStatusDate = new Map<string, number>()
-  for (const t of orderedTasks) {
-    const cat = dateCategory(t.updatedAt ?? t.createdAt, todayStart, weekStart)
-    const set = dateCatsByStatus.get(t.status) ?? new Set<DateCategory>()
-    set.add(cat)
-    dateCatsByStatus.set(t.status, set)
-    const k = `${t.status}|${cat}`
-    countByStatusDate.set(k, (countByStatusDate.get(k) ?? 0) + 1)
-  }
-
-  type TaskRow =
-    | { kind: 'status'; key: string; status: string; first: boolean }
-    | {
-        kind: 'date'
-        key: string
-        category: DateCategory
-        status: string
-        first: boolean
-      }
-    | { kind: 'task'; key: string; task: TaskWithProject; index: number }
-
-  const taskRows: TaskRow[] = []
-  let rowStatus: string | null = null
-  let rowCategory: DateCategory | null = null
-  orderedTasks.forEach((task, index) => {
-    if (task.status !== rowStatus) {
-      taskRows.push({
-        kind: 'status',
-        key: `status-${task.status}`,
-        status: task.status,
-        // The first section gets no leading gap (nothing precedes it).
-        first: rowStatus === null,
-      })
-      rowStatus = task.status
-      rowCategory = null
-    }
-    const category = dateCategory(
-      task.updatedAt ?? task.createdAt,
-      todayStart,
-      weekStart,
-    )
-    if (
-      (dateCatsByStatus.get(task.status)?.size ?? 0) > 1 &&
-      category !== rowCategory
-    ) {
-      taskRows.push({
-        kind: 'date',
-        key: `date-${task.status}-${category}`,
-        category,
-        status: task.status,
-        // The first date in a status sits directly under the status header
-        // (rowCategory is reset to null at each status change).
-        first: rowCategory === null,
-      })
-      rowCategory = category
-    }
-    taskRows.push({ kind: 'task', key: task.id, task, index })
-  })
-
-  // Per-status counts for the summary row below the filter dropdown, ordered
-  // left-to-right as the reverse of the list (landed, resting, riding, wedged
-  // — STATUS_RANK descending). Only statuses present after filtering appear.
-  const statusCounts = (() => {
-    const counts = new Map<string, number>()
-    for (const t of matchedTasks) {
-      counts.set(t.status, (counts.get(t.status) ?? 0) + 1)
-    }
-    return [...counts.entries()].sort(
-      (a, b) => (STATUS_RANK[b[0]] ?? 3) - (STATUS_RANK[a[0]] ?? 3),
-    )
-  })()
-  const countByStatus = new Map(statusCounts)
 
   // The effective selection: the user's pick if it's still visible, otherwise
   // the first task in the list (e.g. after filtering hides the prior pick).
