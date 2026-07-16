@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { uiHeaders, uploadAttachments } from './api'
 import { AskForm } from './asks'
-import { AttachButton, MessageArtifacts, MessageAttachments } from './attachments'
-import { clipboardImageFiles, dataTransferHasFiles } from './fileDrop'
+import { Composer } from './composer'
+import { MessageArtifacts, MessageAttachments } from './attachments'
+import { dataTransferHasFiles } from './fileDrop'
 import {
   formatTimestamp,
   lastPathComponent,
@@ -10,7 +10,7 @@ import {
   worktreeName,
 } from './format'
 import { BlockedSummary, GrantControl } from './grants'
-import { useFileDrop, usePersistentState, useSessionState } from './hooks'
+import { usePersistentState, useSessionState } from './hooks'
 import { CopyIdButton, ReadOnlyMenu, TaskActionsMenu } from './menus'
 import type { TaskAction } from './menus'
 import { MessageText } from './messageText'
@@ -21,12 +21,7 @@ import { TaskList } from './taskList'
 import { blockedRequests } from './permissions'
 import { ResizeHandle } from './resizeHandle'
 import { StatusTransition } from './statusTransition'
-import {
-  latestUsage,
-  taskAgentModelName,
-  taskUsageTelemetry,
-  totalUsage,
-} from './taskMeta'
+import { taskAgentModelName } from './taskMeta'
 import { buildTaskRows } from './taskRows'
 import { useSeenMarker, useViewingState } from './useSeenMarker'
 import { useTaskActions } from './useTaskActions'
@@ -35,7 +30,7 @@ import { buildTimeline } from './timeline'
 import type { TimelineEntry } from './timeline'
 import { Collapsible, ToolStep } from './toolStep'
 import { planTurnCollapse } from './turnCollapse'
-import { TelemetryItemView, TelemetryPanel } from './telemetry'
+import { TelemetryPanel } from './telemetry'
 import type {
   AskItem,
   Ride,
@@ -125,12 +120,6 @@ export function App() {
     'lander:draft:newProject',
     '',
   )
-  // Whether the corner usage readout sums across the whole task or shows just
-  // the latest turn. Clicking it toggles; persisted so the choice sticks.
-  const [usageTotal, setUsageTotal] = usePersistentState(
-    'lander:usageTotal',
-    false,
-  )
   // Heights of the two resizable bottom panels, dragged via the handle above
   // each and persisted globally so the sizing sticks across tabs and reloads.
   // The scrollable region above each (the message timeline, the task list)
@@ -143,23 +132,6 @@ export function App() {
     'lander:size:newTask',
     220,
   )
-
-  // Each task keeps its own draft and in-flight state, keyed by id, so you
-  // can start a reply in one task, switch away, and come back to finish it; the
-  // drafts persist across reloads alongside the new-task message and, like it,
-  // are session-scoped so two tabs don't clobber each other's reply drafts.
-  const [replies, setReplies] = useSessionState<Record<string, string>>(
-    'lander:draft:replies',
-    {},
-  )
-  const [sendingBy, setSendingBy] = useState<Record<string, boolean>>({})
-  const composerRef = useRef<HTMLTextAreaElement>(null)
-
-  // Files attached to per-task replies, held as File objects (not
-  // session-persisted — File isn't serializable) and uploaded to the durable
-  // store on submit. The paperclip <AttachButton> below the composer owns its
-  // own hidden file input.
-  const [replyFiles, setReplyFiles] = useState<Record<string, File[]>>({})
 
   // A browser treats an unhandled file drop as navigation to that local file.
   // Cancel that default at the window capture phase as a safety net: the target
@@ -247,22 +219,6 @@ export function App() {
       : orderedTasks[0]?.id ?? null
   const current = tasks.find((t) => t.id === selected) ?? null
   currentRef.current = current
-
-  // The whole reply panel is one drop target, including its textarea,
-  // paperclip, and surrounding action area. Keep the target bound to the
-  // task currently open so switching tasks cannot leak a dropped file into
-  // another task's draft.
-  const replyDrop = useFileDrop<HTMLDivElement>(
-    (picked) => {
-      if (!current) return
-      const id = current.id
-      setReplyFiles((prev) => ({
-        ...prev,
-        [id]: [...(prev[id] ?? []), ...picked],
-      }))
-    },
-    !current || !!current.archived || (sendingBy[current.id] ?? false),
-  )
 
   // Advance the open task's seen marker per the viewing rules (the 2s dwell,
   // immediate marking while actively viewing).
@@ -425,47 +381,6 @@ export function App() {
       setAtBottom(true)
     }
   }, [selected, current?.items?.length, streamSignal])
-
-  async function sendReply() {
-    if (!current) return
-    const id = current.id
-    const proj = current.projectSlug
-    const draft = replies[id] ?? ''
-    if (!draft.trim() || sendingBy[id]) return
-    setSendingBy((prev) => ({ ...prev, [id]: true }))
-    setError(null)
-    try {
-      const attachments = await uploadAttachments(proj, replyFiles[id] ?? [])
-      const r = await fetch(`/api/${proj}/tasks/${id}/messages`, {
-        method: 'POST',
-        headers: uiHeaders(),
-        body: JSON.stringify({
-          message: draft,
-          ...(attachments.length ? { attachments } : {}),
-        }),
-      })
-      const body = await r.json()
-      if (!r.ok) throw new Error(body.error ?? r.statusText)
-      setReplies((prev) => ({ ...prev, [id]: '' }))
-      setReplyFiles((prev) => ({ ...prev, [id]: [] }))
-      await refresh()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setSendingBy((prev) => ({ ...prev, [id]: false }))
-      // Disabling the textarea while sending drops its focus; restore it once
-      // the element re-enables so you can keep typing the next reply.
-      requestAnimationFrame(() => composerRef.current?.focus())
-    }
-  }
-
-  function onReplyKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    // Plain Enter sends; Shift+Enter / Option(Alt)+Enter inserts a newline.
-    if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
-      e.preventDefault()
-      void sendReply()
-    }
-  }
 
   // Keep the page title in sync with the project-select label text.
   const labelParts = filterLabelParts(projects, shown, timeFilter, view)
@@ -940,110 +855,12 @@ export function App() {
               reserveTop={200}
               label="Resize reply area"
             />
-            <div
-              className={`composer-bar${replyDrop.active ? ' file-drop-active' : ''}`}
-              style={{ height: composerHeight }}
-              {...replyDrop.handlers}
-            >
-              <textarea
-                ref={composerRef}
-                className="composer"
-                placeholder={
-                  current.archived ? 'Restore this task to reply' : 'Reply…'
-                }
-                rows={3}
-                value={replies[current.id] ?? ''}
-                disabled={
-                  (sendingBy[current.id] ?? false) || !!current.archived
-                }
-                onChange={(e) =>
-                  setReplies((prev) => ({
-                    ...prev,
-                    [current.id]: e.target.value,
-                  }))
-                }
-                onKeyDown={onReplyKeyDown}
-                onPaste={(e) => {
-                  const images = clipboardImageFiles(e.clipboardData)
-                  if (images.length === 0) return
-                  e.preventDefault()
-                  const id = current.id
-                  setReplyFiles((prev) => ({
-                    ...prev,
-                    [id]: [...(prev[id] ?? []), ...images],
-                  }))
-                }}
-              />
-              <div className="allow-row">
-                {!current.archived && (
-                  <AttachButton
-                    files={replyFiles[current.id] ?? []}
-                    onAdd={(picked) =>
-                      setReplyFiles((prev) => ({
-                        ...prev,
-                        [current.id]: [...(prev[current.id] ?? []), ...picked],
-                      }))
-                    }
-                    onClear={() =>
-                      setReplyFiles((prev) => ({ ...prev, [current.id]: [] }))
-                    }
-                    disabled={sendingBy[current.id] ?? false}
-                  />
-                )}
-                {(() => {
-                  const u = usageTotal
-                    ? totalUsage(current)
-                    : latestUsage(current)
-                  if (!u) return null
-                  const scope = usageTotal ? 'total' : 'turn'
-                  // Absent on legacy payloads / fixtures without an agent — treat
-                  // as cost-reporting (claude), matching the grants "fully capable"
-                  // default.
-                  const reportsCost = current.reportsCost ?? true
-                  const costText =
-                    u.costUsd !== undefined
-                      ? `$${u.costUsd.toFixed(4)}`
-                      : reportsCost
-                        ? '… (available when the turn lands)'
-                        : 'unavailable for Codex'
-                  const items = taskUsageTelemetry(u, current.agent, reportsCost)
-                  // The model names the whole task, not a scope, so it sits outside
-                  // the turn/total toggle; the counts + cost are what the toggle flips.
-                  const model = items.find((i) => i.id === 'model')
-                  const stats = items.filter((i) => i.id !== 'model')
-                  return (
-                    <div className="telemetry-inline">
-                      {model && <TelemetryItemView item={model} />}
-                      <button
-                        type="button"
-                        className="telemetry-toggle"
-                        onClick={() => setUsageTotal((v) => !v)}
-                        title={
-                          `${scope} — click to show ` +
-                          `${usageTotal ? 'turn' : 'total'}\n` +
-                          `uncached input ${u.input.toLocaleString()} ` +
-                          `(+ ${u.cacheCreation.toLocaleString()} written to cache)\n` +
-                          `cache read ${u.cacheRead.toLocaleString()}\n` +
-                          // The turn's cache-miss diagnostic, when the API reported
-                          // one (per-turn only; misses don't sum).
-                          (!usageTotal && u.cacheMiss
-                            ? `cache miss: ${u.cacheMiss.reason.replaceAll('_', ' ')} ` +
-                              `(${u.cacheMiss.missedTokens.toLocaleString()} tokens missed)\n`
-                            : '') +
-                          `output ${u.output.toLocaleString()}\n` +
-                          `cost ${costText}`
-                        }
-                      >
-                        <span className="telemetry-scope">{scope}</span>
-                        {stats.map((item) => (
-                          <TelemetryItemView key={item.id} item={item} />
-                        ))}
-                      </button>
-                    </div>
-                  )
-                })()}
-              </div>
-            </div>
+            <Composer
+              task={current}
+              height={composerHeight}
+              setError={setError}
+              refresh={refresh}
+            />
           </>
         ) : (
           <div className="placeholder">Select a task</div>
