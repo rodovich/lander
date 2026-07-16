@@ -1,10 +1,5 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  loadShownTasks,
-  uiHeaders,
-  uploadAttachments,
-  type FlowTelemetry,
-} from './api'
+import { Fragment, useEffect, useRef, useState } from 'react'
+import { uiHeaders, uploadAttachments } from './api'
 import { AskForm } from './asks'
 import { AttachButton, MessageArtifacts, MessageAttachments } from './attachments'
 import { clipboardImageFiles, dataTransferHasFiles } from './fileDrop'
@@ -19,7 +14,6 @@ import {
 } from './format'
 import { BlockedSummary, GrantControl } from './grants'
 import { useFileDrop, usePersistentState, useSessionState } from './hooks'
-import type { TaskLinkResolver } from './markdown'
 import {
   CopyIdButton,
   ReadOnlyMenu,
@@ -40,6 +34,7 @@ import {
   totalUsage,
 } from './taskMeta'
 import { buildTaskRows } from './taskRows'
+import { useTaskData } from './useTaskData'
 import { buildTimeline } from './timeline'
 import type { TimelineEntry } from './timeline'
 import { Collapsible, ToolStep } from './toolStep'
@@ -48,7 +43,6 @@ import { TelemetryItemView, TelemetryPanel } from './telemetry'
 import type {
   AskItem,
   DateCategory,
-  Project,
   Ride,
   Task,
   TaskView,
@@ -73,26 +67,6 @@ export function App() {
   // every scroll/tab-focus state change all trip it — so a high count against a
   // little interaction is itself a finding.
   tick('App.render')
-  const [tasks, setTasks] = useState<TaskWithProject[]>([])
-  // Active + archived tasks across shown projects, used only to resolve
-  // task-id mentions to links. The displayed `tasks` list holds just the
-  // current view's set (active OR archived — they come from separate
-  // endpoints), so without this an archived id referenced from an inbox
-  // message — or vice versa — wouldn't link.
-  const [linkTasks, setLinkTasks] = useState<TaskWithProject[]>([])
-  // Per-flow status telemetry (agent → items), carried on every tasks poll. The
-  // producing flow decides when to refresh; the client just renders the latest
-  // snapshot it was handed for whichever flow is in view.
-  const [telemetry, setTelemetry] = useState<FlowTelemetry>({})
-  const [projects, setProjects] = useState<Project[]>([])
-  // The project dropdown acts as a filter: `shown` holds the slugs whose tasks
-  // are merged into the list. It is always either a single project or every
-  // project ("show all"); see showOnly/showAll below. Session-scoped so it
-  // survives a reload but stays per-tab; reconciled against the live project
-  // list once it loads (see the /api/projects effect).
-  const [shown, setShown] = useSessionState<string[]>('lander:shown', [])
-  const [menuOpen, setMenuOpen] = useState(false)
-  const menuRef = useRef<HTMLDivElement>(null)
   // The list's task-slice filter (see TaskView), session-scoped so it survives
   // a reload but can differ per tab.
   const [view, setView] = useSessionState<TaskView>('lander:view', 'inbox')
@@ -101,12 +75,28 @@ export function App() {
     'lander:timeFilter',
     'any',
   )
+  const [error, setError] = useState<string | null>(null)
+  // The task data proper: the displayed list and its polls, per-flow telemetry,
+  // projects and the session's project filter, and mention-link resolution.
+  const {
+    tasks,
+    setTasks,
+    tasksRef,
+    telemetry,
+    projects,
+    shown,
+    setShown,
+    refresh,
+    hasLoadedRef,
+    resolveTaskLink,
+  } = useTaskData(view, setError)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
   // The user's explicit task pick. The effective selection (`selected`, below)
   // falls back to the first visible task when this one is filtered away.
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(
     () => taskIdFromPath() || null,
   )
-  const [error, setError] = useState<string | null>(null)
   // The list search box, session-scoped alongside the other list filters.
   const [filter, setFilter] = useSessionState('lander:filter', '')
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -238,11 +228,6 @@ export function App() {
   // they pass the filter on their own — but joining the set keeps them visible
   // if the viewer then reads them without leaving the list.
   const [stickyUnread, setStickyUnread] = useState<Set<string>>(new Set())
-
-  // Latest tasks readable from timer callbacks that outlive the render that
-  // scheduled them (the dwell timer below marks a task seen 2s later).
-  const tasksRef = useRef(tasks)
-  tasksRef.current = tasks
 
   // Track whether this tab is the active one: visible and window-focused.
   useEffect(() => {
@@ -498,25 +483,6 @@ export function App() {
     setMenuOpen(false)
   }
 
-  // Load the project list once. Reconcile the session-restored project filter
-  // against it — keeping the picked slugs that still exist, and falling back to
-  // "show all" only when nothing valid was restored (first visit, or every
-  // picked project has since gone away). (A task named in the URL is seeded as
-  // the selection by selectedTaskId's initializer.)
-  useEffect(() => {
-    fetch('/api/projects')
-      .then((r) => r.json())
-      .then((list: Project[]) => {
-        setProjects(list)
-        const all = list.map((p) => p.slug)
-        setShown((prev) => {
-          const valid = prev.filter((s) => all.includes(s))
-          return valid.length > 0 ? valid : all
-        })
-      })
-      .catch(() => {})
-  }, [])
-
   // Keep the selection in sync when navigating with the browser back/forward
   // buttons.
   useEffect(() => {
@@ -529,7 +495,6 @@ export function App() {
   // off until tasks have loaded so a deep-linked task isn't clobbered before
   // its project's tasks arrive. replaceState (not push) corrects the URL in
   // place without adding spurious history entries.
-  const hasLoadedRef = useRef(false)
   useEffect(() => {
     if (!hasLoadedRef.current) return
     const cur = tasks.find((t) => t.id === selected)
@@ -572,53 +537,6 @@ export function App() {
     }
   }, [menuOpen])
 
-  const shownKey = shown.join(',')
-  useEffect(() => {
-    if (shown.length === 0) return
-    let cancelled = false
-    const refresh = () =>
-      loadShownTasks(shown, view === 'archived')
-        .then(({ tasks, telemetry }) => {
-          if (!cancelled) {
-            setTasks(tasks)
-            setTelemetry(telemetry)
-            hasLoadedRef.current = true
-          }
-        })
-        .catch((e) => {
-          if (!cancelled) setError(e.message ?? String(e))
-        })
-    refresh()
-    // Poll so assistant replies appear once the server appends them.
-    const timer = setInterval(refresh, 2000)
-    return () => {
-      cancelled = true
-      clearInterval(timer)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shownKey, view])
-
-  // Maintain the union of active and archived tasks for link resolution,
-  // independent of the current view. Archived state changes rarely, so this
-  // polls less often than the displayed list.
-  useEffect(() => {
-    if (shown.length === 0) return
-    let cancelled = false
-    const refresh = () =>
-      Promise.all([loadShownTasks(shown, false), loadShownTasks(shown, true)])
-        .then(([active, archived]) => {
-          if (!cancelled) setLinkTasks([...active.tasks, ...archived.tasks])
-        })
-        .catch(() => {})
-    refresh()
-    const timer = setInterval(refresh, 10000)
-    return () => {
-      cancelled = true
-      clearInterval(timer)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shownKey])
-
   // The project a new task is created in: an explicit pick from the form's
   // dropdown if made, else the single shown project, else the project of the
   // task currently open, else the first project.
@@ -630,62 +548,6 @@ export function App() {
     newProject && projects.some((p) => p.slug === newProject)
       ? newProject
       : defaultTargetSlug
-
-  // Resolve a bare task id or an unambiguous prefix found in a message to an
-  // internal link to that task, used to turn such references into clickable
-  // links with the task's title as the text. A full-length id (>= 36 chars) is
-  // matched exactly; anything shorter matches by prefix, and links only when it
-  // uniquely identifies one loaded task (mirroring the CLI's unambiguous-prefix
-  // rule). Returns undefined otherwise so the id renders as plain text. This is
-  // purely presentational — the stored message and what's sent to the model are
-  // untouched.
-  // A content-stable index for mention resolution. linkTasks gets a fresh array
-  // every 10s poll even when nothing relevant changed, and each open message
-  // calls the resolver once per id-shaped token (thousands, on a pasted log). So
-  // we depend on a *signature* of only the fields resolution reads (id, slug,
-  // title, status) rather than the array reference: `linkIndex` — and therefore
-  // `resolveTaskLink`'s identity and the memoized messages that use it — changes
-  // only when a mention could actually resolve differently, not on every poll.
-  // The precomputed lowercased ids and link objects also keep each resolver call
-  // cheap.
-  const linkSig = linkTasks
-    .map((t) => `${t.id}\t${t.projectSlug}\t${t.title}\t${t.status}`)
-    .join('\n')
-  const linkIndex = useMemo(
-    () =>
-      linkTasks.map((t) => ({
-        id: (t.id ?? '').toLowerCase(),
-        link: { href: `/${t.projectSlug}/${t.id}`, title: t.title, status: t.status },
-      })),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [linkSig],
-  )
-
-  // Resolve a bare task id or an unambiguous prefix found in a message to an
-  // internal link to that task, used to turn such references into clickable
-  // links with the task's title as the text. A full-length id (>= 36 chars) is
-  // matched exactly; anything shorter matches by prefix, and links only when it
-  // uniquely identifies one loaded task (mirroring the CLI's unambiguous-prefix
-  // rule). Returns undefined otherwise so the id renders as plain text. This is
-  // purely presentational — the stored message and what's sent to the model are
-  // untouched. Keyed on linkIndex (see above) so it re-renders messages exactly
-  // when resolution could change — including the first-load transition from an
-  // empty list, without which ids would stay literal forever.
-  const resolveTaskLink = useCallback<TaskLinkResolver>(
-    (id) => {
-      // A legacy/garbled reference can hand us an empty id (e.g. an old
-      // "awaiting" event saved under the pre-rename shape); resolve it to no link
-      // rather than throwing and taking down the whole task view.
-      if (!id) return undefined
-      const needle = id.toLowerCase()
-      const matches =
-        needle.length >= 36
-          ? linkIndex.filter((e) => e.id === needle)
-          : linkIndex.filter((e) => e.id.startsWith(needle))
-      return matches.length === 1 ? matches[0].link : undefined
-    },
-    [linkIndex],
-  )
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -724,7 +586,7 @@ export function App() {
       const body = await r.json()
       if (!r.ok) throw new Error(body.error ?? r.statusText)
       const created = body as Task
-      setTasks((await loadShownTasks(shown, view === 'archived')).tasks)
+      await refresh()
       selectTask(created.id, targetSlug)
       setMessage('')
       setNewFiles([])
@@ -934,7 +796,7 @@ export function App() {
       if (!r.ok) throw new Error(body.error ?? r.statusText)
       setReplies((prev) => ({ ...prev, [id]: '' }))
       setReplyFiles((prev) => ({ ...prev, [id]: [] }))
-      setTasks((await loadShownTasks(shown, view === 'archived')).tasks)
+      await refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -967,7 +829,7 @@ export function App() {
       })
       const resBody = await r.json()
       if (!r.ok) throw new Error(resBody.error ?? r.statusText)
-      setTasks((await loadShownTasks(shown, view === 'archived')).tasks)
+      await refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -999,8 +861,7 @@ export function App() {
       // A codex task-scope grant succeeds but comes back with a parity warning;
       // surface it without treating the grant as failed.
       if (typeof body.warning === 'string') setError(body.warning)
-      if (scope === 'task')
-        setTasks((await loadShownTasks(shown, view === 'archived')).tasks)
+      if (scope === 'task') await refresh()
       return true
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -1073,7 +934,7 @@ export function App() {
         const body = await r.json()
         throw new Error(body.error ?? r.statusText)
       }
-      setTasks((await loadShownTasks(shown, view === 'archived')).tasks)
+      await refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -1115,7 +976,7 @@ export function App() {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
-    setTasks((await loadShownTasks(shown, view === 'archived')).tasks)
+    await refresh()
   }
 
   // Launch a scheduled task now, ahead of its time (the header's "launch"
