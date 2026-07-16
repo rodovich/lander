@@ -34,6 +34,7 @@ import {
   totalUsage,
 } from './taskMeta'
 import { buildTaskRows } from './taskRows'
+import { useTaskActions } from './useTaskActions'
 import { useTaskData } from './useTaskData'
 import { buildTimeline } from './timeline'
 import type { TimelineEntry } from './timeline'
@@ -90,6 +91,24 @@ export function App() {
     hasLoadedRef,
     resolveTaskLink,
   } = useTaskData(view, setError)
+  // The open task, readable by the actions at call time. Assigned below, once
+  // the effective selection is derived from the shaped list.
+  const currentRef = useRef<TaskWithProject | null>(null)
+  const {
+    markSeen,
+    markUnread,
+    setStatus,
+    archiveTask,
+    archiveSection,
+    launchNow,
+    allowTool,
+    setAllowEdits,
+    saveTitle,
+    generateTitle,
+    retitling,
+    answerAsk,
+    answeringBy,
+  } = useTaskActions({ currentRef, tasksRef, setTasks, refresh, setError })
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   // The user's explicit task pick. The effective selection (`selected`, below)
@@ -147,7 +166,6 @@ export function App() {
     {},
   )
   const [sendingBy, setSendingBy] = useState<Record<string, boolean>>({})
-  const [answeringBy, setAnsweringBy] = useState<Record<string, boolean>>({})
   const composerRef = useRef<HTMLTextAreaElement>(null)
 
   // Files attached to the new-task message and to per-task replies, held as File
@@ -264,53 +282,8 @@ export function App() {
     })
   }, [view, listFocused, tasks])
 
-  // Mark a task caught-up: advance its server-side `seenAt` to its latest
-  // completed update, which clears its unseen dot. Optimistically advances the
-  // local copy so the dot clears at once; the 2s poll reconciles. The server
-  // stores the marker monotonically, so a stale/older value never moves it back.
-  // Reads tasksRef so a delayed (dwell-timer) call sees the freshest data.
-  async function markSeen(id: string) {
-    const task = tasksRef.current.find((t) => t.id === id)
-    if (!task) return
-    const at = latestUpdateAt(task)
-    if (!at || (task.seenAt && task.seenAt >= at)) return
-    setTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, seenAt: at } : t)),
-    )
-    try {
-      await fetch(`/api/${task.projectSlug}/tasks/${id}/seen`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ at }),
-      })
-    } catch {
-      // best-effort; a later dwell or the poll will retry the mark
-    }
-  }
-
-  // Mark a task unread: reset its server-side `seenAt` so the task's latest
-  // update reads as unviewed again, re-showing its dot. Optimistically clears
-  // the local marker so the dot appears at once; the 2s poll reconciles. The
-  // next time the viewer reads the task, markSeen advances the marker forward
-  // again.
-  async function markUnread(id: string) {
-    const task = tasksRef.current.find((t) => t.id === id)
-    if (!task) return
-    setTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, seenAt: '' } : t)),
-    )
-    try {
-      await fetch(`/api/${task.projectSlug}/tasks/${id}/unread`, {
-        method: 'POST',
-      })
-    } catch {
-      // best-effort; the next poll restores the true marker
-    }
-  }
-
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
-  const [retitling, setRetitling] = useState<string | null>(null)
   const titleInputRef = useRef<HTMLInputElement>(null)
 
   const pathBySlug = new Map(projects.map((p) => [p.slug, p.path]))
@@ -347,6 +320,7 @@ export function App() {
       ? selectedTaskId
       : orderedTasks[0]?.id ?? null
   const current = tasks.find((t) => t.id === selected) ?? null
+  currentRef.current = current
 
   // Each whole composer panel is one drop target, including its textarea,
   // paperclip, and surrounding action area. Keep the reply target bound to the
@@ -621,60 +595,11 @@ export function App() {
     setEditingTitle(true)
   }
 
-  async function saveTitle() {
-    if (!current) return
-    const id = current.id
-    const proj = current.projectSlug
-    const next = titleDraft.trim()
-    setEditingTitle(false)
-    if (!next || next === current.title) return
-    // Optimistic; the PATCH persists it and polling will reconcile.
-    setTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, title: next } : t)),
-    )
-    try {
-      const r = await fetch(`/api/${proj}/tasks/${id}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ title: next }),
-      })
-      if (!r.ok) {
-        const body = await r.json()
-        throw new Error(body.error ?? r.statusText)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    }
-  }
-
-  // Ask haiku (server-side) to name the task from its conversation.
-  async function generateTitle() {
-    if (!current || retitling === current.id) return
-    const id = current.id
-    const proj = current.projectSlug
-    setRetitling(id)
-    setError(null)
-    try {
-      const r = await fetch(`/api/${proj}/tasks/${id}/retitle`, {
-        method: 'POST',
-      })
-      const body = await r.json()
-      if (!r.ok) throw new Error(body.error ?? r.statusText)
-      const updated = body as Task
-      setTasks((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, title: updated.title } : t)),
-      )
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setRetitling((prev) => (prev === id ? null : prev))
-    }
-  }
-
   function onTitleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') {
       e.preventDefault()
-      void saveTitle()
+      setEditingTitle(false)
+      void saveTitle(titleDraft)
     } else if (e.key === 'Escape') {
       e.preventDefault()
       setEditingTitle(false)
@@ -807,206 +732,16 @@ export function App() {
     }
   }
 
-  // Answer an ask (a choice option, confirm yes/no, or free text). The server
-  // stamps the answer and un-wedges — or schedules the delivery for a future
-  // option `at` — then re-drives the session; here we just post and refresh.
-  // Per-task in-flight disabling mirrors the send path (sendingBy).
-  async function answerAsk(
-    askId: string,
-    body: { optionId?: string; text?: string },
-  ) {
-    if (!current) return
-    const id = current.id
-    const proj = current.projectSlug
-    if (answeringBy[id]) return
-    setAnsweringBy((prev) => ({ ...prev, [id]: true }))
-    setError(null)
-    try {
-      const r = await fetch(`/api/${proj}/tasks/${id}/asks/${askId}/answer`, {
-        method: 'POST',
-        headers: uiHeaders(),
-        body: JSON.stringify(body),
-      })
-      const resBody = await r.json()
-      if (!r.ok) throw new Error(resBody.error ?? r.statusText)
-      await refresh()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setAnsweringBy((prev) => ({ ...prev, [id]: false }))
-    }
-  }
-
-  // Grant a permission rule: "task" scope persists the rule on the task (used on
-  // future turns), "project" scope writes it to the project's settings.local.json.
-  // Refresh so a task-scoped grant shows up. Returns whether the grant landed, so
-  // a caller (the blocked-summary rows) can mark the row granted only on success.
-  // The rule may have been hand-edited before granting.
-  async function allowTool(
-    rule: string,
-    scope: 'task' | 'project',
-  ): Promise<boolean> {
-    if (!current) return false
-    const id = current.id
-    const proj = current.projectSlug
-    setError(null)
-    try {
-      const r = await fetch(`/api/${proj}/tasks/${id}/allow`, {
-        method: 'POST',
-        headers: uiHeaders(),
-        body: JSON.stringify({ rule, scope }),
-      })
-      const body = await r.json()
-      if (!r.ok) throw new Error(body.error ?? r.statusText)
-      // A codex task-scope grant succeeds but comes back with a parity warning;
-      // surface it without treating the grant as failed.
-      if (typeof body.warning === 'string') setError(body.warning)
-      if (scope === 'task') await refresh()
-      return true
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-      return false
-    }
-  }
-
-  async function setAllowEdits(checked: boolean) {
-    if (!current) return
-    const id = current.id
-    const proj = current.projectSlug
-    // Optimistic; the PATCH persists it and polling will reconcile.
-    setTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, allowEdits: checked } : t)),
-    )
-    try {
-      const r = await fetch(`/api/${proj}/tasks/${id}`, {
-        method: 'PATCH',
-        headers: uiHeaders(),
-        body: JSON.stringify({ allowEdits: checked }),
-      })
-      if (!r.ok) {
-        const body = await r.json()
-        throw new Error(body.error ?? r.statusText)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    }
-  }
-
-  async function setStatus(task: TaskWithProject, status: string) {
-    const id = task.id
-    const proj = task.projectSlug
-    setError(null)
-    // Optimistic; the PATCH persists it and polling will reconcile.
-    setTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, status } : t)),
-    )
-    try {
-      const r = await fetch(`/api/${proj}/tasks/${id}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ status }),
-      })
-      if (!r.ok) {
-        const body = await r.json()
-        throw new Error(body.error ?? r.statusText)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    }
-  }
-
-  // Archive (or restore) a task by moving it between the project's tasks/ and
-  // archived/ dirs. The list shows only active tasks or only archived ones, so
-  // either action moves the row out of the current view: optimistically drop it
-  // from the list. A reload reconciles.
-  async function archiveTask(task: TaskWithProject, archived: boolean) {
-    const id = task.id
-    const proj = task.projectSlug
-    setError(null)
-    setTasks((prev) => prev.filter((t) => t.id !== id))
-    try {
-      const r = await fetch(`/api/${proj}/tasks/${id}/archive`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ archived }),
-      })
-      if (!r.ok) {
-        const body = await r.json()
-        throw new Error(body.error ?? r.statusText)
-      }
-      await refresh()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    }
-  }
-
-  // Archive every task in a section at once (the section header's kebab). A
-  // section is a status, or — when the status is broken out into date buckets —
-  // a single status+date bucket, so passing a category narrows the targets to
-  // that date range. Drops them all optimistically, fires the per-task archive
-  // calls in parallel, then reloads to reconcile — including any that failed,
-  // which the reload brings back. Only offered for non-riding sections (a riding
-  // task has a live run the server won't archive), so every target is archivable.
-  async function archiveSection(status: string, category?: DateCategory) {
-    const targets = orderedTasks.filter(
+  // Resolve a section (a status, or a single status+date bucket when the
+  // status is broken out into dates) to the tasks its archive menu targets.
+  function sectionTargets(status: string, category?: DateCategory) {
+    return orderedTasks.filter(
       (t) =>
         t.status === status &&
         (category == null ||
           dateCategory(t.updatedAt ?? t.createdAt, todayStart, weekStart) ===
             category),
     )
-    if (targets.length === 0) return
-    const ids = new Set(targets.map((t) => t.id))
-    setError(null)
-    setTasks((prev) => prev.filter((t) => !ids.has(t.id)))
-    try {
-      await Promise.all(
-        targets.map(async (t) => {
-          const r = await fetch(`/api/${t.projectSlug}/tasks/${t.id}/archive`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ archived: true }),
-          })
-          if (!r.ok) {
-            const body = await r.json()
-            throw new Error(body.error ?? r.statusText)
-          }
-        }),
-      )
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    }
-    await refresh()
-  }
-
-  // Launch a scheduled task now, ahead of its time (the header's "launch"
-  // button). The server clears the schedule, records the launch, and starts the
-  // agent; polling reconciles the new status.
-  async function launchNow(task: TaskWithProject) {
-    const id = task.id
-    const proj = task.projectSlug
-    setError(null)
-    // Optimistic: drop the schedule and flip to riding so the button clears at
-    // once and the launch button gives way to the resting one.
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === id
-          ? { ...t, status: 'riding', scheduledFor: undefined }
-          : t,
-      ),
-    )
-    try {
-      const r = await fetch(`/api/${proj}/tasks/${id}/launch`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-      })
-      if (!r.ok) {
-        const body = await r.json()
-        throw new Error(body.error ?? r.statusText)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    }
   }
 
   function onReplyKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -1273,7 +1008,9 @@ export function App() {
                       (dateCatsByStatus.get(row.status)?.size ?? 0) <= 1 && (
                         <SectionActionsMenu
                           count={countByStatus.get(row.status) ?? 0}
-                          onArchive={() => archiveSection(row.status)}
+                          onArchive={() =>
+                            archiveSection(sectionTargets(row.status))
+                          }
                         />
                       )}
                   </li>
@@ -1313,7 +1050,9 @@ export function App() {
                           ) ?? 0
                         }
                         onArchive={() =>
-                          archiveSection(row.status, row.category)
+                          archiveSection(
+                            sectionTargets(row.status, row.category),
+                          )
                         }
                       />
                     )}
