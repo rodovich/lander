@@ -77,12 +77,54 @@ export function useViewingState(view: TaskView, tasks: TaskWithProject[]) {
   }
 }
 
+// The dwell's bookkeeping between steps: the task being actively viewed (null
+// when none) and the latest-update baseline snapshotted when viewing began —
+// updates at or before it clear only once the dwell elapses; anything past it
+// arrived while viewing.
+export type SeenDwellState = { taskId: string | null; baseline: string }
+
+export const idleSeenDwell: SeenDwellState = { taskId: null, baseline: '' }
+
+// What the hook's effect should do after a change in the viewing signals:
+// cancel any armed dwell ('idle'), (re-)arm the dwell for a newly-viewed task
+// ('arm'), mark the task seen at once ('mark'), or nothing ('hold').
+export type SeenDwellAction = 'idle' | 'arm' | 'mark' | 'hold'
+
+// One step of the seen-marker rules, pure so the timing policy is testable
+// apart from React and the timer plumbing (see useSeenMarker below, which
+// executes the actions).
+export function stepSeenDwell(
+  prev: SeenDwellState,
+  input: { taskId: string | null; activelyViewing: boolean; latest: string },
+): { state: SeenDwellState; action: SeenDwellAction } {
+  // Not actively viewing anything: whatever dwell was pending is a glance that
+  // didn't last, so it never marks.
+  if (!input.activelyViewing || !input.taskId)
+    return { state: idleSeenDwell, action: 'idle' }
+  // Just began actively viewing this task: snapshot the baseline and arm the
+  // dwell. Anything already present clears only once the dwell elapses.
+  if (prev.taskId !== input.taskId)
+    return {
+      state: { taskId: input.taskId, baseline: input.latest },
+      action: 'arm',
+    }
+  // A new update landed while actively viewing — seen immediately. (Any armed
+  // dwell stays; its later markSeen is a no-op against an advanced marker.)
+  if (input.latest > prev.baseline)
+    return {
+      state: { taskId: input.taskId, baseline: input.latest },
+      action: 'mark',
+    }
+  return { state: prev, action: 'hold' }
+}
+
 // Move the open task's seen marker per the viewing rules. When the viewer
 // starts actively viewing a task (switches to it, focuses the tab, or scrolls
 // to the bottom), treat whatever's already there as a baseline and arm a 2s
 // dwell that marks it seen — so a glance that doesn't last doesn't clear the
 // dot. An update that arrives *while* actively viewing is past that baseline,
-// so it's marked seen at once.
+// so it's marked seen at once. The decision rules live in stepSeenDwell; this
+// hook feeds it the signals and executes its actions.
 export function useSeenMarker(opts: {
   current: TaskWithProject | null
   atBottom: boolean
@@ -97,33 +139,29 @@ export function useSeenMarker(opts: {
   const currentLatest = current ? latestUpdateAt(current) : ''
   const activelyViewing = !!current && tabActive && atBottom
 
+  const dwellStateRef = useRef<SeenDwellState>(idleSeenDwell)
   const dwellTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const viewTaskIdRef = useRef<string | null>(null)
-  const viewBaselineRef = useRef<string>('')
   useEffect(() => {
-    if (!activelyViewing || !current) {
+    const { state, action } = stepSeenDwell(dwellStateRef.current, {
+      taskId: current?.id ?? null,
+      activelyViewing,
+      latest: currentLatest,
+    })
+    dwellStateRef.current = state
+    if (action === 'idle' || action === 'arm') {
       if (dwellTimerRef.current) {
         clearTimeout(dwellTimerRef.current)
         dwellTimerRef.current = null
       }
-      viewTaskIdRef.current = null
-      return
     }
-    const id = current.id
-    if (viewTaskIdRef.current !== id) {
-      // Just began actively viewing this task: snapshot the baseline and arm the
-      // dwell. Anything already present clears only once the 2s elapses.
-      viewTaskIdRef.current = id
-      viewBaselineRef.current = currentLatest
-      if (dwellTimerRef.current) clearTimeout(dwellTimerRef.current)
+    if (action === 'arm') {
+      const id = state.taskId!
       dwellTimerRef.current = setTimeout(() => {
         dwellTimerRef.current = null
         void markSeen(id)
       }, 2000)
-    } else if (currentLatest > viewBaselineRef.current) {
-      // A new update landed while actively viewing — seen immediately.
-      viewBaselineRef.current = currentLatest
-      void markSeen(id)
+    } else if (action === 'mark') {
+      void markSeen(state.taskId!)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activelyViewing, currentLatest, current?.id])
