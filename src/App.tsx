@@ -21,7 +21,9 @@ import {
   TaskActionsMenu,
 } from './menus'
 import { MessageText } from './messageText'
+import { NewTaskForm } from './newTaskForm'
 import { tick, timed } from './perf'
+import { ProjectMenu, filterLabelParts } from './projectMenu'
 import { blockedRequests } from './permissions'
 import { ResizeHandle } from './resizeHandle'
 import { StatusTransition } from './statusTransition'
@@ -109,8 +111,6 @@ export function App() {
     answerAsk,
     answeringBy,
   } = useTaskActions({ currentRef, tasksRef, setTasks, refresh, setError })
-  const [menuOpen, setMenuOpen] = useState(false)
-  const menuRef = useRef<HTMLDivElement>(null)
   // The user's explicit task pick. The effective selection (`selected`, below)
   // falls back to the first visible task when this one is filtered away.
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(
@@ -120,19 +120,16 @@ export function App() {
   const [filter, setFilter] = useSessionState('lander:filter', '')
   const searchInputRef = useRef<HTMLInputElement>(null)
 
-  // The new-task form's draft fields persist across reloads so a half-composed
-  // task — its message and its agent/project choices — isn't lost to a hot
-  // reload or refresh. Session-scoped: two tabs composing different tasks keep
-  // independent drafts (localStorage would let them clobber each other, and
-  // since these fields drive the submission, a shared newProject could even
-  // send a task to the wrong project).
-  const [message, setMessage] = useSessionState('lander:draft:newTask', '')
+  // The new-task form's agent/project picks. Session-scoped like the form's
+  // draft message (which lives in the form): two tabs keep independent picks,
+  // and since these drive the submission, a shared newProject could even send
+  // a task to the wrong project. They're lifted here rather than owned by the
+  // form because App reads the agent for the telemetry panel and the project
+  // menu writes the project on a single-project pick.
   const [newTaskAgent, setNewTaskAgent] = useSessionState<Task['agent']>(
     'lander:draft:newAgent',
     'claude',
   )
-  // Explicit project override for the new-task form; empty means "follow the
-  // default" (targetSlug below).
   const [newProject, setNewProject] = useSessionState(
     'lander:draft:newProject',
     '',
@@ -155,7 +152,6 @@ export function App() {
     'lander:size:newTask',
     220,
   )
-  const [submitting, setSubmitting] = useState(false)
 
   // Each task keeps its own draft and in-flight state, keyed by id, so you
   // can start a reply in one task, switch away, and come back to finish it; the
@@ -168,11 +164,10 @@ export function App() {
   const [sendingBy, setSendingBy] = useState<Record<string, boolean>>({})
   const composerRef = useRef<HTMLTextAreaElement>(null)
 
-  // Files attached to the new-task message and to per-task replies, held as File
-  // objects (not session-persisted — File isn't serializable) and uploaded to the
-  // durable store on submit. The paperclip <AttachButton> below each composer owns
-  // its own hidden file input.
-  const [newFiles, setNewFiles] = useState<File[]>([])
+  // Files attached to per-task replies, held as File objects (not
+  // session-persisted — File isn't serializable) and uploaded to the durable
+  // store on submit. The paperclip <AttachButton> below the composer owns its
+  // own hidden file input.
   const [replyFiles, setReplyFiles] = useState<Record<string, File[]>>({})
 
   // A browser treats an unhandled file drop as navigation to that local file.
@@ -236,7 +231,6 @@ export function App() {
   const titleInputRef = useRef<HTMLInputElement>(null)
 
   const pathBySlug = new Map(projects.map((p) => [p.slug, p.path]))
-  const allShown = projects.length > 0 && shown.length === projects.length
   // Tag each task row with its project's leaf only when more than one project's
   // tasks can be intermixed; with a single project shown it's just noise.
   const showProjectLabels = shown.length > 1
@@ -271,14 +265,10 @@ export function App() {
   const current = tasks.find((t) => t.id === selected) ?? null
   currentRef.current = current
 
-  // Each whole composer panel is one drop target, including its textarea,
-  // paperclip, and surrounding action area. Keep the reply target bound to the
+  // The whole reply panel is one drop target, including its textarea,
+  // paperclip, and surrounding action area. Keep the target bound to the
   // task currently open so switching tasks cannot leak a dropped file into
   // another task's draft.
-  const newMessageDrop = useFileDrop<HTMLFormElement>(
-    (picked) => setNewFiles((prev) => [...prev, ...picked]),
-    submitting,
-  )
   const replyDrop = useFileDrop<HTMLDivElement>(
     (picked) => {
       if (!current) return
@@ -385,25 +375,6 @@ export function App() {
     }
   }
 
-  // Clicking a project shows only that project — unless it was already the only
-  // one shown, in which case it expands back to all projects.
-  function showOnly(slug: string) {
-    if (shown.length === 1 && shown[0] === slug) {
-      setShown(projects.map((p) => p.slug))
-    } else {
-      setShown([slug])
-      // Picking a specific project also targets new tasks at it. Showing all
-      // projects or changing the time/status filter leaves this untouched.
-      setNewProject(slug)
-    }
-    setMenuOpen(false)
-  }
-
-  function showAll() {
-    setShown(projects.map((p) => p.slug))
-    setMenuOpen(false)
-  }
-
   // Keep the selection in sync when navigating with the browser back/forward
   // buttons.
   useEffect(() => {
@@ -438,85 +409,6 @@ export function App() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
-
-  // Close the project menu on an outside click or Escape.
-  useEffect(() => {
-    if (!menuOpen) return
-    const onDown = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false)
-      }
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuOpen(false)
-    }
-    window.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('mousedown', onDown)
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [menuOpen])
-
-  // The project a new task is created in: an explicit pick from the form's
-  // dropdown if made, else the single shown project, else the project of the
-  // task currently open, else the first project.
-  const defaultTargetSlug =
-    shown.length === 1
-      ? shown[0]
-      : current?.projectSlug ?? projects[0]?.slug ?? ''
-  const targetSlug =
-    newProject && projects.some((p) => p.slug === newProject)
-      ? newProject
-      : defaultTargetSlug
-
-  function onSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    void createTask()
-  }
-
-  function onMessageKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    // Plain Enter creates the task; Shift+Enter / Option(Alt)+Enter inserts a newline.
-    if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
-      e.preventDefault()
-      void createTask()
-    }
-  }
-
-  async function createTask() {
-    if (!message.trim() || submitting || !targetSlug) return
-    setSubmitting(true)
-    setError(null)
-    try {
-      const attachments = await uploadAttachments(targetSlug, newFiles)
-      const r = await fetch(`/api/${targetSlug}/tasks`, {
-        method: 'POST',
-        headers: uiHeaders(),
-        body: JSON.stringify({
-          message,
-          agent: newTaskAgent,
-          // Human-launched tasks always get edit access; git and other Bash
-          // are governed by the project's .claude permissions (Claude) or the
-          // workspace-scoped edit profile (Codex). A read-only task is only ever
-          // produced by a spawner declining to forward edits, and the human
-          // can grant edits from the task header.
-          allowEdits: true,
-          ...(attachments.length ? { attachments } : {}),
-        }),
-      })
-      const body = await r.json()
-      if (!r.ok) throw new Error(body.error ?? r.statusText)
-      const created = body as Task
-      await refresh()
-      selectTask(created.id, targetSlug)
-      setMessage('')
-      setNewFiles([])
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setSubmitting(false)
-    }
-  }
 
   // Reset per-task view state when switching tasks so none of it bleeds across
   // them: leave title-edit mode and collapse revealed tool details and expanded
@@ -662,36 +554,11 @@ export function App() {
     }
   }
 
-  // Dropdown summary: "All projects" when every project is shown, otherwise the
-  // single shown project's leaf (just the last path segment — the menu items
-  // still show full paths). The active time filter ("Today"/"This week", not
-  // "Any time") and the non-default views ("Unread"/"Archived", not the "Inbox"
-  // default) each append a "• …" suffix, in that order (e.g. "All projects •
-  // Today • Unread").
-  const filterBase =
-    projects.length === 0
-      ? ''
-      : allShown && projects.length > 1
-        ? 'All projects'
-        : shown.length === 1
-          ? lastPathComponent(pathBySlug.get(shown[0]) ?? shown[0])
-          : `${shown.length} of ${projects.length}`
-  const timeLabel =
-    timeFilter === 'today'
-      ? 'Today'
-      : timeFilter === 'week'
-        ? 'This week'
-        : timeFilter === 'older'
-          ? 'Older'
-          : ''
-  const viewLabel =
-    view === 'unread' ? 'Unread' : view === 'archived' ? 'Archived' : ''
-  // The base (project name) and the time/view suffixes are rendered as separate
-  // spans so the name can carry heavier weight than the suffixes (see CSS).
-  const filterSuffixes = [timeLabel, viewLabel].filter(Boolean)
-
   // Keep the page title in sync with the project-select label text.
-  const filterLabel = [filterBase, ...filterSuffixes].filter(Boolean).join(' • ')
+  const labelParts = filterLabelParts(projects, shown, timeFilter, view)
+  const filterLabel = [labelParts.base, ...labelParts.suffixes]
+    .filter(Boolean)
+    .join(' • ')
   useEffect(() => {
     document.title = filterLabel || 'lander'
   }, [filterLabel])
@@ -700,124 +567,16 @@ export function App() {
     <div className="layout">
       <div className="sidebar">
         {projects.length > 0 && (
-          <div className="project-filter" ref={menuRef}>
-            <button
-              type="button"
-              className="project-select"
-              aria-haspopup="listbox"
-              aria-expanded={menuOpen}
-              onClick={() => setMenuOpen((o) => !o)}
-            >
-              <span className="project-select-label">
-                {filterBase && (
-                  <span className="project-select-name">{filterBase}</span>
-                )}
-                {filterSuffixes.map((s) => (
-                  <span key={s} className="project-select-suffix">
-                    {' • '}
-                    {s}
-                  </span>
-                ))}
-              </span>
-              <svg
-                className="project-select-caret"
-                width="15"
-                height="15"
-                viewBox="0 0 24 24"
-                fill="none"
-                aria-hidden
-              >
-                <path
-                  d="m6 9 6 6 6-6"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-            {menuOpen && (
-              <div className="project-menu" role="listbox">
-                {projects.map((p) => (
-                  <button
-                    key={p.slug}
-                    type="button"
-                    role="option"
-                    aria-selected={shown.includes(p.slug)}
-                    className="project-menu-item"
-                    onClick={() => showOnly(p.slug)}
-                  >
-                    <span className="project-menu-check">
-                      {shown.includes(p.slug) ? '✓' : ''}
-                    </span>
-                    <span className="project-menu-path">{p.path}</span>
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  className="project-menu-item project-menu-all"
-                  onClick={showAll}
-                >
-                  <span className="project-menu-check">
-                    {allShown ? '✓' : ''}
-                  </span>
-                  <span className="project-menu-path">All projects</span>
-                </button>
-                {(
-                  [
-                    ['today', 'Today'],
-                    ['week', 'This week'],
-                    ['older', 'Older'],
-                    ['any', 'Any time'],
-                  ] as const
-                ).map(([value, label]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    className="project-menu-item project-menu-time"
-                    role="menuitemradio"
-                    aria-checked={timeFilter === value}
-                    onClick={() => {
-                      setTimeFilter(value)
-                      setMenuOpen(false)
-                    }}
-                  >
-                    <span className="project-menu-check">
-                      {timeFilter === value ? '✓' : ''}
-                    </span>
-                    <span className="project-menu-path">{label}</span>
-                  </button>
-                ))}
-                {(
-                  [
-                    ['inbox', 'Inbox'],
-                    ['unread', 'Unread'],
-                    ['archived', 'Archived'],
-                  ] as const
-                ).map(([value, label], i) => (
-                  <button
-                    key={value}
-                    type="button"
-                    className={
-                      'project-menu-item project-menu-view' +
-                      (i === 0 ? ' project-menu-view-first' : '')
-                    }
-                    role="menuitemradio"
-                    aria-checked={view === value}
-                    onClick={() => {
-                      setView(value)
-                      setMenuOpen(false)
-                    }}
-                  >
-                    <span className="project-menu-check">
-                      {view === value ? '✓' : ''}
-                    </span>
-                    <span className="project-menu-path">{label}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          <ProjectMenu
+            projects={projects}
+            shown={shown}
+            setShown={setShown}
+            view={view}
+            setView={setView}
+            timeFilter={timeFilter}
+            setTimeFilter={setTimeFilter}
+            onPickProject={setNewProject}
+          />
         )}
         <div className="task-toolbar">
           {projects.length > 0 && statusCounts.length > 0 && (
@@ -1094,66 +853,19 @@ export function App() {
           reserveTop={160}
           label="Resize new task area"
         />
-        <form
-          className={`new-task${newMessageDrop.active ? ' file-drop-active' : ''}`}
-          onSubmit={onSubmit}
-          style={{ height: newTaskHeight }}
-          {...newMessageDrop.handlers}
-        >
-          <div className="new-task-head">
-            <h2>New task</h2>
-            <select
-              className="new-task-agent"
-              value={newTaskAgent}
-              onChange={(e) => setNewTaskAgent(e.target.value as Task['agent'])}
-            >
-              <option value="claude">Claude</option>
-              <option value="codex">Codex</option>
-            </select>
-            {projects.length > 1 && (
-              <select
-                className="new-task-project"
-                value={targetSlug}
-                onChange={(e) => setNewProject(e.target.value)}
-              >
-                {projects.map((p) => (
-                  <option key={p.slug} value={p.slug}>
-                    {lastPathComponent(p.path)}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-          <textarea
-            placeholder="Message"
-            rows={4}
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            onKeyDown={onMessageKeyDown}
-            onPaste={(e) => {
-              if (submitting) return
-              const images = clipboardImageFiles(e.clipboardData)
-              if (images.length === 0) return
-              e.preventDefault()
-              setNewFiles((prev) => [...prev, ...images])
-            }}
-          />
-          <div className="composer-actions">
-            <AttachButton
-              files={newFiles}
-              onAdd={(picked) => setNewFiles((prev) => [...prev, ...picked])}
-              onClear={() => setNewFiles([])}
-              disabled={submitting}
-            />
-            <button
-              type="submit"
-              className="launch-btn"
-              disabled={submitting || !message.trim()}
-            >
-              {submitting ? 'Launching…' : 'Launch'}
-            </button>
-          </div>
-        </form>
+        <NewTaskForm
+          projects={projects}
+          shown={shown}
+          currentProjectSlug={current?.projectSlug}
+          agent={newTaskAgent}
+          setAgent={setNewTaskAgent}
+          newProject={newProject}
+          setNewProject={setNewProject}
+          height={newTaskHeight}
+          setError={setError}
+          refresh={refresh}
+          onCreated={selectTask}
+        />
 
         <TelemetryPanel
           items={telemetry[current?.agent ?? newTaskAgent] ?? []}
