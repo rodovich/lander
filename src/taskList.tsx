@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef } from 'react'
+import { Fragment, memo, useEffect, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import {
   DATE_CATEGORY_LABELS,
@@ -8,6 +8,7 @@ import {
 } from './format'
 import { SectionActionsMenu, TaskActionsMenu } from './menus'
 import type { TaskAction } from './menus'
+import { tick } from './perf'
 import { isUnread } from './taskMeta'
 import type { TaskListShape } from './taskRows'
 import type { DateCategory, TaskView, TaskWithProject } from './types'
@@ -15,8 +16,10 @@ import type { DateCategory, TaskView, TaskWithProject } from './types'
 // The sidebar's task list: the toolbar (status-count chips, search), the rows
 // with their sticky status/date headers, section scroll anchors, and the
 // roving-tabindex keyboard navigation. Renders the shape buildTaskRows
-// derived; owns only DOM concerns (refs, focus, scrolling).
-export function TaskList({
+// derived; owns only DOM concerns (refs, focus, scrolling). Memoized: the
+// shape is useMemo'd upstream, so scroll flips and other unrelated App state
+// leave this pane still.
+export const TaskList = memo(function TaskList({
   shape,
   tasksEmpty,
   hasProjects,
@@ -48,6 +51,9 @@ export function TaskList({
   onTaskAction: (task: TaskWithProject, action: TaskAction) => void
   onArchiveSection: (targets: TaskWithProject[]) => void
 }) {
+  // Opt-in profiling (see perf.ts): count re-renders of the list pane
+  // separately from App's own churn.
+  tick('TaskList.render')
   const {
     orderedTasks,
     taskRows,
@@ -405,4 +411,4 @@ export function TaskList({
       </ul>
     </>
   )
-}
+})

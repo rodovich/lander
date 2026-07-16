@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { lastPathComponent } from './format'
 import type { Project, TaskView, TimeFilter } from './types'
@@ -40,7 +40,7 @@ export function filterLabelParts(
 
 // The sidebar's filter dropdown: project picks, the time-window radios, and
 // the view radios, summarized on the closed button. Owns its open/close state.
-export function ProjectMenu({
+export const ProjectMenu = memo(function ProjectMenu({
   projects,
   shown,
   setShown,
@@ -220,4 +220,4 @@ export function ProjectMenu({
       )}
     </div>
   )
-}
+})

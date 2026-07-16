@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { uiHeaders, uploadAttachments } from './api'
 import { AttachButton } from './attachments'
@@ -12,7 +12,7 @@ import type { Project, Task } from './types'
 // owned by App — the telemetry panel reads the agent, and the project menu
 // writes the project on a single-project pick — but the rest of the draft
 // state lives here, used nowhere else.
-export function NewTaskForm({
+export const NewTaskForm = memo(function NewTaskForm({
   projects,
   shown,
   currentProjectSlug,
@@ -180,4 +180,4 @@ export function NewTaskForm({
       </div>
     </form>
   )
-}
+})

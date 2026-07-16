@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { memo, useRef, useState } from 'react'
 import { uiHeaders, uploadAttachments } from './api'
 import { AttachButton } from './attachments'
 import { clipboardImageFiles } from './fileDrop'
@@ -16,7 +16,7 @@ import type { TaskWithProject } from './types'
 // state are keyed by task id so a reply started in one task survives switching
 // away and back — which is why this component takes the task as a prop rather
 // than remounting per task.
-export function Composer({
+export const Composer = memo(function Composer({
   task,
   height,
   setError,
@@ -206,4 +206,4 @@ export function Composer({
       </div>
     </div>
   )
-}
+})
