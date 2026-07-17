@@ -108,7 +108,11 @@ export function RuleRow({
 
   return (
     <div className="rule-row">
-      {editing ? (
+      {granted ? (
+        // Once granted, the row records what was allowed — editing the text
+        // would misrepresent the rule the grant actually covers.
+        <span className="rule-row-rule readonly">{committed}</span>
+      ) : editing ? (
         <input
           ref={inputRef}
           className="rule-row-input"

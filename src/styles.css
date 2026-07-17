@@ -1908,6 +1908,16 @@ body {
   background: var(--bg-tinted);
 }
 
+/* A granted rule is read-only — no edit hint on hover. */
+.rule-row-rule.readonly {
+  cursor: default;
+}
+
+.rule-row-rule.readonly:hover {
+  border-color: transparent;
+  background: none;
+}
+
 .rule-row-placeholder {
   color: var(--muted);
 }

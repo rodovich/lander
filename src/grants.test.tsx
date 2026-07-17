@@ -74,6 +74,14 @@ describe('RuleRow', () => {
     expect(html).not.toContain('rule-row-kebab')
   })
 
+  it('renders the rule read-only (not click-to-edit) once granted', () => {
+    const html = render({ granted: 'task' })
+    expect(html).toContain('rule-row-rule readonly')
+    expect(html).not.toContain('Click to edit')
+    const ungranted = render()
+    expect(ungranted).toContain('Click to edit')
+  })
+
   it('starts in edit mode with a placeholder for an empty authoring row', () => {
     const html = render({ rule: '', autoEdit: true, placeholder: 'Author a rule…' })
     expect(html).toContain('rule-row-input')
