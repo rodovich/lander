@@ -88,6 +88,9 @@ export type Ride = {
   endedAt?: string
   outcome?: 'done' | 'interrupted' | 'error'
   usage?: TokenUsage
+  // Present only on an 'error' outcome: the failure's diagnostics (exit code,
+  // the daemon's cause for a synthesized done, the stderr tail).
+  error?: { exitCode?: number; cause?: string; idleMs?: number; stderr?: string }
 }
 
 // One entry in the unified item log that replaces the parallel messages/events/

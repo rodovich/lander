@@ -186,6 +186,12 @@ export type UpdateMessage = {
   rateLimitResetsAt?: string
 }
 
+// Why the daemon synthesized a done itself instead of relaying the host's own:
+// the idle watchdog fired, the daemon was shutting down (killChildren), or the
+// host died without reporting a result. Absent on a natural done — the exit
+// code and stderr carry the story there.
+export type DoneCause = 'idle-timeout' | 'daemon-shutdown' | 'host-crash'
+
 // The run finished. Sent with retry/replay until the server acks; a `done` for an
 // already-done run is a no-op (idempotency by runId).
 export type DoneMessage = {
@@ -194,6 +200,11 @@ export type DoneMessage = {
   exitCode: number
   interrupted: boolean
   stderr: string
+  // Present only on a daemon-synthesized done: why the run had to be ended.
+  cause?: DoneCause
+  // For cause 'idle-timeout': the idle window that expired, so the retry ask
+  // can name the actual duration.
+  idleMs?: number
 }
 
 // The provider session id learned for a task's first turn. For Claude today, the

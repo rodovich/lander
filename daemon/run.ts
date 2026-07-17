@@ -3,6 +3,7 @@ import path from 'node:path'
 import type { AgentAdapter } from './agent'
 import type { AgentKind } from '../server/protocol'
 import type {
+  DoneCause,
   DoneMessage,
   SessionMessage,
   StartRunMessage,
@@ -209,13 +210,21 @@ export function createRunManager({
     let seq = 0
     const buffer: UpdateMessage[] = []
     let settled = false
+    // Why we killed the host, when we did — stamped onto the synthesized
+    // close-without-done so the server can name the cause instead of wedging
+    // with a generic "run failed" that's indistinguishable from a crash.
+    let endCause: DoneCause | undefined
     // The activity-armed idle watchdog acts *through* the boundary: it arms on any
     // host output and, on fire, kills the host group. The resulting
     // close-without-a-natural-done is settled by the gate as exitCode 1.
     let timer: ReturnType<typeof setTimeout> | undefined
+    const idleWindowMs = msg.idleTimeoutMs || defaultIdleMs
     const arm = () => {
       if (timer) clearTimeout(timer)
-      timer = setTimeout(() => killHost(), msg.idleTimeoutMs || defaultIdleMs)
+      timer = setTimeout(() => {
+        endCause ??= 'idle-timeout'
+        killHost()
+      }, idleWindowMs)
       timer.unref?.()
     }
 
@@ -227,6 +236,8 @@ export function createRunManager({
       exitCode: number
       stderr: string
       interrupted: boolean
+      cause?: DoneCause
+      idleMs?: number
     }): void => {
       if (settled) return
       settled = true
@@ -237,6 +248,8 @@ export function createRunManager({
         exitCode: d.exitCode,
         interrupted: d.interrupted,
         stderr: d.stderr,
+        ...(d.cause ? { cause: d.cause } : {}),
+        ...(d.idleMs ? { idleMs: d.idleMs } : {}),
       }
       rec.done = doneMsg
       rec.dropTimer = setTimeout(() => {
@@ -299,7 +312,13 @@ export function createRunManager({
 
     const rec: Run = {
       buffer,
-      kill: killHost,
+      kill: () => {
+        // A daemon shutdown (killChildren) is a deliberate platform stop, not a
+        // crash — record it so the synthesized done names the right cause. An
+        // already-set cause (the watchdog fired first) wins.
+        endCause ??= 'daemon-shutdown'
+        killHost()
+      },
       interrupt: () => {
         // Mirror today's interrupt: settle an interrupted done at once (the gate
         // wins over the host's kill-triggered close), then kill the host group.
@@ -352,9 +371,17 @@ export function createRunManager({
     })
     host.on('close', () => {
       // A natural done (or a synthesized interrupt done) already settled the run.
-      // Otherwise the host was killed (idle) or crashed without emitting one —
-      // synthesize the same close-without-done the old direct spawn produced.
-      if (!settled) settle({ exitCode: 1, stderr: '', interrupted: false })
+      // Otherwise the host was killed (idle timeout / daemon shutdown) or crashed
+      // without emitting one — synthesize the failed done, naming which, so the
+      // server's wedge can say why instead of the generic "run failed".
+      if (!settled)
+        settle({
+          exitCode: 1,
+          stderr: '',
+          interrupted: false,
+          cause: endCause ?? 'host-crash',
+          ...(endCause === 'idle-timeout' ? { idleMs: idleWindowMs } : {}),
+        })
     })
 
     // Initial arm at spawn (host output re-arms thereafter), matching today's

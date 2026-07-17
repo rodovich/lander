@@ -72,8 +72,10 @@ export type ApplyUpdate = Pick<
 // but leaves `interrupted`/`stderr` optional, since today's file producer reads
 // them from a done.json that may omit either (the inline code treated both as
 // optional); the WS `DoneMessage` always sends them, which still satisfies this.
+// `cause`/`idleMs` ride along from a daemon-synthesized done (idle kill, daemon
+// shutdown, host crash) so the wedge can name the failure.
 export type ApplyDone = Pick<DoneMessage, 'exitCode'> &
-  Partial<Pick<DoneMessage, 'interrupted' | 'stderr'>>
+  Partial<Pick<DoneMessage, 'interrupted' | 'stderr' | 'cause' | 'idleMs'>>
 
 // Side inputs applyDone needs that don't come off the done payload itself: the
 // rate-limit reset time captured during the run (carried onto a wedge's retry),
@@ -275,13 +277,17 @@ export function applyDone(
   // An assistant error — a non-zero exit that isn't a deliberate interrupt — needs
   // the user's attention, so wedge the task with the platform retry ask (usage-limit
   // or generic error). Only override a still-riding task: a self-wedge/land the
-  // agent set stands.
+  // agent set stands. Name the failure when we can — the daemon's synthesized-done
+  // cause, or the first stderr line of a natural non-zero exit; a usage-limit
+  // wedge keeps its reset-time wording.
   if (done.exitCode !== 0 && !done.interrupted && task.status === 'riding') {
+    const prompt = rateLimitResetsAt ? undefined : failurePrompt(done)
     wedgeForRetry(task, {
       committed: hadOutput,
       askId,
       at,
       ...(rateLimitResetsAt ? { resetsAt: rateLimitResetsAt } : {}),
+      ...(prompt ? { prompt } : {}),
     })
   }
   // Close the ride: interrupted on a deliberate stop, error on a non-zero
@@ -292,8 +298,44 @@ export function applyDone(
     : done.exitCode !== 0
       ? 'error'
       : 'done'
+  // Stash the failure's diagnostics on the ride before it closes: exit code, the
+  // daemon's cause, and the stderr tail. The retry ask is answered and gone once
+  // the user retries — this is the record that outlives it.
+  if (outcome === 'error' && ride) {
+    const stderrTail = done.stderr?.trim().slice(-2000)
+    ride.error = {
+      exitCode: done.exitCode,
+      ...(done.cause ? { cause: done.cause } : {}),
+      ...(done.idleMs ? { idleMs: done.idleMs } : {}),
+      ...(stderrTail ? { stderr: stderrTail } : {}),
+    }
+  }
   closeRide(task, outcome, at)
   task.updatedAt = at
   delete task.runId
   delete task.runCursor
+}
+
+// The one-line cause for a failed run's retry ask. A daemon-synthesized done
+// names why the daemon ended the run (the idle watchdog with its window, a
+// daemon shutdown, a host crash); a natural non-zero exit surfaces its first
+// stderr line. Undefined when there's nothing to say — createRetryAsk then
+// falls back to its generic "The assistant run failed."
+function failurePrompt(done: ApplyDone): string | undefined {
+  if (done.cause === 'idle-timeout') {
+    const mins = done.idleMs ? Math.round(done.idleMs / 60_000) : 0
+    return mins
+      ? `The assistant went silent for ${mins} minute${mins === 1 ? '' : 's'} and was stopped.`
+      : 'The assistant went silent and was stopped.'
+  }
+  if (done.cause === 'daemon-shutdown')
+    return 'The daemon shut down and stopped the run.'
+  if (done.cause === 'host-crash')
+    return 'The assistant process died without reporting a result.'
+  const first = done.stderr
+    ?.split('\n')
+    .map((line) => line.trim())
+    .find(Boolean)
+  if (!first) return undefined
+  return `The assistant run failed: ${first.length > 120 ? `${first.slice(0, 119)}…` : first}`
 }

@@ -192,20 +192,23 @@ describe('daemon run manager', () => {
       vi.advanceTimersByTime(50)
       expect(host.kill).toHaveBeenCalledWith('SIGKILL')
 
-      // The killed host closes without ever emitting a natural done.
+      // The killed host closes without ever emitting a natural done. The
+      // synthesized done names the idle kill and the window that expired.
       host.emit('close', 137)
       expect(h.messages.at(-1)).toMatchObject({
         type: 'done',
         runId: 'run-1',
         exitCode: 1,
         interrupted: false,
+        cause: 'idle-timeout',
+        idleMs: 50,
       })
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it('synthesizes a failed done when the host closes without a done', () => {
+  it('synthesizes a failed done naming a host crash when the host closes without a done', () => {
     const h = harness()
     h.manager.startRun(makeStart())
 
@@ -218,6 +221,7 @@ describe('daemon run manager', () => {
         exitCode: 1,
         interrupted: false,
         stderr: '',
+        cause: 'host-crash',
       },
     ])
   })
@@ -306,7 +310,7 @@ describe('daemon run manager', () => {
     expect(refreshUsage).toHaveBeenCalled()
   })
 
-  it('kills every held host group on killChildren', () => {
+  it('kills every held host group on killChildren, naming the shutdown as the cause', () => {
     const h = harness()
     h.manager.startRun(makeStart({ runId: 'run-1' }))
     h.manager.startRun(makeStart({ runId: 'run-2' }))
@@ -315,6 +319,17 @@ describe('daemon run manager', () => {
 
     expect(h.hosts[0].kill).toHaveBeenCalledWith('SIGKILL')
     expect(h.hosts[1].kill).toHaveBeenCalledWith('SIGKILL')
+
+    // The killed hosts close without a natural done; the synthesized dones name
+    // the deliberate shutdown, not a crash.
+    h.hosts[0].emit('close', 137)
+    h.hosts[1].emit('close', 137)
+    expect(
+      h.messages.filter((m) => m.type === 'done').map((m) => m),
+    ).toMatchObject([
+      { runId: 'run-1', exitCode: 1, cause: 'daemon-shutdown' },
+      { runId: 'run-2', exitCode: 1, cause: 'daemon-shutdown' },
+    ])
   })
 
   it('aborts a run interrupted while its attachments were still materializing', async () => {

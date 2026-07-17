@@ -99,6 +99,12 @@ export type Ride = {
   outcome?: 'done' | 'interrupted' | 'error'
   // The turn's token usage, moved off the message onto the ride at close time.
   usage?: Usage
+  // Present only on an 'error' outcome: the exit code, the daemon's cause when
+  // it synthesized the done itself (idle-timeout / daemon-shutdown / host-crash,
+  // plus the expired window for an idle kill), and the tail of the run's stderr.
+  // The durable diagnostic record — applyDone previously dropped stderr entirely
+  // once anything had streamed, leaving an error ride with no evidence of why.
+  error?: { exitCode?: number; cause?: string; idleMs?: number; stderr?: string }
 }
 
 // The task's currently-open ride (the last one without an `endedAt`), if any —

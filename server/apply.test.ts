@@ -289,6 +289,80 @@ describe('applyDone', () => {
     expect(t.retry).toBeUndefined()
     expect(t.items!.some((i) => i.kind === 'ask')).toBe(false)
   })
+
+  it('names an idle kill in the retry ask and stashes the cause on the ride', () => {
+    const t = task()
+    // The turn had streamed (a flow message) — the old behavior dropped every
+    // diagnostic in exactly this case.
+    applyUpdate(t, update({ steps: [step({ text: 'surveying…' })], cursor: 1 }))
+    applyDone(
+      t,
+      done({ exitCode: 1, cause: 'idle-timeout', idleMs: 10 * 60_000 }),
+      { at: AT, askId: 'ask-x-0' },
+    )
+    const ask = t.items!.find((i) => i.kind === 'ask')!
+    expect(ask.kind === 'ask' && ask.prompt).toBe(
+      'The assistant went silent for 10 minutes and was stopped.',
+    )
+    expect(t.rides![0].error).toEqual({
+      exitCode: 1,
+      cause: 'idle-timeout',
+      idleMs: 10 * 60_000,
+    })
+  })
+
+  it('names a host crash and a daemon shutdown in the retry ask', () => {
+    for (const [cause, prompt] of [
+      ['host-crash', 'The assistant process died without reporting a result.'],
+      ['daemon-shutdown', 'The daemon shut down and stopped the run.'],
+    ] as const) {
+      const t = task()
+      applyDone(t, done({ exitCode: 1, cause }), { at: AT, askId: 'ask-x-0' })
+      const ask = t.items!.find((i) => i.kind === 'ask')!
+      expect(ask.kind === 'ask' && ask.prompt).toBe(prompt)
+      expect(t.rides![0].error).toEqual({ exitCode: 1, cause })
+    }
+  })
+
+  it('surfaces the first stderr line of a natural failure and keeps the tail on the ride', () => {
+    const t = task()
+    // A tool ran, so the run had streamed output — the stderr must survive anyway.
+    applyUpdate(t, update({ steps: [step({ kind: 'tool_use', tool: 'Bash', toolUseId: 'c1' })], cursor: 1 }))
+    applyDone(
+      t,
+      done({ exitCode: 1, stderr: '\nError: session is locked\n  at resume (cli.js:10)\n' }),
+      { at: AT, askId: 'ask-x-0' },
+    )
+    const ask = t.items!.find((i) => i.kind === 'ask')!
+    expect(ask.kind === 'ask' && ask.prompt).toBe(
+      'The assistant run failed: Error: session is locked',
+    )
+    expect(t.rides![0].error).toEqual({
+      exitCode: 1,
+      stderr: 'Error: session is locked\n  at resume (cli.js:10)',
+    })
+  })
+
+  it('keeps the usage-limit wording when a reset time is present', () => {
+    const t = task()
+    applyDone(
+      t,
+      done({ exitCode: 1, cause: 'host-crash' }),
+      { at: AT, rateLimitResetsAt: '2026-01-01T01:00:00.000Z', askId: 'ask-x-0' },
+    )
+    const ask = t.items!.find((i) => i.kind === 'ask')!
+    expect(ask.kind === 'ask' && ask.prompt).toBe('Usage limit reached.')
+  })
+
+  it('records no error detail on a clean or interrupted ride', () => {
+    const t = task()
+    applyDone(t, done(), { at: AT, askId: 'ask-x-0' })
+    expect(t.rides![0].error).toBeUndefined()
+
+    const t2 = task()
+    applyDone(t2, done({ exitCode: 137, interrupted: true }), { at: AT, askId: 'ask-x-0' })
+    expect(t2.rides![0].error).toBeUndefined()
+  })
 })
 
 // The load-bearing seam: a run that streamed half its steps under v1 and half
