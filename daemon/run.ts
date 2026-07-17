@@ -61,7 +61,7 @@ export type RunManagerOptions = {
   resolveRunPaths: (
     msg: StartRunMessage,
     adapter: AgentAdapter,
-  ) => { root: string; cwd: string }
+  ) => { root: string; cwd: string; reentryArgs: string[]; effectiveCwd?: string }
   send: (msg: RunManagerMessage) => void
   // The deterministic per-task file store dir (pure function of the run's
   // project/task). Set as LANDER_FILES_DIR on EVERY turn so `lander file cat/ls`
@@ -136,12 +136,14 @@ export function createRunManager({
     }
     const activeAdapter = adapter
 
-    let root: string
-    let cwd: string
+    let paths: {
+      root: string
+      cwd: string
+      reentryArgs: string[]
+      effectiveCwd?: string
+    }
     try {
-      const paths = resolveRunPaths(msg, activeAdapter)
-      root = paths.root
-      cwd = paths.cwd
+      paths = resolveRunPaths(msg, activeAdapter)
     } catch (e) {
       done(msg.runId, 1, e instanceof Error ? e.message : String(e))
       return
@@ -151,11 +153,11 @@ export function createRunManager({
     // carries attachments takes the async detour to materialize them (fetch
     // bytes, write LANDER_FILES_DIR, build the manifest block) before spawning.
     if (!(msg.attachments?.length && materialize)) {
-      spawnRun(msg, activeAdapter, root, cwd, undefined)
+      spawnRun(msg, activeAdapter, paths, undefined)
       return
     }
     materialize(msg, { visionNative: activeAdapter.attachesImagesToVision }).then(
-      (materialized) => spawnRun(msg, activeAdapter, root, cwd, materialized),
+      (materialized) => spawnRun(msg, activeAdapter, paths, materialized),
       (e) => {
         preSpawnInterrupts.delete(msg.runId)
         done(
@@ -172,8 +174,12 @@ export function createRunManager({
   function spawnRun(
     msg: StartRunMessage,
     activeAdapter: AgentAdapter,
-    root: string,
-    cwd: string,
+    paths: {
+      root: string
+      cwd: string
+      reentryArgs: string[]
+      effectiveCwd?: string
+    },
     materialized: MaterializedFiles | undefined,
   ): void {
     // A human wedged the task while we were materializing — before a Run record
@@ -188,7 +194,15 @@ export function createRunManager({
     // cat-able), falling back to the just-materialized dir if no resolver is wired.
     // Everything the executor needs to run the turn rides in the HostInput.
     const filesDir = resolveFilesDir?.(msg) ?? materialized?.filesDir
-    const hostInput: HostInput = { start: msg, root, cwd, filesDir, materialized }
+    const hostInput: HostInput = {
+      start: msg,
+      root: paths.root,
+      cwd: paths.cwd,
+      reentryArgs: paths.reentryArgs,
+      ...(paths.effectiveCwd ? { effectiveCwd: paths.effectiveCwd } : {}),
+      filesDir,
+      materialized,
+    }
 
     // Spawn the flow host (its own process group). It reads the HostInput on
     // stdin, runs the adapter, and streams neutral HostEvents back on stdout.

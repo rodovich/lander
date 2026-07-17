@@ -40,12 +40,14 @@ describe('Claude adapter', () => {
     })
 
     expect(launch.env).toEqual({ LANDER_TASK: 'task-1' })
+    // The --worktree re-entry argv is no longer built here — it moved to
+    // resolveLaunchDir().reentryArgs (asserted separately). buildLaunch ignores
+    // task.worktree entirely now.
+    expect(launch.args).not.toContain('--worktree')
     // Edit access rides --permission-mode, not the allowlist: only Bash(lander:*)
     // and the per-task allow rule ride --allowedTools. git and other Bash follow
     // the project's .claude permissions.
-    expect(launch.args.slice(0, 8)).toEqual([
-      '--worktree',
-      'feature',
+    expect(launch.args.slice(0, 6)).toEqual([
       '--permission-mode',
       'acceptEdits',
       '--allowedTools',
@@ -180,6 +182,75 @@ describe('Claude adapter', () => {
     expect(context).not.toContain('Git status')
   })
 
+  describe('resolveLaunchDir', () => {
+    const yes = () => true
+
+    it('launches at root with no re-entry when the task has no worktree', () => {
+      expect(
+        adapter.resolveLaunchDir({ root: '/repo', isDir: yes }),
+      ).toEqual({ cwd: '/repo', reentryArgs: [] })
+    })
+
+    it('launches at root and re-enters a worktree via argv', () => {
+      expect(
+        adapter.resolveLaunchDir({
+          root: '/repo',
+          worktree: 'feature',
+          isDir: yes,
+        }),
+      ).toEqual({
+        cwd: '/repo',
+        reentryArgs: ['--worktree', 'feature'],
+        effectiveCwd: '/repo/.claude/worktrees/feature',
+      })
+    })
+
+    it('ignores a wandered recordedCwd — it never becomes the launch dir', () => {
+      expect(
+        adapter.resolveLaunchDir({
+          root: '/repo',
+          recordedCwd: '/tmp',
+          isDir: yes,
+        }),
+      ).toEqual({ cwd: '/repo', reentryArgs: [] })
+    })
+  })
+
+  describe('manual-cd hint in the context block', () => {
+    it('warns when the previous shell ended somewhere this turn will not restore', () => {
+      const context = adapter.buildTurnContext?.({
+        task: { allowEdits: false },
+        root: '/repo',
+        cwd: '/repo',
+        recordedCwd: '/repo/sub',
+      })
+      expect(context).toContain("previous turn's shell ended in sub")
+      expect(context).toContain('this turn starts at the project root')
+    })
+
+    it('stays silent on an EnterWorktree re-entry (landed == recorded)', () => {
+      const wt = '/repo/.claude/worktrees/feature'
+      const context = adapter.buildTurnContext?.({
+        task: { allowEdits: false, worktree: 'feature' },
+        root: '/repo',
+        cwd: '/repo',
+        effectiveCwd: wt,
+        recordedCwd: wt,
+      })
+      expect(context).not.toContain("previous turn's shell ended")
+    })
+
+    it('stays silent on a plain root-to-root turn', () => {
+      const context = adapter.buildTurnContext?.({
+        task: { allowEdits: false },
+        root: '/repo',
+        cwd: '/repo',
+        recordedCwd: '/repo',
+      })
+      expect(context).not.toContain("previous turn's shell ended")
+    })
+  })
+
   it('builds Claude start and resume session arguments', () => {
     expect(
       adapter.buildSession({
@@ -270,8 +341,10 @@ describe('Claude adapter', () => {
     git(root, 'worktree', 'add', '-b', 'feature', wtPath)
     await writeFile(path.join(wtPath, 'wt-only.txt'), 'x')
 
-    // A worktree Claude task launches from root (resolveRunPaths → cwd=root),
-    // yet the block must describe the worktree the agent actually edits.
+    // A worktree Claude task launches from root (resolveLaunchDir → cwd=root)
+    // and lands in the worktree via --worktree; the daemon threads that landed
+    // dir back as effectiveCwd, and the block must describe the worktree the
+    // agent actually edits, not root.
     const realGit = createClaudeAdapter({
       landerBin: '/repo/bin/lander',
       taskPromptTemplate: 'Prompt: {{forwardable}}.',
@@ -280,6 +353,7 @@ describe('Claude adapter', () => {
       task: { allowEdits: true, worktree: 'feature' },
       root,
       cwd: root,
+      effectiveCwd: wtPath,
     })
     expect(context).toContain('Current branch: feature')
     expect(context).toContain('?? wt-only.txt')

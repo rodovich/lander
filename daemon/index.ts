@@ -22,9 +22,9 @@ import type {
   TelemetryMessage,
   ProjectGrantResultMessage,
 } from '../server/protocol'
+import { statSync } from 'node:fs'
 import { createRunManager, type RunManagerMessage } from './run'
 import { createDrain } from './drain'
-import { resolveRunCwd } from './paths'
 import {
   materializeAttachments,
   taskFilesDir,
@@ -132,15 +132,36 @@ function scheduleUsageReset(body: UsageBody): void {
   usageResetTimer.unref()
 }
 
-// Resolve a start-run's launch directories from the project slug + cwd hints.
-// The cwd rule (worktree flag vs recorded cwd) lives in resolveRunCwd.
+function isDir(p: string): boolean {
+  try {
+    return statSync(p).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+// Resolve a start-run's launch directories from the project slug + cwd hints. The
+// cwd rule (launch at root + re-enter a worktree, or resume from the recorded cwd)
+// lives in each adapter's resolveLaunchDir; the daemon just launches where it says
+// and threads the re-entry argv + landed dir back to the executor.
 function resolveRunPaths(
   msg: StartRunMessage,
   adapter: AgentAdapter,
-): { root: string; cwd: string } {
+): { root: string; cwd: string; reentryArgs: string[]; effectiveCwd?: string } {
   const root = pathBySlug.get(msg.project)
   if (!root) throw new Error(`daemon serves no project for slug ${msg.project}`)
-  return { root, cwd: resolveRunCwd(msg, adapter, root) }
+  const launch = adapter.resolveLaunchDir({
+    root,
+    recordedCwd: msg.recordedCwd,
+    worktree: msg.task.worktree,
+    isDir,
+  })
+  return {
+    root,
+    cwd: launch.cwd,
+    reentryArgs: launch.reentryArgs,
+    ...(launch.effectiveCwd ? { effectiveCwd: launch.effectiveCwd } : {}),
+  }
 }
 
 // Root under which each task's materialized attachment blobs live (cached across

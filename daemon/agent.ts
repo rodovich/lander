@@ -42,6 +42,38 @@ export type AgentContextInput = {
   task: AgentTaskView
   root: string
   cwd: string
+  // Where the shell actually lands once this turn's re-entry argv applies, when it
+  // differs from cwd (Claude re-enters a worktree from a root launch). The git
+  // snapshot reads from here so the block describes the worktree, not root.
+  effectiveCwd?: string
+  // The cwd the previous turn's shell ended in (task.cwd), if any. Compared against
+  // the landed dir to warn when a manual `cd` won't be restored this turn.
+  recordedCwd?: string
+}
+
+// The launch directory an adapter owns for its next turn: where the child is
+// spawned, the extra argv it needs to reach its intended working state, and where
+// the shell actually lands once that argv applies (when different from cwd).
+export type AgentLaunchDir = {
+  // Dir the child process is spawned in — the config-load root and (for Claude)
+  // the permission boundary.
+  cwd: string
+  // Extra argv prepended to the launch to reach the intended working state
+  // (Claude: ['--worktree', name]). Empty when the spawn cwd already suffices.
+  reentryArgs: string[]
+  // Where the shell lands once reentryArgs apply, if different from cwd (Claude's
+  // worktree path). Absent when the shell simply stays in cwd.
+  effectiveCwd?: string
+}
+
+export type AgentLaunchDirInput = {
+  root: string
+  // The cwd the previous turn's shell ended in (task.cwd), if any.
+  recordedCwd?: string
+  // The worktree the task is currently in, if any (Claude re-enters it via argv).
+  worktree?: string
+  // Injectable directory probe, so tests don't touch the filesystem.
+  isDir(p: string): boolean
 }
 
 export type AgentSessionLaunch = {
@@ -72,6 +104,13 @@ export type AgentAdapter = {
   command: string
   buildLaunch(input: AgentLaunchInput): AgentLaunch
   buildSession(input: AgentSessionInput): AgentSessionLaunch
+  // The directory this adapter launches its next turn in, plus any re-entry argv
+  // (and where the shell lands after it). The daemon no longer knows or cares
+  // whether an adapter has worktrees: it launches where the adapter says and
+  // appends reentryArgs. Claude launches at root and re-enters a worktree via
+  // ['--worktree', name] (so its permission boundary never moves with a manual
+  // cd); Codex resumes from the recorded cwd, preserving its --cd behavior.
+  resolveLaunchDir(input: AgentLaunchDirInput): AgentLaunchDir
   // Build the dynamic per-turn context block (current git snapshot, live
   // permission grants, …) the run manager appends to the outgoing user message —
   // dynamic facts belong at the cache-friendly end of the conversation, not in
@@ -91,7 +130,6 @@ export type AgentAdapter = {
   // that doesn't but omits it falls back to a generic message.
   projectGrantsUnsupportedReason?: string
   supportsProjectGrants: boolean
-  supportsWorktreeFlag: boolean
   supportsUsageSnapshot: boolean
   supportsRateLimitRetryScheduling: boolean
   // Whether the provider delivers image attachments to its vision itself, given

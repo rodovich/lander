@@ -2010,6 +2010,14 @@ app.post('/api/:project/tasks/:id/relaunch', async (c) => {
   }
 })
 
+// Whether a path is the project root or lives under it (a subdir or a worktree at
+// `.claude/worktrees/<name>`, both of which sit inside root). Used to bound the
+// recorded cwd so a wandered `/tmp` or sibling-repo path is never persisted.
+function isUnderRoot(root: string, p: string): boolean {
+  const rel = path.relative(root, p)
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
+}
+
 // The session's working directory (and transcript path) at the end of a turn,
 // posted by the Stop hook via `lander record-cwd`. Persisted so the next turn
 // resumes here instead of the project root — see Task.cwd and runTurn. Only the
@@ -2037,6 +2045,14 @@ app.post('/api/:project/tasks/:id/cwd', async (c) => {
     if (typeof body.cwd !== 'string' || !body.cwd)
       return c.json({ error: 'cwd is required' }, 400)
     const cwd = body.cwd
+    // An independent server-side bound: only persist a cwd under the project root
+    // (the root itself, a subdir, or a `.claude/worktrees/<name>` — all of which
+    // live under it). A wandered `/tmp` or sibling-repo cwd is dropped, so it can
+    // never become the next turn's launch dir regardless of adapter. The daemon's
+    // launch-at-root already neutralizes the practical harm for Claude; this caps
+    // Codex's resume-from-recorded-cwd (and its one cross-repo gitCommonDir edge).
+    if (!isUnderRoot(project.path, cwd))
+      return c.json({ error: 'cwd must be under the project root' }, 400)
     const transcriptPath =
       typeof body.transcriptPath === 'string' ? body.transcriptPath : undefined
 

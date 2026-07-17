@@ -31,6 +31,14 @@ export type HostInput = {
   start: StartRunMessage
   root: string
   cwd: string
+  // Extra argv the adapter needs to reach its intended working state, prepended to
+  // the launch (Claude re-enters a worktree with ['--worktree', name]). Empty when
+  // the spawn cwd already suffices.
+  reentryArgs?: string[]
+  // Where the shell lands once reentryArgs apply, if different from cwd (Claude's
+  // worktree path) — the dir the git snapshot reads from and the manual-cd hint
+  // compares against. Absent when the shell stays in cwd.
+  effectiveCwd?: string
   // LANDER_FILES_DIR — the persistent per-task store, resolved daemon-side (a pure
   // function of project/task, with the just-materialized dir as a fallback).
   filesDir?: string
@@ -84,7 +92,8 @@ export function runAgent(
   input: HostInput,
   deps: RunAgentDeps,
 ): { kill: () => void } {
-  const { start, root, cwd, materialized } = input
+  const { start, root, cwd, effectiveCwd, materialized } = input
+  const reentryArgs = input.reentryArgs ?? []
   const {
     emit,
     arm,
@@ -113,7 +122,13 @@ export function runAgent(
   // Regenerate the dynamic context block and append it to the outgoing user
   // message when it differs from what the session last received (always, on a
   // fresh session — the server sends no turnContext then).
-  const context = adapter.buildTurnContext?.({ task: taskView, root, cwd })
+  const context = adapter.buildTurnContext?.({
+    task: taskView,
+    root,
+    cwd,
+    effectiveCwd,
+    recordedCwd: start.recordedCwd,
+  })
   const sentContext =
     context && context !== start.turnContext ? context : undefined
   // Append the attachment manifest (this turn's files) and the dynamic context
@@ -144,7 +159,10 @@ export function runAgent(
 
   const child = spawn(
     adapter.command,
-    [...session.args, ...launch.args],
+    // reentryArgs (Claude's --worktree) ride right after the session args and
+    // before the rest of the launch, which ends in `-- <prompt>` — so they must
+    // precede that terminator, not trail it.
+    [...session.args, ...reentryArgs, ...launch.args],
     {
       cwd,
       env: { ...process.env, ...(launch.env ?? start.env) },

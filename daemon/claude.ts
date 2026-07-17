@@ -65,18 +65,23 @@ export function createClaudeAdapter({
         env: landerEnv,
       }
     },
-    buildTurnContext({ task, root, cwd }) {
+    buildTurnContext({ task, root, cwd, effectiveCwd, recordedCwd }) {
       const parts = [`${forwardableAccess(task)}.`]
-      // A worktree Claude task launches from the project root (resolveRunPaths
-      // hands cwd=root, since Claude re-enters the worktree via --worktree) — so
-      // read the snapshot from the worktree itself, not root, or the block would
-      // describe the wrong branch and dirty tree. The worktree lives at the same
-      // <root>/.claude/worktrees/<name> path `--worktree <name>` re-enters.
-      const gitCwd = task.worktree
-        ? path.join(root, '.claude', 'worktrees', task.worktree)
-        : cwd
-      const git = readGitContext(gitCwd)
+      // A worktree Claude task launches from the project root (resolveLaunchDir
+      // hands cwd=root and re-enters the worktree via --worktree) — so read the
+      // snapshot from where the shell actually lands (effectiveCwd = the worktree),
+      // not root, or the block would describe the wrong branch and dirty tree.
+      const landed = effectiveCwd ?? cwd
+      const git = readGitContext(landed)
       if (git) parts.push(git)
+      // A manual `cd` last turn (into a subdir or /tmp) recorded that dir as
+      // task.cwd, but this turn launches at root and won't restore it — tell the
+      // agent its shell moved back so it can cd again if it still needs to. Fires
+      // only when the landed dir differs from where the shell ended; an
+      // EnterWorktree re-entry lands back in the recorded worktree, so it stays
+      // silent.
+      if (recordedCwd && recordedCwd !== landed)
+        parts.push(manualCdHint(root, recordedCwd, landed))
       return [
         '<task-context>',
         'Task state as of this message — background context from lander, not ' +
@@ -100,10 +105,23 @@ export function createClaudeAdapter({
         announceSession: true,
       }
     },
+    resolveLaunchDir({ root, worktree }) {
+      // Claude always launches at the project root — that's its permission
+      // boundary and config-load root, so it must never drift to a wandered cwd.
+      // A worktree is re-entered through argv (--worktree), landing the shell in
+      // the worktree without moving the boundary. recordedCwd is deliberately
+      // ignored: a manual `cd` last turn does not become this turn's root.
+      if (worktree)
+        return {
+          cwd: root,
+          reentryArgs: ['--worktree', worktree],
+          effectiveCwd: path.join(root, '.claude', 'worktrees', worktree),
+        }
+      return { cwd: root, reentryArgs: [] }
+    },
     reduceLine: reduceStreamLine,
     persistProjectGrant: persistClaudeProjectGrant,
     supportsProjectGrants: true,
-    supportsWorktreeFlag: true,
     supportsUsageSnapshot: true,
     supportsRateLimitRetryScheduling: true,
     // Claude has no vision flag on the CLI: it Reads an image by its local path
@@ -125,7 +143,6 @@ function buildClaudeArgs(
     filesDir?: string
   },
 ): string[] {
-  const worktreeArgs = task.worktree ? ['--worktree', task.worktree] : []
   // Extra workspace root for the materialized attachment store, so Read can open
   // an attached image sitting outside the task's cwd (see buildLaunch). Only set
   // when the turn has images.
@@ -206,8 +223,9 @@ function buildClaudeArgs(
     },
   })
 
+  // The --worktree re-entry argv now comes from resolveLaunchDir().reentryArgs
+  // (prepended at the launch site), so worktree knowledge lives in one method.
   return [
-    ...worktreeArgs,
     ...editModeArgs,
     ...editArgs,
     ...filesDirArgs,
@@ -223,6 +241,19 @@ function buildClaudeArgs(
     '--',
     prompt,
   ]
+}
+
+// The manual-cd note for the task-context block: the previous turn's shell ended
+// somewhere this turn's launch won't restore (a plain `cd` into a subdir or /tmp,
+// recorded as task.cwd), so tell the agent its shell moved back and it can cd
+// again if it still needs to. Paths are shown relative to root for brevity.
+function manualCdHint(root: string, recordedCwd: string, landed: string): string {
+  const rel = (p: string) => path.relative(root, p) || 'the project root'
+  return (
+    `Note: your previous turn's shell ended in ${rel(recordedCwd)}, but this ` +
+    `turn starts at ${rel(landed)} (a manual cd isn't carried across turns) — ` +
+    `cd back if you still need to work there.`
+  )
 }
 
 // Cap the working-tree listing so a huge dirty tree can't bloat the turn

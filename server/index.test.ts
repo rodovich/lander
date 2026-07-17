@@ -31,6 +31,13 @@ async function post(pathname: string, body: unknown): Promise<Response> {
   })
 }
 
+async function readTaskField(id: string, field: string): Promise<unknown> {
+  const raw = JSON.parse(
+    await readFile(path.join(tasksDir, `${id}.json`), 'utf8'),
+  )
+  return raw[field]
+}
+
 async function createTask(title: string): Promise<{ id: string; agent: string }> {
   const res = await post(`/api/${slug}/tasks`, { title })
   expect(res.status).toBe(201)
@@ -116,6 +123,30 @@ describe('server task provider behavior', () => {
       await readFile(path.join(tasksDir, `${task.id}.json`), 'utf8'),
     )
     expect(raw.allow).toEqual(['Bash(npm test)'])
+  })
+
+  it('bounds the recorded cwd to the project root', async () => {
+    const task = await createTask('Cwd bound task')
+
+    // A subdir under the root is accepted and persisted.
+    const sub = path.join(projectDir, 'sub', 'dir')
+    const subRes = await post(`/api/${slug}/tasks/${task.id}/cwd`, { cwd: sub })
+    expect(subRes.status).toBe(200)
+    expect(await readTaskField(task.id, 'cwd')).toBe(sub)
+
+    // A worktree path (under .claude/worktrees) is accepted too.
+    const wt = path.join(projectDir, '.claude', 'worktrees', 'feat')
+    const wtRes = await post(`/api/${slug}/tasks/${task.id}/cwd`, { cwd: wt })
+    expect(wtRes.status).toBe(200)
+    expect(await readTaskField(task.id, 'cwd')).toBe(wt)
+
+    // A wandered /tmp path is rejected, and the last good cwd stays put.
+    const tmpRes = await post(`/api/${slug}/tasks/${task.id}/cwd`, { cwd: '/tmp' })
+    expect(tmpRes.status).toBe(400)
+    expect(await tmpRes.json()).toEqual({
+      error: 'cwd must be under the project root',
+    })
+    expect(await readTaskField(task.id, 'cwd')).toBe(wt)
   })
 
   it('treats legacy tasks without agent as Claude when delegating project grants', async () => {

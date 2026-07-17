@@ -23,8 +23,10 @@ describe('daemon agent adapter contract', () => {
       reduceLine(_line, at) {
         return { steps: [{ kind: 'text', text: 'ok', createdAt: at }] }
       },
+      resolveLaunchDir({ root }) {
+        return { cwd: root, reentryArgs: [] }
+      },
       supportsProjectGrants: true,
-      supportsWorktreeFlag: true,
       supportsUsageSnapshot: true,
       supportsRateLimitRetryScheduling: true,
       attachesImagesToVision: false,

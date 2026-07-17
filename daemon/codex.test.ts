@@ -77,9 +77,45 @@ describe('Codex adapter reducer', () => {
     expect(adapter.kind).toBe('codex')
     expect(adapter.command).toBe('codex')
     expect(adapter.supportsProjectGrants).toBe(false)
-    expect(adapter.supportsWorktreeFlag).toBe(false)
     expect(adapter.supportsUsageSnapshot).toBe(false)
     expect(adapter.supportsRateLimitRetryScheduling).toBe(false)
+  })
+
+  describe('resolveLaunchDir', () => {
+    const yes = () => true
+
+    it('resumes from the recorded cwd when it still exists', () => {
+      expect(
+        adapter.resolveLaunchDir({
+          root: '/repo',
+          recordedCwd: '/repo/sub',
+          isDir: yes,
+        }),
+      ).toEqual({ cwd: '/repo/sub', reentryArgs: [] })
+    })
+
+    it('falls back to root when the recorded cwd is gone', () => {
+      expect(
+        adapter.resolveLaunchDir({
+          root: '/repo',
+          recordedCwd: '/repo/sub',
+          isDir: () => false,
+        }),
+      ).toEqual({ cwd: '/repo', reentryArgs: [] })
+    })
+
+    it('falls back to root when the recorded cwd is root or absent', () => {
+      expect(
+        adapter.resolveLaunchDir({
+          root: '/repo',
+          recordedCwd: '/repo',
+          isDir: yes,
+        }),
+      ).toEqual({ cwd: '/repo', reentryArgs: [] })
+      expect(
+        adapter.resolveLaunchDir({ root: '/repo', isDir: yes }),
+      ).toEqual({ cwd: '/repo', reentryArgs: [] })
+    })
   })
 
   it('builds first-turn Codex exec args with workspace-scoped read access', () => {

@@ -45,12 +45,23 @@ export function createCodexAdapter({
         announceSession: false,
       }
     },
+    resolveLaunchDir({ root, recordedCwd, isDir }) {
+      // Codex has no worktree flag: it resumes from the cwd the previous turn
+      // ended in (relayed to the child as --cd), falling back to root when that
+      // cwd is missing, gone, or already root. Its writable sandbox is pinned to
+      // the project root independent of --cd, so a wandered cwd never loses
+      // project access — preserving today's behavior exactly.
+      const cwd =
+        recordedCwd && recordedCwd !== root && isDir(recordedCwd)
+          ? recordedCwd
+          : root
+      return { cwd, reentryArgs: [] }
+    },
     reduceLine: reduceCodexStreamLine,
     extractSession: extractCodexSession,
     projectGrantsUnsupportedReason:
       'Project permission grants are not supported for Codex tasks yet.',
     supportsProjectGrants: false,
-    supportsWorktreeFlag: false,
     supportsUsageSnapshot: false,
     supportsRateLimitRetryScheduling: false,
     attachesImagesToVision: true,

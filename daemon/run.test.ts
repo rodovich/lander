@@ -68,7 +68,7 @@ function harness(opts: Partial<RunManagerOptions> = {}) {
         taskPromptTemplate: 'Prompt: {{forwardable}}.',
       }),
     },
-    resolveRunPaths: () => ({ root: '/repo', cwd: '/repo' }),
+    resolveRunPaths: () => ({ root: '/repo', cwd: '/repo', reentryArgs: [] }),
     send: (msg) => messages.push(msg),
     resolveFilesDir: (msg) => `/files/${msg.project}/${msg.taskId}`,
     refreshUsage: () => {},
