@@ -58,7 +58,6 @@ import {
   pushUserItem,
   pushFlowItem,
   pushEventItem,
-  lastFlowItem,
   userItems,
   eventItems,
   recordAssistantError,
@@ -2384,15 +2383,17 @@ app.post('/api/:project/tasks/:id/asks', async (c) => {
         t.status = 'wedged'
       }
       t.updatedAt = at
-      // Agent-raised asks anchor to the message that raised them — the ride's last
-      // flow message item — so the form renders as that message's footer.
+      // Agent-raised asks anchor to the ride that raised them, so the form
+      // renders as that turn's footer. Raised with no ride in flight (e.g. by
+      // the UI principal), the ask stands alone in the timeline instead.
+      const rideId = openRide(t)?.id
       created = wireAsk(
         createAsk(t, {
           id: askId,
           ...(prompt ? { prompt } : {}),
           form,
           blocking,
-          ...(lastFlowItem(t)?.id ? { parentId: lastFlowItem(t)!.id } : {}),
+          ...(rideId ? { rideId } : {}),
           at,
         }),
       )

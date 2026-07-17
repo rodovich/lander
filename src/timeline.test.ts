@@ -266,19 +266,19 @@ describe('buildTimeline ask placement', () => {
     ])
   })
 
-  it('leaves an ask anchored to a real message to the ride bubble that renders it', () => {
+  it('leaves an ask anchored to a rendered ride to the bubble that renders it', () => {
     const items = [
       flow('r1a', 'r1', T('10:00:00')),
-      ask('ask-wedge', T('10:00:05'), { parentId: 'r1a' }),
+      ask('ask-wedge', T('10:00:05'), { rideId: 'r1' }),
     ]
     const rides = [ride('r1', T('10:00:00'), T('10:00:06'))]
     expect(seq(build({ items, rides }).items)).toEqual(['asst:r1'])
   })
 
-  it('stands an ask up on its own when its anchor did not survive conversion', () => {
+  it('stands an ask up on its own when its ride streamed nothing else', () => {
     const items = [
       flow('r1a', 'r1', T('10:00:00')),
-      ask('ask-orphan', T('10:00:05'), { parentId: 'gone' }),
+      ask('ask-orphan', T('10:00:05'), { rideId: 'gone' }),
     ]
     const rides = [ride('r1', T('10:00:00'), T('10:00:06'))]
     expect(seq(build({ items, rides }).items)).toEqual(['asst:r1', 'ask:ask-orphan'])

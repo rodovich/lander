@@ -142,7 +142,7 @@ describe('Conversation timeline dispatch', () => {
   it('hangs an anchored open ask off its ride as a footer, not a platform row', () => {
     const html = render(
       baseTask({
-        items: [flow('f1', 'r1', 'shall I?'), ask('k1', { parentId: 'f1' })],
+        items: [flow('f1', 'r1', 'shall I?'), ask('k1', { rideId: 'r1' })],
         rides: [ride('r1')],
       }),
     )

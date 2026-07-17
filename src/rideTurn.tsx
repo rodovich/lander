@@ -45,8 +45,8 @@ export const RideTurn = memo(function RideTurn({
   // Expanded fold keys, `${rideId}:${segmentIndex}`.
   expandedTurns: Set<string>
   onToggleTurn: (key: string) => void
-  // The task's open ask; rendered as this turn's footer only when its parent
-  // item belongs to this ride.
+  // The task's open ask; rendered as this turn's footer only when this ride
+  // raised it.
   openAsk: AskItem | undefined
   answering: boolean
   onAnswerAsk: (askId: string, body: { optionId?: string; text?: string }) => void
@@ -140,9 +140,8 @@ export const RideTurn = memo(function RideTurn({
             }
             if (it.kind === 'message') {
               // A flow message item: its prose. The open ask renders
-              // as the whole turn's footer (below), not inline — its
-              // parentId is the last flow item at wedge time, which
-              // may sit before later prose in the same turn.
+              // as the whole turn's footer (below), not inline with
+              // whatever prose happened to precede the wedge.
               return (
                 <MessageText key={it.id} text={it.text} linkTask={linkTask} />
               )
@@ -252,11 +251,9 @@ export const RideTurn = memo(function RideTurn({
         ) : null
       })()}
       {/* The open ask's controls hang off the turn that raised it, as
-          its footer — at the very bottom of the bubble (its parentId
-          item may sit before later prose in the same turn). */}
-      {openAsk &&
-        openAsk.parentId !== undefined &&
-        items.some((it) => it.id === openAsk.parentId) && (
+          its footer — at the very bottom of the bubble, below any prose
+          the agent wrote before or after wedging. */}
+      {openAsk && openAsk.rideId === ride.id && (
           <AskForm
             ask={openAsk}
             linkTask={linkTask}

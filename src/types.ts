@@ -99,10 +99,10 @@ type ItemCommon = {
   id: string
   at: string
   // Absent for out-of-ride items (user messages, most events); present on every
-  // item a ride produced (flow messages, tools).
+  // item a ride produced (flow messages, tools, agent-raised asks).
   rideId?: string
-  // Nesting: a subagent's items point at the spawning tool item; a natively-
-  // written ask points at its raising message item. Generalizes parentToolUseId.
+  // Nesting: a subagent's items point at the spawning tool item. Generalizes
+  // parentToolUseId.
   parentId?: string
   // Grouping key (renamed from inferenceId): items emitted in one atomic burst.
   // Not 1:1 with items — one inference fans out into a text block plus a parallel

@@ -596,6 +596,41 @@ describe('asks', () => {
     expect(raw.status).toBe('wedged')
   })
 
+  it('anchors the ask to the open ride, even when an earlier ride wrote the last prose', async () => {
+    // The regression case: a wedge raised before its own turn streams any prose
+    // must anchor to the ride that raised it, not to a stale message from a
+    // previous turn (where the form would render in the wrong bubble).
+    const id = 'ask-create-anchor'
+    await seedTask(id, {
+      shape: 2,
+      items: [
+        {
+          id: 'old-prose',
+          at: AT,
+          rideId: 'ride-old',
+          kind: 'message',
+          role: 'flow',
+          text: 'earlier turn',
+        },
+      ],
+      rides: [
+        { id: 'ride-old', startedAt: AT, endedAt: AT, outcome: 'done' },
+        { id: 'ride-live', startedAt: AT },
+      ],
+    })
+    expect((await create(id, { form: choiceForm })).status).toBe(201)
+    const item = asksOf(await readRaw(id))[0]
+    expect(item.rideId).toBe('ride-live')
+    expect(item.parentId).toBeUndefined()
+  })
+
+  it('leaves an ask raised with no ride in flight unanchored', async () => {
+    const id = 'ask-create-no-ride'
+    await seedTask(id, { shape: 2, items: [], rides: [] })
+    expect((await create(id, { form: choiceForm })).status).toBe(201)
+    expect(asksOf(await readRaw(id))[0].rideId).toBeUndefined()
+  })
+
   it('400s a malformed form or an unimplemented blocking level', async () => {
     const id = 'ask-create-valid'
     await seedTask(id)

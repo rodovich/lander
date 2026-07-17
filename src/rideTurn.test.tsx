@@ -191,16 +191,16 @@ describe('RideTurn settled/open footers', () => {
 })
 
 describe('RideTurn open-ask footer', () => {
-  it('renders the open ask as the footer of the ride holding its parent item', () => {
+  it('renders the open ask as the footer of the ride that raised it', () => {
     const html = render([flow('f1', 'shall I?')], {
-      openAsk: openAsk({ parentId: 'f1' }),
+      openAsk: openAsk({ rideId: 'r1' }),
     })
     expect(html).toContain('Alpha-option')
   })
 
-  it('leaves the ask out when its parent item belongs to another ride', () => {
+  it('leaves the ask out when another ride raised it', () => {
     const html = render([flow('f1', 'shall I?')], {
-      openAsk: openAsk({ parentId: 'elsewhere' }),
+      openAsk: openAsk({ rideId: 'elsewhere' }),
     })
     expect(html).not.toContain('Alpha-option')
   })

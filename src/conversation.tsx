@@ -158,9 +158,9 @@ export const Conversation = memo(function Conversation({
 
   // The task's open ask renders as the footer of the ride that raised it
   // (the message is the question, the form is the answer). There's at most one
-  // open ask. An ask with no reachable `parentId` to hang under — a platform ask,
-  // or converted history — isn't handled that way at all: buildTimeline gives it
-  // its own entry in the stream.
+  // open ask. An ask with no ride to hang under — a platform ask, or converted
+  // history — isn't handled that way at all: buildTimeline gives it its own
+  // entry in the stream.
   const openAsk = task.items?.find(
     (it): it is AskItem => it.kind === 'ask' && it.state === 'open',
   )

@@ -99,8 +99,8 @@ export function nextAskId(task: AskTask, nowMs: number): string {
 // Build an open ask item and append it to the task's item log, returning it.
 // Assumes the form has already passed validateAskForm (the create endpoint checks
 // and 400s first; createAsk is the plumbing that stamps state and pushes).
-// `origin` marks a platform retry ask; `parentId` anchors an agent-raised ask to
-// the message that raised it (the form renders as that message's footer).
+// `origin` marks a platform retry ask; `rideId` anchors an agent-raised ask to
+// the ride that raised it (the form renders as that turn's footer).
 export function createAsk(
   task: AskTask,
   opts: {
@@ -109,7 +109,7 @@ export function createAsk(
     form: AskForm
     blocking: Ask['blocking']
     origin?: 'retry'
-    parentId?: string
+    rideId?: string
     at: string
   },
 ): AskItem {
@@ -122,7 +122,7 @@ export function createAsk(
     state: 'open',
     ...(opts.prompt ? { prompt: opts.prompt } : {}),
     ...(opts.origin ? { origin: opts.origin } : {}),
-    ...(opts.parentId ? { parentId: opts.parentId } : {}),
+    ...(opts.rideId ? { rideId: opts.rideId } : {}),
   }
   ;(task.items ??= []).push(ask)
   return ask

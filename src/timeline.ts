@@ -47,7 +47,12 @@ export function buildTimeline(
 ): { items: TimelineEntry[] } {
   const all = task.items ?? []
   const rideById = new Map((task.rides ?? []).map((r) => [r.id, r]))
-  const itemIds = new Set(all.map((it) => it.id))
+  // The rides that get a turn in the stream (they produced something to
+  // render). An ask anchored to one hangs there as the turn's footer; an ask
+  // whose ride streamed nothing else falls back to standing alone.
+  const ridesWithItems = new Set(
+    all.flatMap((it) => (it.kind !== 'ask' && it.rideId ? [it.rideId] : [])),
+  )
 
   // Hold aside the queued follow-ups (trailing user items the server flagged) so
   // they sink below everything — including any items of a still-open ride that
@@ -65,7 +70,7 @@ export function buildTimeline(
   const rideEntry = new Map<string, { kind: 'ride'; at: string; ride: Ride; items: Item[] }>()
   for (const it of kept) {
     if (it.kind === 'ask') {
-      // An ask anchored to a message it can actually reach is that message's
+      // An ask anchored to a ride whose turn is in the stream is that turn's
       // footer (the App renders it there), so it takes no slot of its own. Every
       // other ask — a platform ask, or converted history whose anchor didn't
       // survive — stands on its own here, where it was raised.
@@ -74,7 +79,7 @@ export function buildTimeline(
       // happened (a kill, a daemon outage), and that's history the conversation
       // keeps even though the buttons are gone. Drop only an ask with nothing
       // left to show — no prompt to stand as a record, and no live form.
-      const anchored = it.parentId !== undefined && itemIds.has(it.parentId)
+      const anchored = it.rideId !== undefined && ridesWithItems.has(it.rideId)
       if (!anchored && (it.prompt || it.state === 'open'))
         out.push({ kind: 'ask', at: it.at, ask: it })
       continue
