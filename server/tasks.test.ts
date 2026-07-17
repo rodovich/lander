@@ -6,6 +6,7 @@ import {
   recordArtifactOnMessage,
   lastTurnPrompts,
   turnAttachments,
+  deliverQueuedBatch,
   worktreeName,
   applyRelaunch,
   applyDueMessages,
@@ -27,6 +28,7 @@ import {
   type Ride,
 } from './tasks'
 import { askItems, createAsk } from './asks'
+import { buildTimeline } from '../src/timeline'
 
 const AT = '2026-01-01T00:00:00.000Z'
 const later = (n: number) => `2026-01-01T00:0${n}:00.000Z`
@@ -220,6 +222,76 @@ describe('turnAttachments', () => {
     }
     expect(turnAttachments(t, 2)).toEqual(att)
     expect(turnAttachments(t, 1)).toEqual([]) // only p2, which has none
+  })
+})
+
+describe('deliverQueuedBatch', () => {
+  const ids = (t: { items?: Item[] }) => (t.items ?? []).map((i) => i.id)
+
+  it('moves a mid-ride follow-up to the tail so it renders between the two rides', () => {
+    // 'F' was enqueued while ride rA was still streaming, so it sits between rA's
+    // items in array order — the bug. After delivery it belongs after rA, before rB.
+    const t: { items: Item[]; rides: Ride[] } = {
+      items: [
+        flowItem('a1', 'rA'),
+        userItem('F', later(1)),
+        flowItem('a2', 'rA', later(2)),
+      ],
+      rides: [
+        { id: 'rA', startedAt: AT, endedAt: later(3) },
+        { id: 'rB', startedAt: later(4), endedAt: later(5) },
+      ],
+    }
+    deliverQueuedBatch(t, 1, 'rB')
+    expect(ids(t)).toEqual(['f-a1', 'f-a2', 'u-F']) // F relocated to the tail
+    expect((t.items.find((i) => i.id === 'u-F') as MessageItem).deliveredIn).toBe('rB')
+
+    pushFlowItem(t, 'rB', 'b1', later(4)) // rB streams its reply after the move
+    const seq = buildTimeline(t, later(9)).items.map((e) =>
+      e.kind === 'ride' ? `ride:${e.ride.id}` : e.kind === 'user' ? `user:${e.item.text}` : e.kind,
+    )
+    expect(seq).toEqual(['ride:rA', 'user:F', 'ride:rB']) // rideA → follow-up → rideB
+  })
+
+  it('scopes the move to the batch — migrated/historical user items stay put', () => {
+    // A v1-migrated task: every historical user item lacks `deliveredIn`. Only the
+    // fresh follow-up (the trailing batch) may move; history must not collapse down.
+    const t: { items: Item[] } = {
+      items: [
+        userItem('h1'),
+        flowItem('r1a', 'r1', later(1)),
+        userItem('h2', later(2)),
+        flowItem('r2a', 'r2', later(3)),
+        userItem('F', later(4)),
+      ],
+    }
+    deliverQueuedBatch(t, 1, 'r3')
+    expect(ids(t)).toEqual(['u-h1', 'f-r1a', 'u-h2', 'f-r2a', 'u-F']) // unchanged order
+    expect((t.items[0] as MessageItem).deliveredIn).toBeUndefined() // history untouched
+    expect((t.items[2] as MessageItem).deliveredIn).toBeUndefined()
+    expect((t.items[4] as MessageItem).deliveredIn).toBe('r3') // only the batch stamped
+  })
+
+  it('leaves an already-delivered re-queued prompt in place (retry resend)', () => {
+    // 'doX' was delivered in rA, which errored; retry re-queues it. It already carries
+    // `deliveredIn`, so it must not jump below its own error reply.
+    const t: { items: Item[] } = {
+      items: [
+        userItem('doX', AT, { deliveredIn: 'rA' }),
+        flowItem('err', 'rA', later(1)),
+        { id: 'ev', at: later(2), kind: 'event', eventKind: 'wedged', title: 'T' },
+      ],
+    }
+    deliverQueuedBatch(t, 1, 'rB')
+    expect(ids(t)).toEqual(['u-doX', 'f-err', 'ev']) // doX stays above its error reply
+  })
+
+  it('moves a whole batch of fresh follow-ups, preserving their order', () => {
+    const t: { items: Item[] } = {
+      items: [flowItem('a1', 'rA'), userItem('F1', later(1)), userItem('F2', later(2)), flowItem('a2', 'rA', later(3))],
+    }
+    deliverQueuedBatch(t, 2, 'rB')
+    expect(ids(t)).toEqual(['f-a1', 'f-a2', 'u-F1', 'u-F2'])
   })
 })
 

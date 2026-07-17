@@ -43,6 +43,7 @@ import {
   recordStatusTransition,
   recordArtifactOnMessage,
   turnAttachments,
+  deliverQueuedBatch,
   worktreeName,
   applyRelaunch,
   applyRetryRecovery,
@@ -785,9 +786,11 @@ async function driveTask(project: Project, id: string): Promise<void> {
           // Gather the attachments off the trailing user items this batch is made
           // of, under the same lock, so the run carries exactly this turn's files.
           atts = turnAttachments(t, batch.length)
-          // Stamp deliveredIn = this ride on the batch's trailing user items.
-          const users = userItems(t)
-          for (const u of users.slice(-batch.length)) u.deliveredIn = runId
+          // Stamp deliveredIn on this batch's user items and move the freshly-
+          // delivered ones to the tail so array order becomes delivery order — a
+          // mid-ride follow-up otherwise renders before the reply it was delivered
+          // after (buildTimeline trusts array order). See deliverQueuedBatch.
+          deliverQueuedBatch(t, batch.length, runId)
           delete t.queued
         }
       }).catch(() => {})

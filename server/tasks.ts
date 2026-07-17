@@ -875,6 +875,38 @@ export function turnAttachments(
   return out
 }
 
+// Deliver a drained batch into a ride: stamp `deliveredIn` on this batch's trailing
+// user items and move the freshly-delivered ones to the tail of the item log.
+//
+// A user message is appended to `items[]` at its *enqueue* slot (pushUserItem, when
+// it's sent). One typed mid-ride therefore lands ahead of that ride's own items, and
+// buildTimeline — which trusts array order and pins a ride bubble at its first item —
+// renders it before the reply it was actually delivered after. Moving it to the tail
+// here, just before the ride opens, makes its stored position its delivery position,
+// so array order becomes delivery order.
+//
+// The move set is the trailing `batchLen` user items (this delivery's own messages,
+// NOT the whole history) minus any that already carry `deliveredIn`. The trailing-N
+// scope keeps migrated/historical items — convertUser never stamps them — and any
+// unqueued orphan opening off the move; the `!deliveredIn` filter then excludes
+// re-delivery entries in that window (retry resend, recoverQueues opening-replay
+// re-queue an already-delivered item), leaving them in their correct historical slot.
+// `moving` MUST be computed before the stamp loop — stamping first would empty it.
+export function deliverQueuedBatch(
+  task: { items?: Item[] },
+  batchLen: number,
+  runId: string,
+): void {
+  const window = userItems(task).slice(-batchLen)
+  const moving = window.filter((u) => !u.deliveredIn)
+  for (const u of window) u.deliveredIn = runId
+  if (moving.length && task.items) {
+    const movingSet = new Set<Item>(moving)
+    task.items = task.items.filter((it) => !movingSet.has(it))
+    for (const u of moving) task.items.push(u)
+  }
+}
+
 // Record an artifact ref on the flow message item that generated it, so the UI
 // renders the output row under it. Prefers the open ride's last main-agent flow
 // item (the common publish-during-a-run case), else the last flow item overall; if

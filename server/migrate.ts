@@ -229,9 +229,12 @@ export function migrateTask<T extends object>(raw: T): T {
     ...(ev.awaiting !== undefined ? { awaiting: ev.awaiting } : {}),
   })
 
-  // Expand each message into its item group, in array order (which the server
-  // wrote in true chronological order — it only ever appends). Queued follow-ups
-  // stay in place; buildTimeline still owns the render-time queued sink.
+  // Expand each message into its item group, in array order (which the v1 server
+  // wrote in true chronological order — it only ever appended). This runs on v1
+  // tasks only (shape < 2); the v2 delivery-time reposition of a mid-ride
+  // follow-up — which can leave a delivered item's `at` earlier than items before
+  // it — never applies here, so the chronological-order assumption below is sound.
+  // Queued follow-ups stay in place; buildTimeline still owns the render-time sink.
   const groups = messages.map((m) => ({
     spliceAt: m.createdAt,
     items: m.role === 'assistant' ? convertAssistant(m) : [convertUser(m)],

@@ -8,10 +8,14 @@
 // home and a test suite. `now` is injected (rather than read from the clock) so
 // the in-flight-turn behavior is deterministic under test.
 //
-// With the item log, array order is already the interleave: every write is a
-// tail push stamped with the current clock, and events are stored in place (they
-// no longer live in a parallel array spliced at render time). So this reduces to
-// three things:
+// With the item log, array order is already the interleave: writes are tail
+// pushes stamped with the current clock, and events are stored in place (they no
+// longer live in a parallel array spliced at render time). The one exception is a
+// user message enqueued mid-ride: it's appended at its enqueue slot but, at
+// delivery, the drain moves it to the tail so array order matches its delivery
+// point (see driveTask in server/index.ts) — so a delivered message can carry an
+// `at` earlier than items stored before it. This code never sorts by `at`; it
+// trusts array order. So this reduces to three things:
 //
 //   - Gather each ride into ONE bubble by its id. A ride's items are usually
 //     contiguous, but not always — an event recorded mid-turn (e.g. `lander
