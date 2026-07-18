@@ -25,7 +25,13 @@ import * as codexFlowModule from './codex'
 import type { Ctx, FlowMeta, TurnResult } from './ctx'
 
 // Providers whose live turns run as flows rather than as compiled adapters.
-export const LIVE_FLOWS: ReadonlySet<AgentKind> = new Set<AgentKind>(['claude'])
+// Both have flipped, so the compiled adapters no longer drive anything — they
+// survive only as the parity oracle until step 5 deletes them, along with the
+// adapter bridge that let their ids match the flows'.
+export const LIVE_FLOWS: ReadonlySet<AgentKind> = new Set<AgentKind>([
+  'claude',
+  'codex',
+])
 
 export type BundledFlow = {
   meta: FlowMeta

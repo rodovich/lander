@@ -246,7 +246,7 @@ describe('flow host', () => {
     )
   })
 
-  it('reduces stdout into session, update, and done events', () => {
+  it('reduces stdout into state, update, and done events', async () => {
     const h = harness()
     h.run(makeInput())
     const child = h.spawns[0].child
@@ -261,21 +261,35 @@ describe('flow host', () => {
         }),
       ]),
     )
+    await settle()
+    child.stdout.emit('end')
     child.emit('close', 0)
+    await settle()
 
-    expect(h.events.map((e) => e.kind)).toEqual(['session', 'update', 'done'])
-    expect(h.events[0]).toMatchObject({ kind: 'session', sessionId: 'thread-1' })
+    // Codex has cut over too, so the thread id it reports in-stream is persisted
+    // through ctx.state rather than announced as a SessionMessage. It flushes
+    // immediately — ahead of the chunk's update — so a crash can't lose it.
+    expect(h.events.map((e) => e.kind)).toEqual([
+      'state-patch',
+      'update',
+      'done',
+    ])
+    expect(h.events[0]).toMatchObject({
+      kind: 'state-patch',
+      ops: [{ op: 'set', path: ['sessionId'], value: 'thread-1' }],
+    })
     expect(h.events[1]).toMatchObject({ kind: 'update', finalText: 'codex ok' })
     expect(h.events[2]).toMatchObject({ kind: 'done', exitCode: 0, stderr: '' })
   })
 
-  it('extracts the codex session id mid-stream and emits it once', () => {
+  it('extracts the codex session id mid-stream and records it once', async () => {
     const h = harness()
     h.run(makeInput())
     const child = h.spawns[0].child
 
     // The thread id arrives in its own chunk, after the run began.
     child.stdout.emit('data', line({ type: 'thread.started', thread_id: 'thread-9' }))
+    await settle()
     child.stdout.emit(
       'data',
       line({
@@ -283,10 +297,17 @@ describe('flow host', () => {
         item: { id: 'item-1', type: 'agent_message', text: 'ok' },
       }),
     )
+    await settle()
+    child.stdout.emit('end')
     child.emit('close', 0)
+    await settle()
 
-    expect(h.events.filter((e) => e.kind === 'session')).toEqual([
-      { kind: 'session', sessionId: 'thread-9' },
+    expect(h.events.filter((e) => e.kind === 'state-patch')).toEqual([
+      {
+        kind: 'state-patch',
+        ops: [{ op: 'set', path: ['sessionId'], value: 'thread-9' }],
+        rev: 1,
+      },
     ])
   })
 
@@ -336,13 +357,16 @@ describe('flow host', () => {
     })
   })
 
-  it('folds a terminalError into a non-zero done even on a clean exit', () => {
+  it('folds a terminalError into a non-zero done even on a clean exit', async () => {
     const h = harness()
     h.run(makeInput())
     const child = h.spawns[0].child
 
     child.stdout.emit('data', line({ type: 'error', message: 'boom' }))
+    await settle()
+    child.stdout.emit('end')
     child.emit('close', 0)
+    await settle()
 
     const done = h.events.at(-1)!
     expect(done).toMatchObject({ kind: 'done', exitCode: 1 })
