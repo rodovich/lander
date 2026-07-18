@@ -10,6 +10,7 @@ import {
   type RunManagerMessage,
   type RunManagerOptions,
 } from './run'
+import { providerCaps } from './flows/index'
 
 // A stand-in for the flow-host subprocess. Its stdin captures the HostInput the
 // daemon writes; its stdout/stderr are pushed by the test to drive the supervisor;
@@ -57,9 +58,10 @@ function harness(opts: Partial<RunManagerOptions> = {}) {
     return host as unknown as ChildProcess
   }
   const manager = createRunManager({
-    // The daemon keeps a compiled-in *capability* view of the adapters (it no
-    // longer executes them — the host does), so real adapters serve fine here.
-    adapters: {
+    // The supervisor sees only a provider's capability view — never a flow or an
+    // adapter — so these are the real ones the daemon builds, whichever side is
+    // currently answering them.
+    caps: providerCaps({
       claude: createClaudeAdapter({
         landerBin: '/repo/bin/lander',
         taskPromptTemplate: 'Prompt: {{forwardable}}.',
@@ -67,7 +69,7 @@ function harness(opts: Partial<RunManagerOptions> = {}) {
       codex: createCodexAdapter({
         taskPromptTemplate: 'Prompt: {{forwardable}}.',
       }),
-    },
+    }),
     resolveRunPaths: () => ({ root: '/repo', cwd: '/repo', reentryArgs: [] }),
     send: (msg) => messages.push(msg),
     resolveFilesDir: (msg) => `/files/${msg.project}/${msg.taskId}`,

@@ -49,6 +49,10 @@ function harness() {
   const spawns: SpawnCall[] = []
   const run = (input: HostInput) =>
     runHost(input, {
+      // Pin the compiled-adapter path: this suite is about the bridge, which is
+      // what a provider that has NOT cut over still goes through. Once every
+      // provider has flipped, the bridge and this suite retire together.
+      liveFlows: new Set(),
       emit: (e) => events.push(e),
       spawn: (command, args, _options: SpawnOptions) => {
         const child = new FakeChild()

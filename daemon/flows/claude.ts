@@ -26,6 +26,8 @@ import {
   reduceStreamLine,
   type Usage,
 } from 'lander/flow'
+import { fetchUsage, usageTelemetry } from '../../server/usage'
+import type { TelemetryItem } from '../../server/protocol'
 import type { Ctx, FlowMeta, GroupHandle, ToolHandle, TurnResult } from './ctx'
 
 export const meta: FlowMeta = {
@@ -406,6 +408,32 @@ export function resolveLaunchDir({
       effectiveCwd: path.join(root, '.claude', 'worktrees', worktree),
     }
   return { cwd: root, reentryArgs: [] }
+}
+
+// The other out-of-turn hook, and the reason the global usage panel's content
+// can leave the daemon core. The daemon keeps the SCHEDULE (60s TTL floor,
+// per-turn trigger, boot/connect fetch, re-arming from refreshAt) because that
+// schedule runs when no run — and therefore no host — is alive; the flow owns
+// what a snapshot is: the credential read, the fetch, the item mapping, and when
+// to look again. Codex exports none of this, so its panel stays empty.
+export async function onStatus(): Promise<{
+  items: TelemetryItem[]
+  refreshAt?: string
+} | null> {
+  const r = await fetchUsage()
+  if (!r.ok) return null
+  // The soonest window reset, nudged past the boundary so the readout catches
+  // utilization dropping back. The daemon still clamps this against its TTL
+  // floor — a reset already in the past must not become a busy loop.
+  const resets = [r.body.session?.resetsAt, r.body.weekly?.resetsAt]
+    .map((s) => (s ? Date.parse(s) : NaN))
+    .filter((n) => Number.isFinite(n))
+  return {
+    items: usageTelemetry(r.body),
+    ...(resets.length
+      ? { refreshAt: new Date(Math.min(...resets) + 2_000).toISOString() }
+      : {}),
+  }
 }
 
 // An out-of-turn hook: a project grant arrives over the daemon WS with no run

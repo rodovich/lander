@@ -1,20 +1,24 @@
 // The flow host: one subprocess per run. It reads a HostInput as a single JSON
-// line on stdin, runs the adapter executor (runAgent) against the compiled-in
-// adapters, and streams neutral HostEvents back as line-JSON on stdout. The agent
-// grandchild's stdout is reduced by runAgent and never leaks here; its stderr is
-// relayed to this process's stderr so the daemon's idle watchdog sees the activity
-// through the boundary (decision 6). On any exit it kills its agent child so a
-// killed host leaves no orphan.
+// line on stdin, drives the turn, and streams neutral HostEvents back as
+// line-JSON on stdout. The agent grandchild's stdout never leaks here; its stderr
+// is relayed to this process's stderr so the daemon's idle watchdog sees the
+// activity through the boundary. On any exit it kills its children, so a killed
+// host leaves no orphan.
+//
+// Two ways to drive a turn live here, and which one a provider gets is the
+// cutover switch (LIVE_FLOWS in flows/index.ts):
+//
+//   - As a FLOW: construct ctx and call the flow module's onTurn. This is the
+//     destination shape.
+//   - As a compiled ADAPTER: runAgent, with its outgoing steps routed through
+//     the ctx runtime's identity minter (the compatibility bridge) so the wire
+//     looks the same either way.
+//
+// Both paths mint ids through the same runtime, which is what let the parity
+// harness deep-equal whole task JSONs across them before any provider flipped.
 //
 // The daemon spawns one of these per run (daemon/run.ts). Because it lives under
 // daemon/, daemon-watch reloads the daemon on edits to it.
-//
-// The adapter's outgoing steps are routed through the ctx runtime's identity
-// minter (the compatibility bridge), so tool/group ids on the wire are Lander's
-// rather than the provider's even while the compiled adapters still execute the
-// turn. That lands ahead of either cutover on purpose: it makes the adapter
-// oracle and the ported flow mint identical ids, which is what the parity
-// harness's whole-task-JSON deep-equal rests on.
 
 import { spawn as nodeSpawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -31,6 +35,7 @@ import {
 } from './run-agent'
 import { createCtxRuntime } from './flows/ctx'
 import { createAdapterBridge } from './flows/adapter-bridge'
+import { buildFlows, LIVE_FLOWS, type BundledFlow } from './flows/index'
 
 // Serialize one neutral event as a JSON line on stdout — the host → daemon wire.
 export function emitLine(event: HostEvent): void {
@@ -46,22 +51,43 @@ export type RunHostDeps = {
   // Injectable so tests run against test-configured adapters; defaults to the real
   // compiled-in claude/codex adapters (proving buildAdapters wires the host).
   adapters?: Partial<Record<AgentKind, AgentAdapter>>
+  // Likewise for the ported flows. A provider in LIVE_FLOWS runs its turn from
+  // here; the rest still run as adapters.
+  flows?: Partial<Record<AgentKind, BundledFlow>>
+  liveFlows?: ReadonlySet<AgentKind>
 }
 
-// Wire the executor with the host's seam: emit serializes to the daemon, `arm` is a
+// Wire the turn to the host's seam: emit serializes to the daemon, `arm` is a
 // no-op (idle activity is the daemon's job across the boundary — it arms on our
-// stdout/stderr), and agent stderr relays to ours. Returns the executor handle.
+// stdout/stderr), and agent stderr relays to ours. Returns a kill handle covering
+// whichever path drove the turn.
 export function runHost(input: HostInput, deps: RunHostDeps): { kill: () => void } {
-  const adapters =
-    deps.adapters ?? buildAdapters({ root: ROOT, env: process.env })
-  // A runtime instance purely for its identity minter and batch assembly — the
-  // adapter, not a flow, drives the turn, so nothing here calls onTurn. Its
-  // `emit` is where the normalized update comes out.
+  const liveFlows = deps.liveFlows ?? LIVE_FLOWS
   const runtime = createCtxRuntime(input, {
     emit: deps.emit,
     now: deps.now,
+    spawn: deps.spawn,
     onStderr: deps.onStderr,
   })
+
+  if (liveFlows.has(input.start.agent)) {
+    const flows = deps.flows ?? buildFlows({ root: ROOT, env: process.env })
+    const flow = flows[input.start.agent]
+    if (flow) {
+      // runTurn owns the done contract end to end: it awaits onTurn, SIGKILLs
+      // anything the flow left running, flushes, and emits the done. Nothing is
+      // awaited here — the host stays alive on its event loop until the turn
+      // settles, exactly as it did under the adapter.
+      void runtime.runTurn(flow)
+      return { kill: () => runtime.killChildren() }
+    }
+  }
+
+  // Compiled-adapter path. The runtime above is used only for its identity
+  // minter and batch assembly here — the adapter drives the turn, so nothing
+  // calls onTurn; its `emit` is where the normalized update comes out.
+  const adapters =
+    deps.adapters ?? buildAdapters({ root: ROOT, env: process.env })
   const bridge = createAdapterBridge(runtime.bridge)
   return runAgent(input, {
     // Session/turn-context/done pass straight through; only `update` is
@@ -100,8 +126,10 @@ async function main(): Promise<void> {
     onStderr: (chunk) => process.stderr.write(chunk),
   })
   // A control signal from the daemon (interrupt / idle-kill / drain) or any exit
-  // kills our agent child — belt-and-suspenders against orphans on top of the
-  // daemon's process-group kill.
+  // kills whatever the turn left running — belt-and-suspenders against orphans on
+  // top of the daemon's process-group kill. On the flow path this reaches every
+  // ctx.spawn child rather than a single adapter child, which matters because a
+  // flow can end while a child of its own is still alive.
   const kill = () => handle.kill()
   process.on('SIGTERM', kill)
   process.on('SIGINT', kill)

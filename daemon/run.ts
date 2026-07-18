@@ -1,6 +1,6 @@
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process'
 import path from 'node:path'
-import type { AgentAdapter } from './agent'
+import type { ProviderCaps } from './flows/index'
 import type { AgentKind } from '../server/protocol'
 import type {
   DoneCause,
@@ -61,10 +61,14 @@ type Run = {
 }
 
 export type RunManagerOptions = {
-  adapters: Partial<Record<AgentKind, AgentAdapter>>
+  // What the supervisor needs to know about a provider before the host starts:
+  // where to launch, how images reach vision, whether it owns the usage panel.
+  // Answered by a flow or by a compiled adapter — the supervisor is written
+  // against the one shape either way, so a cutover never reaches in here.
+  caps: Partial<Record<AgentKind, ProviderCaps>>
   resolveRunPaths: (
     msg: StartRunMessage,
-    adapter: AgentAdapter,
+    caps: ProviderCaps,
   ) => { root: string; cwd: string; reentryArgs: string[]; effectiveCwd?: string }
   send: (msg: RunManagerMessage) => void
   // The deterministic per-task file store dir (pure function of the run's
@@ -95,7 +99,7 @@ const DEFAULT_IDLE_MS = 10 * 60_000
 const DEFAULT_RUN_BUFFER_TTL_MS = 120_000
 
 export function createRunManager({
-  adapters,
+  caps,
   resolveRunPaths,
   send,
   resolveFilesDir,
@@ -133,12 +137,12 @@ export function createRunManager({
   }
 
   function startRun(msg: StartRunMessage): void {
-    const adapter = adapters[msg.agent]
-    if (!adapter) {
+    const known = caps[msg.agent]
+    if (!known) {
       done(msg.runId, 1, `unsupported agent: ${msg.agent}`)
       return
     }
-    const activeAdapter = adapter
+    const activeCaps = known
 
     let paths: {
       root: string
@@ -147,7 +151,7 @@ export function createRunManager({
       effectiveCwd?: string
     }
     try {
-      paths = resolveRunPaths(msg, activeAdapter)
+      paths = resolveRunPaths(msg, activeCaps)
     } catch (e) {
       done(msg.runId, 1, e instanceof Error ? e.message : String(e))
       return
@@ -157,11 +161,11 @@ export function createRunManager({
     // carries attachments takes the async detour to materialize them (fetch
     // bytes, write LANDER_FILES_DIR, build the manifest block) before spawning.
     if (!(msg.attachments?.length && materialize)) {
-      spawnRun(msg, activeAdapter, paths, undefined)
+      spawnRun(msg, activeCaps, paths, undefined)
       return
     }
-    materialize(msg, { visionNative: activeAdapter.attachesImagesToVision }).then(
-      (materialized) => spawnRun(msg, activeAdapter, paths, materialized),
+    materialize(msg, { visionNative: activeCaps.visionNative }).then(
+      (materialized) => spawnRun(msg, activeCaps, paths, materialized),
       (e) => {
         preSpawnInterrupts.delete(msg.runId)
         done(
@@ -177,7 +181,7 @@ export function createRunManager({
 
   function spawnRun(
     msg: StartRunMessage,
-    activeAdapter: AgentAdapter,
+    activeCaps: ProviderCaps,
     paths: {
       root: string
       cwd: string
@@ -277,7 +281,7 @@ export function createRunManager({
       }, runBufferTtlMs)
       rec.dropTimer.unref?.()
       send(doneMsg)
-      if (activeAdapter.supportsUsageSnapshot) void refreshUsage()
+      if (activeCaps.usageSnapshot) void refreshUsage()
     }
 
     // The executor → supervisor seam: assign seq + buffer + relay each event, and
@@ -312,7 +316,7 @@ export function createRunManager({
           if (
             event.rateLimitResetsAt &&
             !sawRateLimit &&
-            activeAdapter.supportsUsageSnapshot
+            activeCaps.usageSnapshot
           ) {
             sawRateLimit = true
             void refreshUsage()

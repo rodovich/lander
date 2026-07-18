@@ -6,6 +6,9 @@ import { createCodexAdapter } from './codex'
 import type { StartRunMessage } from '../server/protocol'
 import type { HostEvent, HostInput } from './run-agent'
 import { runHost } from './flow-host'
+import { makeFlow as makeClaudeFlow } from './flows/claude'
+import { makeFlow as makeCodexFlow } from './flows/codex'
+import { settle } from './flows/testCtx'
 
 class FakeChild extends EventEmitter {
   stdout = new EventEmitter()
@@ -63,6 +66,35 @@ function testAdapters() {
   }
 }
 
+// Test-configured flows matching the adapters above, so a claude assertion reads
+// the same whether it is served by the flow or the adapter.
+function testFlows() {
+  return {
+    claude: makeClaudeFlow({
+      landerBin: '/repo/bin/lander',
+      taskPromptTemplate: 'Prompt: {{forwardable}}.',
+      gitContext: () => 'Git status as of this message:\n\non branch test',
+      mint: () => 'minted-session',
+    }),
+    codex: makeCodexFlow({ taskPromptTemplate: 'Prompt: {{forwardable}}.' }),
+  }
+}
+
+// The turn-context values a run recorded, however they were plumbed: a cut-over
+// provider writes them through ctx.state, one still on its adapter sends a
+// TurnContextMessage.
+function turnContextWrites(events: HostEvent[]): string[] {
+  return events.flatMap((e) =>
+    e.kind === 'turn-context'
+      ? [e.context]
+      : e.kind === 'state-patch'
+        ? e.ops
+            .filter((op) => op.path.join('.') === 'turnContext')
+            .map((op) => String(op.value))
+        : [],
+  )
+}
+
 function harness() {
   const events: HostEvent[] = []
   const spawns: SpawnCall[] = []
@@ -79,7 +111,11 @@ function harness() {
       mintSessionId: () => 'minted-session',
       now: () => '2026-01-01T00:00:00.000Z',
       onStderr: (c) => stderr.push(c),
+      // Both halves, test-configured: claude has cut over and runs as a flow,
+      // codex still runs as its compiled adapter. The expectations below are the
+      // same either way, which is the point of the cutover being invisible.
       adapters: testAdapters(),
+      flows: testFlows(),
     })
   return { events, spawns, stderr, run }
 }
@@ -149,18 +185,23 @@ describe('flow host', () => {
       ],
       options: { cwd: '/repo' },
     })
-    // The host emits neutral (seq-less) session/turn-context events; the daemon
-    // adds runId/seq. Claude minted + announced its session and its context block.
+    // Claude has cut over, so it persists thread identity through ctx.state —
+    // state-patch batches rather than the SessionMessage / TurnContextMessage the
+    // adapter path still sends. Both plumbings land in the same place on the
+    // server, which is what made the switch invisible.
     expect(h.events).toContainEqual({
-      kind: 'session',
-      sessionId: 'minted-session',
+      kind: 'state-patch',
+      ops: [{ op: 'set', path: ['sessionId'], value: 'minted-session' }],
+      rev: 1,
     })
     expect(h.events).toContainEqual({
-      kind: 'turn-context',
-      context: claudeContext,
+      kind: 'state-patch',
+      ops: [{ op: 'set', path: ['turnContext'], value: claudeContext }],
+      rev: 2,
     })
-    // Codex has no context builder: its prompt is untouched and nothing announced.
-    expect(h.events.filter((e) => e.kind === 'turn-context')).toHaveLength(1)
+    // Codex has no context builder: its prompt is untouched and nothing is
+    // announced for it at all.
+    expect(h.events.filter((e) => e.kind === 'turn-context')).toHaveLength(0)
   })
 
   it('omits an unchanged turn context and appends a changed one', () => {
@@ -183,9 +224,11 @@ describe('flow host', () => {
       }),
     )
     expect(h.spawns[1].args.at(-1)).toBe('follow-up')
-    expect(h.events.filter((e) => e.kind === 'turn-context')).toHaveLength(1)
+    // Only the first run recorded a baseline; the unchanged second one wrote
+    // nothing.
+    expect(turnContextWrites(h.events)).toHaveLength(1)
 
-    // A stale baseline (the grants changed) re-appends and re-emits.
+    // A stale baseline (the grants changed) re-appends and re-records.
     h.run(
       makeInput({
         runId: 'run-3',
@@ -198,10 +241,9 @@ describe('flow host', () => {
     )
     const changed = h.spawns[2].args.at(-1)!
     expect(changed).toContain('You currently have permission for editing files')
-    expect(h.events).toContainEqual({
-      kind: 'turn-context',
-      context: changed.slice('follow-up\n\n'.length),
-    })
+    expect(turnContextWrites(h.events)).toContainEqual(
+      changed.slice('follow-up\n\n'.length),
+    )
   })
 
   it('reduces stdout into session, update, and done events', () => {
@@ -248,7 +290,11 @@ describe('flow host', () => {
     ])
   })
 
-  it('keeps the streamed cache miss on the result event usage replacement', () => {
+  // Claude runs as a flow now, and a flow consumes its child's stdout through an
+  // async iterator — so the events land on a later turn of the event loop rather
+  // than inside the emit call. The adapter-path tests around this one stay
+  // synchronous because runAgent still reduces inline.
+  it('keeps the streamed cache miss on the result event usage replacement', async () => {
     const h = harness()
     h.run(makeInput({ agent: 'claude' }))
     const child = h.spawns[0].child
@@ -277,7 +323,10 @@ describe('flow host', () => {
         }),
       ]),
     )
+    await settle()
+    child.stdout.emit('end')
     child.emit('close', 0)
+    await settle()
 
     const updates = h.events.filter((e) => e.kind === 'update')
     const final = updates.at(-1)!

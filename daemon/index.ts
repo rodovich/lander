@@ -14,7 +14,8 @@ import path from 'node:path'
 import type { AgentAdapter } from './agent'
 import { buildAdapters, ROOT } from './adapters'
 import { projectSlug } from '../server/projects'
-import { fetchUsage, usageTelemetry, type UsageBody } from '../server/usage'
+import { FLOW_MODULES, providerCaps, type ProviderCaps } from './flows/index'
+import type { AgentKind, TelemetryItem } from '../server/protocol'
 import type {
   ServerToDaemon,
   StartRunMessage,
@@ -59,7 +60,11 @@ const WS_URL = process.env.LANDER_WS?.trim() || 'ws://localhost:6181/daemon'
 const TOKEN = process.env.LANDER_DAEMON_TOKEN?.trim() || ''
 const DEFAULT_IDLE_MS = Number(process.env.LANDER_IDLE_TIMEOUT_MS ?? 10 * 60_000)
 const ADAPTERS = buildAdapters({ root: ROOT, env: process.env })
-const CLAUDE_ADAPTER = ADAPTERS.claude
+// What the daemon needs to know about each provider before a host exists —
+// answered by its flow once it has cut over, by its compiled adapter until then.
+// The run manager is written against this single shape, so flipping a provider is
+// a change of source here, not a change of shape there.
+const CAPS = providerCaps(ADAPTERS)
 
 let ws: WebSocket | null = null
 
@@ -73,57 +78,68 @@ function send(
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
 }
 
-// ── Usage (decision 6) ──────────────────────────────────────────────────────
-// The daemon owns the account usage snapshot end to end: it reads the credential,
-// hits the OAuth endpoint, runs the whole refresh schedule (60s floor, per-turn
-// trigger, reset timer, boot/connect fetch), and pushes each snapshot to the
-// server — which only caches and serves it. This is the logic that used to live
-// in the server; only the credential read + fetch are shared (server/usage.ts).
+// ── Usage ───────────────────────────────────────────────────────────────────
+// The daemon owns the SCHEDULE for the global usage panel — the 60s TTL floor
+// every trigger shares, the per-turn trigger, the boot/connect fetch, and the
+// reset timer — because that schedule has to run when no run, and therefore no
+// flow host, is alive. It no longer owns the CONTENT: what a snapshot is (the
+// credential read, the fetch, the item mapping, and when to look again) belongs
+// to whichever flow declares usageSnapshot, reached through its out-of-turn
+// onStatus hook. A provider that publishes nothing simply exports no hook and its
+// panel stays empty.
 const USAGE_TTL_MS = 60_000
-let usageBody: UsageBody | null = null
+// The provider whose flow owns the panel. At most one does today; a registry
+// makes this a list later.
+const USAGE_AGENT = (Object.keys(CAPS) as AgentKind[]).find(
+  (agent) => CAPS[agent].usageSnapshot,
+)
+let usageItems: TelemetryItem[] | null = null
 let usageAt = 0
 let usageRefreshing = false
 let usageResetTimer: ReturnType<typeof setTimeout> | null = null
 
 function pushUsage(): void {
-  if (usageBody)
-    send({
-      type: 'telemetry',
-      agent: CLAUDE_ADAPTER.kind,
-      items: usageTelemetry(usageBody),
+  if (usageItems && USAGE_AGENT)
+    send({ type: 'telemetry', agent: USAGE_AGENT, items: usageItems })
+}
+
+// Refresh unless a snapshot was taken within the TTL, so no trigger can hammer
+// the endpoint or the keychain. A fresh snapshot pushes to the server and re-arms
+// the reset timer; a failed one leaves the last snapshot in place.
+function refreshUsage(): Promise<void> {
+  if (!USAGE_AGENT) return Promise.resolve()
+  if (usageItems && Date.now() - usageAt < USAGE_TTL_MS) return Promise.resolve()
+  if (usageRefreshing) return Promise.resolve()
+  const onStatus = FLOW_MODULES[USAGE_AGENT].onStatus
+  if (!onStatus) return Promise.resolve()
+  usageRefreshing = true
+  return (async () => {
+    const snapshot = await onStatus()
+    if (snapshot) {
+      usageItems = snapshot.items as TelemetryItem[]
+      usageAt = Date.now()
+      pushUsage()
+      scheduleUsageReset(snapshot.refreshAt)
+    }
+  })()
+    .catch(() => {
+      // A flow hook that throws must not take the daemon's schedule down with
+      // it; the last snapshot stands until the next trigger.
+    })
+    .finally(() => {
+      usageRefreshing = false
     })
 }
 
-// Fetch unless a snapshot was taken within the TTL — the single 60s floor every
-// trigger shares (per-turn, reset timer, boot/connect), so none can hammer the
-// endpoint or the keychain. A fresh fetch pushes to the server and re-arms the
-// reset timer; a failed one leaves the last snapshot in place.
-function refreshUsage(): Promise<void> {
-  if (usageBody && Date.now() - usageAt < USAGE_TTL_MS) return Promise.resolve()
-  if (usageRefreshing) return Promise.resolve()
-  usageRefreshing = true
-  return (async () => {
-    const r = await fetchUsage()
-    if (r.ok) {
-      usageBody = r.body
-      usageAt = Date.now()
-      pushUsage()
-      scheduleUsageReset(r.body)
-    }
-  })().finally(() => {
-    usageRefreshing = false
-  })
-}
-
-// Arm a one-shot refresh just after the soonest window resets, so the readout
-// catches utilization dropping back without waiting for the next turn; re-arms
-// itself from each fresh snapshot. A reset already past clamps to the TTL.
-function scheduleUsageReset(body: UsageBody): void {
-  const resets = [body.session?.resetsAt, body.weekly?.resetsAt]
-    .map((s) => (s ? Date.parse(s) : NaN))
-    .filter((n) => Number.isFinite(n))
-  if (!resets.length) return
-  const delay = Math.max(Math.min(...resets) + 2_000 - Date.now(), USAGE_TTL_MS)
+// Arm a one-shot refresh just after the flow says its windows reset, so the
+// readout catches utilization dropping back without waiting for the next turn.
+// Clamped to the TTL floor: a reset already in the past must not become a busy
+// loop.
+function scheduleUsageReset(refreshAt: string | undefined): void {
+  if (!refreshAt) return
+  const at = Date.parse(refreshAt)
+  if (!Number.isFinite(at)) return
+  const delay = Math.max(at - Date.now(), USAGE_TTL_MS)
   if (usageResetTimer) clearTimeout(usageResetTimer)
   usageResetTimer = setTimeout(() => {
     usageResetTimer = null
@@ -142,15 +158,17 @@ function isDir(p: string): boolean {
 
 // Resolve a start-run's launch directories from the project slug + cwd hints. The
 // cwd rule (launch at root + re-enter a worktree, or resume from the recorded cwd)
-// lives in each adapter's resolveLaunchDir; the daemon just launches where it says
-// and threads the re-entry argv + landed dir back to the executor.
+// belongs to the provider — its flow once cut over, its adapter until then — and
+// the daemon just launches where it says, threading the re-entry argv + landed
+// dir on to the host. It runs here rather than in the host because it stats
+// directories on the daemon's own filesystem to make the call.
 function resolveRunPaths(
   msg: StartRunMessage,
-  adapter: AgentAdapter,
+  caps: ProviderCaps,
 ): { root: string; cwd: string; reentryArgs: string[]; effectiveCwd?: string } {
   const root = pathBySlug.get(msg.project)
   if (!root) throw new Error(`daemon serves no project for slug ${msg.project}`)
-  const launch = adapter.resolveLaunchDir({
+  const launch = caps.resolveLaunchDir({
     root,
     recordedCwd: msg.recordedCwd,
     worktree: msg.task.worktree,
@@ -210,7 +228,7 @@ async function materialize(
 }
 
 const runManager = createRunManager({
-  adapters: ADAPTERS,
+  caps: CAPS,
   resolveRunPaths,
   send,
   // Point LANDER_FILES_DIR at the task's persistent store every turn, so a file
@@ -260,7 +278,19 @@ function onMessage(raw: string): void {
       break
     case 'project-grant': {
       const projectPath = pathBySlug.get(msg.project)
-      const adapter = ADAPTERS[msg.agent]
+      const caps = CAPS[msg.agent]
+      // A project grant arrives outside any run, so there is no host to route it
+      // through — the daemon calls the flow's hook in-process, exactly as it
+      // called the adapter's method. Bundled flows are compiled-in TypeScript,
+      // as trusted as the adapters they replace; third-party installation has to
+      // re-decide this boundary before it opens.
+      const onGrant = FLOW_MODULES[msg.agent]?.onGrant
+      const persist = caps.projectGrants
+        ? onGrant
+          ? (input: { projectPath: string; rule: string }) =>
+              onGrant(undefined, input)
+          : ADAPTERS[msg.agent].persistProjectGrant
+        : undefined
       if (!projectPath) {
         send({
           type: 'project-grant-result',
@@ -271,23 +301,23 @@ function onMessage(raw: string): void {
         })
         break
       }
-      if (!adapter.supportsProjectGrants || !adapter.persistProjectGrant) {
+      if (!persist) {
         send({
           type: 'project-grant-result',
           requestId: msg.requestId,
           ok: false,
-          // Source the reason from the adapter rather than branching on the agent
-          // name; codex carries the exact current text, so this is byte-identical.
-          // The generic fallback is dead until a third non-grant adapter exists.
+          // Source the reason from the provider rather than branching on the
+          // agent name; codex carries the exact current text, so this is
+          // byte-identical. The generic fallback is dead until a third
+          // non-granting provider exists.
           error:
-            adapter.projectGrantsUnsupportedReason ??
+            caps.projectGrantsUnsupportedReason ??
             `Project permission grants are not supported for ${msg.agent} tasks.`,
           status: 400,
         })
         break
       }
-      adapter
-        .persistProjectGrant({ projectPath, rule: msg.rule })
+      persist({ projectPath, rule: msg.rule })
         .then(() =>
           send({
             type: 'project-grant-result',
@@ -365,7 +395,7 @@ function connect(): void {
     // Prime the server's snapshot: re-push the last one we hold (so a reconnect
     // re-fills the server cache immediately), then fetch a fresh one (the boot /
     // connect trigger; the TTL floor collapses a redundant fetch).
-    if (CLAUDE_ADAPTER.supportsUsageSnapshot) {
+    if (USAGE_AGENT) {
       pushUsage()
       void refreshUsage()
     }
