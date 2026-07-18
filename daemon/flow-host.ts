@@ -6,10 +6,15 @@
 // through the boundary (decision 6). On any exit it kills its agent child so a
 // killed host leaves no orphan.
 //
-// In step 2 nothing spawns this yet — the daemon still runs runAgent in-process
-// (see run.ts). It becomes live when the run manager flips to spawning the host.
-// Because it lives under daemon/, daemon-watch reloads the daemon on edits to it —
-// correct, and harmless while unwired.
+// The daemon spawns one of these per run (daemon/run.ts). Because it lives under
+// daemon/, daemon-watch reloads the daemon on edits to it.
+//
+// The adapter's outgoing steps are routed through the ctx runtime's identity
+// minter (the compatibility bridge), so tool/group ids on the wire are Lander's
+// rather than the provider's even while the compiled adapters still execute the
+// turn. That lands ahead of either cutover on purpose: it makes the adapter
+// oracle and the ported flow mint identical ids, which is what the parity
+// harness's whole-task-JSON deep-equal rests on.
 
 import { spawn as nodeSpawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -24,6 +29,8 @@ import {
   type HostInput,
   type SpawnLike,
 } from './run-agent'
+import { createCtxRuntime } from './flows/ctx'
+import { createAdapterBridge } from './flows/adapter-bridge'
 
 // Serialize one neutral event as a JSON line on stdout — the host → daemon wire.
 export function emitLine(event: HostEvent): void {
@@ -47,8 +54,22 @@ export type RunHostDeps = {
 export function runHost(input: HostInput, deps: RunHostDeps): { kill: () => void } {
   const adapters =
     deps.adapters ?? buildAdapters({ root: ROOT, env: process.env })
-  return runAgent(input, {
+  // A runtime instance purely for its identity minter and batch assembly — the
+  // adapter, not a flow, drives the turn, so nothing here calls onTurn. Its
+  // `emit` is where the normalized update comes out.
+  const runtime = createCtxRuntime(input, {
     emit: deps.emit,
+    now: deps.now,
+    onStderr: deps.onStderr,
+  })
+  const bridge = createAdapterBridge(runtime.bridge)
+  return runAgent(input, {
+    // Session/turn-context/done pass straight through; only `update` is
+    // re-minted, and only its ids change.
+    emit: (event) => {
+      if (event.kind === 'update') bridge.update(event)
+      else deps.emit(event)
+    },
     arm: () => {},
     onStderr: deps.onStderr,
     spawn: deps.spawn,
