@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "exports": {
+    "./flow": "./flow/index.ts"
+  },
   "scripts": {
     "dev": "node dev.mjs",
     "build": "vite build",

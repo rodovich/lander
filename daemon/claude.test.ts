@@ -3,7 +3,10 @@ import { execFileSync } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
-import { createClaudeAdapter, gitContext } from './claude'
+import { createClaudeAdapter } from './claude'
+// gitContext moved to the flow stdlib; the adapter imports it back, so exercising
+// it from here still proves the exact function the adapter's buildTurnContext runs.
+import { gitContext } from 'lander/flow'
 
 const adapter = createClaudeAdapter({
   landerBin: '/repo/bin/lander',
