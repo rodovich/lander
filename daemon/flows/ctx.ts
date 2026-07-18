@@ -88,6 +88,14 @@ export type CtxTurn = {
   attachments: TurnAttachment[]
   // Absolute paths of this turn's image blobs (the vision channel).
   images: string[]
+  // The prompt-facing attachment manifest, already built by the daemon as part
+  // of materializing the blobs. The flow decides whether and where to append it
+  // (prompt assembly is the flow's job) but does not rebuild it: the block is a
+  // pure function of inputs the daemon already had, and re-deriving it in the
+  // host would risk a silent byte-level divergence that reads as a prompt-cache
+  // miss rather than an error. A flow that materializes its own attachments can
+  // still build one with buildManifestBlock from the stdlib.
+  manifestBlock?: string
   // The per-task attachment store. UNGATED on purpose: LANDER_FILES_DIR is set
   // from it with no existence check (the daemon always supplies it), so gating
   // here would diverge from the adapter on every task without attachments.
@@ -691,6 +699,9 @@ export function createCtxRuntime(
       prompts: [start.prompt],
       attachments,
       images: materialized?.images ?? [],
+      ...(materialized?.manifestBlock
+        ? { manifestBlock: materialized.manifestBlock }
+        : {}),
       filesDir,
       filesDirExists: filesDir ? existsSync(filesDir) : false,
     },
