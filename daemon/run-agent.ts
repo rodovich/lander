@@ -19,7 +19,11 @@ import { spawn as nodeSpawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import type { AgentAdapter } from './agent'
-import type { AgentKind, StartRunMessage } from '../server/protocol'
+import type {
+  AgentKind,
+  StartRunMessage,
+  StatePatchOp,
+} from '../server/protocol'
 import { addUsage, type Step, type Usage } from '../server/stream'
 import type { MaterializedFiles } from './attachments'
 
@@ -66,6 +70,19 @@ export type HostEvent =
   // when the supervisor already settled). exitCode already accounts for
   // terminalError; stderr is the agent's stderr joined with any terminalError.
   | { kind: 'done'; exitCode: number; stderr: string }
+  // A flow's durable-state write (ctx.state.set/delete/push/patch), batched. The
+  // supervisor buffers these on the Run record and re-sends them on resume-from
+  // alongside mintedSession/sentContext, then forwards each as a
+  // StatePatchMessage; the server's applyStatePatch rev-guard dedupes the replay.
+  // `rev` is seeded from StartRunMessage.flowStateRev and incremented per batch,
+  // so a later ride's batches always clear that guard.
+  //
+  // Routing for this kind lands BEFORE any emitter exists, deliberately: the host
+  // is spawned from source on disk per run, so a fresh host can outrun its still-
+  // running supervisor, and run.ts silently ignores event kinds it doesn't know.
+  // The rule for every future HostEvent addition is the same — supervisor routing
+  // in an earlier-or-same commit than the first emitter.
+  | { kind: 'state-patch'; ops: StatePatchOp[]; rev: number }
 
 export type SpawnLike = (
   command: string,

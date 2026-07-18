@@ -300,6 +300,73 @@ describe('daemon run manager', () => {
     ])
   })
 
+  it('forwards a state-patch and replays it on resume-from', () => {
+    // A flow's durable-state write must survive a server restart mid-turn, so the
+    // supervisor buffers batches like it does mintedSession/sentContext. The
+    // replay is safe to send unconditionally because the server's applyStatePatch
+    // rev guard drops a batch it already folded in.
+    const h = harness()
+    h.manager.startRun(makeStart())
+    const host = h.hosts[0]
+
+    push(host, {
+      kind: 'state-patch',
+      ops: [{ op: 'set', path: ['sessionId'], value: 'sess-1' }],
+      rev: 8,
+    })
+    push(host, {
+      kind: 'state-patch',
+      ops: [{ op: 'set', path: ['phase'], value: 'building' }],
+      rev: 9,
+    })
+
+    expect(h.messages).toEqual([
+      {
+        type: 'state-patch',
+        runId: 'run-1',
+        ops: [{ op: 'set', path: ['sessionId'], value: 'sess-1' }],
+        rev: 8,
+      },
+      {
+        type: 'state-patch',
+        runId: 'run-1',
+        ops: [{ op: 'set', path: ['phase'], value: 'building' }],
+        rev: 9,
+      },
+    ])
+
+    h.messages.length = 0
+    h.manager.resumeFrom('run-1', 0)
+    // Both batches replay, in order, revs intact — the server dedupes.
+    expect(h.messages).toEqual([
+      {
+        type: 'state-patch',
+        runId: 'run-1',
+        ops: [{ op: 'set', path: ['sessionId'], value: 'sess-1' }],
+        rev: 8,
+      },
+      {
+        type: 'state-patch',
+        runId: 'run-1',
+        ops: [{ op: 'set', path: ['phase'], value: 'building' }],
+        rev: 9,
+      },
+    ])
+  })
+
+  it('ignores a host event kind it does not know', () => {
+    // The host is spawned from source per run, so a freshly-committed host can be
+    // one generation newer than its still-running supervisor. Unknown kinds must
+    // be dropped silently rather than crash the run — which is also why routing
+    // for a new kind has to land before its first emitter.
+    const h = harness()
+    h.manager.startRun(makeStart())
+    push(h.hosts[0], { kind: 'from-the-future' } as unknown as HostEvent)
+    push(h.hosts[0], { kind: 'done', exitCode: 0, stderr: '' })
+
+    expect(h.messages.map((m) => m.type)).toEqual(['done'])
+  })
+
   it('triggers a usage refresh on done for a usage-snapshot flow', () => {
     const refreshUsage = vi.fn()
     const h = harness({ refreshUsage })

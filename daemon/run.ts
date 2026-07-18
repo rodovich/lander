@@ -7,6 +7,7 @@ import type {
   DoneMessage,
   SessionMessage,
   StartRunMessage,
+  StatePatchMessage,
   TurnContextMessage,
   UpdateMessage,
 } from '../server/protocol'
@@ -27,6 +28,7 @@ export type RunManagerMessage =
   | DoneMessage
   | SessionMessage
   | TurnContextMessage
+  | StatePatchMessage
 
 export type RunManager = {
   startRun: (msg: StartRunMessage) => void
@@ -48,10 +50,12 @@ type Run = {
   // re-sent on resume-from — like mintedSession — so a server restart between
   // the announcement and its receipt can't lose the record.
   sentContext?: string
-  // step 3: buffer emitted state-patches here and re-send them on resume-from
-  // (like sentContext / mintedSession), so a server restart can't lose a flow's
-  // durable-state write; the server's applyStatePatch rev guard dedupes the replay.
-  // No producer exists in step 1, so there is nothing to buffer yet.
+  // A flow's durable-state batches, buffered and re-sent on resume-from like
+  // sentContext / mintedSession, so a server restart mid-turn can't lose a write.
+  // The server's applyStatePatch rev guard dedupes the replay, so re-sending the
+  // whole list is safe — order is preserved, and a batch the server already
+  // folded in is a no-op there.
+  statePatches: StatePatchMessage[]
   done?: DoneMessage
   dropTimer?: ReturnType<typeof setTimeout>
 }
@@ -223,6 +227,7 @@ export function createRunManager({
 
     let seq = 0
     const buffer: UpdateMessage[] = []
+    const statePatches: StatePatchMessage[] = []
     let settled = false
     // Why we killed the host, when we did — stamped onto the synthesized
     // close-without-done so the server can name the cause instead of wedging
@@ -314,6 +319,19 @@ export function createRunManager({
           }
           break
         }
+        case 'state-patch': {
+          // Buffer before sending, so a resume-from can replay it even if the
+          // send raced the disconnect that triggered the resume.
+          const patch: StatePatchMessage = {
+            type: 'state-patch',
+            runId: msg.runId,
+            ops: event.ops,
+            rev: event.rev,
+          }
+          statePatches.push(patch)
+          send(patch)
+          break
+        }
         case 'done':
           settle({
             exitCode: event.exitCode,
@@ -326,6 +344,7 @@ export function createRunManager({
 
     const rec: Run = {
       buffer,
+      statePatches,
       kill: () => {
         // A daemon shutdown (killChildren) is a deliberate platform stop, not a
         // crash — record it so the synthesized done names the right cause. An
@@ -425,6 +444,9 @@ export function createRunManager({
       send({ type: 'session', runId, sessionId: run.mintedSession })
     if (run.sentContext)
       send({ type: 'turn-context', runId, context: run.sentContext })
+    // Durable-state batches carry no seq of their own — replay them all and let
+    // the server's applyStatePatch rev guard drop the ones it already folded in.
+    for (const patch of run.statePatches) send(patch)
     for (const update of run.buffer) if (update.seq > seq) send(update)
     if (run.done) send(run.done)
   }

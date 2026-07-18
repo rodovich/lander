@@ -562,6 +562,13 @@ async function runTurn(
     // The context baseline rides only with a session to resume: a fresh session
     // (first turn, or post-relaunch) must always receive the full block.
     turnContext: taskSessionId(task) ? taskTurnContext(task) : undefined,
+    // The flow's durable state rides in on start-run so ctx.state.get is a free
+    // read, and its revision rides with it so the flow's state-patch producer
+    // seeds its counter above applyStatePatch's dedupe guard — without that seed
+    // every ride after the first would have its writes silently dropped. Both are
+    // additive: the compiled adapters ignore them.
+    flowState: task.flowState,
+    flowStateRev: task.flowStateRev,
     // This turn's attachment refs; the daemon materializes them and builds the
     // prompt manifest. Omitted when the turn carries none.
     attachments: attachments.length ? attachments : undefined,

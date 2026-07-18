@@ -1108,6 +1108,62 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     await new Promise<void>((r) => http.close(() => r()))
   })
 
+  // A flow reads its durable state as a free ride-in on start-run, and its
+  // producer seeds the state-patch rev counter from what comes with it. Without
+  // the revision, the server's applyStatePatch guard (`rev <= flowStateRev`)
+  // would silently drop every ride's writes after the first — so the revision
+  // has to reach the daemon, not just the blob. Runs first, on the daemon
+  // beforeAll connected: the later tests in this block disconnect it to stage a
+  // crash, and connecting a second one here would orphan a socket past teardown.
+  it('rides flowState and its revision in on start-run', async () => {
+    const id = 'flowstate-start'
+    await writeFile(
+      path.join(tasksDir, `${id}.json`),
+      JSON.stringify({
+        id,
+        title: 'Stateful task',
+        status: 'idle',
+        createdAt: AT,
+        updatedAt: AT,
+        allowEdits: false,
+        shape: 2,
+        items: [],
+        rides: [],
+        flowState: { sessionId: 'sess-kept', phase: 'reviewing' },
+        flowStateRev: 4,
+      }),
+    )
+
+    expect(
+      (await post(`/api/${slug}/tasks/${id}/messages`, { message: 'go' })).status,
+    ).toBe(200)
+    await waitFor(() => startRuns(id).length === 1)
+
+    const started = startRuns(id)[0] as unknown as {
+      runId: string
+      flowState?: Record<string, unknown>
+      flowStateRev?: number
+    }
+    expect(started.flowState).toEqual({
+      sessionId: 'sess-kept',
+      phase: 'reviewing',
+    })
+    expect(started.flowStateRev).toBe(4)
+
+    // Settle it: this suite holds runs open by default, and an unfinished run
+    // keeps the server's reduce loop alive past teardown.
+    ws.send(
+      JSON.stringify({
+        type: 'done',
+        runId: started.runId,
+        exitCode: 0,
+        interrupted: false,
+        stderr: '',
+      }),
+    )
+    await waitForRaw(id, (r) => !r.runId)
+  })
+
   // Runs before the crash test, which disconnects the shared daemon.
   it('a user PATCH interrupt wedges without a retry ask (semantics unchanged)', async () => {
     const id = 'kill-user-interrupt'

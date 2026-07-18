@@ -96,6 +96,13 @@ export type StartRunMessage = {
   // current compiled-in adapters never read it; a ported flow (step 3) will.
   // Absent until some flow has written state via a state-patch.
   flowState?: Record<string, unknown>
+  // The revision `flowState` above is at, so a flow's state-patch producer can
+  // seed its per-run counter ABOVE the server's dedupe guard. applyStatePatch
+  // drops any batch with `rev <= task.flowStateRev`, so a producer that restarted
+  // its counter at 1 each run would have every ride's writes after the first
+  // silently discarded. The producer emits `flowStateRev + n` for its nth batch.
+  // Additive; absent until a flow has written state.
+  flowStateRev?: number
   env: Record<string, string>
   idleTimeoutMs: number
 }
