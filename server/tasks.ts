@@ -586,34 +586,60 @@ export function recordStatusTransition(
   withdrawOpenAsks(task)
 }
 
-// The migration seam for a task's provider thread state (its resumable session id
-// and the recorded per-turn context baseline). Every server read/write of these two
-// fields routes through these accessors so a later step can flip their *storage*
-// into `flowState` (the ported claude/codex flows persist thread identity via
-// state-patch) without touching any call site — today they read/write the existing
-// top-level fields verbatim. Codex has no separate thread storage: it rides the same
-// `sessionId` slot, so this one accessor family covers both providers.
-export function taskSessionId(task: { sessionId?: string }): string | undefined {
-  return task.sessionId
-}
-export function setTaskSessionId(task: { sessionId?: string }, id: string): void {
-  task.sessionId = id
-}
-export function taskTurnContext(task: { turnContext?: string }): string | undefined {
-  return task.turnContext
-}
-export function setTaskTurnContext(task: { turnContext?: string }, ctx: string): void {
-  task.turnContext = ctx
-}
-// Clear a task's provider thread (session + context baseline), so its next turn
-// mints a fresh session and receives the full context block. The seam sealForRelaunch
-// uses; a later step re-points it at flowState alongside the accessors above.
-export function clearTaskThread(task: {
+// A task's provider thread state (its resumable session id and the recorded
+// per-turn context baseline) now lives inside `flowState`, alongside whatever
+// else a flow persists — thread identity is just the first thing every driver
+// happens to keep. Routing every server read/write through these accessors is
+// what made moving the storage a change to four function bodies rather than to
+// every call site.
+//
+// Reads are a union, new location first, and that fallback is permanent rather
+// than transitional: a task whose session predates this flip keeps its id at the
+// top level forever. Nothing migrates it — reduceRunWs's set-once guard means an
+// adapter turn never rewrites an id it already has — so the union is what keeps
+// those conversations resumable. Writes go only to the new location, so a task
+// converts the first time it writes.
+//
+// Codex has no separate thread storage: it rides the same `sessionId` slot, so
+// this one accessor family covers both providers.
+type ThreadStateTask = {
   sessionId?: string
   turnContext?: string
-}): void {
+  flowState?: Record<string, unknown>
+}
+
+function threadValue(
+  task: ThreadStateTask,
+  key: 'sessionId' | 'turnContext',
+): string | undefined {
+  const fromFlowState = task.flowState?.[key]
+  if (typeof fromFlowState === 'string') return fromFlowState
+  return task[key]
+}
+
+export function taskSessionId(task: ThreadStateTask): string | undefined {
+  return threadValue(task, 'sessionId')
+}
+export function setTaskSessionId(task: ThreadStateTask, id: string): void {
+  ;(task.flowState ??= {}).sessionId = id
+}
+export function taskTurnContext(task: ThreadStateTask): string | undefined {
+  return threadValue(task, 'turnContext')
+}
+export function setTaskTurnContext(task: ThreadStateTask, ctx: string): void {
+  ;(task.flowState ??= {}).turnContext = ctx
+}
+// Clear a task's provider thread (session + context baseline), so its next turn
+// mints a fresh session and receives the full context block. Clears BOTH
+// locations: a pre-flip task still carries the legacy fields, and leaving them
+// would let the union read resurrect the very session the seal was meant to end.
+export function clearTaskThread(task: ThreadStateTask): void {
   delete task.sessionId
   delete task.turnContext
+  if (task.flowState) {
+    delete task.flowState.sessionId
+    delete task.flowState.turnContext
+  }
 }
 
 // Seal a task's assistant session so its next turn mints a fresh provider session,

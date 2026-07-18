@@ -22,6 +22,11 @@ import {
   lastFlowItem,
   userItems,
   eventItems,
+  taskSessionId,
+  setTaskSessionId,
+  taskTurnContext,
+  setTaskTurnContext,
+  clearTaskThread,
   type Item,
   type MessageItem,
   type ScheduledMessage,
@@ -402,6 +407,61 @@ describe('recordStatusTransition', () => {
       recordStatusTransition(t, 'riding', AT)
       expect(askState(t)).toBe('answered')
     })
+  })
+})
+
+describe('thread-state accessors', () => {
+  it('writes session and turn context into flowState', () => {
+    const t: { flowState?: Record<string, unknown>; sessionId?: string } = {}
+    setTaskSessionId(t, 'sess-new')
+    setTaskTurnContext(t, '<task-context>…</task-context>')
+    expect(t.flowState).toEqual({
+      sessionId: 'sess-new',
+      turnContext: '<task-context>…</task-context>',
+    })
+    // Nothing lands at the old location any more.
+    expect('sessionId' in t).toBe(false)
+  })
+
+  it('still reads a pre-flip task stored at the top level', () => {
+    // The fallback is permanent, not transitional: nothing migrates a legacy
+    // task (reduceRunWs's set-once guard means an adapter turn never rewrites an
+    // id it already has), so dropping the union would silently strand those
+    // conversations and mint fresh sessions for them.
+    const t = { sessionId: 'sess-legacy', turnContext: 'ctx-legacy' }
+    expect(taskSessionId(t)).toBe('sess-legacy')
+    expect(taskTurnContext(t)).toBe('ctx-legacy')
+  })
+
+  it('prefers flowState over a stale top-level value', () => {
+    const t = {
+      sessionId: 'sess-legacy',
+      flowState: { sessionId: 'sess-new' },
+    }
+    expect(taskSessionId(t)).toBe('sess-new')
+  })
+
+  it('converts a legacy task on its next write', () => {
+    const t: {
+      sessionId?: string
+      flowState?: Record<string, unknown>
+    } = { sessionId: 'sess-legacy' }
+    setTaskSessionId(t, 'sess-fresh')
+    expect(taskSessionId(t)).toBe('sess-fresh')
+    expect(t.flowState).toEqual({ sessionId: 'sess-fresh' })
+  })
+
+  it('clears both locations, so the union cannot resurrect a sealed session', () => {
+    const t = {
+      sessionId: 'sess-legacy',
+      turnContext: 'ctx-legacy',
+      flowState: { sessionId: 'sess-new', turnContext: 'ctx-new', phase: 'x' },
+    }
+    clearTaskThread(t)
+    expect(taskSessionId(t)).toBeUndefined()
+    expect(taskTurnContext(t)).toBeUndefined()
+    // Only thread identity goes; the rest of the flow's state is untouched.
+    expect(t.flowState).toEqual({ phase: 'x' })
   })
 })
 
