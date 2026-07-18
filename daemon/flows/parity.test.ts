@@ -5,8 +5,12 @@
 
 import { describe, expect, it } from 'vitest'
 import { createClaudeAdapter } from '../claude'
+import { createCodexAdapter } from '../codex'
 import { makeFlow as makeClaudeFlow } from './claude'
+import { makeFlow as makeCodexFlow } from './codex'
 import { CLAUDE_GOLDENS } from './claude.goldens'
+import { CODEX_GOLDENS } from './codex.goldens'
+import type { HostEvent } from '../run-agent'
 import { driveAdapter, applyEvents, forCompare } from './parity'
 import { driveFlow, goldenInput, type Golden } from './testCtx'
 
@@ -36,9 +40,33 @@ function claudeFlow() {
   })
 }
 
-async function bothPaths(g: Golden) {
-  const oracle = await driveAdapter(g, claudeAdapters(), () => MINTED)
-  const flow = await driveFlow(g, claudeFlow())
+// A stub git-common-dir probe, so codex's permission profile doesn't depend on
+// the host's repo layout.
+const GIT_COMMON_STUB = () => '/repo/.git'
+
+function codexAdapters() {
+  return {
+    codex: createCodexAdapter({
+      taskPromptTemplate: TASK_PROMPT,
+      resolveGitCommonDir: GIT_COMMON_STUB,
+    }),
+  }
+}
+
+function codexFlow() {
+  return makeCodexFlow({
+    taskPromptTemplate: TASK_PROMPT,
+    resolveGitCommonDir: GIT_COMMON_STUB,
+  })
+}
+
+async function bothPaths(
+  g: Golden,
+  adapters: Parameters<typeof driveAdapter>[1],
+  flowUnderTest: Parameters<typeof driveFlow>[1],
+) {
+  const oracle = await driveAdapter(g, adapters, () => MINTED)
+  const flow = await driveFlow(g, flowUnderTest)
   return {
     oracle,
     flow: {
@@ -51,54 +79,62 @@ async function bothPaths(g: Golden) {
 // Updates carry the whole comparable wire payload; session/turn-context and
 // state-patch are the two paths' legitimately different plumbing for the SAME
 // facts, which the folded task state is what actually compares.
-const updatesOf = (events: { kind: string }[]) =>
-  events.filter((e) => e.kind === 'update')
+const updatesOf = (events: HostEvent[]) =>
+  events.filter(
+    (e): e is Extract<HostEvent, { kind: 'update' }> => e.kind === 'update',
+  )
 
-describe('claude parity — adapter oracle vs ported flow', () => {
-  for (const g of CLAUDE_GOLDENS) {
-    describe(g.name, () => {
-      it('folds to the same task state', async () => {
-        const { oracle, flow } = await bothPaths(g)
-        expect(forCompare(flow.task)).toEqual(forCompare(oracle.task))
-      })
+const launchOf = (spawns: { command: string; args: string[]; cwd?: string; envDelta: Record<string, string> }[]) =>
+  spawns.map((s) => ({
+    command: s.command,
+    args: s.args,
+    cwd: s.cwd,
+    envDelta: s.envDelta,
+  }))
 
-      it('produces the same wire update sequence', async () => {
-        const { oracle, flow } = await bothPaths(g)
-        // Tighter than the folded compare: catches streaming-granularity drift
-        // and identity-translation slips before the fold hides them.
-        expect(updatesOf(flow.events)).toEqual(updatesOf(oracle.events))
-      })
+const doneOf = (events: HostEvent[]) => events.find((e) => e.kind === 'done')
 
-      it('launches the child identically', async () => {
-        const { oracle, flow } = await bothPaths(g)
-        // Task-JSON and wire equality are blind to the launch — a dropped
-        // --settings, acceptEdits, or --add-dir would pass both and fail live.
-        expect(
-          flow.spawns.map((s) => ({
-            command: s.command,
-            args: s.args,
-            cwd: s.cwd,
-            envDelta: s.envDelta,
-          })),
-        ).toEqual(
-          oracle.spawns.map((s) => ({
-            command: s.command,
-            args: s.args,
-            cwd: s.cwd,
-            envDelta: s.envDelta,
-          })),
-        )
-      })
+// Parity is per provider, never across them.
+function parityFor(
+  label: string,
+  goldens: Golden[],
+  adapters: Parameters<typeof driveAdapter>[1],
+  flowUnderTest: Parameters<typeof driveFlow>[1],
+) {
+  describe(`${label} parity — adapter oracle vs ported flow`, () => {
+    for (const g of goldens) {
+      describe(g.name, () => {
+        it('folds to the same task state', async () => {
+          const { oracle, flow } = await bothPaths(g, adapters, flowUnderTest)
+          expect(forCompare(flow.task)).toEqual(forCompare(oracle.task))
+        })
 
-      it('reports the same turn outcome', async () => {
-        const { oracle, flow } = await bothPaths(g)
-        const doneOf = (events: { kind: string }[]) =>
-          events.find((e) => e.kind === 'done')
-        expect(doneOf(flow.events)).toEqual(doneOf(oracle.events))
+        it('produces the same wire update sequence', async () => {
+          const { oracle, flow } = await bothPaths(g, adapters, flowUnderTest)
+          // Tighter than the folded compare: catches streaming-granularity drift
+          // and identity-translation slips before the fold hides them.
+          expect(updatesOf(flow.events)).toEqual(updatesOf(oracle.events))
+        })
+
+        it('launches the child identically', async () => {
+          const { oracle, flow } = await bothPaths(g, adapters, flowUnderTest)
+          // Task-JSON and wire equality are blind to the launch — a dropped
+          // --settings, acceptEdits, --add-dir, permission profile, or a
+          // misplaced -i would pass both and fail only live.
+          expect(launchOf(flow.spawns)).toEqual(launchOf(oracle.spawns))
+        })
+
+        it('reports the same turn outcome', async () => {
+          const { oracle, flow } = await bothPaths(g, adapters, flowUnderTest)
+          expect(doneOf(flow.events)).toEqual(doneOf(oracle.events))
+        })
       })
-    })
-  }
-})
+    }
+  })
+}
+
+parityFor('claude', CLAUDE_GOLDENS, claudeAdapters(), claudeFlow())
+parityFor('codex', CODEX_GOLDENS, codexAdapters(), codexFlow())
 
 describe('claude parity — thread identity across the two plumbings', () => {
   it('resumes a legacy top-level session rather than minting a fresh one', async () => {
@@ -159,6 +195,55 @@ describe('claude parity — thread identity across the two plumbings', () => {
     }
     const flow = await driveFlow(g, claudeFlow())
     expect(flow.spawns[0].args.at(-1)).toContain('<task-context>')
+  })
+})
+
+describe('codex parity — session and identity', () => {
+  it('writes no session patch when a resumed turn re-emits thread.started', async () => {
+    // The adapter's `!sessionId && !announced` guard: a resumed turn re-emits
+    // the event, and persisting it again would put a state-patch on the wire
+    // that the oracle never sends.
+    const g = CODEX_GOLDENS.find(
+      (x) =>
+        x.name ===
+        'resumed turn re-emitting thread.started writes no duplicate session',
+    )!
+    const flow = await driveFlow(g, codexFlow())
+    expect(flow.events.filter((e) => e.kind === 'state-patch')).toEqual([])
+  })
+
+  it('persists the thread id the stream reports on a fresh turn', async () => {
+    const g = CODEX_GOLDENS[0]
+    const flow = await driveFlow(g, codexFlow())
+    const task = applyEvents(goldenInput(g).start, flow.events) as {
+      flowState?: Record<string, unknown>
+    }
+    expect(task.flowState?.sessionId).toBe('thread-1')
+  })
+
+  it('keeps two rides that reuse the same local item ids distinct', async () => {
+    const first = CODEX_GOLDENS.find(
+      (x) => x.name === 'command execution started and completed in one chunk',
+    )!
+    const second = CODEX_GOLDENS.find(
+      (x) => x.name === 'later ride reusing the same local item ids',
+    )!
+    const a = await driveFlow(first, codexFlow())
+    const b = await driveFlow(second, codexFlow())
+    const idsOf = (r: typeof a) =>
+      updatesOf(r.events).flatMap((u) => u.steps.map((s) => s.toolUseId))
+    // Both streams call their command `item-1`; the runtime's per-run minting is
+    // what stops the second ride folding onto the first ride's item.
+    const overlap = idsOf(a).filter((id) => id && idsOf(b).includes(id))
+    expect(overlap).toEqual([])
+  })
+
+  it('reports no project-grant support, with a reason to show the user', async () => {
+    const { meta } = codexFlow()
+    expect(meta.capabilities.grants).toEqual({ task: false, project: false })
+    expect(meta.projectGrantsUnsupportedReason).toBe(
+      'Project permission grants are not supported for Codex tasks yet.',
+    )
   })
 })
 
