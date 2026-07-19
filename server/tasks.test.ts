@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   publicTask,
+  taskFlow,
   latestUpdateAt,
   recordStatusTransition,
   recordArtifactOnMessage,
@@ -97,7 +98,30 @@ function pushEv(): Item {
   return { id: 'e', at: AT, kind: 'event', eventKind: 'launched', title: 'T' }
 }
 
+describe('taskFlow', () => {
+  it('prefers a stored flow over the legacy agent', () => {
+    expect(taskFlow({ flow: 'open-pr', agent: 'claude' })).toBe('open-pr')
+  })
+
+  it('reads a pre-step-4 task’s agent as its flow — permanently', () => {
+    // Not a migration window: nothing rewrites these tasks, so this fallback
+    // stays load-bearing forever.
+    expect(taskFlow({ agent: 'codex' })).toBe('codex')
+  })
+
+  it('falls back to the legacy flow when a task names neither', () => {
+    expect(taskFlow({})).toBe('claude')
+  })
+})
+
 describe('publicTask', () => {
+  it('derives and serves the flow name', () => {
+    expect(publicTask({ id: 's', agent: 'codex' }).flow).toBe('codex')
+    expect(publicTask({ id: 's', flow: 'open-pr' }).flow).toBe('open-pr')
+    // A structural fixture with no provider field at all still gets one.
+    expect(publicTask({ id: 's' }).flow).toBe('claude')
+  })
+
   it('strips token, runId, runCursor and the retry stash', () => {
     const out = publicTask({
       id: 's',

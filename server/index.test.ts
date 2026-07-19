@@ -126,6 +126,15 @@ describe('server task provider behavior', () => {
     expect(raw.agent).toBe('codex')
   })
 
+  it('serves a flow derived from the stored agent, without storing one', async () => {
+    const task = await createTask('Derived flow task')
+    const res = await app.request(`/api/${slug}/tasks/${task.id}`)
+    expect(await res.json()).toMatchObject({ agent: 'codex', flow: 'codex' })
+    // Derived on the way out only — nothing has written `flow` to disk yet, so
+    // backfillAgents still sees this as the legacy task it is.
+    expect(await readTaskField(task.id, 'flow')).toBeUndefined()
+  })
+
   it('serves the persisted provider instead of re-resolving the environment', async () => {
     const task = await createTask('Persisted Codex task')
     process.env.LANDER_AGENT = 'claude'

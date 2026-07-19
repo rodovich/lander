@@ -278,7 +278,15 @@ export function App() {
         />
 
         <TelemetryPanel
-          items={telemetry[current?.agent ?? newTaskAgent] ?? []}
+          // Keyed by flow name — the telemetry cache is keyed that way
+          // server-side now. `agent` stays as the fallback for a payload from a
+          // server that predates `flow`; the trailing literal covers the draft
+          // state, which is still optionally-typed until the picker lands.
+          items={
+            telemetry[
+              current?.flow ?? current?.agent ?? newTaskAgent ?? 'claude'
+            ] ?? []
+          }
         />
       </div>
 

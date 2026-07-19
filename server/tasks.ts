@@ -13,6 +13,7 @@ import type { Artifact } from './artifacts'
 // recordStatusTransition settles open asks on the crossing. asks.ts imports only
 // types from here, so the runtime edge stays one-way — this module → asks.ts.
 import { withdrawOpenAsks, type Ask, type AskForm } from './asks'
+import { LEGACY_FLOW } from './flows'
 
 export type Message = {
   role: 'user' | 'assistant'
@@ -384,6 +385,20 @@ export type ScheduledMessage = {
   attachments?: Attachment[]
 }
 
+// The driver flow a task runs under — the single reader every server read of a
+// task's provider goes through.
+//
+// A PERMANENT union-read, not a migration window. Nothing rewrites pre-step-4
+// tasks, so `agent` stays the answer for every task created before `flow`
+// existed, forever. This deliberately diverges from flow-inversion.md's
+// "backfill agent:'claude' → flow:'claude'" sentence, following instead the
+// precedent step 1 set for sessionId/turnContext: same observable behavior, no
+// migration pass, and no half-migrated window in which a task has neither field
+// or both disagree.
+export function taskFlow(task: { flow?: string; agent?: string }): string {
+  return task.flow ?? task.agent ?? LEGACY_FLOW
+}
+
 // Grant-capability flags served on the public task so the UI stops branching on
 // the agent kind: `task` = task-scope allow rules are honored, `project` =
 // project-scope grants are supported. Derived from the task's agent here — the one
@@ -443,6 +458,7 @@ export function publicTask<T extends object>(
   T,
   'token' | 'runId' | 'runCursor' | 'queued' | 'retry' | 'flowState' | 'flowStateRev'
 > & {
+  flow: string
   grants?: GrantCaps
   reportsCost?: boolean
 } {
@@ -493,6 +509,10 @@ export function publicTask<T extends object>(
   const agent = (task as { agent?: AgentKind }).agent
   const out = {
     ...rest,
+    // The task's driver flow, derived. Served additively alongside `agent`
+    // until the client stops reading the latter — a pre-step-4 task has no
+    // stored `flow`, so this is where its `agent` becomes one.
+    flow: taskFlow(task as { flow?: string; agent?: string }),
     ...(agent
       ? { grants: agentGrantCaps(agent), reportsCost: agentReportsCost(agent) }
       : {}),
@@ -501,6 +521,7 @@ export function publicTask<T extends object>(
     T,
     'token' | 'runId' | 'runCursor' | 'queued' | 'retry' | 'flowState' | 'flowStateRev'
   > & {
+    flow: string
     grants?: GrantCaps
     reportsCost?: boolean
   }

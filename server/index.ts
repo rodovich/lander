@@ -147,9 +147,21 @@ type Task = {
   // keyed by — backfilled from the filename, see backfillIds). Always equals the
   // task's filename stem.
   id: string
-  // The provider used for this task. Stored so future turns resume with the same
-  // provider once multiple agents exist. Existing tasks are backfilled to Claude.
-  agent: AgentKind
+  // The provider used for this task. LEGACY: written only for the claude and
+  // codex flows, so an old daemon can still drive them (StartRunMessage.agent).
+  // Never written for a task created with any other flow, and never rewritten
+  // once `flow` is set — backfillAgents is gated on that. Read through
+  // taskFlow(), never directly.
+  agent?: AgentKind
+  // The driver flow for this task. Absent on every task created before step 4,
+  // which is why taskFlow() is a permanent union-read over both fields rather
+  // than a migration: nothing rewrites pre-flip tasks, so the fallback is
+  // load-bearing forever (the precedent sessionId/turnContext set in step 1).
+  flow?: string
+  // Opaque per-task configuration handed to the flow as ctx.task.flowConfig and
+  // echoed on start-run. The server stores and forwards it and never interprets
+  // it; it validates shape (a JSON object) and size only.
+  flowConfig?: Record<string, unknown>
   // The provider session id backing this task's turns, reported by the daemon on
   // the first turn and persisted by the server (see SessionMessage /
   // reduceRunWs). Passed to the daemon each turn so it can resume the same
@@ -2808,8 +2820,15 @@ async function backfillAgents(): Promise<void> {
         try {
           const task = JSON.parse(await readFile(file, 'utf8')) as Task
           if (task.agent !== undefined) continue
+          // A task that names a flow is NOT a legacy task missing its agent —
+          // it is one that deliberately has none. Stamping LEGACY_AGENT here
+          // would make taskFlow() still read `flow` correctly, but it would
+          // resurrect `agent` on every server boot and hand the C6 dispatch
+          // path a legal-looking legacy kind for a flow that isn't one.
+          if (task.flow !== undefined) continue
           await mutateTask(file, (t) => {
-            if (t.agent === undefined) t.agent = LEGACY_AGENT
+            if (t.agent === undefined && t.flow === undefined)
+              t.agent = LEGACY_AGENT
           })
         } catch {
           // skip unreadable/invalid files
