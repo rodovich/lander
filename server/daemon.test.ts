@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { WebSocket } from 'ws'
@@ -13,7 +13,12 @@ import {
   daemonServes,
 } from './daemon'
 import type { RunEvent } from './daemon'
-import type { ServerToDaemon } from './protocol'
+import type { FlowAnnouncement, ServerToDaemon } from './protocol'
+import {
+  announcedFlows,
+  clearAnnouncedFlows,
+  isAnnouncedFlow,
+} from './flows'
 
 // Integration test for the daemon ⇄ server transport's drain-handoff, driving the
 // real attachDaemonServer over real WebSockets with stand-in daemons. The logic
@@ -37,7 +42,11 @@ async function waitFor(pred: () => boolean, ms = 1000): Promise<void> {
   throw new Error('waitFor timed out')
 }
 
-type RegisterOpts = { draining?: boolean; runs?: string[] }
+type RegisterOpts = {
+  draining?: boolean
+  runs?: string[]
+  flows?: FlowAnnouncement[]
+}
 
 type FakeDaemon = {
   received: ServerToDaemon[]
@@ -62,13 +71,15 @@ function connectDaemon(port: number): Promise<FakeDaemon> {
     ws.on('open', () =>
       resolve({
         received,
-        register: ({ draining = false, runs = [] }: RegisterOpts = {}) =>
+        register: ({ draining = false, runs = [], flows }: RegisterOpts = {}) =>
           ws.send(
             JSON.stringify({
               type: 'register',
               projects: [{ slug: 'proj' }],
               draining,
               runs,
+              // Omitted entirely when not given — that IS the old-daemon case.
+              ...(flows ? { flows } : {}),
             }),
           ),
         send: (m) => ws.send(JSON.stringify(m)),
@@ -251,5 +262,120 @@ describe('daemon transport handoff', () => {
 
     await d.close()
     await waitFor(() => !daemonConnected())
+  })
+})
+
+// The flow registry's transport half: who may write it, when it is written
+// relative to the slug set, and what clears it. These are what make C6's
+// dispatch gate a real invariant rather than a hint — a registry that could go
+// stale in the "announces more than the daemon can run" direction would let a
+// task be dispatched to a daemon that cannot drive it.
+
+const flowAnn = (name: string): FlowAnnouncement => ({
+  scope: 'bundled',
+  meta: {
+    api: 1,
+    name,
+    description: `the ${name} flow`,
+    driver: true,
+    capabilities: {
+      worktrees: false,
+      vision: 'read',
+      grants: { task: false, project: false },
+      usageSnapshot: false,
+      rateLimitRetry: false,
+      reportsCost: false,
+    },
+  },
+})
+
+describe('flow announcement over the daemon link', () => {
+  let http2: Server
+  let port2: number
+  // What the registry looked like at the instant onRegister fired.
+  let seenAtRegister: string[] | null = null
+
+  beforeAll(async () => {
+    http2 = createServer()
+    attachDaemonServer(http2, {
+      token: TOKEN,
+      onRegister: () => {
+        seenAtRegister = announcedFlows().map((f) => f.meta.name)
+      },
+    })
+    await new Promise<void>((r) => http2.listen(0, r))
+    port2 = (http2.address() as AddressInfo).port
+  })
+
+  afterAll(async () => {
+    await new Promise<void>((r) => http2.close(() => r()))
+  })
+
+  beforeEach(() => {
+    clearAnnouncedFlows()
+    seenAtRegister = null
+  })
+
+  it('sets the registry BEFORE onRegister fires', async () => {
+    // Load-bearing, not decorative: awaitDaemonServing unblocks off the slug
+    // set that onRegister reports, so a runTurn released by it must not be able
+    // to read a registry that hasn't been written yet. If setAnnouncedFlows
+    // moved after the slug loop, this sees [].
+    const d = await connectDaemon(port2)
+    d.register({ flows: [flowAnn('claude'), flowAnn('open-pr')] })
+    await waitFor(() => seenAtRegister !== null)
+    expect(seenAtRegister).toEqual(['claude', 'open-pr'])
+    await d.close()
+  })
+
+  it('treats a register with no flows field as announcing nothing', async () => {
+    // The old-daemon and rolled-back-daemon case. It must not inherit whatever
+    // the previous primary announced.
+    const a = await connectDaemon(port2)
+    a.register({ flows: [flowAnn('open-pr')] })
+    await waitFor(() => isAnnouncedFlow('open-pr'))
+
+    const b = await connectDaemon(port2)
+    b.register() // no `flows` key at all — a daemon built before the field
+    await waitFor(() => !isAnnouncedFlow('open-pr'))
+    expect(announcedFlows()).toEqual([])
+
+    await a.close()
+    await b.close()
+  })
+
+  it('does not let a draining daemon overwrite the live registry', async () => {
+    // A draining daemon is not the primary, and the registry describes what the
+    // primary can run. Letting a handoff's outgoing half write here would
+    // announce the wrong capability set mid-drain.
+    const primary = await connectDaemon(port2)
+    primary.register({ flows: [flowAnn('open-pr')] })
+    await waitFor(() => isAnnouncedFlow('open-pr'))
+
+    const draining = await connectDaemon(port2)
+    draining.register({ draining: true, flows: [flowAnn('something-else')] })
+    await delay(50)
+    expect(isAnnouncedFlow('open-pr')).toBe(true)
+    expect(isAnnouncedFlow('something-else')).toBe(false)
+
+    await primary.close()
+    await draining.close()
+  })
+
+  it('clears the registry when the primary drops, but not a non-primary', async () => {
+    const primary = await connectDaemon(port2)
+    primary.register({ flows: [flowAnn('open-pr')] })
+    await waitFor(() => isAnnouncedFlow('open-pr'))
+
+    // A draining non-primary disconnecting is the normal end of a handoff — it
+    // must not take the live daemon's announcement with it.
+    const draining = await connectDaemon(port2)
+    draining.register({ draining: true })
+    await draining.close()
+    await delay(50)
+    expect(isAnnouncedFlow('open-pr')).toBe(true)
+
+    await primary.close()
+    await waitFor(() => !isAnnouncedFlow('open-pr'))
   })
 })

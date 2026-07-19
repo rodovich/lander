@@ -215,6 +215,17 @@ export type RegisterMessage = {
   // pre-announcement daemon — which the server then treats the legacy way (assume
   // it holds every open run); an empty array means it genuinely holds none.
   runs?: string[]
+  // The driver flows this daemon can run, with their announced meta — the flow
+  // registry's source of truth. The server caches this on every PRIMARY register
+  // and serves it to the picker; it also gates dispatch on it, so a flow missing
+  // here is one the server refuses to dispatch rather than silently running as
+  // something else.
+  //
+  // Optional in both directions. Absent from a daemon built before this field
+  // existed, which the server reads as an announcement of NOTHING — correct,
+  // because such a daemon can only run the legacy flows, and those carry
+  // StartRunMessage.agent and bypass the gate.
+  flows?: FlowAnnouncement[]
 }
 
 // A structured run update — one reduced batch of stream output, plus the
@@ -302,6 +313,10 @@ export type ProjectGrantResultMessage = {
 export type TelemetryMessage = {
   type: 'telemetry'
   agent: AgentKind
+  // The producing flow's name. Supersedes `agent` as the cache key — the server
+  // reads `flow ?? agent`, so an old daemon that sends only `agent` still keys
+  // correctly. `agent` stays required until step 5 retires the legacy kinds.
+  flow?: string
   items: TelemetryItem[]
 }
 

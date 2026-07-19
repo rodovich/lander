@@ -972,13 +972,17 @@ async function launchScheduled(): Promise<void> {
   }
 }
 
-// The latest telemetry snapshot each flow pushed, keyed by agent (decision 6). A
-// producing adapter owns the fetch + refresh schedule and sends a `telemetry`
+// The latest telemetry snapshot each flow pushed, keyed by FLOW NAME (decision
+// 6). A producing flow owns the fetch + refresh schedule and sends a `telemetry`
 // message on each refresh, which lands here via the WS handler; the server only
 // caches the items and serves them (the tasks poll embeds them, /api/telemetry
 // returns them). The server never learns what the items mean, nor reads any
 // credential — which is what lets it move into a credential-less container later.
-const telemetryCache = new Map<AgentKind, TelemetryItem[]>()
+//
+// Keyed by name rather than AgentKind because an adapter-less flow has no agent
+// kind; the wire already reads `msg.flow ?? msg.agent`, and the client has always
+// consumed this as a plain Record<string, …>.
+const telemetryCache = new Map<string, TelemetryItem[]>()
 
 // The shared secret that marks a request as coming from the human's browser
 // (vs. a task's `lander` CLI). Prefer the env var dev.mjs sets — it hands the

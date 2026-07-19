@@ -19,6 +19,7 @@ import type {
   AgentKind,
   TelemetryItem,
 } from './protocol'
+import { clearAnnouncedFlows, setAnnouncedFlows } from './flows'
 
 // One run's inbound events, delivered in order to the reducer awaiting them. The
 // WS message handler pushes; reduceRunWs pulls via `next()`. A `crashed` event is
@@ -243,7 +244,9 @@ type DaemonServerOpts = {
   onRegister?: (slugs: string[]) => void
   // Called with each pushed telemetry snapshot (a flow's status items, keyed by
   // agent), for the server to cache and serve.
-  onTelemetry?: (agent: AgentKind, items: TelemetryItem[]) => void
+  // Keyed by flow name, not AgentKind: the producer is a flow, and an
+  // adapter-less one has no agent kind to be keyed under.
+  onTelemetry?: (flow: string, items: TelemetryItem[]) => void
 }
 
 // Attach the daemon WS endpoint to the running HTTP server at /daemon. Handles
@@ -296,6 +299,16 @@ export function attachDaemonServer(
           // so it must not become primary.
           if (!msg.draining) {
             primary = ws
+            // BEFORE registeredSlugs/onRegister, deliberately: awaitDaemonServing
+            // unblocks off the slug set, so setting the registry after it would
+            // let a runTurn through to read a stale one.
+            //
+            // Unconditional in the sense that matters — `?? []` rather than
+            // `if (msg.flows)`. An old or rolled-back daemon that sends no flows
+            // announces NOTHING, which is what stops it inheriting its
+            // predecessor's set. Confined to the primary branch so a draining
+            // daemon can't overwrite the live registry on its way out.
+            setAnnouncedFlows(msg.flows ?? [])
             registeredSlugs.clear()
             for (const p of msg.projects) registeredSlugs.add(p.slug)
             opts.onRegister?.([...registeredSlugs])
@@ -317,7 +330,8 @@ export function attachDaemonServer(
           reconcileGrace()
           console.log(
             `daemon registered (${msg.draining ? 'draining' : 'primary'}): ` +
-              `${[...registeredSlugs].join(', ') || '(no slugs)'}; holds ${held.length} run(s)`,
+              `${[...registeredSlugs].join(', ') || '(no slugs)'}; holds ${held.length} run(s)` +
+              `; flows: ${msg.flows?.map((f) => f.meta.name).join(', ') || '(none)'}`,
           )
           break
         }
@@ -341,7 +355,7 @@ export function attachDaemonServer(
           break
         }
         case 'telemetry':
-          opts.onTelemetry?.(msg.agent, msg.items)
+          opts.onTelemetry?.(msg.flow ?? msg.agent, msg.items)
           break
       }
     })
@@ -352,6 +366,11 @@ export function attachDaemonServer(
       if (primary === ws) {
         primary = null
         registeredSlugs.clear()
+        // The registry describes the PRIMARY's capabilities, so it dies with it.
+        // Gated on `primary === ws` (as the slug clear already is), which is
+        // what keeps a *draining* non-primary's disconnect from clearing the
+        // live daemon's announcement mid-handoff.
+        clearAnnouncedFlows()
       }
       console.log('daemon disconnected')
       // Release the runs this daemon held. We don't reassign them to another

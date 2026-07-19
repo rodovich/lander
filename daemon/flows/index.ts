@@ -12,7 +12,7 @@
 
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import type { AgentKind } from '../../server/protocol'
+import type { AgentKind, FlowAnnouncement } from '../../server/protocol'
 import type { AgentAdapter, AgentLaunchDir, AgentLaunchDirInput } from '../agent'
 import { makeFlow as makeClaudeFlow, meta as claudeMeta } from './claude'
 import {
@@ -72,6 +72,19 @@ export const FLOW_MODULES: Record<
 > = {
   claude: claudeFlowModule,
   codex: codexFlowModule,
+}
+
+// What this daemon can drive, as the server's flow registry consumes it. Built
+// from FLOW_MODULES so registering a flow module is the single act that makes it
+// both runnable and announced — the two cannot drift.
+//
+// Everything is `bundled` at step 4. Step 5 adds the user- and project-scoped
+// entries the envelope already has room for.
+export function announcedFlows(): FlowAnnouncement[] {
+  return Object.values(FLOW_MODULES).map((mod) => ({
+    scope: 'bundled' as const,
+    meta: mod.meta,
+  }))
 }
 
 // What the daemon needs to know about a provider BEFORE a host exists: where to

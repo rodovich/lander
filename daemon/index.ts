@@ -14,7 +14,12 @@ import path from 'node:path'
 import type { AgentAdapter } from './agent'
 import { buildAdapters, ROOT } from './adapters'
 import { projectSlug } from '../server/projects'
-import { FLOW_MODULES, providerCaps, type ProviderCaps } from './flows/index'
+import {
+  FLOW_MODULES,
+  announcedFlows,
+  providerCaps,
+  type ProviderCaps,
+} from './flows/index'
 import type { AgentKind, TelemetryItem } from '../server/protocol'
 import type {
   ServerToDaemon,
@@ -100,7 +105,14 @@ let usageResetTimer: ReturnType<typeof setTimeout> | null = null
 
 function pushUsage(): void {
   if (usageItems && USAGE_AGENT)
-    send({ type: 'telemetry', agent: USAGE_AGENT, items: usageItems })
+    send({
+      type: 'telemetry',
+      agent: USAGE_AGENT,
+      // The flow name is the cache key going forward; `agent` rides along until
+      // step 5 retires it, so an older server still keys this correctly.
+      flow: USAGE_AGENT,
+      items: usageItems,
+    })
 }
 
 // Refresh unless a snapshot was taken within the TTL, so no trigger can hammer
@@ -391,6 +403,11 @@ function connect(): void {
       // losing them to the fresh primary.
       draining: drain.draining(),
       runs: runManager.heldRunIds(),
+      // Everything we can drive, so the server knows what it may dispatch. All
+      // bundled at step 4; the scope envelope is here because resolution
+      // precedence (bundled → user → project) is already committed to, and a
+      // flat list would need a second wire change one step later.
+      flows: announcedFlows(),
     })
     // Prime the server's snapshot: re-push the last one we hold (so a reconnect
     // re-fills the server cache immediately), then fetch a fresh one (the boot /
