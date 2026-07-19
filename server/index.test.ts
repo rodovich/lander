@@ -135,6 +135,26 @@ describe('server task provider behavior', () => {
     expect(await readTaskField(task.id, 'flow')).toBeUndefined()
   })
 
+  it('carries capability flags and items on GET /tasks/:id', async () => {
+    // A test rather than a UI check on purpose: the UI polls only the LIST
+    // endpoint (src/useTaskData.ts), so a visual pass would look fine while the
+    // single-task endpoint dropped these. That endpoint is also what a flow's
+    // own ctx.view() reads, and the ask-reading path depends on `items` passing
+    // through publicTask untouched — so both are pinned here.
+    const task = await createTask('Caps on the single-task endpoint')
+    await post(`/api/${slug}/tasks/${task.id}/messages`, { message: 'hello' })
+
+    const res = await app.request(`/api/${slug}/tasks/${task.id}`)
+    const body = (await res.json()) as {
+      grants?: unknown
+      reportsCost?: unknown
+      items?: { kind: string }[]
+    }
+    expect(body.grants).toEqual({ task: false, project: false }) // codex
+    expect(body.reportsCost).toBe(false)
+    expect(body.items?.some((i) => i.kind === 'message')).toBe(true)
+  })
+
   it('serves the persisted provider instead of re-resolving the environment', async () => {
     const task = await createTask('Persisted Codex task')
     process.env.LANDER_AGENT = 'claude'

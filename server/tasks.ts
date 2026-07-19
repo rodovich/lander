@@ -13,7 +13,7 @@ import type { Artifact } from './artifacts'
 // recordStatusTransition settles open asks on the crossing. asks.ts imports only
 // types from here, so the runtime edge stays one-way — this module → asks.ts.
 import { withdrawOpenAsks, type Ask, type AskForm } from './asks'
-import { LEGACY_FLOW } from './flows'
+import { LEGACY_FLOW, flowCaps, type FlowCaps } from './flows'
 
 export type Message = {
   role: 'user' | 'assistant'
@@ -400,28 +400,12 @@ export function taskFlow(task: { flow?: string; agent?: string }): string {
 }
 
 // Grant-capability flags served on the public task so the UI stops branching on
-// the agent kind: `task` = task-scope allow rules are honored, `project` =
-// project-scope grants are supported. Derived from the task's agent here — the one
-// place that maps an agent to its grant capabilities — so a provider that doesn't
-// honor a scope degrades from data rather than a UI `agent === 'codex'` special
-// case. codex saves task rules for parity but honors neither scope yet (both
-// false); claude supports both. The flow inversion supersedes this switch with
-// each flow's announced meta.capabilities (see docs/flow-inversion.md).
+// the provider: `task` = task-scope allow rules are honored, `project` =
+// project-scope grants are supported. Now sourced from the flow's ANNOUNCED
+// meta.capabilities (see server/flows.ts) rather than a compiled switch on the
+// agent kind — which is what lets a flow the server has never been compiled
+// against describe its own capabilities.
 export type GrantCaps = { task: boolean; project: boolean }
-
-export function agentGrantCaps(agent: AgentKind): GrantCaps {
-  return agent === 'codex'
-    ? { task: false, project: false }
-    : { task: true, project: true }
-}
-
-// Whether this agent reports a per-turn dollar cost (claude does, via its result
-// event; codex reports tokens without account cost). Served on the public task so
-// the footer reads a capability instead of branching on `agent === 'codex'`, like
-// the grant caps above. Superseded by flow meta.capabilities in the flow inversion.
-export function agentReportsCost(agent: AgentKind): boolean {
-  return agent !== 'codex'
-}
 
 // Flag the trailing-N user entries (N = queue length) as `queued`, cloning only
 // the flagged ones. The unread follow-ups are the trailing user messages, one
@@ -454,13 +438,14 @@ function flagQueued<M extends { role: 'user' | 'flow' | 'assistant' }>(
 // `grants` flags.
 export function publicTask<T extends object>(
   task: T,
+  opts?: { caps?: FlowCaps },
 ): Omit<
   T,
   'token' | 'runId' | 'runCursor' | 'queued' | 'retry' | 'flowState' | 'flowStateRev'
 > & {
   flow: string
-  grants?: GrantCaps
-  reportsCost?: boolean
+  grants: GrantCaps
+  reportsCost: boolean
 } {
   const {
     token: _t,
@@ -503,27 +488,40 @@ export function publicTask<T extends object>(
       storedStatus === 'riding' ? (hasLiveRun ? 'riding' : 'resting') : storedStatus
   }
 
-  // Attach the derived grant capabilities and cost-reporting flag when the task
-  // carries an agent (real tasks always do; the structurally-typed test fixtures
-  // may not) — so the client reads capabilities, never the agent name.
-  const agent = (task as { agent?: AgentKind }).agent
+  // Attach the capability flags from the flow's ANNOUNCED meta, so the client
+  // reads capabilities and never the agent name.
+  //
+  // The default resolves here rather than being injected at the route layer.
+  // Injection was tried and reverted: publicTask has ~25 call sites, all of
+  // which attach these today, and a no-default options object would silently
+  // drop both fields from the ~23 that didn't opt in — including
+  // GET /tasks/:id, which is what a flow's own ctx.view() reads. Worse, the
+  // regression would be invisible to a UI check, since the UI polls only the
+  // list endpoint. The purity cost of reading process-global registry state
+  // from a serializer is real and accepted; the registry is already global and
+  // already read on this request path.
+  //
+  // The options object stays because it is arity-immune (a bare
+  // `.map(publicTask)` would otherwise bind the array index to it) and gives
+  // tests a way to pin caps.
+  const flow = taskFlow(task as { flow?: string; agent?: string })
+  const caps = opts?.caps ?? flowCaps(flow)
   const out = {
     ...rest,
     // The task's driver flow, derived. Served additively alongside `agent`
     // until the client stops reading the latter — a pre-step-4 task has no
     // stored `flow`, so this is where its `agent` becomes one.
-    flow: taskFlow(task as { flow?: string; agent?: string }),
-    ...(agent
-      ? { grants: agentGrantCaps(agent), reportsCost: agentReportsCost(agent) }
-      : {}),
+    flow,
+    grants: caps.grants,
+    reportsCost: caps.reportsCost,
   }
   return out as Omit<
     T,
     'token' | 'runId' | 'runCursor' | 'queued' | 'retry' | 'flowState' | 'flowStateRev'
   > & {
     flow: string
-    grants?: GrantCaps
-    reportsCost?: boolean
+    grants: GrantCaps
+    reportsCost: boolean
   }
 }
 

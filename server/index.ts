@@ -39,7 +39,6 @@ import { parseProjects, type Project } from './projects'
 import {
   publicTask,
   taskFlow,
-  agentGrantCaps,
   latestUpdateAt,
   recordStatusTransition,
   recordArtifactOnMessage,
@@ -1119,7 +1118,9 @@ app.get('/api/:project/tasks', async (c) => {
     const telemetry = Object.fromEntries(telemetryCache)
     if (c.req.query('archived') !== '1')
       return c.json({
-        tasks: (await readTasks(project.dataDir)).map(publicTask),
+        // Arrow-wrapped: a bare `.map(publicTask)` binds the array index to the
+        // options parameter.
+        tasks: (await readTasks(project.dataDir)).map((t) => publicTask(t)),
         telemetry,
       })
     const archived = (await readTasks(project.archiveDir)).map((t) => ({
@@ -1129,7 +1130,7 @@ app.get('/api/:project/tasks', async (c) => {
     archived.sort((a, b) =>
       (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt),
     )
-    return c.json({ tasks: archived.map(publicTask), telemetry })
+    return c.json({ tasks: archived.map((t) => publicTask(t)), telemetry })
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }

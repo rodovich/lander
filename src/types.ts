@@ -181,16 +181,17 @@ export type Task = {
   // Optional on the wire only because a response from a pre-step-4 server
   // wouldn't carry it; the current server always does.
   flow?: string
-  // Grant-capability flags derived server-side (publicTask/agentGrantCaps): `task`
-  // = task-scope allow rules are honored, `project` = project grants are supported.
-  // The grant UI reads these instead of branching on `agent`, so a provider that
-  // doesn't honor a scope degrades from data. Absent on legacy payloads — treat as
-  // fully capable.
+  // Grant-capability flags, resolved server-side from the FLOW's announced
+  // meta.capabilities (publicTask → flowCaps): `task` = task-scope allow rules
+  // are honored, `project` = project grants are supported. The grant UI reads
+  // these instead of branching on the provider name, so a flow that doesn't
+  // honor a scope degrades from data. The current server always sends them; the
+  // field stays optional for a payload from one that predates it, which
+  // src/grants.tsx reads as fully capable.
   grants?: { task: boolean; project: boolean }
-  // Whether this task's agent reports a per-turn dollar cost (derived server-side
-  // by publicTask/agentReportsCost: claude does, codex doesn't). The footer reads
-  // this instead of branching on `agent`, so a provider without cost degrades from
-  // data. Absent on legacy payloads / fixtures without an agent.
+  // Whether this task's flow reports a per-turn dollar cost (claude does, codex
+  // doesn't), from the same announced meta. The footer reads this instead of
+  // branching on the provider name.
   reportsCost?: boolean
   title: string
   status: string
