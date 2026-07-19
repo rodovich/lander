@@ -60,6 +60,22 @@ export type ToolResult = {
 
 const handleIds = new WeakMap<object, string>()
 
+// The durable-state size cap, owed since step 3. Enforced at the write in the
+// host (see mutate): the server cannot enforce it, because dropping a batch
+// there leaves flowStateRev unadvanced, so the next batch applies on top of the
+// hole while the host reasons over state the server never received.
+export const STATE_MAX_BYTES = 64 * 1024
+
+// Enough for what a flow publishes — the server sanitizes and validates the
+// name itself, and everything else falls back to plain text (not
+// octet-stream, which would make a diff or a log download rather than render).
+function guessArtifactMime(name: string): string {
+  if (name.endsWith('.json')) return 'application/json'
+  if (name.endsWith('.md')) return 'text/markdown'
+  if (name.endsWith('.html')) return 'text/html'
+  return 'text/plain'
+}
+
 function handleId(h: object): string | undefined {
   return handleIds.get(h)
 }
@@ -189,6 +205,12 @@ export type CtxState = {
   delete(path: string[]): void
   push(path: string[], value: unknown): void
   patch(path: string[], value: unknown): void
+  // Put any pending writes on the wire now. Writes otherwise batch until a
+  // ctx.spawn drain or the turn's end, so a flow that mutates the task through
+  // an orchestration call (ask/wedge/rest) must flush first or risk losing the
+  // write to an interrupt. The ctx orchestration wrappers do this for you; this
+  // is for a flow's own transitions that don't go through one.
+  flush(): void
 }
 
 export type SpawnOpts = {
@@ -240,17 +262,27 @@ export type Ctx = {
   signal: AbortSignal
   telemetry: CtxTelemetry
   artifacts: CtxArtifacts
-  // Interaction + orchestration: reserved names so the v1 type is stable. These
-  // throw until a flow consumes them (step 6 converges command flows onto this
-  // same ctx, with async assist/shell and thrown errors); the ported claude and
-  // codex drivers call none of them.
-  ask(opts: { options?: unknown }): Promise<void>
-  wedge(opts?: { options?: unknown }): Promise<void>
-  launch(...args: unknown[]): Promise<unknown>
+  // Interaction + orchestration, over the public task API. The subset the
+  // bundled flows consume is implemented; the rest stay reserved names that
+  // throw, so the v1 type is stable and step 6 (which converges command flows
+  // onto this same ctx, with async assist/shell) fills them in.
+  //
+  // Errors are THROWN, never process.exit — a driver can handle a failure
+  // instead of vanishing, and runFlowTurn turns an unhandled rejection into a
+  // done rather than a stranded host.
+
+  // Advisory: renders options without blocking the task.
+  ask(opts: AskOpts): Promise<unknown>
+  // Task-blocking: the user must answer before the task rides again. With no
+  // options it is a bare status change.
+  wedge(opts?: AskOpts): Promise<unknown>
+  launch(message: string, opts?: LaunchOpts): Promise<unknown>
   send(...args: unknown[]): Promise<unknown>
-  view(...args: unknown[]): Promise<unknown>
+  // A task's public JSON, defaulting to this task. The way a flow reads back
+  // its own answered ask.
+  view(id?: string): Promise<unknown>
   list(...args: unknown[]): Promise<unknown>
-  rest(...args: unknown[]): Promise<unknown>
+  rest(opts?: RestOpts): Promise<unknown>
   relaunch(...args: unknown[]): Promise<unknown>
   land(...args: unknown[]): Promise<unknown>
   flow(...args: unknown[]): Promise<unknown>
@@ -263,9 +295,32 @@ export type CtxTelemetry = {
 }
 
 export type CtxArtifacts = {
-  put(pathOrBytes: unknown, opts?: unknown): Promise<unknown>
+  put(name: string, content: string): Promise<unknown>
   list(): Promise<unknown>
   cat(name: string): Promise<unknown>
+}
+
+// One option on a flow-authored ask. `id` is what comes back on the answer, so
+// a flow matches on it rather than on the label.
+export type AskOption = { id: string; label: string; detail?: string }
+
+export type AskOpts = {
+  options?: AskOption[]
+  prompt?: string
+}
+
+export type LaunchOpts = {
+  title?: string
+  flow?: string
+  config?: Record<string, unknown>
+  edits?: boolean
+}
+
+export type RestOpts = {
+  date?: string
+  time?: number
+  await?: string
+  clear?: boolean
 }
 
 // A driver flow module.
@@ -377,6 +432,9 @@ export function createCtxRuntime(
   }
 
   // ── Durable state ────────────────────────────────────────────────────────
+  // The blob is meant to hold decisions, identities, and user-visible progress —
+  // a PR number, a run id, a phase — not bulk data. Anything derivable belongs
+  // in ctx.scratch; anything large the user should see belongs in an artifact.
   // Seed the in-memory copy from flowState, falling back to the legacy top-level
   // wire fields for thread identity. This fallback is not a nicety: a task whose
   // session predates the storage flip keeps its sessionId at the legacy level
@@ -459,8 +517,83 @@ export function createCtxRuntime(
     }
   }
 
+  // Restore the pre-op value at `op.path`, so a rejected write leaves the local
+  // copy matching what the server has. Captured by value before the op runs.
+  function undoLocal(op: StatePatchOp, root: Record<string, unknown>): void {
+    const { path } = op
+    if (!path.length) return
+    let node: Record<string, unknown> = root
+    for (let i = 0; i < path.length - 1; i++) {
+      const next = node[path[i]]
+      if (!next || typeof next !== 'object') return
+      node = next as Record<string, unknown>
+    }
+    const leaf = path[path.length - 1]
+    if (undoValue === UNSET) delete node[leaf]
+    else node[leaf] = undoValue
+  }
+
+  // The value displaced by the op currently being applied, so undoLocal can put
+  // it back. A sentinel distinguishes "was absent" from "was undefined".
+  const UNSET = Symbol('unset')
+  let undoValue: unknown = UNSET
+
+  function captureUndo(op: StatePatchOp): void {
+    let node: unknown = stateCopy
+    for (let i = 0; i < op.path.length - 1; i++) {
+      if (!node || typeof node !== 'object') {
+        undoValue = UNSET
+        return
+      }
+      node = (node as Record<string, unknown>)[op.path[i]]
+    }
+    if (!node || typeof node !== 'object') {
+      undoValue = UNSET
+      return
+    }
+    const leaf = op.path[op.path.length - 1]
+    const holder = node as Record<string, unknown>
+    if (!(leaf in holder)) {
+      undoValue = UNSET
+      return
+    }
+    const prev = holder[leaf]
+    // Deep-copy so a `push`/`patch` mutating in place can still be undone.
+    undoValue =
+      prev && typeof prev === 'object' ? JSON.parse(JSON.stringify(prev)) : prev
+  }
+
   function mutate(op: StatePatchOp): void {
+    captureUndo(op)
+    // Enforce the cap HOST-SIDE, before localApply, so an over-cap write fails
+    // visibly and atomically: the flow throws, and its local copy still matches
+    // what the server has.
+    //
+    // The server cannot be the enforcement point. applyStatePatch drops a batch
+    // without advancing flowStateRev, so the producer's NEXT batch is strictly
+    // greater and applies on top of the hole — ops 5-8 landing while 1-4 are
+    // gone — while the host, having already applied the dropped ops locally,
+    // reasons over state the server does not have. Silent divergence is a worse
+    // failure than a thrown write.
+    const projected = JSON.stringify({ ...stateCopy })
+    if (projected.length > STATE_MAX_BYTES) {
+      throw new Error(
+        `flow state exceeds ${STATE_MAX_BYTES} bytes (${projected.length}); ` +
+          `put bulk data in ctx.scratch or an artifact`,
+      )
+    }
     localApply(op)
+    // Re-check after applying: the projection above is the pre-write size, so a
+    // single huge value would otherwise slip through once.
+    const after = JSON.stringify(stateCopy)
+    if (after.length > STATE_MAX_BYTES) {
+      // Undo, so the local copy still matches what the server will have.
+      undoLocal(op, stateCopy)
+      throw new Error(
+        `flow state would exceed ${STATE_MAX_BYTES} bytes (${after.length}); ` +
+          `put bulk data in ctx.scratch or an artifact`,
+      )
+    }
     pushOp(op)
   }
 
@@ -477,6 +610,16 @@ export function createCtxRuntime(
     delete: (path) => mutate({ op: 'delete', path }),
     push: (path, value) => mutate({ op: 'push', path, value }),
     patch: (path, value) => mutate({ op: 'patch', path, value }),
+    // "Make my writes durable now." Exists because a flow-authored helper (the
+    // open-PR flow's setPhase) has to be able to get a phase write onto the
+    // wire before an orchestration call that mutates the task — and state
+    // batches lazily, with the only mid-turn flush being a ctx.spawn drain. A
+    // flow in an ask-only phase never spawns a child, so without this nothing
+    // flushes until the turn ends, and a kill mid-call loses the write.
+    //
+    // Chosen over adding a `phase` key to IMMEDIATE_KEYS, which would put one
+    // flow's vocabulary into generic runtime code.
+    flush: () => flushState(),
   }
 
   // ── Emission API ─────────────────────────────────────────────────────────
@@ -685,6 +828,153 @@ export function createCtxRuntime(
     )
   }
 
+  // ── Orchestration over the public task API ───────────────────────────────
+  // The host reaches the server the same way the in-task `lander` CLI does:
+  // HTTP with the task's own token, which rides in on start-run's env. The
+  // daemon already fetches over this env every turn, so the path is proven.
+  //
+  // Request shapes are copied from bin/lander's makeLander, which is not
+  // importable (it lives inside the CLI executable).
+  const api = start.env.LANDER_API
+  const apiProject = start.env.LANDER_PROJECT
+  const apiTask = start.env.LANDER_TASK
+  const apiToken = start.env.LANDER_TOKEN
+
+  async function apiCall(
+    path: string,
+    init?: { method?: string; body?: unknown },
+  ): Promise<unknown> {
+    if (!api) throw new Error('ctx: LANDER_API is unset; no server to call')
+    // BOTH buffers, before every call. This is correctness, not hygiene.
+    //
+    // ctx.emit and ctx.state batch lazily — the only mid-turn flush is a
+    // ctx.spawn drain — while an orchestration call mutates the task
+    // IMMEDIATELY. A flow in an ask-only phase never spawns a child, so without
+    // this an interrupt after (say) ctx.wedge leaves the user looking at a
+    // wedge with buttons above an EMPTY ride, and the flow's phase write lost.
+    // The emission loss is the worse of the two: re-entry lands in the next
+    // phase and never re-emits.
+    //
+    // Precisely what this buys: bytes on the host's stdout, which the daemon
+    // forwards and the server applies asynchronously through the run channel,
+    // while this fetch mutates the task file directly. So it is "on the wire,
+    // not applied" — enough that nothing is lost to a SIGKILL, but NOT an
+    // ordering guarantee between the emitted items and the ask this creates.
+    // Don't build anything that depends on that ordering.
+    flush()
+    flushState()
+    const res = await fetch(`${api}/api/${apiProject}${path}`, {
+      method: init?.method ?? 'GET',
+      headers: {
+        'content-type': 'application/json',
+        ...(apiTask ? { 'x-lander-task': apiTask } : {}),
+        ...(apiProject ? { 'x-lander-project': apiProject } : {}),
+        ...(apiToken ? { 'x-lander-token': apiToken } : {}),
+      },
+      ...(init?.body !== undefined
+        ? { body: JSON.stringify(init.body) }
+        : {}),
+    })
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>
+    // Thrown, never process.exit — the v1 contract. runFlowTurn turns a
+    // rejection into a `done { exitCode: 1 }`, so a failed call settles the
+    // ride instead of stranding the host.
+    if (!res.ok)
+      throw new Error(
+        typeof body.error === 'string'
+          ? body.error
+          : `${res.status} ${res.statusText}`,
+      )
+    return body
+  }
+
+  // Publish an artifact. The route takes MULTIPART, not JSON — `parseBody()`
+  // with a `file` part — so this can't go through apiCall. Mirrors bin/lander's
+  // putArtifact: the blob's filename is the slot name, with an explicit `name`
+  // field only when overriding it.
+  async function putArtifact(name: string, content: string): Promise<unknown> {
+    if (!api) throw new Error('ctx: LANDER_API is unset; no server to call')
+    flush()
+    flushState()
+    const fd = new FormData()
+    fd.append('file', new Blob([content], { type: guessArtifactMime(name) }), name)
+    fd.append('name', name)
+    const res = await fetch(`${api}/api/${apiProject}/tasks/${apiTask}/artifacts`, {
+      method: 'POST',
+      headers: {
+        ...(apiTask ? { 'x-lander-task': apiTask } : {}),
+        ...(apiProject ? { 'x-lander-project': apiProject } : {}),
+        ...(apiToken ? { 'x-lander-token': apiToken } : {}),
+      },
+      body: fd,
+    })
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>
+    if (!res.ok)
+      throw new Error(
+        typeof body.error === 'string'
+          ? body.error
+          : `${res.status} ${res.statusText}`,
+      )
+    return body.artifact
+  }
+
+  // The blob, as text. The GET returns raw bytes rather than JSON, so this also
+  // bypasses apiCall.
+  async function catArtifact(name: string): Promise<string> {
+    if (!api) throw new Error('ctx: LANDER_API is unset; no server to call')
+    flush()
+    flushState()
+    const res = await fetch(
+      `${api}/api/${apiProject}/tasks/${apiTask}/artifacts/${encodeURIComponent(name)}`,
+      {
+        headers: {
+          ...(apiTask ? { 'x-lander-task': apiTask } : {}),
+          ...(apiProject ? { 'x-lander-project': apiProject } : {}),
+          ...(apiToken ? { 'x-lander-token': apiToken } : {}),
+        },
+      },
+    )
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as Record<string, unknown>
+      throw new Error(
+        typeof body.error === 'string'
+          ? body.error
+          : `${res.status} ${res.statusText}`,
+      )
+    }
+    return res.text()
+  }
+
+  // Raise an ask. `blocking: 'task'` wedges the task (the user must answer
+  // before it rides again); 'none' is advisory and leaves it resting. Returns
+  // the created ask, so a caller could hold its id — though the open-PR flow
+  // deliberately reads its ask back from the item log instead, since the id
+  // does not exist until this resolves.
+  async function raiseAsk(
+    options: { id: string; label: string; detail?: string }[] | undefined,
+    blocking: 'task' | 'none',
+    prompt?: string,
+  ): Promise<unknown> {
+    if (!options?.length) {
+      // A bare wedge with no options is just a status change.
+      if (blocking === 'task')
+        return apiCall(`/tasks/${apiTask}`, {
+          method: 'PATCH',
+          body: { status: 'wedged' },
+        })
+      throw new Error('ctx.ask requires at least one option')
+    }
+    const body = (await apiCall(`/tasks/${apiTask}/asks`, {
+      method: 'POST',
+      body: {
+        ...(prompt ? { prompt } : {}),
+        form: { type: 'choice', options },
+        blocking,
+      },
+    })) as { ask?: unknown }
+    return body.ask ?? body
+  }
+
   const ctx: Ctx = {
     turn: {
       prompts: [start.prompt],
@@ -732,17 +1022,42 @@ export function createCtxRuntime(
       },
     },
     artifacts: {
-      put: notImplemented('artifacts.put'),
-      list: notImplemented('artifacts.list'),
-      cat: notImplemented('artifacts.cat'),
+      put: putArtifact,
+      list: async () =>
+        ((await apiCall(`/tasks/${apiTask}/artifacts`)) as {
+          artifacts?: unknown
+        }).artifacts ?? [],
+      cat: catArtifact,
     },
-    ask: notImplemented('ask'),
-    wedge: notImplemented('wedge'),
-    launch: notImplemented('launch'),
+    ask: (opts) => raiseAsk(opts?.options, 'none', opts?.prompt),
+    wedge: (opts) => raiseAsk(opts?.options, 'task', opts?.prompt),
+    launch: (message, opts) =>
+      apiCall('/tasks', {
+        method: 'POST',
+        body: {
+          message,
+          ...(opts?.title ? { title: opts.title } : {}),
+          ...(opts?.flow ? { flow: opts.flow } : {}),
+          ...(opts?.config ? { flowConfig: opts.config } : {}),
+          allowEdits: !!opts?.edits,
+        },
+      }),
     send: notImplemented('send'),
-    view: notImplemented('view'),
+    // Reads a task through the public API — including this one, which is how a
+    // flow reads back its own answered ask (publicTask passes `items` through
+    // untouched, and an AskItem carries state/answer).
+    view: (id) => apiCall(`/tasks/${id ?? apiTask}`),
     list: notImplemented('list'),
-    rest: notImplemented('rest'),
+    rest: (opts) =>
+      apiCall(`/tasks/${apiTask}/rest`, {
+        method: 'POST',
+        body: {
+          ...(opts?.date ? { date: opts.date } : {}),
+          ...(opts?.time !== undefined ? { time: opts.time } : {}),
+          ...(opts?.await ? { await: opts.await } : {}),
+          ...(opts?.clear ? { clear: true } : {}),
+        },
+      }),
     relaunch: notImplemented('relaunch'),
     land: notImplemented('land'),
     flow: notImplemented('flow'),

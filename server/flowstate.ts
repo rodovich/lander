@@ -85,4 +85,28 @@ export function applyStatePatch(
   const root = (task.flowState ??= {})
   for (const op of ops) applyOp(root, op)
   task.flowStateRev = rev
+
+  // Backstop only. The real cap is enforced HOST-SIDE, at the write (see
+  // STATE_MAX_BYTES in daemon/flows/ctx.ts), because dropping a batch here
+  // would be the worst available outcome: a drop leaves flowStateRev
+  // unadvanced, so the producer's next batch is strictly greater and applies on
+  // top of the hole — while the host, having already applied the dropped ops to
+  // its local copy, reasons over state the server does not have.
+  //
+  // So this applies the batch and complains loudly. Reaching it means a
+  // producer bypassed the host cap, which is a bug worth seeing rather than a
+  // condition to recover from.
+  const size = JSON.stringify(root).length
+  if (size > STATE_WARN_BYTES)
+    console.warn(
+      `flowState is ${size} bytes, over the ${STATE_WARN_BYTES}-byte cap — ` +
+        `a producer bypassed the host-side limit. State belongs in scratch or ` +
+        `artifacts once it is this large.`,
+    )
 }
+
+// Mirrors daemon/flows/ctx.ts's STATE_MAX_BYTES. Duplicated rather than
+// imported for the same reason BOOTSTRAP_FLOWS is a literal: no file under
+// server/ imports from daemon/, and doing so would drag the daemon tree into
+// the API server's watch graph.
+const STATE_WARN_BYTES = 64 * 1024

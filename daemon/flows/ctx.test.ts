@@ -3,7 +3,12 @@ import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import { describe, expect, it, vi } from 'vitest'
 import type { StartRunMessage } from '../../server/protocol'
 import type { HostEvent, HostInput } from '../run-agent'
-import { createCtxRuntime, type Ctx, type TurnResult } from './ctx'
+import {
+  createCtxRuntime,
+  STATE_MAX_BYTES,
+  type Ctx,
+  type TurnResult,
+} from './ctx'
 
 class FakeChild extends EventEmitter {
   stdout = new EventEmitter()
@@ -566,12 +571,13 @@ describe('ctx runtime — turn inputs', () => {
 })
 
 describe('ctx runtime — reserved v1 surface', () => {
-  it('throws rather than silently no-oping on unimplemented methods', async () => {
+  it('throws rather than silently no-oping on still-unimplemented methods', async () => {
     const h = harness()
     await runFlow(h, async (ctx) => {
-      await expect(ctx.ask({})).rejects.toThrow('not implemented')
-      await expect(ctx.rest()).rejects.toThrow('not implemented')
-      await expect(ctx.artifacts.list()).rejects.toThrow('not implemented')
+      await expect(ctx.send()).rejects.toThrow('not implemented')
+      await expect(ctx.list()).rejects.toThrow('not implemented')
+      await expect(ctx.relaunch()).rejects.toThrow('not implemented')
+      await expect(ctx.assist()).rejects.toThrow('not implemented')
       expect(() => ctx.telemetry.set([])).toThrow('not implemented')
       return { exitCode: 0 }
     })
@@ -584,6 +590,232 @@ describe('ctx runtime — reserved v1 surface', () => {
       // at ride end), and assuming cold is always correct.
       expect(ctx.scratch.fresh).toBe(false)
       expect(typeof ctx.scratch.dir).toBe('string')
+      return { exitCode: 0 }
+    })
+  })
+})
+
+describe('ctx runtime — orchestration', () => {
+  const API = 'http://api.test'
+  const withApi = () =>
+    harness(
+      makeInput({
+        env: {
+          LANDER_API: API,
+          LANDER_PROJECT: 'proj',
+          LANDER_TASK: 'task-1',
+          LANDER_TOKEN: 'tok',
+        },
+      }),
+    )
+
+  // Capture requests and answer them, standing in for the server.
+  function fakeFetch(reply: unknown = { ok: true }) {
+    const calls: { url: string; method: string; body: unknown }[] = []
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({
+        url,
+        method: init?.method ?? 'GET',
+        body:
+          typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body,
+      })
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => reply,
+        text: async () => JSON.stringify(reply),
+      } as Response
+    })
+    vi.stubGlobal('fetch', fn)
+    return calls
+  }
+
+  it('flushes BOTH buffers before an orchestration call', async () => {
+    // The correctness rule, not hygiene. emit and state batch lazily and the
+    // only mid-turn flush is a ctx.spawn drain — so a flow in an ask-only phase
+    // that is killed after ctx.wedge would otherwise leave the user staring at
+    // a wedge with buttons above an EMPTY ride, with its phase write lost.
+    const h = withApi()
+    const calls = fakeFetch({ ask: { id: 'ask-1' } })
+    try {
+      await runFlow(h, async (ctx) => {
+        ctx.emit.message('collected the diff')
+        ctx.state.set(['phase'], 'awaiting-approval')
+        // Nothing on the wire yet — no spawn has drained.
+        expect(updates(h.events)).toHaveLength(0)
+        expect(patches(h.events)).toHaveLength(0)
+
+        await ctx.wedge({ options: [{ id: 'go', label: 'Open PR' }] })
+
+        // Both are out, and they were out BEFORE the request went.
+        expect(updates(h.events).length).toBeGreaterThan(0)
+        expect(patches(h.events)).toHaveLength(1)
+        expect(patches(h.events)[0].ops[0]).toMatchObject({
+          op: 'set',
+          path: ['phase'],
+          value: 'awaiting-approval',
+        })
+        expect(calls).toHaveLength(1)
+        return { exitCode: 0 }
+      })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('raises a task-blocking wedge and an advisory ask on the same route', async () => {
+    const h = withApi()
+    const calls = fakeFetch({ ask: { id: 'ask-1' } })
+    try {
+      await runFlow(h, async (ctx) => {
+        await ctx.wedge({ options: [{ id: 'go', label: 'Go' }] })
+        await ctx.ask({ options: [{ id: 'keep', label: 'Keep watching' }] })
+        return { exitCode: 0 }
+      })
+      expect(calls[0].url).toBe(`${API}/api/proj/tasks/task-1/asks`)
+      expect(calls[0].body).toMatchObject({ blocking: 'task' })
+      expect(calls[1].body).toMatchObject({ blocking: 'none' })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('returns the created ask so a caller can hold its id', async () => {
+    const h = withApi()
+    fakeFetch({ ask: { id: 'ask-42' } })
+    try {
+      await runFlow(h, async (ctx) => {
+        const ask = await ctx.wedge({ options: [{ id: 'g', label: 'Go' }] })
+        expect(ask).toMatchObject({ id: 'ask-42' })
+        return { exitCode: 0 }
+      })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('reads a task through view, defaulting to its own', async () => {
+    const h = withApi()
+    const calls = fakeFetch({ id: 'task-1', items: [] })
+    try {
+      await runFlow(h, async (ctx) => {
+        await ctx.view()
+        await ctx.view('other-task')
+        return { exitCode: 0 }
+      })
+      expect(calls[0].url).toBe(`${API}/api/proj/tasks/task-1`)
+      expect(calls[1].url).toBe(`${API}/api/proj/tasks/other-task`)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('posts rest triggers and launches siblings with a flow and config', async () => {
+    const h = withApi()
+    const calls = fakeFetch({ id: 'sibling-1' })
+    try {
+      await runFlow(h, async (ctx) => {
+        await ctx.rest({ time: 5 })
+        await ctx.launch('fix the build', {
+          flow: 'claude',
+          config: { pr: 12 },
+          edits: true,
+        })
+        return { exitCode: 0 }
+      })
+      expect(calls[0].url).toBe(`${API}/api/proj/tasks/task-1/rest`)
+      expect(calls[0].body).toMatchObject({ time: 5 })
+      expect(calls[1].body).toMatchObject({
+        message: 'fix the build',
+        flow: 'claude',
+        flowConfig: { pr: 12 },
+        allowEdits: true,
+      })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('throws on a failed call, and the turn settles as a failed done', async () => {
+    // The v1 contract: errors are thrown, not process.exit — so a driver can
+    // handle failure, and an unhandled one still settles the ride rather than
+    // stranding the host.
+    const h = withApi()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 403,
+        statusText: 'Forbidden',
+        json: async () => ({ error: 'only the task itself may raise its asks' }),
+      })) as unknown as typeof fetch,
+    )
+    try {
+      await runFlow(h, async (ctx) => {
+        await ctx.wedge({ options: [{ id: 'g', label: 'Go' }] })
+        return { exitCode: 0 }
+      })
+      const done = h.events.find((e) => e.kind === 'done')
+      expect(done).toMatchObject({ exitCode: 1 })
+      expect(JSON.stringify(done)).toContain('only the task itself')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+})
+
+describe('ctx runtime — durable state size cap', () => {
+  it('throws at the write rather than letting the server drop a batch', async () => {
+    // Enforcement must be host-side. applyStatePatch drops an over-cap batch
+    // WITHOUT advancing flowStateRev, so the producer's next batch is strictly
+    // greater and applies on top of the hole — while the host, having applied
+    // the dropped ops locally, reasons over state the server never got.
+    const h = harness()
+    await runFlow(h, async (ctx) => {
+      expect(() => ctx.state.set(['blob'], 'x'.repeat(STATE_MAX_BYTES + 1))).toThrow(
+        /exceed/,
+      )
+      return { exitCode: 0 }
+    })
+  })
+
+  it('leaves the local copy matching the server after a rejected write', async () => {
+    // The whole point of failing atomically: if the local copy kept the
+    // rejected value, the flow would reason over state the server never has.
+    const h = harness()
+    await runFlow(h, async (ctx) => {
+      ctx.state.set(['phase'], 'collect')
+      expect(() => ctx.state.set(['blob'], 'x'.repeat(STATE_MAX_BYTES + 1))).toThrow()
+      expect(ctx.state.get(['blob'])).toBeUndefined()
+      expect(ctx.state.get(['phase'])).toBe('collect')
+      return { exitCode: 0 }
+    })
+    // And nothing over-cap reached the wire.
+    for (const p of patches(h.events))
+      expect(JSON.stringify(p).length).toBeLessThan(STATE_MAX_BYTES + 1000)
+  })
+
+  it('allows writes up to the cap', async () => {
+    const h = harness()
+    await runFlow(h, async (ctx) => {
+      ctx.state.set(['blob'], 'x'.repeat(1000))
+      expect(String(ctx.state.get(['blob'])).length).toBe(1000)
+      return { exitCode: 0 }
+    })
+  })
+
+  it('flush() puts a pending write on the wire without a spawn drain', async () => {
+    // What a flow-authored setPhase() helper needs: state batches lazily and
+    // the only mid-turn flush is a ctx.spawn drain, so a flow that never spawns
+    // has no other way to make a phase write durable before a transition.
+    const h = harness()
+    await runFlow(h, async (ctx) => {
+      ctx.state.set(['phase'], 'push')
+      expect(patches(h.events)).toHaveLength(0)
+      ctx.state.flush()
+      expect(patches(h.events)).toHaveLength(1)
+      expect(patches(h.events)[0].ops[0]).toMatchObject({ path: ['phase'] })
       return { exitCode: 0 }
     })
   })
