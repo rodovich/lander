@@ -43,6 +43,8 @@ export const meta: FlowMeta = {
     grants: { task: true, project: true },
     usageSnapshot: true,
     rateLimitRetry: true,
+    // Claude's result event carries the turn's dollar cost.
+    reportsCost: true,
   },
   inputs: {},
 }

@@ -30,7 +30,7 @@
 import { spawn as nodeSpawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import type { ChildProcess } from 'node:child_process'
-import type { StatePatchOp } from '../../server/protocol'
+import type { FlowMeta, StatePatchOp } from '../../server/protocol'
 import type { Step, Usage } from '../../server/stream'
 import type { HostEvent, HostInput, SpawnLike } from '../run-agent'
 
@@ -273,23 +273,10 @@ export type FlowModule = {
   resolveLaunchDir?(input: unknown): unknown
 }
 
-export type FlowMeta = {
-  api: number
-  name: string
-  description: string
-  driver: boolean
-  capabilities: {
-    worktrees: boolean
-    vision: 'read' | 'flag'
-    grants: { task: boolean; project: boolean }
-    usageSnapshot: boolean
-    rateLimitRetry: boolean
-  }
-  inputs?: Record<string, unknown>
-  // The human-facing reason a project-scope grant is refused, for a flow whose
-  // capabilities.grants.project is false.
-  projectGrantsUnsupportedReason?: string
-}
+// FlowMeta lives in server/protocol.ts — the shared contract module — because the
+// server caches and serves it (the flow registry) as well as the daemon building
+// it. Re-exported here so flow modules keep importing it from their own tree.
+export type { FlowMeta }
 
 // ── The runtime ────────────────────────────────────────────────────────────
 

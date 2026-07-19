@@ -2,12 +2,17 @@
 // answers it. This is the cutover's hinge: flipping a provider changes where
 // these answers come from, and nothing else in the daemon should notice.
 
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { createClaudeAdapter } from '../claude'
 import { createCodexAdapter } from '../codex'
 import { LIVE_FLOWS, providerCaps } from './index'
 import { meta as claudeMeta } from './claude'
 import { meta as codexMeta } from './codex'
+
+const HERE = path.dirname(fileURLToPath(import.meta.url))
 
 function adapters() {
   return {
@@ -76,6 +81,28 @@ describe('provider caps', () => {
     ).toEqual(
       a.codex.resolveLaunchDir({ root: '/repo', recordedCwd: '/repo/sub', isDir }),
     )
+  })
+
+  it('declares rateLimitRetry iff the flow actually emits a reset timestamp', () => {
+    // The capability is advisory — nothing gates on it, because the
+    // scheduled-retry option gates on the *datum* (`resetsAt` present in the
+    // ask), which only a flow with the capability can produce. This is the one
+    // cheap check that keeps the two from disagreeing.
+    //
+    // Asserted against the module's source text rather than a runtime probe:
+    // "can this flow's meter path emit rateLimitResetsAt" is a property over the
+    // whole input space, so any probe would be a hand-picked sample mirroring
+    // the implementation instead of constraining it. Source text is crude but
+    // genuinely falsifiable in both directions — adding the emission to codex,
+    // or removing it from claude, fails this without a meta change.
+    for (const [file, meta] of [
+      ['claude.ts', claudeMeta],
+      ['codex.ts', codexMeta],
+    ] as const) {
+      const src = readFileSync(path.join(HERE, file), 'utf8')
+      const emits = /emit\.meter\(\{[^}]*rateLimitResetsAt/s.test(src)
+      expect(emits).toBe(meta.capabilities.rateLimitRetry)
+    }
   })
 
   it('carries the unsupported-grant reason for a provider that cannot persist one', () => {

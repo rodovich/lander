@@ -260,6 +260,28 @@ export type TelemetryItem =
       note?: string
     }
 
+// What a driver flow announces about itself, as GET /api/:project/flows serves
+// it. Mirrors server/protocol.ts's FlowMeta by hand, like TelemetryItem above.
+// The picker renders `name`/`description`; the capability flags reach the client
+// per-task via publicTask's `grants`/`reportsCost` rather than being read off
+// this directly.
+export type FlowMeta = {
+  api: number
+  name: string
+  description: string
+  driver: boolean
+  capabilities: {
+    worktrees: boolean
+    vision: 'read' | 'flag'
+    grants: { task: boolean; project: boolean }
+    usageSnapshot: boolean
+    rateLimitRetry: boolean
+    reportsCost: boolean
+  }
+  inputs?: Record<string, unknown>
+  projectGrantsUnsupportedReason?: string
+}
+
 // The list's time window: tasks updated today, this week (from Sunday), before
 // this week ('older', same Sunday cutoff), or with no bound. 'today'/'week'/
 // 'older' also surface in the dropdown title.

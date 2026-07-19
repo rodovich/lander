@@ -35,6 +35,54 @@ export type TelemetryItem =
       note?: string
     }
 
+// What a driver flow announces about itself. Lives here rather than under
+// daemon/ because both sides read it now: the daemon builds it from its bundled
+// flow modules, and the server caches it, serves it to the picker, and derives
+// per-task capability flags from it. Mirrors the client copy in src/types.ts
+// (kept in sync by hand, like TelemetryItem above).
+//
+// `capabilities` is the announced replacement for the compiled-in adapter
+// booleans. Two of them are advisory at step 4 and deliberately have no
+// consumer — see docs/flow-inversion.md's step-4 as-built notes:
+//   - `worktrees` documents whether a flow can launch into a worktree, but the
+//     mechanics live in the flow's own resolveLaunchDir and the UI derives the
+//     worktree name from cwd, so there is no affordance to gate.
+//   - `rateLimitRetry` documents whether a flow can supply a reset timestamp,
+//     but the scheduled-retry option already gates on the *datum* (`resetsAt`
+//     present), which only such a flow can produce.
+export type FlowMeta = {
+  api: number
+  name: string
+  description: string
+  driver: boolean
+  capabilities: {
+    worktrees: boolean
+    vision: 'read' | 'flag'
+    grants: { task: boolean; project: boolean }
+    usageSnapshot: boolean
+    rateLimitRetry: boolean
+    // Whether this flow reports a per-turn dollar cost. The task footer reads
+    // this instead of branching on the agent name.
+    reportsCost: boolean
+  }
+  inputs?: Record<string, unknown>
+  // The human-facing reason a project-scope grant is refused, for a flow whose
+  // capabilities.grants.project is false.
+  projectGrantsUnsupportedReason?: string
+}
+
+// One entry in a daemon's flow announcement. The scope/project envelope ships
+// now even though step 4 announces only bundled flows: flow-inversion.md commits
+// to resolution precedence bundled → user (~/.lander/flows) → project
+// (data/<proj>/flows), so a flat FlowMeta[] would need a second wire change one
+// step later. The scope filter is consequently unexercised until step 5.
+export type FlowAnnouncement = {
+  scope: 'bundled' | 'user' | 'project'
+  // The project slug, when scope === 'project'.
+  project?: string
+  meta: FlowMeta
+}
+
 // ── Server → daemon ────────────────────────────────────────────────────────
 
 // A message attachment as it crosses to the daemon: refs only — id/name/mime/size,
