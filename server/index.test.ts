@@ -1408,3 +1408,195 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     expect(settled.prompt).toBe(KILL_PROMPT)
   }, 30_000)
 })
+
+// C6's dispatch gate, end to end over a real attachDaemonServer. The invariant:
+// a task is never dispatched to a daemon that hasn't announced its flow. The
+// failure it prevents is the silent one — a task whose flow the daemon lacks
+// running as claude and executing the prompt anyway.
+describe('flow dispatch gate', () => {
+  let http: Server
+  let ws: WebSocket
+  const received: Record<string, unknown>[] = []
+
+  const waitFor = async (pred: () => boolean, ms = 3000): Promise<void> => {
+    const start = Date.now()
+    while (Date.now() - start < ms) {
+      if (pred()) return
+      await new Promise((r) => setTimeout(r, 10))
+    }
+    throw new Error('waitFor timed out')
+  }
+  const readRaw = async (id: string): Promise<Record<string, unknown>> =>
+    JSON.parse(await readFile(path.join(tasksDir, `${id}.json`), 'utf8'))
+  const waitForRaw = async (
+    id: string,
+    pred: (raw: Record<string, unknown>) => boolean,
+    ms = 5000,
+  ): Promise<Record<string, unknown>> => {
+    const start = Date.now()
+    let last: Record<string, unknown> | undefined
+    while (Date.now() - start < ms) {
+      last = await readRaw(id)
+      if (pred(last)) return last
+      await new Promise((r) => setTimeout(r, 10))
+    }
+    throw new Error(`waitForRaw timed out; last status=${String(last?.status)}`)
+  }
+
+  async function seed(id: string, fields: Record<string, unknown>): Promise<void> {
+    await writeFile(
+      path.join(tasksDir, `${id}.json`),
+      JSON.stringify({
+        id,
+        title: 'Gate task',
+        status: 'resting',
+        createdAt: AT,
+        updatedAt: AT,
+        allowEdits: false,
+        shape: 2,
+        items: [],
+        rides: [],
+        ...fields,
+      }),
+    )
+  }
+
+  // Announce exactly `flows`, so the gate has something real to disagree with.
+  async function connect(flows: string[]): Promise<void> {
+    const port = (http.address() as AddressInfo).port
+    ws = new WebSocket(`ws://localhost:${port}/daemon?token=${UI_TOKEN}`)
+    await new Promise<void>((resolve, reject) => {
+      ws.on('error', reject)
+      ws.on('open', () => resolve())
+    })
+    ws.on('message', (d) => received.push(JSON.parse(d.toString())))
+    ws.send(
+      JSON.stringify({
+        type: 'register',
+        projects: [{ slug }],
+        draining: false,
+        runs: [],
+        flows: flows.map((name) => ({
+          scope: 'bundled',
+          meta: {
+            api: 1,
+            name,
+            description: name,
+            driver: true,
+            capabilities: {
+              worktrees: false,
+              vision: 'read',
+              grants: { task: false, project: false },
+              usageSnapshot: false,
+              rateLimitRetry: false,
+              reportsCost: false,
+            },
+          },
+        })),
+      }),
+    )
+    await waitFor(() => daemonServes(slug))
+  }
+
+  beforeAll(async () => {
+    // Created lazily by task creation elsewhere in this file, so seed() alone
+    // can't rely on it (notably when this describe runs under a -t filter).
+    await mkdir(tasksDir, { recursive: true })
+    http = createServer()
+    attachDaemonServer(http, { token: UI_TOKEN })
+    await new Promise<void>((r) => http.listen(0, r))
+  })
+
+  afterAll(async () => {
+    ws?.close()
+    await new Promise<void>((r) => http.close(() => r()))
+  })
+
+  // Run channels are module state shared by every suite in this file, and an
+  // open one with no live owner keeps the reconnect-grace timer armed — see the
+  // note on the platform-kill suite's afterEach.
+  afterEach(() => {
+    for (const m of received)
+      if (m.type === 'start-run' && m.runId) closeRunChannel(String(m.runId))
+    received.length = 0
+  })
+
+  // Other suites in this file share the server process and can be driving their
+  // own tasks, so every assertion here is scoped to OUR taskId.
+  const startRunFor = (id: string): Record<string, unknown> | undefined =>
+    received.find((m) => m.type === 'start-run' && m.taskId === id)
+
+  it('wedges a task whose flow the daemon never announced', async () => {
+    await connect(['claude', 'codex'])
+    const id = 'gate-unknown'
+    await seed(id, { flow: 'open-pr' })
+
+    expect(
+      (await post(`/api/${slug}/tasks/${id}/messages`, { message: 'go' })).status,
+    ).toBe(200)
+
+    const raw = await waitForRaw(id, (r) => r.status === 'wedged')
+    // It wedged with a named cause rather than running as something else.
+    expect(JSON.stringify(raw.items)).toContain("no connected daemon provides the flow 'open-pr'")
+    // And crucially: nothing was dispatched for this task.
+    expect(startRunFor(id)).toBeUndefined()
+    ws.close()
+    await waitFor(() => !daemonConnected())
+  }, 20_000)
+
+  it('dispatches an announced non-legacy flow with `flow` and no `agent`', async () => {
+    await connect(['claude', 'codex', 'open-pr'])
+    const id = 'gate-announced'
+    await seed(id, { flow: 'open-pr', flowConfig: { dryRun: true } })
+
+    expect(
+      (await post(`/api/${slug}/tasks/${id}/messages`, { message: 'go' })).status,
+    ).toBe(200)
+
+    await waitFor(() => !!startRunFor(id))
+    const start = startRunFor(id)!
+    expect(start.flow).toBe('open-pr')
+    // No `agent`: an old daemon must not be able to read this as a claude run.
+    expect(start.agent).toBeUndefined()
+    expect(start.flowConfig).toEqual({ dryRun: true })
+    ws.close()
+    await waitFor(() => !daemonConnected())
+  }, 20_000)
+
+  it('still sends `agent` alongside `flow` for a legacy task', async () => {
+    // The compatibility half: a daemon that predates `flow` reads `agent` and
+    // keeps driving claude and codex.
+    await connect(['claude', 'codex'])
+    const id = 'gate-legacy'
+    await seed(id, { agent: 'codex' })
+
+    expect(
+      (await post(`/api/${slug}/tasks/${id}/messages`, { message: 'go' })).status,
+    ).toBe(200)
+
+    await waitFor(() => !!startRunFor(id))
+    const start = startRunFor(id)!
+    expect(start.agent).toBe('codex')
+    expect(start.flow).toBe('codex')
+    ws.close()
+    await waitFor(() => !daemonConnected())
+  }, 20_000)
+
+  it('dispatches a legacy flow even when the daemon announced nothing', async () => {
+    // The rolled-back-daemon case. Bootstrap entries bypass the gate precisely
+    // because start-run carries `agent` for them, so an old daemon can drive
+    // them — wedging here would be a regression, not safety.
+    await connect([])
+    const id = 'gate-legacy-noannounce'
+    await seed(id, { agent: 'claude' })
+
+    expect(
+      (await post(`/api/${slug}/tasks/${id}/messages`, { message: 'go' })).status,
+    ).toBe(200)
+
+    await waitFor(() => !!startRunFor(id))
+    expect(startRunFor(id)!.agent).toBe('claude')
+    ws.close()
+    await waitFor(() => !daemonConnected())
+  }, 20_000)
+})

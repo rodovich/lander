@@ -235,6 +235,7 @@ describe('daemon transport handoff', () => {
     const result = requestProjectGrant({
       project: 'proj',
       agent: 'codex',
+      flow: 'codex',
       rule: 'Bash(npm test)',
       timeoutMs: 1000,
     })

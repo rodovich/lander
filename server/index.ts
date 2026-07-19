@@ -38,6 +38,7 @@ import {
 import { parseProjects, type Project } from './projects'
 import {
   publicTask,
+  taskFlow,
   agentGrantCaps,
   latestUpdateAt,
   recordStatusTransition,
@@ -97,7 +98,7 @@ import {
   type Ask,
   type AskForm,
 } from './asks'
-import { flowRegistry } from './flows'
+import { flowCaps, flowRegistry, isAnnouncedFlow } from './flows'
 
 const execFileAsync = promisify(execFile)
 
@@ -493,7 +494,14 @@ async function runTurn(
   // The token the in-task `lander` CLI sends back to authenticate as this task.
   // Backfilled for tasks created before tokens existed.
   const token = task.token ?? randomUUID()
-  const agent = task.agent ?? LEGACY_AGENT
+  // The flow to drive this turn, derived from the FLOW NAME — never from
+  // task.agent, which backfillAgents may have stamped on a legacy task.
+  const flow = taskFlow(task)
+  // `agent` rides along only when the flow IS a legacy kind, so a daemon built
+  // before `flow` existed keeps driving claude and codex. Omitting it for every
+  // other flow is what stops such a daemon from silently running an unknown
+  // flow as claude — it will report `unsupported flow` instead.
+  const agent = isAgentKind(flow) ? flow : undefined
   const landerEnv = {
     PATH: `${LANDER_BIN_DIR}:${process.env.PATH ?? ''}`,
     // The base URL the daemon's agent (and the in-task CLI) use to reach this
@@ -538,6 +546,33 @@ async function runTurn(
     return 'crashed'
   }
 
+  // Refuse to dispatch a flow the current primary hasn't announced. A legacy
+  // flow is exempt: it carries `agent`, so even a daemon that announces nothing
+  // (an old one, or one rolled back below this field) can drive it.
+  //
+  // Checked AFTER awaitDaemonServing, so a reconnect blip can't wedge a task
+  // that a moment later would have been fine — by the time we are here a daemon
+  // has registered, and setAnnouncedFlows runs before the slug set that released
+  // us. Failing here is a wedge with a named cause, never a silent run as some
+  // other flow.
+  if (!isAgentKind(flow) && !isAnnouncedFlow(flow)) {
+    await mutateTask(file, (t) => {
+      const at = new Date().toISOString()
+      const text =
+        `error running assistant: no connected daemon provides the flow '${flow}'` +
+        `; available: ${flowRegistry(project.slug).map((f) => f.name).join(', ') || '(none)'}`
+      recordAssistantError(t, text, at)
+      wedgeForRetry(t, {
+        committed: false,
+        askId: nextAskId(t, Date.parse(at)),
+        at,
+        prompt: `The connected daemon does not provide the '${flow}' flow.`,
+      })
+      t.updatedAt = at
+    }).catch(() => {})
+    return 'crashed'
+  }
+
   // Mark riding and record the run before sending, so a crash between here and the
   // first update still leaves a resumable pointer (recoverQueues reattaches via
   // the persisted runId/runCursor). Don't bump updatedAt: the riding flip isn't a
@@ -559,7 +594,11 @@ async function runTurn(
     type: 'start-run',
     runId,
     taskId: id,
-    agent,
+    // Both, deliberately: `flow` is what the daemon reads, `agent` is the
+    // legacy-only fallback for a daemon that predates it (undefined otherwise).
+    ...(agent ? { agent } : {}),
+    flow,
+    ...(task.flowConfig !== undefined ? { flowConfig: task.flowConfig } : {}),
     project: project.slug,
     // cwd hints — the daemon does the stat/fallback/worktree resolution locally.
     recordedCwd: task.cwd,
@@ -2568,13 +2607,17 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
 
     const task = await readTask(project.dataDir, id)
     if (!task) return c.json({ error: 'task not found' }, 404)
-    const grantAgent = task.agent ?? LEGACY_AGENT
+    // Derived from the flow name, like start-run's — and `agent` sent only for
+    // a legacy kind, since there is no legal AgentKind for any other flow.
+    const grantFlow = taskFlow(task)
+    const grantAgent = isAgentKind(grantFlow) ? grantFlow : undefined
 
     let warning: string | undefined
     if (scope === 'project') {
       const result = await requestProjectGrant({
         project: project.slug,
         agent: grantAgent,
+        flow: grantFlow,
         rule,
       })
       if (!result.ok)
@@ -2591,11 +2634,13 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
       } catch {
         return c.json({ error: 'task not found' }, 404)
       }
-      // Key off the single caps map, not the agent name: an adapter that saves
-      // task rules for parity but doesn't honor them (task cap false) gets the
-      // "saved for parity" warning. agentGrantCaps('codex').task === false and
-      // ('claude').task === true, so this is byte-identical today.
-      if (!agentGrantCaps(grantAgent).task) warning = CODEX_TASK_ALLOW_WARNING
+      // Key off the flow's announced capability, not the agent name: a flow
+      // that saves task rules for parity but doesn't honor them (task cap
+      // false) gets the "saved for parity" warning. Byte-identical today —
+      // claude's task cap is true and codex's false, announced and bootstrap
+      // alike — and it is what lets a non-legacy flow, which has no AgentKind
+      // to pass here at all, be answered correctly.
+      if (!flowCaps(grantFlow).grants.task) warning = CODEX_TASK_ALLOW_WARNING
     }
     return c.json({ ok: true, rule, scope, ...(warning ? { warning } : {}) })
   } catch (e) {

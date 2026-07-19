@@ -148,7 +148,10 @@ export type ProjectGrantResponse = {
 
 export function requestProjectGrant(input: {
   project: string
-  agent: AgentKind
+  // Legacy fallback, omitted for a non-legacy flow (there is no AgentKind for
+  // one). The daemon resolves `flow ?? agent`.
+  agent?: AgentKind
+  flow: string
   rule: string
   timeoutMs?: number
 }): Promise<ProjectGrantResponse> {
@@ -168,7 +171,8 @@ export function requestProjectGrant(input: {
       type: 'project-grant',
       requestId,
       project: input.project,
-      agent: input.agent,
+      ...(input.agent ? { agent: input.agent } : {}),
+      flow: input.flow,
       rule: input.rule,
     })
     if (!sent) {
