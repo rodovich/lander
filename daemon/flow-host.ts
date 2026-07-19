@@ -35,7 +35,7 @@ import {
 } from './run-agent'
 import { createCtxRuntime } from './flows/ctx'
 import { createAdapterBridge } from './flows/adapter-bridge'
-import { buildFlows, LIVE_FLOWS, type BundledFlow } from './flows/index'
+import { buildFlows, type BundledFlow } from './flows/index'
 
 // Serialize one neutral event as a JSON line on stdout — the host → daemon wire.
 export function emitLine(event: HostEvent): void {
@@ -51,9 +51,14 @@ export type RunHostDeps = {
   // Injectable so tests run against test-configured adapters; defaults to the real
   // compiled-in claude/codex adapters (proving buildAdapters wires the host).
   adapters?: Partial<Record<AgentKind, AgentAdapter>>
-  // Likewise for the ported flows. A provider in LIVE_FLOWS runs its turn from
-  // here; the rest still run as adapters.
-  flows?: Partial<Record<AgentKind, BundledFlow>>
+  // Likewise for the ported flows. Anything in FLOW_MODULES runs its turn from
+  // here.
+  flows?: Partial<Record<string, BundledFlow>>
+  // TEST SEAM ONLY. When set, selection is restricted to this set, which is the
+  // only way to reach the compiled-adapter path below now that flow selection
+  // isn't gated on a cutover set. adapter-bridge.test.ts passes an empty set to
+  // exercise the bridge, which stays live until step 5 deletes the adapters.
+  // Undefined in production: select whatever FLOW_MODULES holds.
   liveFlows?: ReadonlySet<AgentKind>
 }
 
@@ -62,7 +67,6 @@ export type RunHostDeps = {
 // stdout/stderr), and agent stderr relays to ours. Returns a kill handle covering
 // whichever path drove the turn.
 export function runHost(input: HostInput, deps: RunHostDeps): { kill: () => void } {
-  const liveFlows = deps.liveFlows ?? LIVE_FLOWS
   const runtime = createCtxRuntime(input, {
     emit: deps.emit,
     now: deps.now,
@@ -70,9 +74,17 @@ export function runHost(input: HostInput, deps: RunHostDeps): { kill: () => void
     onStderr: deps.onStderr,
   })
 
-  if (liveFlows.has(input.start.agent)) {
+  // The flow to drive this turn. `flow ?? agent` so a start-run from a server
+  // that predates the field still resolves.
+  const name = input.start.flow ?? input.start.agent
+  // Selection is by FLOW_MODULES membership (via buildFlows), NOT by a cutover
+  // set — a gate keyed on a set of legacy providers could never admit a flow
+  // that has no adapter. `deps.liveFlows`, when injected, restricts selection;
+  // it is a TEST seam only (adapter-bridge.test.ts passes an empty set as the
+  // only way to reach the adapter path below, which is still live until step 5).
+  if (name && (deps.liveFlows?.has(name as AgentKind) ?? true)) {
     const flows = deps.flows ?? buildFlows({ root: ROOT, env: process.env })
-    const flow = flows[input.start.agent]
+    const flow = flows[name]
     if (flow) {
       // runTurn owns the done contract end to end: it awaits onTurn, SIGKILLs
       // anything the flow left running, flushes, and emits the done. Nothing is

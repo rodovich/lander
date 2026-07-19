@@ -120,6 +120,70 @@ function harness() {
   return { events, spawns, stderr, run }
 }
 
+describe('flow host selection', () => {
+  it('drives a flow that has no compiled adapter', async () => {
+    // The other half of C5's adapter-less regression check (the first is in
+    // flows/index.test.ts, over providerCaps). Selection used to be
+    // `LIVE_FLOWS.has(start.agent)` — a set of legacy provider names, which no
+    // adapter-less flow can ever be in, so such a flow fell through to the
+    // adapter path and died on `adapters['open-pr']`. Selection is now
+    // membership in the flow map, keyed off `flow ?? agent`.
+    const events: HostEvent[] = []
+    let sawCtxFlowConfig: unknown
+    const synthetic = {
+      meta: testFlows().codex.meta,
+      onTurn: async (ctx: { task: { flowConfig?: unknown }; emit: { message: (t: string) => void } }) => {
+        sawCtxFlowConfig = ctx.task.flowConfig
+        ctx.emit.message('synthetic flow ran')
+        return { exitCode: 0 }
+      },
+    }
+    runHost(
+      makeInput({
+        // No `agent` at all — exactly what the server sends for a non-legacy
+        // flow, and what an adapter lookup has nothing to key on.
+        agent: undefined,
+        flow: 'synthetic',
+        flowConfig: { dryRun: false, attempts: 3 },
+      }),
+      {
+        emit: (e) => events.push(e),
+        adapters: testAdapters(),
+        flows: { synthetic } as never,
+      },
+    )
+    await settle()
+
+    // It ran as a flow, and its config reached ctx.
+    expect(sawCtxFlowConfig).toEqual({ dryRun: false, attempts: 3 })
+    const done = events.find((e) => e.kind === 'done')
+    expect(done).toMatchObject({ kind: 'done', exitCode: 0 })
+    // And it never fell through to the adapter path, which would have emitted
+    // an `unsupported agent` done instead.
+    expect(JSON.stringify(events)).not.toContain('unsupported')
+  })
+
+  it('resolves the flow name from `agent` when the server sent no `flow`', async () => {
+    // An old server (pre-C6) sends only `agent`. The fallback keeps it driving.
+    const events: HostEvent[] = []
+    runHost(makeInput({ agent: 'codex', flow: undefined }), {
+      emit: (e) => events.push(e),
+      spawn: (() => {
+        const c = new FakeChild()
+        queueMicrotask(() => {
+          c.stdout.emit('end')
+          c.emit('close', 0)
+        })
+        return c as unknown as ChildProcess
+      }) as never,
+      adapters: testAdapters(),
+      flows: testFlows(),
+    })
+    await settle()
+    expect(JSON.stringify(events)).not.toContain('unsupported')
+  })
+})
+
 describe('flow host', () => {
   it('spawns the selected provider binary with provider session args', () => {
     const h = harness()

@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { createClaudeAdapter } from '../claude'
 import { createCodexAdapter } from '../codex'
-import { LIVE_FLOWS, providerCaps } from './index'
+import { FLOW_MODULES, providerCaps } from './index'
+import type { AgentLaunchDirInput } from '../agent'
 import { meta as claudeMeta } from './claude'
 import { meta as codexMeta } from './codex'
 
@@ -37,19 +38,61 @@ describe('provider caps', () => {
     expect(caps.codex.visionNative).toBe(true)
   })
 
-  it('answers a cut-over provider from its flow and the rest from adapters', () => {
+  it('answers every flow from its flow module, agreeing with the adapter oracle', () => {
     const a = adapters()
     const caps = providerCaps(a)
     for (const agent of ['claude', 'codex'] as const) {
-      const live = LIVE_FLOWS.has(agent)
-      // Whichever side answers, the values must agree with the compiled adapter
-      // — the port moved this code verbatim, and during a drain window an old
-      // daemon answers from the adapter while a new one answers from the flow.
-      // Any deliberate divergence has to wait until every provider has flipped.
+      // Every flow is answered from its module now — LIVE_FLOWS is gone as a
+      // gate. The values must still agree with the compiled adapter, because
+      // during a drain window an old daemon answers these from the adapter
+      // while a new one answers from the flow.
       expect(caps[agent].visionNative).toBe(a[agent].attachesImagesToVision)
       expect(caps[agent].usageSnapshot).toBe(a[agent].supportsUsageSnapshot)
       expect(caps[agent].projectGrants).toBe(a[agent].supportsProjectGrants)
-      expect(typeof live).toBe('boolean')
+    }
+  })
+
+  it('enumerates from FLOW_MODULES, so an adapter-less flow gets caps', () => {
+    // The regression this commit exists to prevent. providerCaps used to
+    // enumerate Object.keys(adapters) and then branch through fromAdapter for
+    // anything not in LIVE_FLOWS — two independent reasons a flow with no
+    // compiled adapter was structurally unreachable. C5's live verify uses only
+    // claude and codex and so cannot catch either.
+    const synthetic = {
+      meta: {
+        api: 1,
+        name: 'synthetic',
+        description: 'a flow with no compiled adapter',
+        driver: true,
+        capabilities: {
+          worktrees: false,
+          vision: 'read' as const,
+          grants: { task: false, project: false },
+          usageSnapshot: false,
+          rateLimitRetry: false,
+          reportsCost: false,
+        },
+      },
+      resolveLaunchDir: ({ recordedCwd, root }: AgentLaunchDirInput) => ({
+        cwd: recordedCwd ?? root,
+        reentryArgs: [],
+      }),
+    }
+    FLOW_MODULES.synthetic = synthetic
+    try {
+      const caps = providerCaps(adapters())
+      expect(caps.synthetic).toBeDefined()
+      expect(caps.synthetic.projectGrants).toBe(false)
+      expect(caps.synthetic.visionNative).toBe(false)
+      expect(
+        caps.synthetic.resolveLaunchDir({
+          root: '/repo',
+          recordedCwd: '/repo/sub',
+          isDir: () => true,
+        }),
+      ).toEqual({ cwd: '/repo/sub', reentryArgs: [] })
+    } finally {
+      delete FLOW_MODULES.synthetic
     }
   })
 

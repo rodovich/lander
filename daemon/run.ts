@@ -36,12 +36,21 @@ export type RunManager = {
   resumeFrom: (runId: string, seq: number) => void
   ack: (runId: string) => void
   killChildren: () => void
+  // Settle a run as failed through the settle-once gate — see Run.fail.
+  failRun: (runId: string, stderr: string) => void
   heldRunIds: () => string[]
   size: () => number
 }
 
 type Run = {
   interrupt: () => void
+  // Settle this run as failed THROUGH the settle-once gate, for a synchronous
+  // throw caught outside the run's own machinery. Routing it here rather than
+  // sending a raw done matters: a bare send would settle the ride server-side
+  // while the daemon still held the run, so runsHeld() would never drop and
+  // drain.check() would never fire — pinning a draining daemon to the 12h
+  // supervisor backstop.
+  fail: (stderr: string) => void
   // Kill the executor (the agent child in-process today; the host group later).
   kill: () => void
   buffer: UpdateMessage[]
@@ -65,7 +74,8 @@ export type RunManagerOptions = {
   // where to launch, how images reach vision, whether it owns the usage panel.
   // Answered by a flow or by a compiled adapter — the supervisor is written
   // against the one shape either way, so a cutover never reaches in here.
-  caps: Partial<Record<AgentKind, ProviderCaps>>
+  // Keyed by flow name — an adapter-less flow has no AgentKind to be keyed by.
+  caps: Partial<Record<string, ProviderCaps>>
   resolveRunPaths: (
     msg: StartRunMessage,
     caps: ProviderCaps,
@@ -137,9 +147,14 @@ export function createRunManager({
   }
 
   function startRun(msg: StartRunMessage): void {
-    const known = caps[msg.agent]
+    // `flow ?? agent` so a start-run from a server that predates the field still
+    // resolves. An unknown name settles the run cleanly rather than throwing —
+    // the server's dispatch gate should make this unreachable, but a daemon
+    // rolled back below the flow the task names would land here.
+    const flow = msg.flow ?? msg.agent
+    const known = flow ? caps[flow] : undefined
     if (!known) {
-      done(msg.runId, 1, `unsupported agent: ${msg.agent}`)
+      done(msg.runId, 1, `unsupported flow: ${flow ?? '(none)'}`)
       return
     }
     const activeCaps = known
@@ -362,6 +377,10 @@ export function createRunManager({
         settle({ exitCode: 0, stderr: '', interrupted: true })
         killHost()
       },
+      fail: (stderr: string) => {
+        settle({ exitCode: 1, stderr, interrupted: false })
+        killHost()
+      },
     }
     runs.set(msg.runId, rec)
 
@@ -472,6 +491,14 @@ export function createRunManager({
     resumeFrom,
     ack,
     killChildren,
+    // Settle a run as failed. If the run was never registered (the throw beat
+    // runs.set), there is nothing holding it, so a plain done is correct and
+    // cannot bypass a gate that doesn't exist yet.
+    failRun: (runId: string, stderr: string): void => {
+      const rec = runs.get(runId)
+      if (rec) rec.fail(stderr)
+      else done(runId, 1, stderr)
+    },
     heldRunIds: () => [...runs.keys()],
     size: () => runs.size,
   }

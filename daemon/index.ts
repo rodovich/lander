@@ -271,6 +271,55 @@ function onMessage(raw: string): void {
   } catch {
     return
   }
+  try {
+    handleMessage(msg)
+  } catch (e) {
+    // A synchronous throw in here would otherwise be uncaught inside the WS
+    // message listener, killing the daemon and dropping every run it holds.
+    //
+    // But it must RESPOND, never merely swallow. A bare catch is strictly worse
+    // than the crash it replaces: on a crash the server's drop() releases the
+    // daemon's runs, unownedOpenRuns() finds them, and reconcileGrace() crashes
+    // them after the 15s grace, so each task settles with an error and a retry
+    // ask. Swallowing keeps the daemon connected, so the run stays owned, no
+    // crash-grace fires, and — no host having been spawned — no idle watchdog
+    // exists either: the task sits `riding` with an open ride forever.
+    const err = e instanceof Error ? e.message : String(e)
+    console.error(`daemon: error handling ${msg.type}:`, e)
+    switch (msg.type) {
+      case 'start-run':
+        // Through runManager, so the settle-once gate and the run's release
+        // both happen. See failRun.
+        runManager.failRun(msg.runId, `daemon error: ${err}`)
+        break
+      case 'project-grant':
+        // Otherwise the server's grantRequests entry hangs to its 15s timeout.
+        send({
+          type: 'project-grant-result',
+          requestId: msg.requestId,
+          ok: false,
+          error: `daemon error: ${err}`,
+          status: 500,
+        })
+        break
+      case 'resume-from':
+        // The one case with no server-side timeout: the server is waiting on a
+        // replay that will now never come. Let the run fall to the crash grace
+        // rather than look healthy.
+        console.error(
+          `daemon: resume-from failed for run ${msg.runId}; releasing it to the crash grace`,
+        )
+        runManager.failRun(msg.runId, `daemon error during resume: ${err}`)
+        break
+      case 'interrupt':
+      case 'ack':
+        // Nothing is waiting on a reply for these, but they must not be silent.
+        break
+    }
+  }
+}
+
+function handleMessage(msg: ServerToDaemon): void {
   switch (msg.type) {
     case 'start-run':
       if (drain.draining()) {
@@ -290,18 +339,26 @@ function onMessage(raw: string): void {
       break
     case 'project-grant': {
       const projectPath = pathBySlug.get(msg.project)
-      const caps = CAPS[msg.agent]
+      // Every lookup in this block is keyed by a name that is now `string`, so
+      // each one can miss. They were safe only while AgentKind was a closed
+      // union; an unguarded miss here throws inside the WS message listener,
+      // which is uncaught — killing the daemon and dropping every run it holds.
+      const flowName = msg.flow ?? msg.agent
+      const caps = flowName ? CAPS[flowName] : undefined
       // A project grant arrives outside any run, so there is no host to route it
       // through — the daemon calls the flow's hook in-process, exactly as it
       // called the adapter's method. Bundled flows are compiled-in TypeScript,
       // as trusted as the adapters they replace; third-party installation has to
       // re-decide this boundary before it opens.
-      const onGrant = FLOW_MODULES[msg.agent]?.onGrant
-      const persist = caps.projectGrants
+      const onGrant = flowName ? FLOW_MODULES[flowName]?.onGrant : undefined
+      const persist = caps?.projectGrants
         ? onGrant
           ? (input: { projectPath: string; rule: string }) =>
               onGrant(undefined, input)
-          : ADAPTERS[msg.agent].persistProjectGrant
+          : // Optional-chained: reached when a flow declares projectGrants but
+            // exports no onGrant, which for an adapter-less flow would be
+            // `undefined.persistProjectGrant`.
+            ADAPTERS[flowName as AgentKind]?.persistProjectGrant
         : undefined
       if (!projectPath) {
         send({
@@ -322,9 +379,12 @@ function onMessage(raw: string): void {
           // agent name; codex carries the exact current text, so this is
           // byte-identical. The generic fallback is dead until a third
           // non-granting provider exists.
+          // `caps?` because this is the branch an UNKNOWN flow reaches — it has
+          // no caps at all, making this the likeliest of the four sites to
+          // deref undefined, not the least.
           error:
-            caps.projectGrantsUnsupportedReason ??
-            `Project permission grants are not supported for ${msg.agent} tasks.`,
+            caps?.projectGrantsUnsupportedReason ??
+            `Project permission grants are not supported for ${flowName ?? 'unknown'} tasks.`,
           status: 400,
         })
         break

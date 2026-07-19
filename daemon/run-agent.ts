@@ -121,9 +121,17 @@ export function runAgent(
     onStderr,
   } = deps
 
-  const adapter = adapters[start.agent]
-  if (!adapter) {
-    emit({ kind: 'done', exitCode: 1, stderr: `unsupported agent: ${start.agent}` })
+  // The compiled-adapter path is keyed by AgentKind and always will be — it is
+  // the parity oracle, which only ever runs the two legacy providers. A start-run
+  // that names a flow with no agent simply has no adapter to select.
+  const agent = start.agent
+  const adapter = agent ? adapters[agent] : undefined
+  if (!adapter || !agent) {
+    emit({
+      kind: 'done',
+      exitCode: 1,
+      stderr: `unsupported agent: ${start.agent ?? start.flow ?? '(none)'}`,
+    })
     return { kill: () => {} }
   }
 
@@ -133,7 +141,7 @@ export function runAgent(
   })
   const taskView = {
     ...start.task,
-    agent: start.agent,
+    agent,
     sessionId: start.sessionId,
   }
   // Regenerate the dynamic context block and append it to the outgoing user

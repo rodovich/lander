@@ -132,7 +132,11 @@ export type CtxTask = {
   // The run env (LANDER_API/TOKEN/TASK…). The flow merges this into its child
   // env; ctx.spawn merges the result over process.env.
   env: Record<string, string>
-  // Reserved: meta.inputs is parked until the flow registry lands.
+  // The task's opaque per-flow configuration, set at launch (picker or
+  // `lander launch --flow x --key v`) and echoed on start-run. The server never
+  // interprets it; the flow owns its meaning, including validating it and
+  // failing safe on a value it doesn't recognize. (meta.inputs — a declared
+  // schema the platform would validate — remains parked.)
   flowConfig?: Record<string, unknown>
 }
 
@@ -708,6 +712,11 @@ export function createCtxRuntime(
         ? { worktree: start.task.worktree }
         : {}),
       env: start.env,
+      // The task's opaque per-flow config, echoed by the server from the task
+      // and handed to the flow verbatim. Absent when the task carries none.
+      ...(start.flowConfig !== undefined
+        ? { flowConfig: start.flowConfig }
+        : {}),
     },
     now,
     emit,

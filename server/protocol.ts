@@ -104,10 +104,18 @@ export type StartRunMessage = {
   type: 'start-run'
   runId: string
   taskId: string
-  // The provider that should run this turn. The server chooses and persists the
-  // provider; the daemon translates the neutral task fields below into provider
-  // CLI args.
-  agent: AgentKind
+  // The provider that should run this turn. LEGACY, and now optional: the server
+  // sends it only when the task's flow IS one of the legacy kinds, so an old
+  // daemon (which reads only this) keeps driving claude and codex tasks. Absent
+  // for any other flow — which is exactly what stops an old daemon from silently
+  // running an unknown flow as claude.
+  agent?: AgentKind
+  // The driver flow that should run this turn. Supersedes `agent`; every daemon
+  // reader resolves `flow ?? agent`. Absent only from a pre-step-4 server.
+  flow?: string
+  // The task's opaque per-flow configuration, echoed from the task and handed to
+  // the flow as ctx.task.flowConfig. The server never interprets it.
+  flowConfig?: Record<string, unknown>
   // The project slug; the daemon maps it to a host path.
   project: string
   // cwd hints — the recorded task.cwd and whether the run wants its worktree. The
@@ -161,7 +169,14 @@ export type ProjectGrantMessage = {
   type: 'project-grant'
   requestId: string
   project: string
-  agent: AgentKind
+  // Legacy, and optional for the same reason as StartRunMessage.agent: once the
+  // route derives from taskFlow(), the server has no legal AgentKind to send for
+  // a non-legacy flow. Latent until C6 (only grants.project flows reach here,
+  // and both are legacy) but it would not typecheck otherwise.
+  agent?: AgentKind
+  // The flow whose onGrant should persist this rule. Readers resolve
+  // `flow ?? agent`.
+  flow?: string
   rule: string
 }
 
