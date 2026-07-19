@@ -1,4 +1,4 @@
-import type { Task, TaskWithProject, TelemetryItem } from './types'
+import type { FlowMeta, Task, TaskWithProject, TelemetryItem } from './types'
 
 // The per-flow status telemetry map (agent → items) the tasks poll carries. Global,
 // so every project's response repeats it; an agent with no items is simply absent.
@@ -37,6 +37,22 @@ export async function uploadAttachments(
   const body = await r.json().catch(() => ({}))
   if (!r.ok) throw new Error(body.error ?? r.statusText)
   return (body.attachments ?? []).map((a: { id: string }) => a.id)
+}
+
+// The driver flows a project can launch a task with, for the new-task picker.
+// Everything served here is dispatchable — the server unions what the daemon
+// announced with the legacy flows — so a picked flow can't wedge on its first
+// message. Returns [] on any failure; the caller falls back to its current
+// options rather than rendering an empty picker.
+export async function loadFlows(slug: string): Promise<FlowMeta[]> {
+  try {
+    const r = await fetch(`/api/${slug}/flows`)
+    const body = await r.json()
+    if (!r.ok) return []
+    return (body.flows ?? []) as FlowMeta[]
+  } catch {
+    return []
+  }
 }
 
 // Fetch and merge tasks across every shown project, tagging each with its

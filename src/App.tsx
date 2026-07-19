@@ -79,8 +79,8 @@ export function App() {
   // a task to the wrong project. They're lifted here rather than owned by the
   // form because App reads the agent for the telemetry panel and the project
   // menu writes the project on a single-project pick.
-  const [newTaskAgent, setNewTaskAgent] = useSessionState<Task['agent']>(
-    'lander:draft:newAgent',
+  const [newTaskFlow, setNewTaskFlow] = useSessionState<string>(
+    'lander:draft:newFlow',
     'claude',
   )
   const [newProject, setNewProject] = useSessionState(
@@ -267,8 +267,8 @@ export function App() {
           projects={projects}
           shown={shown}
           currentProjectSlug={current?.projectSlug}
-          agent={newTaskAgent}
-          setAgent={setNewTaskAgent}
+          flow={newTaskFlow}
+          setFlow={setNewTaskFlow}
           newProject={newProject}
           setNewProject={setNewProject}
           height={newTaskHeight}
@@ -280,13 +280,8 @@ export function App() {
         <TelemetryPanel
           // Keyed by flow name — the telemetry cache is keyed that way
           // server-side now. `agent` stays as the fallback for a payload from a
-          // server that predates `flow`; the trailing literal covers the draft
-          // state, which is still optionally-typed until the picker lands.
-          items={
-            telemetry[
-              current?.flow ?? current?.agent ?? newTaskAgent ?? 'claude'
-            ] ?? []
-          }
+          // server that predates `flow`.
+          items={telemetry[current?.flow ?? current?.agent ?? newTaskFlow] ?? []}
         />
       </div>
 

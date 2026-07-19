@@ -126,13 +126,89 @@ describe('server task provider behavior', () => {
     expect(raw.agent).toBe('codex')
   })
 
-  it('serves a flow derived from the stored agent, without storing one', async () => {
+  it('stores both flow and the legacy agent for a legacy flow', async () => {
     const task = await createTask('Derived flow task')
     const res = await app.request(`/api/${slug}/tasks/${task.id}`)
     expect(await res.json()).toMatchObject({ agent: 'codex', flow: 'codex' })
-    // Derived on the way out only — nothing has written `flow` to disk yet, so
-    // backfillAgents still sees this as the legacy task it is.
-    expect(await readTaskField(task.id, 'flow')).toBeUndefined()
+    // Both on disk: `flow` is what dispatch reads, `agent` is what a daemon
+    // predating it reads.
+    expect(await readTaskField(task.id, 'flow')).toBe('codex')
+    expect(await readTaskField(task.id, 'agent')).toBe('codex')
+  })
+
+  it('derives a flow for a task stored before the field existed', async () => {
+    // The permanent union-read. Nothing rewrites these, so this is the path
+    // every pre-step-4 task takes forever.
+    const id = 'legacy-derives'
+    await writeFile(
+      path.join(tasksDir, `${id}.json`),
+      JSON.stringify({
+        id,
+        agent: 'claude',
+        title: 'Legacy',
+        status: 'resting',
+        createdAt: AT,
+        updatedAt: AT,
+        allowEdits: false,
+        shape: 2,
+        items: [],
+        rides: [],
+      }),
+    )
+    const res = await app.request(`/api/${slug}/tasks/${id}`)
+    expect(await res.json()).toMatchObject({ agent: 'claude', flow: 'claude' })
+    expect(await readTaskField(id, 'flow')).toBeUndefined()
+  })
+
+  it('rejects an unknown flow rather than silently defaulting', async () => {
+    // A silent default would make `--flow open-pr` against a daemon lacking it
+    // produce a claude task that runs the prompt anyway.
+    const res = await post(`/api/${slug}/tasks`, {
+      title: 'Bad flow',
+      flow: 'no-such-flow',
+    })
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { error: string }).error).toContain(
+      'unknown flow: no-such-flow',
+    )
+  })
+
+  it('validates flowConfig shape and size', async () => {
+    // bin/ has no typecheck coverage, so the CLI's --key parsing rests on this.
+    const notObject = await post(`/api/${slug}/tasks`, {
+      title: 'Bad config',
+      flowConfig: 'nope',
+    })
+    expect(notObject.status).toBe(400)
+    expect(((await notObject.json()) as { error: string }).error).toContain(
+      'flowConfig must be a JSON object',
+    )
+
+    const arrayConfig = await post(`/api/${slug}/tasks`, {
+      title: 'Bad config',
+      flowConfig: [1, 2, 3],
+    })
+    expect(arrayConfig.status).toBe(400)
+
+    const tooBig = await post(`/api/${slug}/tasks`, {
+      title: 'Big config',
+      flowConfig: { blob: 'x'.repeat(20 * 1024) },
+    })
+    expect(tooBig.status).toBe(400)
+    expect(((await tooBig.json()) as { error: string }).error).toContain('too large')
+
+    const ok = await post(`/api/${slug}/tasks`, {
+      title: 'Good config',
+      flowConfig: { dryRun: false, attempts: 3, name: 'x' },
+    })
+    expect(ok.status).toBe(201)
+    const created = (await ok.json()) as { id: string }
+    // Types survive the round trip — not stringified.
+    expect(await readTaskField(created.id, 'flowConfig')).toEqual({
+      dryRun: false,
+      attempts: 3,
+      name: 'x',
+    })
   })
 
   it('carries capability flags and items on GET /tasks/:id', async () => {
@@ -195,7 +271,9 @@ describe('server task provider behavior', () => {
       ok: true,
       rule: 'Bash(npm test)',
       scope: 'task',
-      warning: 'Saved for parity; Codex runs do not honor task allow rules yet',
+      // Worded from the capability, not the provider: an open-pr task declares
+      // the same `grants.task: false` and would otherwise be told it was Codex.
+      warning: 'Saved for parity; this flow does not honor task allow rules yet',
     })
     const raw = JSON.parse(
       await readFile(path.join(tasksDir, `${task.id}.json`), 'utf8'),

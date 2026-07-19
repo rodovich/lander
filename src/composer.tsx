@@ -166,8 +166,10 @@ export const Composer = memo(function Composer({
               ? `$${u.costUsd.toFixed(4)}`
               : reportsCost
                 ? '… (available when the turn lands)'
-                : 'unavailable for Codex'
-          const items = taskUsageTelemetry(u, task.agent, reportsCost)
+                : // Keyed on the capability, not the provider — an open-pr task
+                  // reports no cost either, and would have claimed to be Codex.
+                  'not reported by this flow'
+          const items = taskUsageTelemetry(u, task.flow ?? task.agent, reportsCost)
           // The model names the whole task, not a scope, so it sits outside
           // the turn/total toggle; the counts + cost are what the toggle flips.
           const model = items.find((i) => i.id === 'model')

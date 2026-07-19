@@ -367,7 +367,7 @@ export const Conversation = memo(function Conversation({
               key={`r-${entry.ride.id}`}
               ride={entry.ride}
               items={entry.items}
-              agent={task.agent}
+              agent={task.flow ?? task.agent}
               taskId={task.id}
               slug={task.projectSlug}
               grants={task.grants}
@@ -390,7 +390,7 @@ export const Conversation = memo(function Conversation({
           <div className="message">
             <div className="message-pending">
               <span className="spinner" aria-hidden />
-              {`${taskAgentModelName(task.agent)} is starting…`}
+              {`${taskAgentModelName(task.flow ?? task.agent)} is starting…`}
             </div>
           </div>
         )}

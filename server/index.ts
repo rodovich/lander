@@ -16,7 +16,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { applyUpdate, applyDone, wedgeForRetry } from './apply'
 import { applyStatePatch } from './flowstate'
-import { defaultAgentFromEnv, isAgentKind } from './agent'
+import { isAgentKind } from './agent'
 import {
   attachDaemonServer,
   daemonConnected,
@@ -97,7 +97,7 @@ import {
   type Ask,
   type AskForm,
 } from './asks'
-import { flowCaps, flowRegistry, isAnnouncedFlow } from './flows'
+import { LEGACY_FLOW, flowCaps, flowRegistry, isAnnouncedFlow } from './flows'
 
 const execFileAsync = promisify(execFile)
 
@@ -109,9 +109,27 @@ const PROJECT_BY_SLUG = new Map<string, Project>(
   PROJECTS.map((p) => [p.slug, p]),
 )
 const LEGACY_AGENT: AgentKind = 'claude'
-const DEFAULT_NEW_TASK_AGENT = defaultAgentFromEnv(process.env)
-const CODEX_TASK_ALLOW_WARNING =
-  'Saved for parity; Codex runs do not honor task allow rules yet'
+// The configured default flow, read ONCE at boot — a task must serve the
+// provider it was created with, not re-resolve the environment on every read
+// (which is what DEFAULT_NEW_TASK_AGENT, now superseded, guaranteed). Its
+// VALIDATION, though, is deferred to each request (resolveNewTaskFlow): at boot
+// no daemon has registered, so a boot-time registry check would permanently
+// degrade a valid LANDER_FLOW=open-pr to claude and warn about it wrongly.
+//
+// LANDER_AGENT is still honored as the fallback name, so an existing
+// configuration keeps working.
+const DEFAULT_NEW_TASK_FLOW = (
+  process.env.LANDER_FLOW ??
+  process.env.LANDER_AGENT ??
+  ''
+)
+  .trim()
+  .toLowerCase()
+// Fires on the flow's declared task-grant capability, not on a provider name —
+// an open-pr task declares the same `false` and would otherwise be told it was
+// Codex.
+const TASK_ALLOW_UNSUPPORTED_WARNING =
+  'Saved for parity; this flow does not honor task allow rules yet'
 
 // Daemon split: runs are driven by the host
 // daemon over a WebSocket — the server holds task state, drives the queue, and
@@ -1558,6 +1576,72 @@ async function awaitSatisfied(
   return true
 }
 
+// A flowConfig's own bound, distinct from the 64 KiB flowState cap: this is
+// launch-time configuration, not accumulated durable state.
+const FLOW_CONFIG_MAX_BYTES = 16 * 1024
+
+// Shape and size only — the server never interprets a flowConfig's contents.
+function validateFlowConfig(
+  value: unknown,
+): { config?: Record<string, unknown> } | { error: string } {
+  if (value === undefined || value === null) return {}
+  if (typeof value !== 'object' || Array.isArray(value))
+    return { error: 'flowConfig must be a JSON object' }
+  const size = JSON.stringify(value).length
+  if (size > FLOW_CONFIG_MAX_BYTES)
+    return {
+      error: `flowConfig too large (${size} bytes, max ${FLOW_CONFIG_MAX_BYTES})`,
+    }
+  return { config: value as Record<string, unknown> }
+}
+
+// Unknown values of LANDER_FLOW we've already warned about, so a misconfigured
+// env logs once rather than on every task creation.
+const warnedUnknownDefaultFlows = new Set<string>()
+
+// The flow for a new task. An EXPLICIT flow that doesn't exist is an error; a
+// bad *default* only degrades. That asymmetry is deliberate: making the default
+// 400 too would turn a single typo'd LANDER_FLOW into a total task-creation
+// outage for the project.
+//
+// Its registry check runs per request rather than at module scope (as the old
+// DEFAULT_NEW_TASK_AGENT
+// is), because at boot no daemon has registered and the registry is empty — a
+// boot-time check would permanently degrade a perfectly valid
+// LANDER_FLOW=open-pr to claude and log a warning that is always wrong. The
+// residual window is the same one every registry read lives with: between boot
+// and the first register, an unknown-but-valid default degrades to
+// LEGACY_FLOW. It fails toward the legacy flow, never toward a mis-dispatch.
+function resolveNewTaskFlow(
+  slug: string,
+  requested: unknown,
+): { flow: string } | { error: string } {
+  const known = (name: string): boolean =>
+    flowRegistry(slug).some((f) => f.name === name)
+
+  if (typeof requested === 'string' && requested.trim()) {
+    const name = requested.trim()
+    if (!known(name))
+      return {
+        error:
+          `unknown flow: ${name}` +
+          ` (available: ${flowRegistry(slug).map((f) => f.name).join(', ') || 'none'})`,
+      }
+    return { flow: name }
+  }
+
+  const fromEnv = DEFAULT_NEW_TASK_FLOW
+  if (!fromEnv) return { flow: LEGACY_FLOW }
+  if (known(fromEnv)) return { flow: fromEnv }
+  if (!warnedUnknownDefaultFlows.has(fromEnv)) {
+    warnedUnknownDefaultFlows.add(fromEnv)
+    console.warn(
+      `default flow '${fromEnv}' is not available; falling back to ${LEGACY_FLOW}`,
+    )
+  }
+  return { flow: LEGACY_FLOW }
+}
+
 app.post('/api/:project/tasks', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
@@ -1569,12 +1653,27 @@ app.post('/api/:project/tasks', async (c) => {
       time?: unknown
       await?: unknown
       agent?: unknown
+      flow?: unknown
+      flowConfig?: unknown
       allowEdits?: unknown
       attachments?: unknown
     }>()
     const title = typeof body.title === 'string' ? body.title.trim() : ''
     const rawMessage = typeof body.message === 'string' ? body.message : ''
-    const agent = isAgentKind(body.agent) ? body.agent : DEFAULT_NEW_TASK_AGENT
+
+    // An explicitly-named flow must exist. 400 rather than a silent default:
+    // inheriting the `isAgentKind(...) ? … : DEFAULT` shape would make
+    // `lander launch --flow open-pr` against a daemon lacking it quietly
+    // produce a CLAUDE task that runs the prompt — strictly worse than failing.
+    const flowResolution = resolveNewTaskFlow(project.slug, body.flow)
+    if ('error' in flowResolution) return c.json({ error: flowResolution.error }, 400)
+    const flow = flowResolution.flow
+    // `agent` is stored only for a legacy flow, so backfillAgents and any
+    // pre-flow daemon still see what they expect. Never stored otherwise.
+    const agent = isAgentKind(flow) ? flow : undefined
+
+    const flowConfig = validateFlowConfig(body.flowConfig)
+    if ('error' in flowConfig) return c.json({ error: flowConfig.error }, 400)
     const allowEdits = body.allowEdits === true
     if (!title && !rawMessage.trim())
       return c.json({ error: 'title or message is required' }, 400)
@@ -1647,7 +1746,11 @@ app.post('/api/:project/tasks', async (c) => {
         : undefined
     const task: Task = {
       id,
-      agent,
+      // Stored only for a legacy flow, so backfillAgents and any pre-flow
+      // daemon still see what they expect. `flow` is the field that matters.
+      ...(agent ? { agent } : {}),
+      flow,
+      ...(flowConfig.config ? { flowConfig: flowConfig.config } : {}),
       title: title || '…',
       // Stored status is the collapsed vocabulary (`riding | wedged | landed`). A
       // deferred task stores `riding` with no open ride, so publicTask serves it
@@ -2641,7 +2744,8 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
       // claude's task cap is true and codex's false, announced and bootstrap
       // alike — and it is what lets a non-legacy flow, which has no AgentKind
       // to pass here at all, be answered correctly.
-      if (!flowCaps(grantFlow).grants.task) warning = CODEX_TASK_ALLOW_WARNING
+      if (!flowCaps(grantFlow).grants.task)
+        warning = TASK_ALLOW_UNSUPPORTED_WARNING
     }
     return c.json({ ok: true, rule, scope, ...(warning ? { warning } : {}) })
   } catch (e) {

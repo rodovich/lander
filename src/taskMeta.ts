@@ -51,7 +51,9 @@ export function isUnread(task: Task): boolean {
   return task.seenAt != null && latestUpdateAt(task) > task.seenAt
 }
 
-export function taskAgentModelName(agent: Task['agent'], model?: string): string {
+// Takes a flow NAME, not a closed agent union: agentDisplayName falls back to
+// the trimmed raw string, so an `open-pr` task renders "open-pr".
+export function taskAgentModelName(agent: string | undefined, model?: string): string {
   return formatAgentModelName(agentDisplayName(agent), model)
 }
 
@@ -97,7 +99,9 @@ export function totalUsage(task: Task): TokenUsage | undefined {
 // to the same generic item renderer the flow-status panel uses.
 export function taskUsageTelemetry(
   u: TokenUsage,
-  agent: Task['agent'],
+  // The flow name, for the model-name display lookup only — never a behavior
+  // branch.
+  agent: string | undefined,
   reportsCost: boolean,
 ): TelemetryItem[] {
   // Uncached = fresh input processed this turn (regular input + the part written
