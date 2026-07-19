@@ -24,8 +24,10 @@ import {
   meta as codexMeta,
   codexOptionsFromEnv,
 } from './codex'
+import { makeFlow as makeOpenPrFlow } from './open-pr'
 import * as claudeFlowModule from './claude'
 import * as codexFlowModule from './codex'
+import * as openPrFlowModule from './open-pr'
 import type { Ctx, FlowMeta, TurnResult } from './ctx'
 
 export type BundledFlow = {
@@ -50,6 +52,9 @@ export function buildFlows({
       taskPromptTemplate,
     }),
     codex: makeCodexFlow({ taskPromptTemplate, ...codexOptionsFromEnv(env) }),
+    // The first bundled flow with no compiled adapter — which is what C5's
+    // enumeration fix exists to make reachable at all.
+    'open-pr': makeOpenPrFlow(),
   }
 }
 
@@ -72,6 +77,7 @@ export const FLOW_MODULES: Record<
 > = {
   claude: claudeFlowModule,
   codex: codexFlowModule,
+  'open-pr': openPrFlowModule,
 }
 
 // What this daemon can drive, as the server's flow registry consumes it. Built
