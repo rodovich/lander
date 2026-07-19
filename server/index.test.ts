@@ -5,8 +5,13 @@ import type { AddressInfo } from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WebSocket } from 'ws'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { attachDaemonServer, daemonConnected, daemonServes } from './daemon'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import {
+  attachDaemonServer,
+  closeRunChannel,
+  daemonConnected,
+  daemonServes,
+} from './daemon'
 import { normalizeProjectPath, projectSlug } from './projects'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -1008,12 +1013,20 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     ms = 3000,
   ): Promise<Raw> => {
     const start = Date.now()
+    let last: Raw | undefined
     while (Date.now() - start < ms) {
-      const raw = await readRaw(id)
-      if (pred(raw)) return raw
+      last = await readRaw(id)
+      if (pred(last)) return last
       await new Promise((r) => setTimeout(r, 10))
     }
-    throw new Error('waitForRaw timed out')
+    // Say what the task actually looked like: "timed out" alone can't distinguish
+    // "the state never arrived" from "it arrived in a shape the predicate didn't
+    // match", and those want opposite fixes.
+    throw new Error(
+      `waitForRaw timed out after ${ms}ms; last saw ` +
+        `status=${String(last?.status)} runId=${String(last?.runId)} ` +
+        `retry=${JSON.stringify(last?.retry)}`,
+    )
   }
   const asksOf = (raw: Raw): Raw[] =>
     ((raw.items as Raw[]) ?? []).filter((i) => i.kind === 'ask')
@@ -1080,13 +1093,40 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
   // on the run it abandoned and crashes it. Only setTimeout is faked, so real
   // WS/fs I/O still flows and setImmediate stays a genuine event-loop yield.
   async function killDaemon(): Promise<void> {
+    // Fake timers go in FIRST and stay in: the grace timer has to be armed while
+    // they're installed for advanceTimersByTime to reach it. A timer already
+    // scheduled on the real clock would just sit there.
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-    // Yield real I/O ticks until the server has registered the disconnect and
-    // armed the (now fake) grace timer.
     ws.close()
-    for (let i = 0; i < 200 && daemonConnected(); i++)
+    // Yield real I/O ticks until the server has registered the disconnect and
+    // armed that timer. Bound this by the wall clock rather than by a tick count:
+    // a fixed budget buys less and less real time as the suite gets busier, and
+    // exhausting it here used to fall through silently — the grace timer would
+    // then be armed *after* we stopped faking, so it never fired, and the failure
+    // surfaced downstream as the caller's own poll timing out. Only setTimeout is
+    // faked, so Date.now() and setImmediate are still real.
+    const deadline = Date.now() + 10_000
+    while (daemonConnected() && Date.now() < deadline)
       await new Promise((r) => setImmediate(r))
-    await vi.advanceTimersByTimeAsync(30_000)
+    if (daemonConnected()) {
+      vi.useRealTimers()
+      throw new Error(
+        'killDaemon: server never registered the disconnect, so the reconnect ' +
+          'grace timer was never armed',
+      )
+    }
+    // Alternate advancing with real yields instead of advancing once. The daemon
+    // going away and the grace timer being armed are not the same tick: the
+    // disconnect is recorded first and reconcileGrace runs behind some I/O, so a
+    // single advance can land in the window before the timer exists. It would
+    // then be armed on the fake clock we are about to uninstall — and a
+    // fake-armed timer that never gets advanced simply never fires, which
+    // surfaced as the task sitting at status=riding until the caller's poll gave
+    // up. Each yield lets pending work arm its timer; each advance fires it.
+    for (let i = 0; i < 5; i++) {
+      await vi.advanceTimersByTimeAsync(30_000)
+      await new Promise((r) => setImmediate(r))
+    }
     vi.useRealTimers()
   }
 
@@ -1106,6 +1146,20 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
         ws.close()
       })
     await new Promise<void>((r) => http.close(() => r()))
+  })
+
+  // Drop each test's run channel once it's finished with it. Run channels are
+  // module state shared by every suite in this file, and an open one with no live
+  // owner keeps the server's reconnect-grace timer armed. That timer is armed on
+  // the REAL clock, and reconcileGrace won't replace an existing one — so a
+  // leaked channel from an earlier test made the next killDaemon unable to arm a
+  // FAKE timer it could advance, leaving that test to wait out the real 15s
+  // grace. It showed up as this suite occasionally taking 16s instead of 2.6s,
+  // and as an outright failure whenever the per-test budget ran out first.
+  afterEach(() => {
+    for (const m of received)
+      if (m.type === 'start-run' && m.runId) closeRunChannel(m.runId)
+    received.length = 0
   })
 
   // A flow reads its durable state as a free ride-in on start-run, and its
@@ -1191,6 +1245,18 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     answerInterrupt = false
   })
 
+  // The two tests below wait on the server's reconnect grace, and that wait is
+  // usually instant but sometimes real. killDaemon fakes the clock so it can
+  // expire the grace immediately — but reconcileGrace refuses to replace a timer
+  // that is already armed (`if (graceTimer) return`), and an open run channel
+  // with no live owner, left behind by any earlier suite in this file, keeps one
+  // armed on the REAL clock. When that happens there is no fake timer to advance
+  // and the grace genuinely takes its full 15 seconds.
+  //
+  // So both carry a budget that can absorb it. Measured: ~2.6s for the whole file
+  // normally, ~16s when a stale timer forces the real wait. Trimming them back to
+  // the 5s default reintroduces an intermittent failure that presents as an
+  // unrelated timeout rather than as anything to do with the grace.
   it('crashes a run whose daemon vanished into a retry-ask wedge, and answering retries', async () => {
     const id = 'kill-platform'
     await seed(id)
@@ -1203,7 +1269,7 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     // Past the grace, the run is unowned → crashed. reduceRunWs folds that in.
     await killDaemon()
 
-    const raw = await waitForRaw(id, (r) => r.status === 'wedged')
+    const raw = await waitForRaw(id, (r) => r.status === 'wedged', 25_000)
     expect(raw.status).toBe('wedged')
     // The ride closed as an error (a platform kill, not a user interrupt).
     expect((raw.rides as Raw[]).at(-1)?.outcome).toBe('error')
@@ -1232,7 +1298,7 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     expect(after.status).toBe('riding')
     expect(after.queued).toEqual(['go'])
     expect(after.retry).toBeUndefined()
-  })
+  }, 30_000)
 
   // A kill that lands mid-reply leaves the streamed text standing, so there's no
   // empty turn to fill and no synthetic error line — the ask's prompt carries the
@@ -1262,7 +1328,7 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     )
     await killDaemon()
 
-    const raw = await waitForRaw(id, (r) => r.status === 'wedged')
+    const raw = await waitForRaw(id, (r) => r.status === 'wedged', 25_000)
     // The streamed text stands alone: no error line appended over it, and none
     // written into it.
     const flow = ((raw.items as Raw[]) ?? []).filter(
@@ -1278,6 +1344,7 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
 
     // Answering settles the form but must not erase the prompt — it's the only
     // account of the kill the conversation has.
+
     const answer = await post(
       `/api/${slug}/tasks/${id}/asks/${String(ask!.id)}/answer`,
       { optionId: 'retry-now' },
@@ -1286,5 +1353,5 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     const settled = asksOf(await readRaw(id)).find((a) => a.origin === 'retry')!
     expect(settled.state).toBe('answered')
     expect(settled.prompt).toBe(KILL_PROMPT)
-  })
+  }, 30_000)
 })
