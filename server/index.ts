@@ -97,6 +97,7 @@ import {
   type Ask,
   type AskForm,
 } from './asks'
+import { flowRegistry } from './flows'
 
 const execFileAsync = promisify(execFile)
 
@@ -1092,6 +1093,23 @@ app.get('/api/:project/tasks/:id', async (c) => {
   const task = await readTask(project.dataDir, id)
   if (!task) return c.json({ error: 'task not found' }, 404)
   return c.json(publicTask(task))
+})
+
+// The driver flows this project can launch a task with, as the new-task picker
+// renders them. Sourced from the registry, which is the announced set unioned
+// with the frozen legacy entries — so everything served here is either something
+// the primary daemon said it can run, or claude/codex (which dispatch carries
+// `agent` for). Nothing offered here can be picked and then wedge on first
+// message.
+//
+// A SIBLING of the /flows/:name resolver below, not a replacement: that one
+// serves the unrelated user command-flow scripts for the `lander flow` CLI. The
+// two notions of "flow" converge in step 6; the different segment count keeps
+// them from colliding until then.
+app.get('/api/:project/flows', (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  return c.json({ flows: flowRegistry(project.slug) })
 })
 
 // Flow names are bare filenames (<name>.js under the project's flows dir), so

@@ -71,6 +71,50 @@ afterAll(async () => {
   process.env = originalEnv
 })
 
+describe('flow registry endpoint', () => {
+  it('serves the legacy flows when no daemon has announced', async () => {
+    // No daemon is connected in this suite, so this is the bootstrap window:
+    // the picker must still have something to render.
+    const res = await app.request(`/api/${slug}/flows`)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { flows: { name: string }[] }
+    expect(body.flows.map((f) => f.name)).toEqual(['claude', 'codex'])
+  })
+
+  it('serves each flow’s announced capabilities', async () => {
+    const res = await app.request(`/api/${slug}/flows`)
+    const body = (await res.json()) as {
+      flows: { name: string; capabilities: Record<string, unknown> }[]
+    }
+    const claude = body.flows.find((f) => f.name === 'claude')
+    const codex = body.flows.find((f) => f.name === 'codex')
+    expect(claude?.capabilities).toMatchObject({
+      grants: { task: true, project: true },
+      reportsCost: true,
+    })
+    expect(codex?.capabilities).toMatchObject({
+      grants: { task: false, project: false },
+      reportsCost: false,
+    })
+  })
+
+  it('404s an unknown project', async () => {
+    const res = await app.request('/api/not-a-project/flows')
+    expect(res.status).toBe(404)
+  })
+
+  it('does not shadow the command-flow :name resolver', async () => {
+    // The two notions of "flow" share the word and the path prefix. The list
+    // endpoint is a sibling route (different segment count), so the script
+    // resolver the `lander flow` CLI depends on must still answer.
+    const res = await app.request(`/api/${slug}/flows/definitely-not-there`)
+    expect(res.status).toBe(404)
+    expect(await res.json()).toMatchObject({
+      error: 'unknown flow: definitely-not-there',
+    })
+  })
+})
+
 describe('server task provider behavior', () => {
   it('stores the configured default provider on new tasks', async () => {
     const task = await createTask('Codex default task')
