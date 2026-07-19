@@ -317,6 +317,14 @@ async function launchTask(rest) {
     else if (a === '--time') o.time = Number(rest[++i])
     else if (a === '--await') o.await = rest[++i]
     else if (a === '--edits') o.allowEdits = true
+    else if (a === '--flow') o.flow = rest[++i]
+    // --key <name> <value> pairs accumulate into the flow's config. Values are
+    // coerced at this boundary so a flow receives real booleans/numbers.
+    else if (a === '--key') {
+      const k = rest[++i]
+      if (!k) die('launch: --key needs a name and a value')
+      ;(o.flowConfig ??= {})[k] = coerceConfigValue(rest[++i] ?? '')
+    }
     // --files is variadic: consume following args up to the next --flag.
     else if (a === '--files')
       while (i + 1 < rest.length && !rest[i + 1].startsWith('--'))
@@ -330,7 +338,8 @@ async function launchTask(rest) {
   // follow the project's normal .claude permissions, not a Lander grant.
   o.message ??= pos.shift()
   if (o.message === '-') o.message = await readStdin()
-  if (!o.message?.trim()) die('usage: lander launch <message>')
+  if (!o.message?.trim())
+    die('usage: lander launch <message> [--flow <name>] [--key <k> <v> …]')
   validateSchedule(o)
   // --await defers the launch until the named tasks land (resolved to full ids
   // here); combinable with --date/--time, in which case launch fires on
@@ -839,6 +848,11 @@ function makeLander(inputs) {
         date: opts.date,
         time: opts.time,
         allowEdits: !!opts.edits,
+        // The driver flow for the new task, and its opaque config. Already
+        // typed here (a flow author writes real values), so no coercion — that
+        // is only needed at the argv boundary.
+        ...(opts.flow ? { flow: opts.flow } : {}),
+        ...(opts.config ? { flowConfig: opts.config } : {}),
       }
       validateSchedule(o)
       o.await = await resolveAwait(opts.await)
@@ -974,6 +988,19 @@ async function runFlowByName(name, inputs) {
   if (typeof mod.default !== 'function')
     die(`flow "${name}" must export a default async function`)
   return mod.default(makeLander(inputs))
+}
+
+// A `--key value` pair's value, typed. The raw argv value is always a string, so
+// `--key dryRun false` would otherwise hand a flow the TRUTHY string "false" —
+// the exact shape of bug that makes a dry-run default useless. JSON-parse it,
+// falling back to the raw string so `--key branch main` stays a string rather
+// than failing to parse.
+function coerceConfigValue(raw) {
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return raw
+  }
 }
 
 // `lander flow <name> [--key value …]` — the --key value pairs become inputs.
