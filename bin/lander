@@ -575,6 +575,17 @@ async function listTasks(args) {
   }
 }
 
+// Defaults for how much of a task's conversation `lander view` renders. Named so
+// the knobs aren't magic numbers, and env-overridable so a harness can set the
+// house style once; per-call --messages/--clip still win. Kept small so a glance
+// at a sibling task stays token-cheap — widen them when you actually need more.
+const envPos = (v, dflt) => {
+  const n = Number(v)
+  return Number.isFinite(n) && n > 0 ? n : dflt
+}
+const VIEW_MESSAGES = envPos(process.env.LANDER_VIEW_MESSAGES, 6)
+const VIEW_CLIP = envPos(process.env.LANDER_VIEW_CLIP, 600)
+
 // `lander view <id> [--tools] [--json]` — one task's status and recent
 // conversation. By default only the prose each side wrote is shown: the user's
 // prompts and the assistant's text (including text it wrote between tool calls,
@@ -599,7 +610,7 @@ async function viewTask(args) {
   console.log(`id: ${task.id}`)
   if (task.scheduledFor) console.log(`scheduled: ${task.scheduledFor}`)
   console.log(`edits: ${task.allowEdits}`)
-  const clip = (s) => (s.length > 600 ? `${s.slice(0, 600)}…` : s)
+  const clip = (s) => (s.length > VIEW_CLIP ? `${s.slice(0, VIEW_CLIP)}…` : s)
   const items = task.items ?? []
   // Open asks first: what a wedged task is waiting on, so a sibling can answer
   // it (or decide what to send). Prompt plus each choice option's id → label.
@@ -634,7 +645,7 @@ async function viewTask(args) {
       }
     }
   }
-  for (const b of blocks.slice(-6)) {
+  for (const b of blocks.slice(-VIEW_MESSAGES)) {
     const body = b.parts.filter((p) => p.trim()).join('\n\n')
     if (body.trim()) console.log(`\n${b.role}:\n${body}`)
   }
