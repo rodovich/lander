@@ -522,23 +522,26 @@ function parseDateArg(flag, value) {
   return ms
 }
 
-// `lander list [--status <s>] [--since <when>] [--until <when>] [--text <terms>] [--json]`
+// `lander list [--status <s>] [--since <when>] [--until <when>] [--text <terms>] [--archived] [--json]`
 // — the project's tasks, newest first, as metadata only (id, title, status,
 // createdAt, updatedAt) — never their conversation, in either output mode
 // (see taskMetadata), even when --text matched inside one. --since/--until
 // filter by createdAt, inclusive. --text searches title + message text,
 // case-insensitively; repeat it for an AND, comma-delimit one occurrence for
-// an OR (see matchesText).
+// an OR (see matchesText). --archived lists the archived tasks instead of the
+// active ones (the two pools are disjoint); all other filters still apply.
 async function listTasks(args) {
   let status
   let json = false
   let since
   let until
+  let archived = false
   const textGroups = []
   for (let i = 0; i < args.length; i++) {
     const a = args[i]
     if (a === '--status') status = args[++i]
     else if (a === '--json') json = true
+    else if (a === '--archived') archived = true
     else if (a === '--since') since = parseDateArg('--since', args[++i])
     else if (a === '--until') until = parseDateArg('--until', args[++i])
     else if (a === '--text') {
@@ -550,7 +553,9 @@ async function listTasks(args) {
       textGroups.push(terms)
     } else die(`list: unexpected argument ${a}`)
   }
-  const res = await call(PROJECT, '/tasks', { method: 'GET' })
+  const res = await call(PROJECT, `/tasks${archived ? '?archived=1' : ''}`, {
+    method: 'GET',
+  })
   let tasks = Array.isArray(res) ? res : (res.tasks ?? [])
   if (status) tasks = tasks.filter((t) => t.status === status)
   if (since != null || until != null)
@@ -1175,7 +1180,7 @@ if (!run)
       'rest (--date|--time|--await|--clear) | ' +
       'relaunch <message> ' +
       '[--date|--time|--await|--interval|--repeat-count|--repeat-until|--clear] | ' +
-      'launch <message> | list | view <id> [--tools] | send <id> <message> | ' +
+      'launch <message> | list [--archived] | view <id> [--tools] | send <id> <message> | ' +
       'archive <id...> [--restore] | assist <prompt> | ' +
       'artifact (put <path>|ls|cat <name>) | flow <name>',
   )
