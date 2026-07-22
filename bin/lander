@@ -491,16 +491,22 @@ async function relaunchTask(args) {
 
 // Resolve a task id from a full id or any unambiguous prefix (so an agent can
 // paste the short id `lander list` prints). Matches within the caller's project.
-// `archived` resolves among archived tasks instead of active ones (for restore).
+// `archived` resolves among archived tasks instead of active ones (for restore);
+// `'both'` resolves across active and archived together (for `view`, which reads
+// either pool).
 async function resolveId(idOrPrefix, { archived = false } = {}) {
   if (!idOrPrefix) die('a task id is required')
-  const res = await call(PROJECT, `/tasks${archived ? '?archived=1' : ''}`, {
-    method: 'GET',
-  })
-  // The list endpoint wraps the array as `{ tasks, usage }` (account usage rides
-  // along with every poll); tolerate a bare array too in case the shape reverts.
-  const tasks = Array.isArray(res) ? res : (res.tasks ?? [])
-  const pool = archived ? tasks.filter((t) => t.archived) : tasks
+  const modes = archived === 'both' ? [false, true] : [archived]
+  const pool = []
+  for (const arch of modes) {
+    const res = await call(PROJECT, `/tasks${arch ? '?archived=1' : ''}`, {
+      method: 'GET',
+    })
+    // The list endpoint wraps the array as `{ tasks, usage }` (account usage rides
+    // along with every poll); tolerate a bare array too in case the shape reverts.
+    const tasks = Array.isArray(res) ? res : (res.tasks ?? [])
+    pool.push(...(arch ? tasks.filter((t) => t.archived) : tasks))
+  }
   const matches = pool.filter((t) => t.id.startsWith(idOrPrefix))
   if (matches.length === 0) die(`no task matching ${idOrPrefix}`)
   if (matches.length > 1)
@@ -579,10 +585,12 @@ async function viewTask(args) {
     else pos.push(a)
   }
   if (!pos[0]) die('usage: lander view <id> [--tools]')
-  const id = await resolveId(pos[0])
+  // Resolve across active and archived so a view works whether or not the task
+  // has been archived; the endpoint reads both pools too.
+  const id = await resolveId(pos[0], { archived: 'both' })
   const task = await call(PROJECT, `/tasks/${id}`, { method: 'GET' })
   if (json) return void console.log(JSON.stringify(task, null, 2))
-  console.log(`${task.title}  [${task.status}]`)
+  console.log(`${task.title}  [${task.status}]${task.archived ? ' (archived)' : ''}`)
   console.log(`id: ${task.id}`)
   if (task.scheduledFor) console.log(`scheduled: ${task.scheduledFor}`)
   console.log(`edits: ${task.allowEdits}`)

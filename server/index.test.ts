@@ -231,6 +231,17 @@ describe('server task provider behavior', () => {
     expect(body.items?.some((i) => i.kind === 'message')).toBe(true)
   })
 
+  it('reads an archived task on GET /tasks/:id, tagged archived', async () => {
+    // `lander view` resolves an id across both pools, so the single-task endpoint
+    // must fall back to the archive — otherwise a viewable id would 404.
+    const task = await createTask('Archived but viewable')
+    expect((await post(`/api/${slug}/tasks/${task.id}/archive`, {})).status).toBe(200)
+
+    const res = await app.request(`/api/${slug}/tasks/${task.id}`)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ id: task.id, archived: true })
+  })
+
   it('serves the persisted provider instead of re-resolving the environment', async () => {
     const task = await createTask('Persisted Codex task')
     process.env.LANDER_AGENT = 'claude'

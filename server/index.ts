@@ -1161,8 +1161,13 @@ app.get('/api/:project/tasks/:id', async (c) => {
   const id = c.req.param('id')
   if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
   const task = await readTask(project.dataDir, id)
-  if (!task) return c.json({ error: 'task not found' }, 404)
-  return c.json(publicTask(task))
+  if (task) return c.json(publicTask(task))
+  // Fall back to the archive so `lander view` can read a task after it's been
+  // archived — the id resolves against both pools, so the view endpoint must too.
+  // Tagged `archived` (like the list's `?archived=1` rows) so the caller can mark it.
+  const archived = await readTask(project.archiveDir, id)
+  if (archived) return c.json(publicTask({ ...archived, archived: true }))
+  return c.json({ error: 'task not found' }, 404)
 })
 
 // The driver flows this project can launch a task with, as the new-task picker
