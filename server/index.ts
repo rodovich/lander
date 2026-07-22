@@ -642,7 +642,21 @@ async function runTurn(
     // prompt manifest. Omitted when the turn carries none.
     attachments: attachments.length ? attachments : undefined,
     env: landerEnv,
-    idleTimeoutMs: 10 * 60_000,
+    // The idle watchdog window, sent on every run (this is the OPERATIVE idle
+    // value — daemon/run.ts DEFAULT_IDLE_MS is only a fallback for when this is
+    // omitted, which it never is). Deliberately set ABOVE the Claude CLI's hard
+    // ~600s (10 min) foreground-Bash cap so that when a quiet long-running
+    // foreground command hits 600s and the CLI auto-moves it to the background —
+    // returning control to the agent and emitting a stream event — that always
+    // beats this watchdog. Before this the window sat AT 600s, tying the cap and
+    // wedging the ride when the watchdog won the race by ~50ms (easel
+    // PcnoAnNEyG, 4/4). 15 min = the 600s cap + a comfortable margin; polling of
+    // a backgrounded task resets the window, so this only needs to exceed the
+    // single largest SILENT gap (the 600s cap), not the total command duration.
+    // (BASH_MAX_TIMEOUT_MS does NOT raise the 600s cap — verified — so there is no
+    // "pin" to align to; see daemon/claude.ts.) Trade-off: a genuine silent hang
+    // now takes 15 min to detect, up from 10. FLAGGED FOR REVIEW.
+    idleTimeoutMs: 15 * 60_000,
   }
   sendToDaemon(start)
   return reduceRunWs(project, id, runId)

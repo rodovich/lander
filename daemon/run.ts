@@ -105,7 +105,13 @@ export type RunManagerOptions = {
   onEmpty?: () => void
 }
 
-const DEFAULT_IDLE_MS = 10 * 60_000
+// Fallback idle window, used only if a start-run arrives without idleTimeoutMs.
+// The server (server/index.ts) always sends one — see the note there — so line
+// 259's `msg.idleTimeoutMs || defaultIdleMs` never actually falls through to
+// this. Kept in sync with the operative value (15 min) anyway so a hypothetical
+// omission wouldn't silently reintroduce the 10-min watchdog that tied the CLI's
+// hard 600s foreground-Bash cap and wedged long quiet foreground commands.
+const DEFAULT_IDLE_MS = 15 * 60_000
 const DEFAULT_RUN_BUFFER_TTL_MS = 120_000
 
 export function createRunManager({
