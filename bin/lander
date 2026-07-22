@@ -586,6 +586,32 @@ const envPos = (v, dflt) => {
 const VIEW_MESSAGES = envPos(process.env.LANDER_VIEW_MESSAGES, 6)
 const VIEW_CLIP = envPos(process.env.LANDER_VIEW_CLIP, 600)
 
+// Collapse a task's item log into conversational blocks for display: each user
+// message is its own block; a ride's prose — and, with tools, the tool calls it
+// made — is one assistant block. Returns raw (unclipped) parts so the caller
+// decides how many blocks to show and how hard to clip each one.
+function conversationBlocks(items, { tools }) {
+  const blocks = []
+  let curRide = null
+  for (const it of items) {
+    if (it.kind === 'message' && it.role === 'user') {
+      curRide = null
+      blocks.push({ role: 'user', parts: [it.text ?? ''] })
+    } else if (it.rideId) {
+      if (!curRide || curRide.rideId !== it.rideId) {
+        curRide = { role: 'assistant', rideId: it.rideId, parts: [] }
+        blocks.push(curRide)
+      }
+      if (it.kind === 'message') {
+        if (it.text?.trim()) curRide.parts.push(it.text)
+      } else if (tools && it.kind === 'tool') {
+        curRide.parts.push(`⚙ ${it.name}${it.input ? `: ${it.input}` : ''}`)
+      }
+    }
+  }
+  return blocks
+}
+
 // `lander view <id> [--tools] [--json]` — one task's status and recent
 // conversation. By default only the prose each side wrote is shown: the user's
 // prompts and the assistant's text (including text it wrote between tool calls,
@@ -624,29 +650,11 @@ async function viewTask(args) {
     if (it.form?.type === 'choice')
       for (const o of it.form.options) console.log(`  - ${o.id}: ${o.label}`)
   }
-  // Collapse the item log into conversational blocks: each user message is its
-  // own block, and a ride's flow prose (plus, with --tools, its tool calls) is
-  // one assistant block. Show the last six.
-  const blocks = []
-  let curRide = null
-  for (const it of items) {
-    if (it.kind === 'message' && it.role === 'user') {
-      curRide = null
-      blocks.push({ role: 'user', parts: [clip(it.text ?? '')] })
-    } else if (it.rideId) {
-      if (!curRide || curRide.rideId !== it.rideId) {
-        curRide = { role: 'assistant', rideId: it.rideId, parts: [] }
-        blocks.push(curRide)
-      }
-      if (it.kind === 'message') {
-        if (it.text?.trim()) curRide.parts.push(clip(it.text))
-      } else if (tools && it.kind === 'tool') {
-        curRide.parts.push(`⚙ ${it.name}${it.input ? `: ${clip(it.input)}` : ''}`)
-      }
-    }
-  }
+  // Collapse the item log into conversational blocks, then show the last few,
+  // clipping each part as it's rendered.
+  const blocks = conversationBlocks(items, { tools })
   for (const b of blocks.slice(-VIEW_MESSAGES)) {
-    const body = b.parts.filter((p) => p.trim()).join('\n\n')
+    const body = b.parts.map(clip).filter((p) => p.trim()).join('\n\n')
     if (body.trim()) console.log(`\n${b.role}:\n${body}`)
   }
 }
