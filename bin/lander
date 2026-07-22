@@ -667,12 +667,37 @@ async function viewTask(args) {
     if (it.form?.type === 'choice')
       for (const o of it.form.options) console.log(`  - ${o.id}: ${o.label}`)
   }
-  // Collapse the item log into conversational blocks, then show the last few,
-  // clipping each part as it's rendered.
+  // Collapse the item log into conversational blocks and show the last `messages`,
+  // clipping each part as it's rendered. Empty assistant blocks (e.g. a tool-only
+  // ride viewed without --tools) never print, so window and count on the visible
+  // ones to keep the footer's tally honest.
   const blocks = conversationBlocks(items, { tools })
-  for (const b of blocks.slice(-messages)) {
-    const body = b.parts.map(clip).filter((p) => p.trim()).join('\n\n')
-    if (body.trim()) console.log(`\n${b.role}:\n${body}`)
+  const visible = blocks.filter((b) => b.parts.some((p) => p.trim()))
+  const shown = visible.slice(-messages)
+  let clipped = 0
+  for (const b of shown) {
+    const body = b.parts
+      .map((p) => {
+        const c = clip(p)
+        if (c !== p) clipped++
+        return c
+      })
+      .filter((p) => p.trim())
+      .join('\n\n')
+    console.log(`\n${b.role}:\n${body}`)
+  }
+  // A quiet footer whenever the default view dropped something, so the reader
+  // knows it's lossy and how to widen it — silent truncation reads as "this is the
+  // whole story" when it isn't.
+  const hidden = visible.length - shown.length
+  if (hidden > 0 || clipped > 0) {
+    const bits = []
+    if (hidden > 0)
+      bits.push(`${hidden} earlier ${hidden === 1 ? 'message' : 'messages'} hidden`)
+    if (clipped > 0) bits.push(`${clipped} clipped`)
+    console.log(
+      `\n… ${bits.join(', ')} — full text: lander view ${task.id} --messages all --clip 0`,
+    )
   }
 }
 
