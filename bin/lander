@@ -612,21 +612,38 @@ function conversationBlocks(items, { tools }) {
   return blocks
 }
 
-// `lander view <id> [--tools] [--json]` — one task's status and recent
-// conversation. By default only the prose each side wrote is shown: the user's
-// prompts and the assistant's text (including text it wrote between tool calls,
-// which `m.text` — just the final block — would drop). --tools additionally
-// interleaves the tool calls the assistant made.
+// `lander view <id> [--tools] [--messages N] [--clip N] [--json]` — one task's
+// status and recent conversation. By default only the prose each side wrote is
+// shown: the user's prompts and the assistant's text (including text it wrote
+// between tool calls, which `m.text` — just the final block — would drop).
+// --tools additionally interleaves the tool calls the assistant made. --messages
+// sets how many trailing blocks to show and --clip the per-string character cap
+// (each defaults to VIEW_MESSAGES/VIEW_CLIP); pass 0 or "all" to either for no
+// limit — e.g. `--messages all --clip 0` for the unabridged conversation.
 async function viewTask(args) {
   let json = false
   let tools = false
+  let messages = VIEW_MESSAGES
+  let clipLen = VIEW_CLIP
   const pos = []
-  for (const a of args) {
+  // --messages/--clip take a count; 0 or "all" means no limit (Infinity).
+  const limit = (v) => {
+    if (v === 'all') return Infinity
+    const n = Number(v)
+    if (!Number.isInteger(n) || n < 0)
+      die(`view: --messages/--clip want a non-negative integer or "all", got: ${v}`)
+    return n === 0 ? Infinity : n
+  }
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]
     if (a === '--json') json = true
     else if (a === '--tools') tools = true
+    else if (a === '--messages') messages = limit(args[++i])
+    else if (a === '--clip') clipLen = limit(args[++i])
     else pos.push(a)
   }
-  if (!pos[0]) die('usage: lander view <id> [--tools]')
+  if (!pos[0])
+    die('usage: lander view <id> [--tools] [--messages N] [--clip N] [--json]')
   // Resolve across active and archived so a view works whether or not the task
   // has been archived; the endpoint reads both pools too.
   const id = await resolveId(pos[0], { archived: 'both' })
@@ -636,7 +653,7 @@ async function viewTask(args) {
   console.log(`id: ${task.id}`)
   if (task.scheduledFor) console.log(`scheduled: ${task.scheduledFor}`)
   console.log(`edits: ${task.allowEdits}`)
-  const clip = (s) => (s.length > VIEW_CLIP ? `${s.slice(0, VIEW_CLIP)}…` : s)
+  const clip = (s) => (s.length > clipLen ? `${s.slice(0, clipLen)}…` : s)
   const items = task.items ?? []
   // Open asks first: what a wedged task is waiting on, so a sibling can answer
   // it (or decide what to send). Prompt plus each choice option's id → label.
@@ -653,7 +670,7 @@ async function viewTask(args) {
   // Collapse the item log into conversational blocks, then show the last few,
   // clipping each part as it's rendered.
   const blocks = conversationBlocks(items, { tools })
-  for (const b of blocks.slice(-VIEW_MESSAGES)) {
+  for (const b of blocks.slice(-messages)) {
     const body = b.parts.map(clip).filter((p) => p.trim()).join('\n\n')
     if (body.trim()) console.log(`\n${b.role}:\n${body}`)
   }
