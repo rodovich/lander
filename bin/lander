@@ -587,7 +587,12 @@ async function listTasks(args) {
   if (since != null || until != null)
     tasks = tasks.filter((t) => inDateRange(t.createdAt, { since, until }))
   if (textGroups.length) tasks = tasks.filter((t) => matchesText(t, textGroups))
-  const meta = tasks.map(taskMetadata)
+  // Flag the caller's own row so an agent scanning the list never mistakes its
+  // own task for a separate one (a `sibling`) — the whole list includes the task
+  // running the command, and without this marker there's no way to tell which.
+  const meta = tasks.map((t) =>
+    t.id === TASK ? { ...taskMetadata(t), self: true } : taskMetadata(t),
+  )
   if (json) return void console.log(JSON.stringify(meta, null, 2))
   if (!meta.length) return void console.log('(no tasks)')
   for (const t of meta) {
@@ -595,8 +600,9 @@ async function listTasks(args) {
     // A clockwise arrow beside the clock marks a task with a repeating relaunch
     // armed (see hasRepeat) — a `--interval` series still to fire.
     const repeats = t.repeats ? '  🔁' : ''
+    const self = t.self ? '  ← this task' : ''
     console.log(
-      `${t.id}  ${t.status.padEnd(7)}  ${t.createdAt}  ${t.updatedAt}  ${t.title}${sched}${repeats}`,
+      `${t.id}  ${t.status.padEnd(7)}  ${t.createdAt}  ${t.updatedAt}  ${t.title}${sched}${repeats}${self}`,
     )
   }
 }
@@ -676,7 +682,7 @@ async function viewTask(args) {
   const task = await call(PROJECT, `/tasks/${id}`, { method: 'GET' })
   if (json) return void console.log(JSON.stringify(task, null, 2))
   console.log(`${task.title}  [${task.status}]${task.archived ? ' (archived)' : ''}`)
-  console.log(`id: ${task.id}`)
+  console.log(`id: ${task.id}${task.id === TASK ? '  ← this task' : ''}`)
   if (task.scheduledFor) console.log(`scheduled: ${task.scheduledFor}`)
   console.log(`edits: ${task.allowEdits}`)
   const clip = (s) => (s.length > clipLen ? `${s.slice(0, clipLen)}…` : s)
