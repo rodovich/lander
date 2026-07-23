@@ -1212,7 +1212,56 @@ async function clearWorktree() {
   }
 }
 
+// Per-command usage lines, keyed by command. The single source `printUsage`
+// prints from — reached via `lander help [cmd]`, `lander --help`/`-h`, or
+// `lander <cmd> --help`. These PRINT and exit without running the command, which
+// is the whole point: `lander launch --help` used to fall through `launchTask`'s
+// positional parse and spawn a real task whose message was the literal "--help"
+// (a sibling agent someone then had to notice and stop by hand). The hook verbs
+// (bash-guard/record-cwd/…) are internal and deliberately omitted.
+const USAGE = {
+  land: 'land [id…]',
+  launch:
+    'launch <message|-> [--title <t>] [--project <slug>] [--date <when>|--time <min>] [--await <ids>] [--edits] [--flow <name>] [--key <k> <v>]… [--files <paths…>]',
+  list: 'list [--status <s>] [--since <when>] [--until <when>] [--text <terms>] [--archived] [--json]',
+  view: 'view <id> [--tools] [--messages <N|all>] [--clip <N|all>] [--json]',
+  send: 'send <id> <message|-> [--date <when>|--time <min>] [--await <ids>] [--files <paths…>]',
+  rest: 'rest (--date <when> | --time <min> | --await <ids> | --clear)',
+  relaunch:
+    'relaunch <message|-> [--date <when>|--time <min>|--await <ids>] [--interval <min> [--repeat-count <n>|--repeat-until <when>]] [--clear]',
+  wedge: 'wedge [--option <id:label> …]',
+  ask: 'ask --option <id:label> [--option …]',
+  archive: 'archive <id…> [--restore]',
+  assist: 'assist <prompt> [text …]',
+  file: 'file (ls | cat <id>)',
+  artifact: 'artifact (put <path> [--name <n>] [--mime <m>] | ls | cat <name>)',
+  flow: 'flow <name> [--key <k> <v> …]',
+}
+
+// Print one command's usage, or the full command index when no (known) command
+// is named. Help output goes to stdout and never mutates anything.
+function printUsage(cmd) {
+  if (cmd && USAGE[cmd]) return void console.log(`usage: lander ${USAGE[cmd]}`)
+  console.log('usage: lander <command> [args]\n\ncommands:')
+  for (const u of Object.values(USAGE)) console.log(`  lander ${u}`)
+  console.log('\nrun `lander help <command>` or `lander <command> --help` for one command.')
+}
+
 const [cmd, ...rest] = process.argv.slice(2)
+const isHelp = (a) => a === '--help' || a === '-h' || a === 'help'
+// Intercept help BEFORE dispatch so `--help`/`-h`/`help` can never reach
+// launch/send/relaunch and be swallowed as a message. `lander`, `lander help`,
+// `lander --help`, `lander -h` → full index; `lander help <cmd>` and
+// `lander <cmd> --help|-h` → that command's usage. All exit 0, touching nothing.
+if (cmd === undefined || isHelp(cmd)) {
+  printUsage(rest.find((a) => !isHelp(a)))
+  process.exit(0)
+}
+if (rest.some(isHelp)) {
+  printUsage(cmd)
+  process.exit(0)
+}
+
 const run = {
   land: () => landTask(rest),
   wedge: () => wedgeTask(rest),
@@ -1233,16 +1282,9 @@ const run = {
   'record-worktree': () => recordWorktree(),
   'clear-worktree': () => clearWorktree(),
 }[cmd]
-if (!run)
-  die(
-    `unknown command: ${cmd ?? '(none)'} — try ` +
-      'land [id...] | wedge [--option id:label]... | ' +
-      'ask [--option id:label]... | ' +
-      'rest (--date|--time|--await|--clear) | ' +
-      'relaunch <message> ' +
-      '[--date|--time|--await|--interval|--repeat-count|--repeat-until|--clear] | ' +
-      'launch <message> | list [--archived] | view <id> [--tools] | send <id> <message> | ' +
-      'archive <id...> [--restore] | assist <prompt> | ' +
-      'artifact (put <path>|ls|cat <name>) | flow <name>',
-  )
+if (!run) {
+  console.error(`lander: unknown command: ${cmd}`)
+  printUsage()
+  process.exit(1)
+}
 run().catch((e) => die(e.message))
