@@ -527,8 +527,8 @@ function parseDateArg(flag, value) {
 // createdAt, updatedAt) — never their conversation, in either output mode
 // (see taskMetadata), even when --text matched inside one. --since/--until
 // filter by createdAt, inclusive. --text searches title + message text,
-// case-insensitively; repeat it for an AND, comma-delimit one occurrence for
-// an OR (see matchesText). --archived lists the archived tasks instead of the
+// case-insensitively, and also matches a task's exact id; repeat it for an
+// AND, comma-delimit one occurrence for an OR (see matchesText). --archived lists the archived tasks instead of the
 // active ones (the two pools are disjoint); all other filters still apply.
 async function listTasks(args) {
   let status

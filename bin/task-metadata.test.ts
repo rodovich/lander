@@ -143,6 +143,7 @@ describe('inDateRange', () => {
 
 describe('matchesText', () => {
   const task = {
+    id: 'MUuCmBrtqy',
     title: 'Fix the Auth timeout',
     items: [
       { kind: 'message', role: 'user', text: 'sessions are dropping after a few minutes' },
@@ -169,5 +170,14 @@ describe('matchesText', () => {
   it('ANDs across groups, failing if any group has no match', () => {
     expect(matchesText(task, [['auth'], ['timeout']])).toBe(true)
     expect(matchesText(task, [['auth'], ['nonexistent']])).toBe(false)
+  })
+
+  it('matches a term equal to the task id', () => {
+    expect(matchesText(task, [['MUuCmBrtqy']])).toBe(true)
+  })
+
+  it('does not match an id prefix or a differently-cased id', () => {
+    expect(matchesText(task, [['MUuCmB']])).toBe(false)
+    expect(matchesText(task, [['muucmbrtqy']])).toBe(false)
   })
 })

@@ -48,9 +48,11 @@ export function inDateRange(createdAt, { since, until } = {}) {
 // Whether a task's title or any message-item text contains, case-insensitively,
 // at least one term from every group in `groups` (an array of term arrays) — a
 // group is an OR (any term in it matches), groups themselves are ANDed. No
-// groups (an empty array) matches everything. Backs `lander list --text`,
-// which builds one group per occurrence of the flag, splitting each value on
-// commas — so `--text foo,bar --text baz` means (foo OR bar) AND baz.
+// groups (an empty array) matches everything. A term equal to the task's id
+// also matches (the whole id only — no prefix or substring matching there), so
+// a pasted id finds its task. Backs `lander list --text`, which builds one
+// group per occurrence of the flag, splitting each value on commas — so
+// `--text foo,bar --text baz` means (foo OR bar) AND baz.
 export function matchesText(task, groups) {
   if (!groups.length) return true
   const haystack = [
@@ -62,6 +64,8 @@ export function matchesText(task, groups) {
     .join('\n')
     .toLowerCase()
   return groups.every((terms) =>
-    terms.some((term) => haystack.includes(term.toLowerCase())),
+    terms.some(
+      (term) => term === task.id || haystack.includes(term.toLowerCase()),
+    ),
   )
 }
