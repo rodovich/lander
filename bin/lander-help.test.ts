@@ -103,3 +103,34 @@ describe('lander help', () => {
     expect(requests).toBe(0)
   })
 })
+
+// Defense in depth for flag typos the help interception doesn't catch (only
+// --help/-h/help are intercepted): a lone flag-shaped token as the whole message
+// is refused rather than spawned/sent as content.
+describe('flag-shaped message guard', () => {
+  it('`launch --titel foo` is refused, spawns nothing', async () => {
+    const { stderr, code } = await execLander(['launch', '--titel', 'foo'])
+    expect(code).not.toBe(0)
+    expect(stderr).toContain('mistyped flag')
+    expect(requests).toBe(0)
+  })
+
+  it('`send <id> --xyz` is refused before it resolves the target', async () => {
+    const { stderr, code } = await execLander(['send', 'sometask', '--xyz'])
+    expect(code).not.toBe(0)
+    expect(stderr).toContain('mistyped flag')
+    expect(requests).toBe(0)
+  })
+
+  it('--message is the escape hatch: a flag-shaped string still sends as content', async () => {
+    const { code } = await execLander(['launch', '--message', '--xyz'])
+    expect(code).toBe(0)
+    expect(requests).toBe(1)
+  })
+
+  it('prose that merely starts with a dash is not a flag', async () => {
+    const { code } = await execLander(['launch', '--flag means on'])
+    expect(code).toBe(0)
+    expect(requests).toBe(1)
+  })
+})
