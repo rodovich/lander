@@ -73,6 +73,7 @@ export function createClaudeAdapter({
         args: buildClaudeArgs(task, prompt, {
           landerBin,
           taskPromptTemplate,
+          id: landerEnv.LANDER_TASK,
           // Claude reads an attached image by its local path, but that path is
           // under LANDER_FILES_DIR — outside the task's working dir — so Read is
           // denied without a grant (and lander runs non-interactively, so no
@@ -156,10 +157,12 @@ function buildClaudeArgs(
   {
     landerBin,
     taskPromptTemplate,
+    id,
     filesDir,
   }: {
     landerBin: string
     taskPromptTemplate: string
+    id: string
     filesDir?: string
   },
 ): string[] {
@@ -253,7 +256,7 @@ function buildClaudeArgs(
     '--settings',
     hookSettings,
     '--append-system-prompt',
-    `${fillTaskPrompt(taskPromptTemplate, FORWARDABLE_POINTER)}\n\n${GIT_TIPS}`,
+    `${fillTaskPrompt(taskPromptTemplate, FORWARDABLE_POINTER, id)}\n\n${GIT_TIPS}`,
     '--output-format',
     'stream-json',
     '--verbose',

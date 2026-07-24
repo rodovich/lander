@@ -1,31 +1,37 @@
 import type { AgentTaskView } from './agent'
 
-// Fill the task prompt template's {{forwardable}} slot with the given sentence.
-// The two adapters diverge on what goes there: Codex interpolates the live
-// grants (its whole template rides the user message each turn, so it's always
-// fresh); Claude substitutes a static pointer and delivers the live grants via
-// the per-turn task-context block instead, keeping its --append-system-prompt
-// byte-stable across turns for prompt-cache reuse.
+// Fill the task prompt template's slots: {{id}} with the task's own id (constant
+// for the task's life, so it's safe in Claude's byte-stable --append-system-prompt)
+// and {{forwardable}} with a per-agent access sentence. The two adapters diverge on
+// the latter: Codex interpolates the live grants (its whole template rides the user
+// message each turn, so it's always fresh); Claude substitutes a static pointer and
+// delivers the live grants via the per-turn task-context block instead, keeping its
+// --append-system-prompt byte-stable across turns for prompt-cache reuse.
 export function fillTaskPrompt(
   taskPromptTemplate: string,
   forwardable: string,
+  id: string,
 ): string {
-  return taskPromptTemplate.replace('{{forwardable}}', forwardable)
+  return taskPromptTemplate
+    .replace('{{id}}', id)
+    .replace('{{forwardable}}', forwardable)
 }
 
 export function taskManagementPrompt(
   task: AgentTaskView,
   taskPromptTemplate: string,
+  id: string,
 ): string {
-  return fillTaskPrompt(taskPromptTemplate, forwardableAccess(task))
+  return fillTaskPrompt(taskPromptTemplate, forwardableAccess(task), id)
 }
 
 export function promptWithTaskManagement(
   task: AgentTaskView,
   prompt: string,
   taskPromptTemplate: string,
+  id: string,
 ): string {
-  return `${taskManagementPrompt(task, taskPromptTemplate)}\n\n${prompt}`
+  return `${taskManagementPrompt(task, taskPromptTemplate, id)}\n\n${prompt}`
 }
 
 export function forwardableAccess(task: AgentTaskView): string {

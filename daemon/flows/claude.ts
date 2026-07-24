@@ -376,7 +376,7 @@ function buildClaudeArgs(
     '--settings',
     hookSettings,
     '--append-system-prompt',
-    `${fillTaskPrompt(taskPromptTemplate, FORWARDABLE_POINTER)}\n\n${GIT_TIPS}`,
+    `${fillTaskPrompt(taskPromptTemplate, FORWARDABLE_POINTER, ctx.task.taskId)}\n\n${GIT_TIPS}`,
     '--output-format',
     'stream-json',
     '--verbose',

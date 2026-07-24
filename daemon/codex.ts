@@ -35,6 +35,7 @@ export function createCodexAdapter({
           projectRoot: root,
           gitCommonDir: task.allowEdits ? resolveGitCommonDir(cwd) : undefined,
           images: images ?? [],
+          id: landerEnv.LANDER_TASK,
         }),
         env: landerEnv,
       }
@@ -79,6 +80,7 @@ function buildCodexArgs(
     projectRoot,
     gitCommonDir,
     images,
+    id,
   }: {
     taskPromptTemplate: string
     profile?: string
@@ -86,6 +88,7 @@ function buildCodexArgs(
     projectRoot: string
     gitCommonDir?: string
     images: string[]
+    id: string
   },
 ): string[] {
   const configOverridesWithLanderDefaults = [
@@ -97,6 +100,7 @@ function buildCodexArgs(
     { ...task, agent: 'codex' },
     prompt,
     taskPromptTemplate,
+    id,
   )
   // One `-i <path>` per image (the repeatable short form). Placement differs by
   // path: `resume` parses a trailing prompt fine, so the flags go before it; a

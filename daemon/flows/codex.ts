@@ -236,6 +236,7 @@ function buildCodexArgs(
     },
     prompt,
     taskPromptTemplate,
+    ctx.task.taskId,
   )
   // One `-i <path>` per image (the repeatable short form). Placement differs by
   // path: `resume` parses a trailing prompt fine, so the flags go before it; a
