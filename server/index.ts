@@ -67,7 +67,6 @@ import {
   type Ride,
   type Item,
 } from './tasks'
-import { migrateTask } from './migrate'
 import {
   saveAttachment,
   readAttachmentMeta,
@@ -221,16 +220,15 @@ type Task = {
   allow?: string[]
   // The unified item log (v2 storage): messages, tool calls, lifecycle events, and
   // asks, in one flat ordered array (see docs/conversation-model.md). Replaces the
-  // old parallel messages[]/events[]/asks[]. publicTask serves this natively *and*
-  // projects it back to the v1 messages/events/asks shape for the current UI/CLI
-  // (dual-shape, dropped in step 6). Legacy files are converted on read (migrate).
+  // old parallel messages[]/events[]/asks[], and is what publicTask serves.
   items: Item[]
   // Rides: one record per run (agent turn) this task has driven, opened when the
   // run is handed to the daemon and closed when it finishes. `endedAt`-less ⇒ the
   // ride is open (the task is actively riding). Absent on tasks that predate rides.
   rides?: Ride[]
-  // Marks a record migrated to the v2 shape (rides + items). Absent on legacy v1
-  // records until the reviver/boot-sweep converts them.
+  // Storage format stamp; every record carries `2` (rides + items). Kept as the
+  // marker a future format change would key its migration off — the v1 reader that
+  // used to fill it in on read is gone, the backlog having been converted.
   shape?: number
   // Named output slots this task has published (`lander artifact put`), latest
   // version only — the slot registry, upserted by name. Each points at its
@@ -360,18 +358,11 @@ type Task = {
 
 // Bind the generic task store (server/store.ts) to the concrete Task type, so
 // the rest of the server keeps the same typed call sites.
-// Bind the store to the concrete Task type and thread the full v1→v2 migration
-// (server/migrate.ts) through every read path, so a task read off disk is always
-// converted to the current shape — and mutateTask persists that conversion on the
-// task's next write (see applyMutation). `isLegacy` gates the one-time
-// `<id>.json.v1.bak` backup mutateTask drops before it first overwrites a v1 file.
-const isLegacy = (t: Task) => t.shape !== 2
-const readTasks = (dataDir: string) => readTasksStore<Task>(dataDir, migrateTask)
-const readTask = (dataDir: string, id: string) =>
-  readTaskStore<Task>(dataDir, id, migrateTask)
+const readTasks = (dataDir: string) => readTasksStore<Task>(dataDir)
+const readTask = (dataDir: string, id: string) => readTaskStore<Task>(dataDir, id)
 const writeTask = (file: string, task: Task) => writeTaskStore(file, task)
 const mutateTask = (file: string, fn: (task: Task) => void) =>
-  mutateTaskStore(file, fn, migrateTask, isLegacy)
+  mutateTaskStore(file, fn)
 
 async function setTitle(
   dataDir: string,
@@ -3017,40 +3008,6 @@ async function backfillAgents(): Promise<void> {
 // too, since the UI reads those back. Idempotent: a file already in the new shape
 // is left untouched.
 type LegacyAwait = { id?: string; session?: string; title: string }
-// One-time boot sweep: convert every not-yet-migrated task file (in each
-// project's tasks/ and archived/ dirs) to the v2 shape (rides + item log), so the
-// reader's ongoing per-file conversion is bounded to files that appear later
-// (restores, other checkouts — what the two-week cleanup window covers). Each
-// shape-less file is mutated with a no-op — the reviver converts it, the write
-// persists it and drops a one-time `.v1.bak`. Best-effort and sequential; logs a
-// count. Runs after the server is already serving (in-flight runs are unaffected).
-async function migrateSweep(): Promise<void> {
-  let converted = 0
-  for (const project of PROJECTS) {
-    for (const dir of [project.dataDir, project.archiveDir]) {
-      let names: string[]
-      try {
-        names = await readdir(dir)
-      } catch {
-        continue
-      }
-      for (const name of names) {
-        if (!name.endsWith('.json')) continue
-        const file = path.join(dir, name)
-        try {
-          const raw = JSON.parse(await readFile(file, 'utf8')) as { shape?: number }
-          if (raw.shape === 2) continue
-          // The no-op mutation triggers reviver conversion + persistence + backup.
-          await mutateTask(file, () => {})
-          converted++
-        } catch {
-          // skip unreadable/invalid files
-        }
-      }
-    }
-  }
-  if (converted) console.log(`migrated ${converted} task file(s) to shape 2`)
-}
 
 async function backfillIds(): Promise<void> {
   for (const project of PROJECTS) {
@@ -3140,9 +3097,6 @@ if (process.env.NODE_ENV !== 'test' && process.env.VITEST !== 'true') {
   void backfillIds()
   void backfillAgents()
   void backfillSeen()
-  // Convert the whole task backlog to the v2 shape once, up front (per-file writes
-  // serialize with everything else via mutateTask).
-  void migrateSweep()
   void recoverQueues()
   // Launch due scheduled tasks on boot (catching any whose time passed while the
   // server was down), then sweep every 15s to launch each as it comes due.

@@ -490,9 +490,19 @@ describe('artifacts', () => {
           allowEdits: false,
           token: `token-${id}`,
           runId: `run-${id}`,
-          messages: [
-            { role: 'user', text: 'make a file', createdAt: AT },
-            { role: 'assistant', text: 'working', createdAt: AT, pending: true },
+          shape: 2,
+          // A live turn: the open ride the publish lands its artifact ref on.
+          rides: [{ id: `run-${id}`, startedAt: AT }],
+          items: [
+            { id: 'u0', at: AT, kind: 'message', role: 'user', text: 'make a file' },
+            {
+              id: 'f0',
+              at: AT,
+              rideId: `run-${id}`,
+              kind: 'message',
+              role: 'flow',
+              text: 'working',
+            },
           ],
           ...over,
         },
@@ -676,8 +686,16 @@ describe('asks', () => {
     )
 
   // Seed a wedged task on disk with a token, so a create/answer has an owner and
-  // (for answer tests) an ask already open.
+  // (for answer tests) an ask already open. Ask fixtures are written in the
+  // ask-payload form (`asks: [openAsk()]`) for readability and folded here into
+  // the ask items storage actually holds.
   async function seedTask(id: string, over: Raw = {}): Promise<void> {
+    const { asks, items, ...rest } = over as Raw & { asks?: Raw[]; items?: Raw[] }
+    const askItems = (asks ?? []).map(({ createdAt, ...ask }) => ({
+      ...ask,
+      at: createdAt,
+      kind: 'ask',
+    }))
     await writeFile(
       taskFile(id),
       JSON.stringify(
@@ -689,8 +707,15 @@ describe('asks', () => {
           updatedAt: AT,
           allowEdits: false,
           token: `token-${id}`,
-          messages: [{ role: 'user', text: 'go', createdAt: AT }],
-          ...over,
+          shape: 2,
+          rides: [],
+          ...rest,
+          items: [
+            ...(items ?? [
+              { id: 'u0', at: AT, kind: 'message', role: 'user', text: 'go' },
+            ]),
+            ...askItems,
+          ],
         },
         null,
         2,
@@ -993,12 +1018,13 @@ describe('asks', () => {
     await seedTask(id, {
       status: 'wedged',
       scheduledFor: AT,
-      // A turn already ran (the assistant message converts to a settled ride), so
-      // the wakeup drives the synthetic resume prompt rather than a queued
-      // opening message — the `lander rest` path, not a deferred `new`.
-      messages: [
-        { role: 'user', text: 'go', createdAt: AT },
-        { role: 'assistant', text: 'on it', createdAt: AT },
+      // A turn already ran (a settled ride), so the wakeup drives the synthetic
+      // resume prompt rather than a queued opening message — the `lander rest`
+      // path, not a deferred `new`.
+      rides: [{ id: 'r0', startedAt: AT, endedAt: AT, outcome: 'done' }],
+      items: [
+        { id: 'u0', at: AT, kind: 'message', role: 'user', text: 'go' },
+        { id: 'f0', at: AT, rideId: 'r0', kind: 'message', role: 'flow', text: 'on it' },
       ],
       asks: [openAsk()],
     })

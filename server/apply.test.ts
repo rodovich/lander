@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
 import { applyUpdate, applyDone, type ApplyTask, type ApplyUpdate } from './apply'
-import { migrateTask } from './migrate'
 import type { Step, Usage } from './stream'
 import type { Item, MessageItem, ToolItem, Ride } from './tasks'
 
@@ -365,33 +364,29 @@ describe('applyDone', () => {
   })
 })
 
-// The load-bearing seam: a run that streamed half its steps under v1 and half
-// under v2 must reconcile. Convert a pending+runId fixture, then feed the rest of
-// the run through applyUpdate/applyDone — the tool item the converter minted (by
-// toolUseId) gets its result folded seamlessly.
-describe('mid-flight continuation (v1 → v2 mid-run)', () => {
-  it('folds the remaining wire steps onto converter-minted items and finishes', () => {
-    const v1 = {
-      status: 'riding',
+// A tool's result routinely arrives in a *later* batch than its use (the tool was
+// still running when the previous batch was flushed). The result must fold onto the
+// item the earlier batch created rather than minting a second one.
+describe('continuation across batches', () => {
+  it('folds a later batch’s result onto an already-running tool item and finishes', () => {
+    const t = task({
       runId: 'live',
-      title: 't',
-      updatedAt: AT,
       runCursor: 3,
-      messages: [
-        { role: 'user', text: 'go', createdAt: AT },
+      items: [
+        { id: 'u0', at: AT, kind: 'message', role: 'user', text: 'go' },
+        { id: 'f0', at: AT, rideId: 'live', kind: 'message', role: 'flow', text: 'working' },
         {
-          role: 'assistant',
-          text: 'working',
-          createdAt: AT,
-          pending: true,
-          steps: [
-            { kind: 'text', text: 'working', createdAt: AT },
-            { kind: 'tool_use', tool: 'Bash', input: 'ls', toolUseId: 'call_1', createdAt: AT },
-          ],
+          id: 'call_1',
+          at: AT,
+          rideId: 'live',
+          kind: 'tool',
+          name: 'Bash',
+          input: 'ls',
+          status: 'running',
         },
       ],
-    }
-    const t = migrateTask(v1) as unknown as ApplyTask
+      rides: [{ id: 'live', startedAt: AT }],
+    })
     // Sanity: an open ride keyed by runId, with a running tool item.
     expect(t.rides!.find((r: Ride) => r.id === 'live' && !r.endedAt)).toBeTruthy()
     const runningTool = (t.items as Item[]).find(
@@ -399,7 +394,7 @@ describe('mid-flight continuation (v1 → v2 mid-run)', () => {
     ) as ToolItem
     expect(runningTool.status).toBe('running')
 
-    // The daemon streams the tool_result for that same call (v2 side of the run).
+    // The daemon streams the tool_result for that same call in the next batch.
     applyUpdate(
       t,
       update({

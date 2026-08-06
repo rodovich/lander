@@ -15,14 +15,8 @@ export type StoredRecord = { createdAt: string; updatedAt?: string }
 // existed). A missing dir yields []; unreadable or invalid files are skipped
 // rather than aborting the listing — and non-.json entries (e.g. the
 // <id>.json.<uuid>.tmp files that briefly exist mid-write) are ignored.
-//
-// `revive` is the versioned-reader hook (server/migrate.ts): applied to each
-// parsed record so the rest of the server always sees the current shape,
-// regardless of what version the file was written in. Absent in the store's own
-// tests, where records are already current.
 export async function readTasks<T extends StoredRecord>(
   dataDir: string,
-  revive?: (raw: T) => T,
 ): Promise<T[]> {
   let names: string[]
   try {
@@ -35,8 +29,7 @@ export async function readTasks<T extends StoredRecord>(
     if (!name.endsWith('.json')) continue
     try {
       const raw = await readFile(path.join(dataDir, name), 'utf8')
-      const parsed = JSON.parse(raw) as T
-      tasks.push(revive ? revive(parsed) : parsed)
+      tasks.push(JSON.parse(raw) as T)
     } catch {
       // skip unreadable/invalid files
     }
@@ -53,12 +46,10 @@ export async function readTasks<T extends StoredRecord>(
 export async function readTask<T>(
   dataDir: string,
   id: string,
-  revive?: (raw: T) => T,
 ): Promise<T | null> {
   try {
     const raw = await readFile(path.join(dataDir, `${id}.json`), 'utf8')
-    const parsed = JSON.parse(raw) as T
-    return revive ? revive(parsed) : parsed
+    return JSON.parse(raw) as T
   } catch {
     return null
   }
@@ -91,15 +82,13 @@ const chains = new Map<string, Promise<unknown>>()
 export function mutateTask<T>(
   file: string,
   fn: (task: T) => void,
-  revive?: (raw: T) => T,
-  isLegacy?: (raw: T) => boolean,
 ): Promise<void> {
   const prior = chains.get(file) ?? Promise.resolve()
   // Sequence after the prior op whether it resolved or rejected, so one failed
   // mutation doesn't wedge the file's queue.
   const run = prior.then(
-    () => applyMutation<T>(file, fn, revive, isLegacy),
-    () => applyMutation<T>(file, fn, revive, isLegacy),
+    () => applyMutation<T>(file, fn),
+    () => applyMutation<T>(file, fn),
   )
   // The tail swallows outcomes so the next waiter only sequences on it; the
   // caller still observes this op's real result/error via `run`. Drop the map
@@ -118,27 +107,8 @@ export function mutateTask<T>(
 async function applyMutation<T>(
   file: string,
   fn: (task: T) => void,
-  revive?: (raw: T) => T,
-  isLegacy?: (raw: T) => boolean,
 ): Promise<void> {
-  // Revive on the read (before the mutation) so a v1 file is converted first,
-  // and the fn — and the write below — operate on the current shape. This is what
-  // persists the conversion: the first mutation of a legacy record rewrites it.
-  const rawText = await readFile(file, 'utf8')
-  const parsed = JSON.parse(rawText) as T
-  const legacy = isLegacy?.(parsed) ?? false
-  const task = revive ? revive(parsed) : parsed
-  // Before the first write that persists a shape conversion, stash the exact
-  // pre-conversion bytes as a one-time `<file>.v1.bak` (the `wx` flag no-ops if it
-  // already exists). readTasks ignores non-`.json` names, so the backup is inert;
-  // the two-week cleanup deletes them.
-  if (legacy) {
-    try {
-      await writeFile(`${file}.v1.bak`, rawText, { flag: 'wx' })
-    } catch {
-      // already backed up (or unwritable) — leave the existing one
-    }
-  }
+  const task = JSON.parse(await readFile(file, 'utf8')) as T
   fn(task)
   await writeTask(file, task)
 }
