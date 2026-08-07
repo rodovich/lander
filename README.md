@@ -17,8 +17,6 @@ npm install
 npm run dev /path/to/project [/path/to/another ...]
 ```
 
-Type-check with `npm run typecheck`. Run the unit tests with `npm test` (or `npm run test:watch` to re-run on change); they cover the pure server-side logic — the agent stream reducers, the task store, and the project-path/status helpers — plus the markdown renderer.
-
 Each path is resolved and the list is exported as `PROJECT_DIRS` (newline-separated); these are the working directories where agent subprocesses run. Then open the web UI on port 41414.
 
 Each project gets a URL slug from its path (e.g. `/Users/me/code/app` → `users-me-code-app`). The sidebar shows a dropdown to switch projects; choosing one pushes its slug into the URL (`/users-me-code-app/`). Visiting `/` redirects to the first project passed on the command line.
@@ -33,33 +31,26 @@ Each project gets a URL slug from its path (e.g. `/Users/me/code/app` → `users
 | API | Hono on `@hono/node-server` | 6181 | Task CRUD, scheduling, and daemon coordination |
 | Daemon | Node host process | — | Owns `claude`/`codex` subprocesses, stream reduction, and Claude usage polling |
 
-### API (`server/index.ts`)
+- A turn doesn't run as a child of the server. The server sends a provider-neutral `start-run` message to the host daemon over WebSocket. The daemon owns the selected `claude` or `codex` child process, reduces its stream into normalized updates, enforces the idle timeout, and keeps a short replay buffer for reconnects. The server applies those updates to task JSON and surfaces a non-zero exit with no reply as an error message.
+- Because the daemon survives a server restart, an in-flight turn keeps going across a reload and a fresh server **reattaches** to it, resuming from the persisted run cursor. The server stays the **sole writer of task JSON**; the daemon only owns live process state and replay buffers, so the two can later run on separate hosts.
 
-- `GET /api/projects` — list the configured projects (`{ path, slug }`); the first is the default.
-- `GET /api/:project/tasks` — list a project's tasks (sorted newest-first). `?archived=1` also merges in archived tasks, each tagged `archived: true`.
-- `POST /api/:project/tasks` — create a task, store its chosen agent, and queue the first turn on the daemon.
-- `POST /api/:project/tasks/:id/messages` — append a user message; the daemon resumes the task's stored provider session. Both this and `POST .../tasks` accept `attachments: id[]` to associate uploaded files with the message (see [Attachments](#attachments)).
-- `POST /api/:project/attachments` — upload one or more files (multipart) to the project's durable blob store, returning their refs (`{id, name, mime, size}`). `GET /api/:project/attachments/:id` streams a stored file's bytes. Both require an identified caller (the browser's UI token or a task's `LANDER_TOKEN`).
-- `POST /api/:project/tasks/:id/artifacts` — publish a task's named output file (multipart `file` + optional `name`), latest version only; `GET /api/:project/tasks/:id/artifacts` lists the slots and `GET .../artifacts/:name` streams the current blob. Only the task itself (or the human) may publish; any identified caller may read. See [Artifacts](#artifacts).
-- `POST /api/:project/tasks/:id/allow` — grant a permission rule (a denied one from the per-turn blocked summary, or one authored proactively from the header grant control). `{ rule, scope }`: for Claude, `scope: "task"` appends `rule` to the task's `allow` list (fed to `--allowedTools` on future turns) and `scope: "project"` writes it to the project's `.claude/settings.local.json`. Codex task rules are saved for parity but do not affect Codex runs yet, and project grants are not supported for Codex tasks. Human-only (see [Authenticated permission grants](#authenticated-permission-grants)).
-- `POST /api/:project/tasks/:id/archive` — `{ archived }` (default `true`) moves the task's JSON between `tasks/` and `archived/`. Archiving takes a task out of the list (and out of the scheduler's and recovery's view, which only scan `tasks/`); `{ archived: false }` restores it. A `riding` task can't be archived — it has a live run the reducer must keep reattaching to — so the call `409`s until it comes to rest.
-
-All task routes are scoped by the project slug, which selects the host working directory the agent runs in and the on-disk data dir.
-- A turn doesn't run as a child of the server. The server sends a provider-neutral `start-run` message to the host daemon over WebSocket. The daemon owns the selected `claude` or `codex` child process, reduces its stream into normalized updates, enforces the 10-minute idle timeout, and keeps a short replay buffer for reconnects. The server applies those updates to task JSON and surfaces a non-zero exit with no reply as an error message.
-- Because the daemon survives a server restart, an in-flight turn keeps going across a reload and a fresh server **reattaches** to it (resuming from the persisted run cursor — see [Restart & hot reload](#restart--hot-reload)). The server stays the **sole writer of task JSON**; the daemon only owns live process state and replay buffers, so the two can later run on separate hosts.
+The HTTP surface, the permission mechanics, and the restart/reattach machinery are documented in [docs/architecture.md](docs/architecture.md).
 
 ### Storage
 
-Flat JSON files, one per task, no database. Tasks live under `./data/<normalized-project-path>/tasks/<uuid>.json`, where the project path is slugified (e.g. `/Users/me/code/app` → `Users-me-code-app`). This namespaces tasks per target project. The task `id` belongs to Lander; the provider session id is stored separately as `sessionId` after the daemon reports it. The task carries the `runId` and `runCursor` of any run currently in flight so a reloaded server can reattach to the daemon's live replay buffer. Also alongside is `archived/`: archiving a task **moves** its `<uuid>.json` there, which is how an archived task drops out of the list and out of the scheduler/recovery sweeps (both scan only `tasks/`) — its location on disk is the sole source of truth for the archived state, so nothing is written into the file itself.
+Flat JSON files, one per task, no database. Tasks live under `./data/<normalized-project-path>/tasks/<id>.json`, where the project path is slugified (e.g. `/Users/me/code/app` → `Users-me-code-app`). This namespaces tasks per target project. The task `id` belongs to Lander; the provider session id is stored separately as `sessionId` after the daemon reports it. The task carries the `runId` and `runCursor` of any run currently in flight so a reloaded server can reattach to the daemon's live replay buffer. Also alongside is `archived/`: archiving a task **moves** its `<id>.json` there, which is how an archived task drops out of the list and out of the scheduler/recovery sweeps (both scan only `tasks/`) — its location on disk is the sole source of truth for the archived state, so nothing is written into the file itself.
 
-Claude turns build `--allowedTools` from `Bash(lander:*)` (always) and the task's `allow` list (rules granted in **task** scope from the per-turn blocked-permissions summary). Edit access rides `--permission-mode acceptEdits` instead of the allowlist, plus `--add-dir` for the scratch roots (`/tmp` and `os.tmpdir()` — the same path on Linux, but distinct on macOS, where `os.tmpdir()` resolves `$TMPDIR` to a per-user `/var/folders/<hash>/T`). Naming `Edit`/`Write` in `--allowedTools` is "explicit permission", which escapes the working-directory boundary — a granted `Write` can create `/tmp/anything`; `acceptEdits` instead auto-approves file edits and the filesystem Bash commands (`mkdir`/`touch`/`rm`/`rmdir`/`mv`/`cp`/`sed`) and `>` redirects only for paths under the cwd, the scratch roots, or the attachment `--add-dir` root, and never for protected paths (`.git`, `.claude`, shell rc files) — so it both bounds edits and gives edit-capable tasks the delete access a bare `Edit`/`Write` grant can't express. It widens nothing else: git and every other Bash command follow the project's normal `.claude` settings (`settings.json` / `settings.local.json`) plus per-task allow rules — anything unlisted is denied in headless mode. To let tasks run git in a project, add a rule like `Bash(git:*)` to that project's `.claude/settings.json`. Project-scoped Claude grants (granting a denied rule in **project** scope) land in `.claude/settings.local.json`, which the CLI reads on its own. Codex turns use named permission profiles: read-only tasks extend Codex's built-in read-only profile, while editable tasks extend its workspace profile and add write access to the workspace's `.git` path and resolved Git common directory. The editable profile otherwise preserves workspace-write behavior, including general filesystem reads and writes to `/tmp` and `$TMPDIR`. Task allow rules are stored by Lander but do not affect Codex runs yet, and Codex has no separate git gate inside an editable task.
+### Configuring what tasks may run
+
+An edit-capable task can edit, create, and delete files within its project directory and the scratch roots (`/tmp` and `$TMPDIR`), but never `.git`, `.claude`, or paths outside those roots. Edit access is the only thing Lander itself grants.
+
+Everything else — git, package managers, anything you'd run in a shell — follows the target project's own `.claude` settings plus any rules granted to the individual task; anything unlisted is denied. So to let tasks run git in a project, add a rule like `Bash(git:*)` to that project's `.claude/settings.json`. Granting a denied rule in **project** scope from the UI writes it to `.claude/settings.local.json`, which the Claude CLI reads on its own; **task** scope keeps it to the one task. Codex tasks are governed by a sandbox profile rather than rules, so a Codex task's stored rules don't affect its runs yet.
+
+[docs/architecture.md](docs/architecture.md) documents how each provider's flags and profiles produce these boundaries.
 
 ### Restart & hot reload
 
-Because turns run in the separate host daemon (see [API](#api-serverindexts)), restarting the API no longer interrupts in-flight work — so the API runs under `tsx watch` and **hot-reloads on server edits** (including when an agent edits `server/index.ts` while lander targets its own repo). Two mechanisms keep a reload clean:
-
-- **Graceful shutdown.** On `SIGTERM`/`SIGINT` the server stops the scheduler and lets the HTTP server finish in-flight requests before exiting (a 3s timeout forces it if a connection won't close), so a reload never drops a write mid-flight.
-- **Reattach on boot.** `recoverQueues()` scans each task: one with a tracked `runId` is **reattached** by asking the daemon to replay updates after the persisted cursor, so no output is lost and the agent is never re-run. Only a run no connected daemon still owns after the reconnect grace is treated as interrupted and **replayed** — pending flags cleared and the turn re-queued (a "Resumed at … after the previous run was interrupted" nudge for one that already replied, or the opening message replayed for one that never did). Tasks with leftover `queued` messages are drained the same way.
+Because turns run in the separate host daemon, restarting the API doesn't interrupt in-flight work: the API hot-reloads on server edits, an in-flight turn keeps streaming, and a fresh server reattaches to it without re-running the agent. See [docs/architecture.md](docs/architecture.md) for the graceful-shutdown and reattach mechanics.
 
 ### Self-management (`bin/lander`)
 
@@ -87,7 +78,7 @@ A task's agent can call back into lander to manage itself. When the daemon launc
 
 With no trigger flag, `send` delivers immediately, queued behind any in-flight turn. With `--date`/`--time`/`--await` (same semantics as `launch`/`rest`) it stashes the message on the recipient as a scheduled message that fires when its time arrives or every awaited task has landed, whichever comes first. A task may only message tasks in its own project.
 
-`lander launch` reads the message from the argument, or from stdin if it's `-`, and accepts `--project <slug>`, `--title <title>`, `--date <when>` / `--time <minutes>` / `--await <ids>`, and `--edits`. `--title` names the task directly instead of using the auto-titler. Deferred launches are created resting and the scheduler wakes them when their trigger fires; a resting scheduled task also gets a **Launch** item in its row's kebab menu (see [Frontend](#frontend-srcapptsx)) to run it early. A spawned task is read-only unless `--edits` is passed, and `--edits` is inherit-only: a child may be granted edit access only if the spawning task already has it. (Git isn't a Lander grant — it's governed by the project's `.claude` settings.) A human can later grant edits to a read-only task from the crossed-out-pencil menu in the task header. As a guard against a mistyped flag becoming work, `launch` (and `send`/`relaunch`) refuse a message that is a lone flag-shaped token like `--help` or `--titel`; pass such a string as content via `--message` or `-` (stdin).
+`lander launch` reads the message from the argument, or from stdin if it's `-`, and accepts `--project <slug>`, `--title <title>`, `--date <when>` / `--time <minutes>` / `--await <ids>`, and `--edits`. `--title` names the task directly instead of using the auto-titler. Deferred launches are created resting and the scheduler wakes them when their trigger fires; a resting scheduled task also gets a **Launch** item in its row's kebab menu (see [Frontend](#frontend-src)) to run it early. A spawned task is read-only unless `--edits` is passed, and `--edits` is inherit-only: a child may be granted edit access only if the spawning task already has it. (Git isn't a Lander grant — it's governed by the project's `.claude` settings.) A human can later grant edits to a read-only task from the crossed-out-pencil menu in the task header. As a guard against a mistyped flag becoming work, `launch` (and `send`/`relaunch`) refuse a message that is a lone flag-shaped token like `--help` or `--titel`; pass such a string as content via `--message` or `-` (stdin).
 
 `lander rest` takes the same `--date`/`--time`/`--await` flags (at least one required) to re-sleep a running task: it flips to resting with a scheduled or awaiting event and, when the scheduler wakes it, resumes with a generated "Resumed at …" message. `lander rest --clear` disarms pending wakeup triggers without touching status or rewriting history. The CLI is a zero-dependency Node script that talks to the local HTTP API, so the server stays the single source of truth; actual agent subprocesses are launched by the daemon, not by the CLI.
 
@@ -125,8 +116,6 @@ gh pr list --search "review-requested:@me" --json number -q '.[].number' |
   while read pr; do lander launch "Review PR #$pr using \`gh pr diff $pr\`."; done
 ```
 
-So that an agent-set status survives, `driveTask` only resets `riding → resting` on exit — it won't clobber a status like `wedged` or the terminal `landed` the agent set mid-run.
-
 ### Flows (`lander flow`)
 
 A **flow** is a reusable script stored as `data/<normalized-project-path>/flows/<name>.js` (a sibling of the project's `tasks/` dir) that exports a default async function. A task runs one with `lander flow <name> [--key value …]`; the `--key value` pairs arrive as the flow's `lander.inputs`.
@@ -161,9 +150,9 @@ export default async function (lander) {
 }
 ```
 
-### Frontend (`src/App.tsx`)
+### Frontend (`src/`)
 
-Single component: sidebar (task list + new-task form) and a detail pane (message thread + reply composer). Enter submits, Shift/Option+Enter for newlines; shows an agent-specific "Claude is working…" or "Codex is working…" indicator when the last message is from the user.
+`App.tsx` holds the layout and the shared state; the panes are their own modules — the task list, project menu, new-task form, conversation, and composer. A sidebar (task list + new-task form) sits beside a detail pane (message thread + reply composer). Enter submits, Shift/Option+Enter for newlines; an agent-specific "Claude is working…" or "Codex is working…" indicator shows when the last message is from the user.
 
 Each task row carries a **kebab (⋮) menu** with the status actions — **Wedge** / **Rest** / **Land** / **Launch** — plus **Archive**. Only the items that would be both visible *and* enabled for the row's status appear (e.g. a landed task offers Wedge/Rest/Archive but not Land; a riding task can't be archived), so the menu never shows a dead option. The menu is `position: fixed`, anchored to the kebab's live rect, so the scrolling list can't clip it, and arrow keys move between items. Archived tasks are hidden by default; the project dropdown has a **Show archived** toggle that merges them in (each row dimmed and tagged `archived`), where the kebab offers only **Restore**.
 
@@ -178,4 +167,3 @@ The task header carries a **rubber-stamp button** (beside the copy-id / read-onl
 - `status` moves through `riding` (agent working) → `resting` (idle) when a turn finishes; an agent can also set its own status — `wedged` (needs the user) or the terminal `landed` — via the `lander` CLI (see Self-management).
 - **Archiving** is orthogonal to status: it just relocates a task's JSON to `archived/` so it leaves the list and the scheduler/recovery sweeps. Any non-`riding` task can be archived (from the row's kebab menu or `lander archive`); restoring moves it back. An archived task keeps its status and history untouched.
 - Reads are unauthenticated (only permission *changes* check a principal — see Authenticated permission grants); delivery is by 2s polling, not SSE/websockets — though the turn itself streams (see Frontend).
-- Task IDs are validated as UUIDs before filesystem access, which guards against path traversal on the `:id` route.
