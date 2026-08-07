@@ -280,13 +280,17 @@ type Task = {
   // field, records a "launched" event, and drives the queue (a deferred new
   // task's opening message, or a generated "Resumed at …" prompt for a rested
   // one). May coexist with `waitingFor`, in which case whichever fires first
-  // launches the task. Absent on un-scheduled tasks.
+  // launches the task. Also dropped by an incoming message that wakes the task
+  // early (see the /messages handler) and by landing (recordStatusTransition) —
+  // both leave nothing for a timer to come back to. Absent on un-scheduled tasks.
   scheduledFor?: string
   // Task ids this task is resting on (`lander new/rest --await`). The scheduler
   // launches the task once every one has reached terminal "landed" — a missing
   // id (archived/deleted) counts as satisfied so a vanished dependency can't
   // strand the waiter. Coexists with `scheduledFor` as an OR fallback. Cleared
-  // on launch, alongside scheduledFor. Absent when not awaiting.
+  // on launch, alongside scheduledFor, and on landing — but NOT by a message
+  // that wakes the task early, since a dependency on siblings outlives that.
+  // Absent when not awaiting.
   waitingFor?: string[]
   // Transient flag set when a task is read from the project's archive dir, so
   // the UI can mark archived rows and offer "Restore" instead of "Archive". Not

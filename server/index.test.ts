@@ -1160,6 +1160,76 @@ describe('asks', () => {
   })
 })
 
+// Landing is terminal, so any wakeup the task was still holding can only bring a
+// finished task back to report it has nothing to do. Both observed halves of the
+// problem meet here: every one of the recorded spurious resumes fired on a task
+// that had ALREADY landed, and the scheduler will happily launch a landed task
+// even though the daemon's wake-delivery table answers one with "ack and drop".
+describe('landing disarms the task’s wakeups', () => {
+  const taskFile = (id: string) => path.join(tasksDir, `${id}.json`)
+  const readRaw = async (id: string): Promise<Record<string, unknown>> =>
+    JSON.parse(await readFile(taskFile(id), 'utf8'))
+  const patch = (id: string, body: unknown) =>
+    app.request(`/api/${slug}/tasks/${id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', 'x-lander-ui-token': UI_TOKEN },
+      body: JSON.stringify(body),
+    })
+
+  const seedArmed = (id: string) =>
+    writeFile(
+      taskFile(id),
+      JSON.stringify({
+        id,
+        title: 'Resting task',
+        status: 'riding',
+        // Overdue on purpose: the trigger is one scheduler sweep away from
+        // firing, which is exactly the state the seven observed cases were in.
+        scheduledFor: AT,
+        waitingFor: ['sibling-x'],
+        createdAt: AT,
+        updatedAt: AT,
+        allowEdits: false,
+        shape: 2,
+        items: [],
+        rides: [{ id: 'r0', startedAt: AT, endedAt: AT, outcome: 'done' }],
+      }),
+    )
+
+  it('drops both triggers, so the wakeup can no longer launch it', async () => {
+    const id = 'land-disarms'
+    await seedArmed(id)
+    expect((await patch(id, { status: 'landed' })).status).toBe(200)
+
+    const raw = await readRaw(id)
+    expect(raw.status).toBe('landed')
+    expect(raw.scheduledFor).toBeUndefined()
+    expect(raw.waitingFor).toBeUndefined()
+
+    // The scheduler's own gate: nothing armed, nothing to launch. Before this
+    // it would have driven a full "Resumed at …" ride on a landed task.
+    const launch = await post(`/api/${slug}/tasks/${id}/launch`, {})
+    expect(launch.status).toBe(409)
+  })
+
+  it('still un-lands, just with nothing stale left to fire', async () => {
+    const id = 'land-disarms-unland'
+    await seedArmed(id)
+    expect((await patch(id, { status: 'landed' })).status).toBe(200)
+    expect((await patch(id, { status: 'riding' })).status).toBe(200)
+
+    const raw = await readRaw(id)
+    expect(raw.status).toBe('riding')
+    expect(
+      ((raw.items as Record<string, unknown>[]) ?? [])
+        .filter((i) => i.kind === 'event')
+        .map((i) => i.eventKind),
+    ).toEqual(['landed', 'unlanded'])
+    expect(raw.scheduledFor).toBeUndefined()
+    expect(raw.waitingFor).toBeUndefined()
+  })
+})
+
 // A daemon that dies mid-turn (a supervisor max-drain SIGTERM, a crash) can't
 // settle its own runs; the server crashes the abandoned run once the reconnect
 // grace lapses. That platform kill must wedge the task with a retry ask — not

@@ -560,6 +560,10 @@ export function latestUpdateAt(task: {
 // straight between two notable statuses (wedged↔landed) records the arrival
 // only. Call before assigning the new status, while task.status holds the old.
 //
+// The crossing into `landed` also disarms any wakeup the task was still holding
+// (`scheduledFor`/`waitingFor`): landing is terminal, so a surviving trigger can
+// only resurrect a finished task to report it has nothing to do.
+//
 // A crossing also settles any ask left open, because a task-blocking ask is only
 // live while the task sits where the ask put it: the wedge ending IS the end of
 // the ask, by whatever route the task left — answering, a fresh message, a manual
@@ -585,6 +589,8 @@ export function recordStatusTransition(
     title: string
     items?: Item[]
     revived?: RevivedMarker
+    scheduledFor?: string
+    waitingFor?: string[]
   },
   next: string,
   at: string,
@@ -597,9 +603,24 @@ export function recordStatusTransition(
     pushEventItem(task, { eventKind: 'wedged', title: task.title }, at)
     return
   }
-  if (next === 'landed')
+  if (next === 'landed') {
     pushEventItem(task, { eventKind: 'landed', title: task.title }, at)
-  else if (prev === 'wedged' || prev === 'landed') {
+    // Landing is terminal, so every armed wakeup is now dead weight — including
+    // the await, which unlike an early revival has nothing left to come back to.
+    // Left armed they resurrect a finished task to say it has nothing to do:
+    // that is what every one of the seven observed spurious resumes actually
+    // was. The daemon's wake-delivery table already answers a landed task with
+    // "ack and drop" (docs/daemon-wakeups.md §Delivery) while the scheduler
+    // happily launches one; this closes that asymmetry at the source.
+    //
+    // Here rather than at the land routes for the same reason the events are
+    // here: `lander land`, `lander land <id>`, and the UI all funnel through
+    // this one crossing, so no route can forget. Un-landing is unaffected — a
+    // landed task revived by a message still works, it just no longer has a
+    // stale trigger left to fire.
+    delete task.scheduledFor
+    delete task.waitingFor
+  } else if (prev === 'wedged' || prev === 'landed') {
     pushEventItem(
       task,
       {

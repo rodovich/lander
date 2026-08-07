@@ -410,6 +410,56 @@ describe('recordStatusTransition', () => {
     expect(kinds(t)).toEqual(['landed'])
   })
 
+  // Landing is terminal, so a surviving wakeup can only resurrect a finished
+  // task to report it has nothing to do — the observed spurious-resume failure,
+  // every case of which fired on a task that had already landed. Disarmed on the
+  // crossing so no land route (`lander land`, `lander land <id>`, the UI) can
+  // forget, the same way none can forget the event.
+  describe('disarming wakeups on the way into landed', () => {
+    const armed = (status: string) => ({
+      ...task(status),
+      scheduledFor: '2026-08-07T15:00:00.000Z',
+      waitingFor: ['sib-a', 'sib-b'],
+    })
+
+    it('drops both triggers when a riding task lands', () => {
+      const t = armed('riding')
+      recordStatusTransition(t, 'landed', AT)
+      expect(t.scheduledFor).toBeUndefined()
+      expect(t.waitingFor).toBeUndefined()
+    })
+
+    // Including the await, which an early revival deliberately preserves: there
+    // the task comes back, here there is nothing left to come back to.
+    it('drops them from a wedged task too', () => {
+      const t = armed('wedged')
+      recordStatusTransition(t, 'landed', AT)
+      expect(t.scheduledFor).toBeUndefined()
+      expect(t.waitingFor).toBeUndefined()
+    })
+
+    it.each(['riding', 'wedged'] as const)(
+      'leaves them alone crossing to %s',
+      (next) => {
+        const t = armed(next === 'riding' ? 'wedged' : 'riding')
+        recordStatusTransition(t, next, AT)
+        expect(t.scheduledFor).toBe('2026-08-07T15:00:00.000Z')
+        expect(t.waitingFor).toEqual(['sib-a', 'sib-b'])
+      },
+    )
+
+    // Un-landing still works; it just has no stale trigger left to revive.
+    it('leaves a landed task revivable, with nothing armed', () => {
+      const t = armed('riding')
+      recordStatusTransition(t, 'landed', AT)
+      t.status = 'landed'
+      recordStatusTransition(t, 'riding', AT)
+      expect(kinds(t)).toEqual(['landed', 'unlanded'])
+      expect(t.scheduledFor).toBeUndefined()
+      expect(t.waitingFor).toBeUndefined()
+    })
+  })
+
   // The one-shot revival marker rides the same funnel as the events, so no
   // revival route can forget to stamp it. Consumed by the next start-run.
   describe('the revival marker', () => {
