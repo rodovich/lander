@@ -409,6 +409,44 @@ describe('recordStatusTransition', () => {
     expect(kinds(t)).toEqual(['landed'])
   })
 
+  // The one-shot revival marker rides the same funnel as the events, so no
+  // revival route can forget to stamp it. Consumed by the next start-run.
+  describe('the revival marker', () => {
+    const revivedTask = (status: string) => ({
+      ...task(status),
+      revived: undefined as 'wedged' | 'landed' | undefined,
+    })
+
+    it.each(['wedged', 'landed'] as const)(
+      'stamps the prior status crossing %s → riding',
+      (prev) => {
+        const t = revivedTask(prev)
+        recordStatusTransition(t, 'riding', AT)
+        expect(t.revived).toBe(prev)
+      },
+    )
+
+    it('stamps nothing when the status does not actually change', () => {
+      const t = revivedTask('riding')
+      recordStatusTransition(t, 'riding', AT)
+      expect(t.revived).toBeUndefined()
+    })
+
+    // Entering the wedge is not a revival — stamping here would tell the agent
+    // it had been revived on the very turn it wedged.
+    it('stamps nothing entering wedged', () => {
+      const t = revivedTask('riding')
+      recordStatusTransition(t, 'wedged', AT)
+      expect(t.revived).toBeUndefined()
+    })
+
+    it('stamps nothing crossing wedged → landed', () => {
+      const t = revivedTask('wedged')
+      recordStatusTransition(t, 'landed', AT)
+      expect(t.revived).toBeUndefined()
+    })
+  })
+
   // The crossing settles any open ask, so that no caller has to remember to. The
   // rule is stated once here and every path that moves a task inherits it.
   describe('settling open asks on the crossing', () => {

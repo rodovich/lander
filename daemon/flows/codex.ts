@@ -78,6 +78,9 @@ export function makeFlow({
       // ── Prompt ───────────────────────────────────────────────────────────
       const promptParts = [ctx.turn.prompts.join('\n\n')]
       if (ctx.turn.manifestBlock) promptParts.push(ctx.turn.manifestBlock)
+      // Codex has no turn-context block to hide this in, which is half of why the
+      // revival notice is a prompt part rather than an adapter concern.
+      if (ctx.turn.revivedBlock) promptParts.push(ctx.turn.revivedBlock)
 
       const args = [
         ...ctx.task.reentryArgs,

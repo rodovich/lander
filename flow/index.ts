@@ -56,4 +56,5 @@ export {
   forwardableAccess,
   taskManagementPrompt,
   promptWithTaskManagement,
+  buildRevivedBlock,
 } from '../daemon/task-management'

@@ -121,6 +121,13 @@ export type StartRunMessage = {
   // cwd hints — the recorded task.cwd and whether the run wants its worktree. The
   // daemon does the stat/fallback/worktree resolution locally.
   recordedCwd?: string
+  // Set only on the first turn after an incoming message revived this task from
+  // `wedged` or `landed`, and names which. The daemon renders it as a small
+  // `<task-revived>` prompt block, because the resumed session's last act was its
+  // own `lander wedge`/`lander land` and nothing else tells it that call no
+  // longer holds. One-shot: the server clears the task-side marker as it launches
+  // this run, so a later turn never sees it.
+  revived?: 'wedged' | 'landed'
   prompt: string
   task: {
     allowEdits: boolean

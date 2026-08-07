@@ -219,6 +219,13 @@ export const CODEX_GOLDENS: Golden[] = [
     },
   },
   {
+    // Codex has no turn-context block, so the revival notice reaching it at all
+    // is the point of making it a prompt part.
+    name: 'revival notice rides the prompt of the reviving turn',
+    chunks: [[threadStarted(), agentMessage('ok')]],
+    start: { ...codexStart, revived: 'landed' },
+  },
+  {
     // Provider-local item ids restart per thread; the runtime's per-run minting
     // is what keeps two rides' items distinct.
     name: 'later ride reusing the same local item ids',

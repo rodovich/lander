@@ -579,7 +579,12 @@ export function latestUpdateAt(task: {
 // rule, about new user intent rather than status, and stays with the paths that
 // carry it.
 export function recordStatusTransition(
-  task: { status: string; title: string; items?: Item[] },
+  task: {
+    status: string
+    title: string
+    items?: Item[]
+    revived?: 'wedged' | 'landed'
+  },
   next: string,
   at: string,
 ): void {
@@ -593,7 +598,7 @@ export function recordStatusTransition(
   }
   if (next === 'landed')
     pushEventItem(task, { eventKind: 'landed', title: task.title }, at)
-  else if (prev === 'wedged' || prev === 'landed')
+  else if (prev === 'wedged' || prev === 'landed') {
     pushEventItem(
       task,
       {
@@ -602,6 +607,15 @@ export function recordStatusTransition(
       },
       at,
     )
+    // A revived task's own last act was `lander wedge`/`lander land`, and its
+    // resumed session remembers that and nothing else — so left alone it reports
+    // itself as still wedged/landed on the next turn. Stamp the crossing here,
+    // for the same reason the events are stamped here: every revival route comes
+    // through this one funnel, so no route can forget it. ONE-SHOT — the next
+    // start-run carries it into the prompt and the queue drain that launched
+    // that run clears it (see driveTask), so it can never ride a second turn.
+    task.revived = prev
+  }
   withdrawOpenAsks(task)
 }
 

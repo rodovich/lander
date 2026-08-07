@@ -33,6 +33,7 @@ import type { ChildProcess } from 'node:child_process'
 import type { FlowMeta, StatePatchOp } from '../../server/protocol'
 import type { Step, Usage } from '../../server/stream'
 import type { HostEvent, HostInput, SpawnLike } from '../run-agent'
+import { buildRevivedBlock } from '../task-management'
 
 // ── Handles ────────────────────────────────────────────────────────────────
 
@@ -112,6 +113,12 @@ export type CtxTurn = {
   // miss rather than an error. A flow that materializes its own attachments can
   // still build one with buildManifestBlock from the stdlib.
   manifestBlock?: string
+  // The one-turn "you were revived" notice, present only when an incoming
+  // message pulled this task out of `wedged` or `landed`. Pre-built by the daemon
+  // for the same reason as manifestBlock — the flow decides where it goes in the
+  // prompt, not what it says. A flow that skips it just leaves the resumed
+  // session believing its own wedge/land call still holds.
+  revivedBlock?: string
   // The per-task attachment store. UNGATED on purpose: LANDER_FILES_DIR is set
   // from it with no existence check (the daemon always supplies it), so gating
   // here would diverge from the adapter on every task without attachments.
@@ -982,6 +989,9 @@ export function createCtxRuntime(
       images: materialized?.images ?? [],
       ...(materialized?.manifestBlock
         ? { manifestBlock: materialized.manifestBlock }
+        : {}),
+      ...(start.revived
+        ? { revivedBlock: buildRevivedBlock(start.revived) }
         : {}),
       filesDir,
       filesDirExists: filesDir ? existsSync(filesDir) : false,

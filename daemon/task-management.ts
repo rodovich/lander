@@ -34,6 +34,27 @@ export function promptWithTaskManagement(
   return `${taskManagementPrompt(task, taskPromptTemplate, id)}\n\n${prompt}`
 }
 
+// The prompt block a revived task's first turn carries: one sentence telling the
+// resumed session that the `lander wedge`/`lander land` call it remembers making
+// no longer holds. Without it the session's last act is that call and nothing
+// contradicts it, so the agent answers the reviving message as if still wedged.
+//
+// Provider-neutral by construction, and shaped like buildManifestBlock — a small
+// self-framing block appended to the user prompt — for two reasons. It does NOT
+// belong in Claude's `<task-context>` block: that block is delta-compared against
+// a baseline the server stores, so a line that appears for one turn and vanishes
+// counts as a change twice and costs a spurious full resend on the turn after.
+// And codex has no turn-context block at all (daemon/flows/codex.ts), so putting
+// it there would fix claude only.
+export function buildRevivedBlock(prior: 'wedged' | 'landed'): string {
+  return [
+    '<task-revived>',
+    `You were ${prior} when this message arrived; the message changed your ` +
+      'status to riding.',
+    '</task-revived>',
+  ].join('\n')
+}
+
 export function forwardableAccess(task: AgentTaskView): string {
   if (task.agent === 'codex') {
     const permissions = task.allowEdits

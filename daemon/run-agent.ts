@@ -26,6 +26,7 @@ import type {
 } from '../server/protocol'
 import { addUsage, type Step, type Usage } from '../server/stream'
 import type { MaterializedFiles } from './attachments'
+import { buildRevivedBlock } from './task-management'
 
 // daemon → executor: everything needed to run one turn. The daemon resolves the
 // host paths (`root`/`cwd`), the persistent files dir, and materializes any
@@ -156,11 +157,18 @@ export function runAgent(
   })
   const sentContext =
     context && context !== start.turnContext ? context : undefined
-  // Append the attachment manifest (this turn's files) and the dynamic context
-  // block to the user prompt — both ride at the cache-friendly end, after the
-  // user's own text.
+  // Append the attachment manifest (this turn's files), the revival notice, and
+  // the dynamic context block to the user prompt — all ride at the cache-friendly
+  // end, after the user's own text.
+  //
+  // The revival notice sits HERE, next to the manifest, rather than inside
+  // buildTurnContext: that block is delta-compared against the baseline the
+  // server stores, so a one-turn line in it would cost a spurious full resend on
+  // the next turn — and codex has no turn-context block at all, so an
+  // adapter-level fix would only ever cover claude. See buildRevivedBlock.
   const promptParts = [start.prompt]
   if (materialized?.manifestBlock) promptParts.push(materialized.manifestBlock)
+  if (start.revived) promptParts.push(buildRevivedBlock(start.revived))
   if (sentContext) promptParts.push(sentContext)
   // The daemon already resolved the persistent per-task store dir; expose it as
   // LANDER_FILES_DIR (so `lander file cat/ls` reach files attached on an earlier

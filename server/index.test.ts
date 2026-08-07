@@ -1406,6 +1406,68 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     await waitForRaw(id, (r) => !r.runId)
   })
 
+  // The revival marker is one-shot: the drain that launches the reviving turn
+  // takes it under the same lock that takes the queue, so the notice rides that
+  // turn and nothing after it. Also runs on the beforeAll daemon, before the
+  // tests that disconnect it.
+  it('rides the revival marker in on start-run, once, then clears it', async () => {
+    const id = 'revived-once'
+    await writeFile(
+      path.join(tasksDir, `${id}.json`),
+      JSON.stringify({
+        id,
+        title: 'Wedged task',
+        status: 'wedged',
+        createdAt: AT,
+        updatedAt: AT,
+        allowEdits: false,
+        shape: 2,
+        items: [],
+        rides: [],
+      }),
+    )
+
+    expect(
+      (await post(`/api/${slug}/tasks/${id}/messages`, { message: 'go' })).status,
+    ).toBe(200)
+    await waitFor(() => startRuns(id).length === 1)
+
+    const first = startRuns(id)[0] as unknown as { runId: string; revived?: string }
+    expect(first.revived).toBe('wedged')
+    // Already gone from the record by the time the run was handed over.
+    expect((await readRaw(id)).revived).toBeUndefined()
+
+    // Settle the first run, then send again: the second turn is an ordinary one.
+    ws.send(
+      JSON.stringify({
+        type: 'done',
+        runId: first.runId,
+        exitCode: 0,
+        interrupted: false,
+        stderr: '',
+      }),
+    )
+    await waitForRaw(id, (r) => !r.runId)
+
+    expect(
+      (await post(`/api/${slug}/tasks/${id}/messages`, { message: 'again' })).status,
+    ).toBe(200)
+    await waitFor(() => startRuns(id).length === 2)
+    const second = startRuns(id)[1] as unknown as { runId: string; revived?: string }
+    expect(second.revived).toBeUndefined()
+
+    ws.send(
+      JSON.stringify({
+        type: 'done',
+        runId: second.runId,
+        exitCode: 0,
+        interrupted: false,
+        stderr: '',
+      }),
+    )
+    await waitForRaw(id, (r) => !r.runId)
+  })
+
   // Runs before the crash test, which disconnects the shared daemon.
   it('a user PATCH interrupt wedges without a retry ask (semantics unchanged)', async () => {
     const id = 'kill-user-interrupt'

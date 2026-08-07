@@ -247,6 +247,49 @@ describe('codex parity — session and identity', () => {
   })
 })
 
+// Parity proves the two paths agree; these prove they agree on the right thing —
+// the notice actually reaches the child, as a prompt part rather than as part of
+// the delta-compared context block.
+describe('the revival notice reaches the prompt', () => {
+  // Not `args.at(-1)`: codex puts a fresh `exec`'s flags AFTER the positional
+  // prompt (its variadic --image would otherwise swallow it).
+  const promptOf = (args: string[]) =>
+    args.find((a) => a.includes('do the thing')) as string
+
+  it('rides claude’s prompt, outside the task-context block', async () => {
+    const g = CLAUDE_GOLDENS.find(
+      (x) => x.name === 'revival notice rides the prompt of the reviving turn',
+    )!
+    const flow = await driveFlow(g, claudeFlow())
+    const prompt = promptOf(flow.spawns[0].args)
+    expect(prompt).toContain(
+      '<task-revived>\nYou were wedged when this message arrived; the message ' +
+        'changed your status to riding.\n</task-revived>',
+    )
+    // Not inside the context block: that block is compared against a stored
+    // baseline, so a one-turn line in it costs a spurious resend next turn.
+    expect(
+      prompt.slice(prompt.indexOf('<task-context>')),
+    ).not.toContain('<task-revived>')
+  })
+
+  it('rides codex’s prompt, which has no context block at all', async () => {
+    const g = CODEX_GOLDENS.find(
+      (x) => x.name === 'revival notice rides the prompt of the reviving turn',
+    )!
+    const flow = await driveFlow(g, codexFlow())
+    expect(promptOf(flow.spawns[0].args)).toContain(
+      '<task-revived>\nYou were landed when this message arrived; the message ' +
+        'changed your status to riding.\n</task-revived>',
+    )
+  })
+
+  it('is absent from a turn that did not revive anything', async () => {
+    const flow = await driveFlow(CLAUDE_GOLDENS[0], claudeFlow())
+    expect(promptOf(flow.spawns[0].args)).not.toContain('<task-revived>')
+  })
+})
+
 describe('claude parity — the flush cadence', () => {
   it('emits one update per stdout chunk, not per line', async () => {
     const g = CLAUDE_GOLDENS.find(

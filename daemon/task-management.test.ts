@@ -5,6 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  buildRevivedBlock,
   fillTaskPrompt,
   taskManagementPrompt,
   promptWithTaskManagement,
@@ -34,5 +35,26 @@ describe('taskManagementPrompt / promptWithTaskManagement', () => {
     const full = promptWithTaskManagement(task, 'DO THE THING', TEMPLATE, 'task-xyz')
     expect(full).toContain('This task id is task-xyz.')
     expect(full.endsWith('DO THE THING')).toBe(true)
+  })
+})
+
+// The wording is deliberate and deliberately minimal — it states what happened
+// and stops, rather than instructing the agent what to do about it. Asserted
+// byte-for-byte so a later "helpful" embellishment has to be a decision.
+describe('buildRevivedBlock', () => {
+  it('renders the wedged notice', () => {
+    expect(buildRevivedBlock('wedged')).toBe(
+      '<task-revived>\n' +
+        'You were wedged when this message arrived; the message changed your status to riding.\n' +
+        '</task-revived>',
+    )
+  })
+
+  it('renders the landed notice with the same one sentence', () => {
+    expect(buildRevivedBlock('landed')).toBe(
+      '<task-revived>\n' +
+        'You were landed when this message arrived; the message changed your status to riding.\n' +
+        '</task-revived>',
+    )
   })
 })

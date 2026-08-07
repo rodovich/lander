@@ -341,6 +341,13 @@ export const CLAUDE_GOLDENS: Golden[] = [
     },
   },
   {
+    // The one-shot revival notice: a prompt part like the manifest, deliberately
+    // NOT part of the delta-compared context block.
+    name: 'revival notice rides the prompt of the reviving turn',
+    chunks: [[init(), assistantText('ok')], [result()]],
+    start: { revived: 'wedged' },
+  },
+  {
     name: 'agent stderr is aggregated into the done',
     chunks: [[init(), assistantText('ok')], [result()]],
     stderrChunks: ['warning: something\n'],

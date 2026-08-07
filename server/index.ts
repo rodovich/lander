@@ -187,6 +187,15 @@ type Task = {
   sessionId?: string
   title: string
   status: string
+  // ONE-SHOT marker: the status this task was revived FROM, stamped by
+  // recordStatusTransition when an incoming message pulls a wedged or landed task
+  // back into riding. It exists because the revived session's own last act was
+  // `lander wedge`/`lander land` and nothing else in the next turn contradicts
+  // that memory, so the agent reports itself as still wedged. runTurn forwards it
+  // on start-run and the daemon renders it as a one-sentence prompt block; the
+  // queue drain that launches that run clears it under the same lock (see
+  // driveTask), so it rides exactly the one turn it belongs to.
+  revived?: 'wedged' | 'landed'
   createdAt: string
   // Drives the sidebar sort order. Bumped only on meaningful turn boundaries —
   // when a user message is sent, when the assistant begins its reply, when the
@@ -482,6 +491,10 @@ async function runTurn(
   prompt: string,
   runId: string,
   attachments: Attachment[] = [],
+  // The one-shot revival marker, handed in by the caller rather than read off the
+  // task here: the drain that produced this turn already cleared it under its
+  // lock (that's what makes it one-shot), so by now it is gone from the record.
+  revived?: 'wedged' | 'landed',
 ): Promise<'done' | 'crashed'> {
   const file = path.join(project.dataDir, `${id}.json`)
   let task: Task
@@ -610,6 +623,9 @@ async function runTurn(
     project: project.slug,
     // cwd hints — the daemon does the stat/fallback/worktree resolution locally.
     recordedCwd: task.cwd,
+    // Present only on the turn that revived a wedged/landed task, so the daemon
+    // can tell the resumed session its own wedge/land call no longer holds.
+    ...(revived ? { revived } : {}),
     prompt,
     task: {
       allowEdits: task.allowEdits,
@@ -861,7 +877,15 @@ async function driveTask(project: Project, id: string): Promise<void> {
       const runId = randomUUID()
       let batch: string[] = []
       let atts: Attachment[] = []
+      let revived: 'wedged' | 'landed' | undefined
       await mutateTask(file, (t) => {
+        // Take the one-shot revival marker with the batch, under the same lock
+        // that drains it: it then rides with exactly the turn the reviving
+        // message produced and cannot leak into the next one. Cleared even when
+        // the drain finds nothing to send — a marker with no turn left to ride
+        // is stale, not pending.
+        revived = t.revived
+        delete t.revived
         if (t.queued && t.queued.length) {
           batch = t.queued
           // Gather the attachments off the trailing user items this batch is made
@@ -876,7 +900,7 @@ async function driveTask(project: Project, id: string): Promise<void> {
         }
       }).catch(() => {})
       if (!batch.length) break
-      await runTurn(project, id, batch.join('\n\n'), runId, atts)
+      await runTurn(project, id, batch.join('\n\n'), runId, atts, revived)
     }
   } finally {
     running.delete(id)

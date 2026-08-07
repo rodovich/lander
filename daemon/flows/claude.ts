@@ -118,9 +118,13 @@ export function makeFlow({
       if (sendContext) ctx.state.set(['turnContext'], block)
 
       // ── Prompt ───────────────────────────────────────────────────────────
-      // Both extras ride at the cache-friendly end, after the user's own text.
+      // The extras ride at the cache-friendly end, after the user's own text.
+      // The revival notice goes here and not in the context block above: that
+      // block is delta-compared against a stored baseline, so a one-turn line in
+      // it would cost a spurious full resend next turn.
       const promptParts = [ctx.turn.prompts.join('\n\n')]
       if (ctx.turn.manifestBlock) promptParts.push(ctx.turn.manifestBlock)
+      if (ctx.turn.revivedBlock) promptParts.push(ctx.turn.revivedBlock)
       if (sendContext) promptParts.push(block)
 
       const args = [
