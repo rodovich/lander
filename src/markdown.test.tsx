@@ -334,6 +334,21 @@ describe('Markdown rendering', () => {
     expect(render('foo*bar*baz')).toContain('<em>bar</em>')
   })
 
+  it('keeps a run of underscores whole, so BEM/dunder names stay literal', () => {
+    // Regression: the inner "_" of "icon__" opened an italic that closed on the
+    // first "_" of "__img", rendering "icon_<em>color and </em>_img". cmark,
+    // markdown-it and marked all leave both of these alone.
+    const bem = render('material-thumbnail-icon__color and __img')
+    expect(bem).toContain('material-thumbnail-icon__color and __img')
+    expect(bem).not.toContain('<em>')
+    expect(render('.thumb__img/__color styles')).not.toContain('<em>')
+    expect(render('__init__ and __main__')).not.toContain('<em>')
+    // Ordinary underscore emphasis is untouched.
+    expect(render('_italic_ and __bold__')).toBe(
+      '<p><em>italic</em> and <strong>bold</strong></p>',
+    )
+  })
+
   it('renders a safe markdown link with security attributes', () => {
     const html = render('[hi](https://example.com)')
     expect(html).toContain('href="https://example.com"')

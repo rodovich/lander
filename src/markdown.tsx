@@ -136,12 +136,16 @@ function renderInline(
     {
       // Underscore variants require a non-word boundary on each side, so
       // intraword underscores (e.g. patch_based_saving) don't become emphasis,
-      // matching CommonMark/GFM. Asterisks still allow intraword emphasis.
+      // matching CommonMark/GFM. That boundary excludes "_" itself, which is
+      // what keeps a *run* of underscores whole the way CommonMark's delimiter
+      // runs do: in "icon__color and __img" the inner "_" of "icon__" must not
+      // count as an opener just because the character before it isn't a letter,
+      // or a BEM/dunder identifier pair renders as "icon_<em>color and </em>_img".
       // The bold body is lazy and allows nested "*" so that an inner italic span
       // (e.g. **bold *italic* bold**) is kept inside the bold and reparsed by the
       // recursive renderInline below, rather than splitting the "**" off as
       // literal text.
-      re: /\*\*([\s\S]+?)\*\*|(?<![\p{L}\p{N}])__([^_]+)__(?![\p{L}\p{N}])/gud,
+      re: /\*\*([\s\S]+?)\*\*|(?<![\p{L}\p{N}_])__([^_]+)__(?![\p{L}\p{N}_])/gud,
       render: (m, k) => (
         <strong key={k}>
           {renderInline(group(m, 1) ?? group(m, 2) ?? '', k, linkTask)}
@@ -149,7 +153,7 @@ function renderInline(
       ),
     },
     {
-      re: /\*([^*]+)\*|(?<![\p{L}\p{N}])_([^_]+)_(?![\p{L}\p{N}])/gud,
+      re: /\*([^*]+)\*|(?<![\p{L}\p{N}_])_([^_]+)_(?![\p{L}\p{N}_])/gud,
       render: (m, k) => (
         <em key={k}>
           {renderInline(group(m, 1) ?? group(m, 2) ?? '', k, linkTask)}
