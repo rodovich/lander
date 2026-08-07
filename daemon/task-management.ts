@@ -1,4 +1,5 @@
 import type { AgentTaskView } from './agent'
+import type { RevivedMarker } from '../server/protocol'
 
 // Fill the task prompt template's slots: {{id}} with the task's own id (constant
 // for the task's life, so it's safe in Claude's byte-stable --append-system-prompt)
@@ -35,9 +36,16 @@ export function promptWithTaskManagement(
 }
 
 // The prompt block a revived task's first turn carries: one sentence telling the
-// resumed session that the `lander wedge`/`lander land` call it remembers making
-// no longer holds. Without it the session's last act is that call and nothing
-// contradicts it, so the agent answers the reviving message as if still wedged.
+// resumed session what the arriving message changed out from under it. The
+// session's own last act was `lander wedge`/`lander land`/`lander rest` and
+// nothing else contradicts that memory, so left alone the agent answers as if
+// still wedged — or re-arms nothing and lets a cleared timer go unreplaced.
+//
+// Two facts, either or both (see RevivedMarker): the notable status it was pulled
+// out of, and a rest timer the message cleared. The timer clause names the time,
+// because "your wakeup is gone" is only actionable if the agent knows which
+// wakeup — and it points at `lander rest` because re-arming is the whole remedy.
+// An await is never reported: it survives the revival, so nothing changed.
 //
 // Provider-neutral by construction, and shaped like buildManifestBlock — a small
 // self-framing block appended to the user prompt — for two reasons. It does NOT
@@ -46,13 +54,17 @@ export function promptWithTaskManagement(
 // counts as a change twice and costs a spurious full resend on the turn after.
 // And codex has no turn-context block at all (daemon/flows/codex.ts), so putting
 // it there would fix claude only.
-export function buildRevivedBlock(prior: 'wedged' | 'landed'): string {
-  return [
-    '<task-revived>',
-    `You were ${prior} when this message arrived; the message changed your ` +
-      'status to riding.',
-    '</task-revived>',
-  ].join('\n')
+export function buildRevivedBlock(revived: RevivedMarker): string {
+  // `resting` when no notable status was crossed — which is the case a cleared
+  // timer arrives in almost every time.
+  const prior = revived.from ?? 'resting'
+  const sentence = revived.restUntil
+    ? `You were ${prior} until ${revived.restUntil} when this message arrived; ` +
+      'the message changed your status to riding and cleared that wakeup. ' +
+      'Re-arm it with `lander rest` if you still want it.'
+    : `You were ${prior} when this message arrived; the message changed your ` +
+      'status to riding.'
+  return ['<task-revived>', sentence, '</task-revived>'].join('\n')
 }
 
 export function forwardableAccess(task: AgentTaskView): string {

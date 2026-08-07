@@ -28,7 +28,12 @@ import {
   requestResume,
   requestProjectGrant,
 } from './daemon'
-import type { AgentKind, StartRunMessage, TelemetryItem } from './protocol'
+import type {
+  AgentKind,
+  RevivedMarker,
+  StartRunMessage,
+  TelemetryItem,
+} from './protocol'
 import {
   readTasks as readTasksStore,
   readTask as readTaskStore,
@@ -187,15 +192,17 @@ type Task = {
   sessionId?: string
   title: string
   status: string
-  // ONE-SHOT marker: the status this task was revived FROM, stamped by
-  // recordStatusTransition when an incoming message pulls a wedged or landed task
-  // back into riding. It exists because the revived session's own last act was
-  // `lander wedge`/`lander land` and nothing else in the next turn contradicts
-  // that memory, so the agent reports itself as still wedged. runTurn forwards it
-  // on start-run and the daemon renders it as a one-sentence prompt block; the
-  // queue drain that launches that run clears it under the same lock (see
-  // driveTask), so it rides exactly the one turn it belongs to.
-  revived?: 'wedged' | 'landed'
+  // ONE-SHOT marker: what an incoming message changed out from under this task —
+  // the notable status it was pulled out of (stamped by recordStatusTransition,
+  // the funnel every revival route crosses) and/or a rest wakeup the message
+  // cleared (stamped by the /messages endpoint, since riding↔resting isn't a
+  // crossing that funnel sees). It exists because the revived session's own last
+  // act was `lander wedge`/`lander land`/`lander rest` and nothing else in the
+  // next turn contradicts that memory. runTurn forwards it on start-run and the
+  // daemon renders it as a one-sentence prompt block; the queue drain that
+  // launches that run clears it under the same lock (see driveTask), so it rides
+  // exactly the one turn it belongs to.
+  revived?: RevivedMarker
   createdAt: string
   // Drives the sidebar sort order. Bumped only on meaningful turn boundaries —
   // when a user message is sent, when the assistant begins its reply, when the
@@ -494,7 +501,7 @@ async function runTurn(
   // The one-shot revival marker, handed in by the caller rather than read off the
   // task here: the drain that produced this turn already cleared it under its
   // lock (that's what makes it one-shot), so by now it is gone from the record.
-  revived?: 'wedged' | 'landed',
+  revived?: RevivedMarker,
 ): Promise<'done' | 'crashed'> {
   const file = path.join(project.dataDir, `${id}.json`)
   let task: Task
@@ -623,8 +630,9 @@ async function runTurn(
     project: project.slug,
     // cwd hints — the daemon does the stat/fallback/worktree resolution locally.
     recordedCwd: task.cwd,
-    // Present only on the turn that revived a wedged/landed task, so the daemon
-    // can tell the resumed session its own wedge/land call no longer holds.
+    // Present only on the turn an incoming message revived, so the daemon can
+    // tell the resumed session which of its own last acts no longer holds — the
+    // wedge/land it called, or the rest wakeup the message cleared.
     ...(revived ? { revived } : {}),
     prompt,
     task: {
@@ -877,7 +885,7 @@ async function driveTask(project: Project, id: string): Promise<void> {
       const runId = randomUUID()
       let batch: string[] = []
       let atts: Attachment[] = []
-      let revived: 'wedged' | 'landed' | undefined
+      let revived: RevivedMarker | undefined
       await mutateTask(file, (t) => {
         // Take the one-shot revival marker with the batch, under the same lock
         // that drains it: it then rides with exactly the turn the reviving
@@ -2529,6 +2537,27 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
       // "un-wedged"/"un-landed" transition a hair before the message's own
       // timestamp so the timeline shows it ahead of the message that caused it.
       recordStatusTransition(t, 'riding', new Date(Date.parse(now) - 1).toISOString())
+      // An out-of-band wake supersedes a *timer*: the task is riding now, so the
+      // wakeup it armed would fire later against a task that has moved on (and,
+      // in every case we've observed, already landed) and burn a ride announcing
+      // it has nothing to do. Disarm it here and tell the woken turn, naming the
+      // time so re-arming is a single actionable step. An `await`, by contrast,
+      // stays armed — it's a real dependency on sibling tasks, and an unrelated
+      // message must not cancel it. Same rule the wake-delivery table states for
+      // the daemon path (docs/daemon-wakeups.md §Delivery).
+      //
+      // Stamped here rather than in recordStatusTransition because the resting
+      // case can't ride that funnel at all: riding↔resting isn't a crossing (both
+      // store as `riding`), so it returns early. Merged into whatever the
+      // crossing above stamped — a wedged task can hold a retry wakeup, so both
+      // halves can apply to one revival.
+      if (t.scheduledFor) {
+        t.revived = {
+          ...t.revived,
+          restUntil: new Date(t.scheduledFor).toLocaleString(),
+        }
+        delete t.scheduledFor
+      }
       pushUserItem(t, message, now, attachments ? { attachments } : {})
       t.updatedAt = now
       // Queue the prompt for the session and go "riding". driveTask clears it to

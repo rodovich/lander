@@ -345,7 +345,15 @@ export const CLAUDE_GOLDENS: Golden[] = [
     // NOT part of the delta-compared context block.
     name: 'revival notice rides the prompt of the reviving turn',
     chunks: [[init(), assistantText('ok')], [result()]],
-    start: { revived: 'wedged' },
+    start: { revived: { from: 'wedged' } },
+  },
+  {
+    // The other half of the marker: a message that woke a resting task early
+    // disarmed its timer, and the notice has to say so or the woken turn silently
+    // loses a wakeup it may still want.
+    name: 'revival notice names a cleared rest timer',
+    chunks: [[init(), assistantText('ok')], [result()]],
+    start: { revived: { restUntil: '3:00:00 PM' } },
   },
   {
     name: 'agent stderr is aggregated into the done',

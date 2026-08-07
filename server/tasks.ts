@@ -9,6 +9,7 @@ import type { AgentKind } from './agent'
 import type { Step, Usage } from './stream'
 import type { Attachment } from './attachments'
 import type { Artifact } from './artifacts'
+import type { RevivedMarker } from './protocol'
 // The one value we import (the rest of this module's imports are types):
 // recordStatusTransition settles open asks on the crossing. asks.ts imports only
 // types from here, so the runtime edge stays one-way — this module → asks.ts.
@@ -583,7 +584,7 @@ export function recordStatusTransition(
     status: string
     title: string
     items?: Item[]
-    revived?: 'wedged' | 'landed'
+    revived?: RevivedMarker
   },
   next: string,
   at: string,
@@ -614,7 +615,13 @@ export function recordStatusTransition(
     // through this one funnel, so no route can forget it. ONE-SHOT — the next
     // start-run carries it into the prompt and the queue drain that launched
     // that run clears it (see driveTask), so it can never ride a second turn.
-    task.revived = prev
+    //
+    // Merged rather than assigned: the cleared-timer half of the marker is
+    // stamped separately by the /messages endpoint — riding↔resting is not a
+    // crossing, so a resting task can't ride this funnel at all — and the two
+    // halves co-occur (a wedged task can hold a retry wakeup), so neither may
+    // clobber the other.
+    task.revived = { ...task.revived, from: prev }
   }
   withdrawOpenAsks(task)
 }

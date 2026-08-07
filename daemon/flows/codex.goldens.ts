@@ -223,7 +223,7 @@ export const CODEX_GOLDENS: Golden[] = [
     // is the point of making it a prompt part.
     name: 'revival notice rides the prompt of the reviving turn',
     chunks: [[threadStarted(), agentMessage('ok')]],
-    start: { ...codexStart, revived: 'landed' },
+    start: { ...codexStart, revived: { from: 'landed' } },
   },
   {
     // Provider-local item ids restart per thread; the runtime's per-run minting

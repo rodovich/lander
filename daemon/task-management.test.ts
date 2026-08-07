@@ -39,11 +39,13 @@ describe('taskManagementPrompt / promptWithTaskManagement', () => {
 })
 
 // The wording is deliberate and deliberately minimal — it states what happened
-// and stops, rather than instructing the agent what to do about it. Asserted
+// and stops. The one exception is the cleared-timer clause, which does point at
+// `lander rest`: there the agent has lost something it may want back, and naming
+// the remedy is the difference between a notice and a usable one. Asserted
 // byte-for-byte so a later "helpful" embellishment has to be a decision.
 describe('buildRevivedBlock', () => {
   it('renders the wedged notice', () => {
-    expect(buildRevivedBlock('wedged')).toBe(
+    expect(buildRevivedBlock({ from: 'wedged' })).toBe(
       '<task-revived>\n' +
         'You were wedged when this message arrived; the message changed your status to riding.\n' +
         '</task-revived>',
@@ -51,9 +53,35 @@ describe('buildRevivedBlock', () => {
   })
 
   it('renders the landed notice with the same one sentence', () => {
-    expect(buildRevivedBlock('landed')).toBe(
+    expect(buildRevivedBlock({ from: 'landed' })).toBe(
       '<task-revived>\n' +
         'You were landed when this message arrived; the message changed your status to riding.\n' +
+        '</task-revived>',
+    )
+  })
+
+  // The common shape of the cleared-timer case: nothing notable was crossed, so
+  // "resting" is the only status there is to name.
+  it('names a cleared rest timer, its time, and the way to re-arm it', () => {
+    expect(buildRevivedBlock({ restUntil: '8/7/2026, 3:00:00 PM' })).toBe(
+      '<task-revived>\n' +
+        'You were resting until 8/7/2026, 3:00:00 PM when this message arrived; ' +
+        'the message changed your status to riding and cleared that wakeup. ' +
+        'Re-arm it with `lander rest` if you still want it.\n' +
+        '</task-revived>',
+    )
+  })
+
+  // Both halves at once — a wedged task holding a deferred session-limit retry
+  // wakeup, revived by a message. One sentence, not two notices.
+  it('folds a crossed status and a cleared timer into one sentence', () => {
+    expect(
+      buildRevivedBlock({ from: 'wedged', restUntil: '3:00:00 PM' }),
+    ).toBe(
+      '<task-revived>\n' +
+        'You were wedged until 3:00:00 PM when this message arrived; ' +
+        'the message changed your status to riding and cleared that wakeup. ' +
+        'Re-arm it with `lander rest` if you still want it.\n' +
         '</task-revived>',
     )
   })

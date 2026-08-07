@@ -13,6 +13,7 @@ import {
   daemonServes,
 } from './daemon'
 import { normalizeProjectPath, projectSlug } from './projects'
+import type { RevivedMarker } from './protocol'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const UI_TOKEN = 'test-ui-token'
@@ -1432,8 +1433,11 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     ).toBe(200)
     await waitFor(() => startRuns(id).length === 1)
 
-    const first = startRuns(id)[0] as unknown as { runId: string; revived?: string }
-    expect(first.revived).toBe('wedged')
+    const first = startRuns(id)[0] as unknown as {
+      runId: string
+      revived?: RevivedMarker
+    }
+    expect(first.revived).toEqual({ from: 'wedged' })
     // Already gone from the record by the time the run was handed over.
     expect((await readRaw(id)).revived).toBeUndefined()
 
@@ -1453,13 +1457,74 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
       (await post(`/api/${slug}/tasks/${id}/messages`, { message: 'again' })).status,
     ).toBe(200)
     await waitFor(() => startRuns(id).length === 2)
-    const second = startRuns(id)[1] as unknown as { runId: string; revived?: string }
+    const second = startRuns(id)[1] as unknown as {
+      runId: string
+      revived?: RevivedMarker
+    }
     expect(second.revived).toBeUndefined()
 
     ws.send(
       JSON.stringify({
         type: 'done',
         runId: second.runId,
+        exitCode: 0,
+        interrupted: false,
+        stderr: '',
+      }),
+    )
+    await waitForRaw(id, (r) => !r.runId)
+  })
+
+  // An out-of-band revival supersedes a *timer*: left armed it fires later
+  // against a task that has moved on — in every case observed, one that had
+  // already landed — and burns a whole ride to report there's nothing to do. An
+  // await is the opposite: a real dependency on sibling tasks that an unrelated
+  // message must not cancel. Same split the wake-delivery table draws for the
+  // daemon path (docs/daemon-wakeups.md §Delivery).
+  it('an early revival clears the rest timer, keeps the await, and says so', async () => {
+    const id = 'revived-resting'
+    const until = new Date(Date.now() + 3_600_000).toISOString()
+    await writeFile(
+      path.join(tasksDir, `${id}.json`),
+      JSON.stringify({
+        id,
+        title: 'Resting task',
+        // Stored `riding` with no open ride IS resting — the collapsed
+        // vocabulary. Both triggers armed at once, which `lander rest --await
+        // --time` produces and which is the only way to watch the split.
+        status: 'riding',
+        scheduledFor: until,
+        waitingFor: ['sibling-x'],
+        createdAt: AT,
+        updatedAt: AT,
+        allowEdits: false,
+        shape: 2,
+        items: [],
+        rides: [{ id: 'r0', startedAt: AT, endedAt: AT, outcome: 'done' }],
+      }),
+    )
+
+    expect(
+      (await post(`/api/${slug}/tasks/${id}/messages`, { message: 'go' })).status,
+    ).toBe(200)
+    await waitFor(() => startRuns(id).length === 1)
+
+    const run = startRuns(id)[0] as unknown as {
+      runId: string
+      revived?: RevivedMarker
+    }
+    // The notice names the time, so re-arming is one actionable step rather than
+    // a guess. Formatted server-side, in the same shape as "Resumed at …".
+    expect(run.revived).toEqual({ restUntil: new Date(until).toLocaleString() })
+
+    const raw = await readRaw(id)
+    expect(raw.scheduledFor).toBeUndefined()
+    expect(raw.waitingFor).toEqual(['sibling-x'])
+
+    ws.send(
+      JSON.stringify({
+        type: 'done',
+        runId: run.runId,
         exitCode: 0,
         interrupted: false,
         stderr: '',

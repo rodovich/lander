@@ -34,6 +34,7 @@ import {
   type Ride,
 } from './tasks'
 import { askItems, createAsk } from './asks'
+import type { RevivedMarker } from './protocol'
 import { buildTimeline } from '../src/timeline'
 
 const AT = '2026-01-01T00:00:00.000Z'
@@ -414,7 +415,7 @@ describe('recordStatusTransition', () => {
   describe('the revival marker', () => {
     const revivedTask = (status: string) => ({
       ...task(status),
-      revived: undefined as 'wedged' | 'landed' | undefined,
+      revived: undefined as RevivedMarker | undefined,
     })
 
     it.each(['wedged', 'landed'] as const)(
@@ -422,9 +423,17 @@ describe('recordStatusTransition', () => {
       (prev) => {
         const t = revivedTask(prev)
         recordStatusTransition(t, 'riding', AT)
-        expect(t.revived).toBe(prev)
+        expect(t.revived).toEqual({ from: prev })
       },
     )
+
+    // The other half of the marker is stamped by the /messages endpoint, which
+    // can run either side of this: merge, don't assign.
+    it('keeps a cleared-timer half another path already stamped', () => {
+      const t = { ...revivedTask('wedged'), revived: { restUntil: '3:00 PM' } }
+      recordStatusTransition(t, 'riding', AT)
+      expect(t.revived).toEqual({ restUntil: '3:00 PM', from: 'wedged' })
+    })
 
     it('stamps nothing when the status does not actually change', () => {
       const t = revivedTask('riding')

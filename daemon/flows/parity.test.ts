@@ -284,6 +284,22 @@ describe('the revival notice reaches the prompt', () => {
     )
   })
 
+  // The cleared-timer half travels the same wire as the wedged/landed half, so
+  // this is really about the marker being an object now: an early revival that
+  // crossed no notable status still has something to say.
+  it('carries a cleared rest timer, with the time and the way back', async () => {
+    const g = CLAUDE_GOLDENS.find(
+      (x) => x.name === 'revival notice names a cleared rest timer',
+    )!
+    const flow = await driveFlow(g, claudeFlow())
+    expect(promptOf(flow.spawns[0].args)).toContain(
+      '<task-revived>\nYou were resting until 3:00:00 PM when this message ' +
+        'arrived; the message changed your status to riding and cleared that ' +
+        'wakeup. Re-arm it with `lander rest` if you still want it.\n' +
+        '</task-revived>',
+    )
+  })
+
   it('is absent from a turn that did not revive anything', async () => {
     const flow = await driveFlow(CLAUDE_GOLDENS[0], claudeFlow())
     expect(promptOf(flow.spawns[0].args)).not.toContain('<task-revived>')

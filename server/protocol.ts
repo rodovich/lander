@@ -96,6 +96,24 @@ export type AttachmentRef = {
   size: number
 }
 
+// Why the next turn is being told it was revived — everything an incoming message
+// changed out from under the resumed session, which remembers only its own last
+// act. Two independent facts, either or both of which may be present (a marker
+// with neither is never stamped):
+//   `from`      — the notable status the message pulled the task out of, when it
+//                 was in one. Absent when the task was merely resting.
+//   `restUntil` — the display time of a rest wakeup the message cleared, since an
+//                 out-of-band revival supersedes a *timer*. Absent when no timer
+//                 was armed. Preformatted by the server, which owns the "Resumed
+//                 at …" wording this echoes; the daemon only interpolates it.
+// An `await` is deliberately NOT represented: it survives an early revival (a
+// real dependency an unrelated message must not cancel), so there is nothing to
+// report.
+export type RevivedMarker = {
+  from?: 'wedged' | 'landed'
+  restUntil?: string
+}
+
 // Launch a run: like today's RunJob minus the file paths and the absolute cwd.
 // The server sends the project slug plus cwd hints (the recorded task cwd and the
 // worktree flag) and the daemon resolves the actual directory from the host paths
@@ -121,13 +139,11 @@ export type StartRunMessage = {
   // cwd hints — the recorded task.cwd and whether the run wants its worktree. The
   // daemon does the stat/fallback/worktree resolution locally.
   recordedCwd?: string
-  // Set only on the first turn after an incoming message revived this task from
-  // `wedged` or `landed`, and names which. The daemon renders it as a small
-  // `<task-revived>` prompt block, because the resumed session's last act was its
-  // own `lander wedge`/`lander land` and nothing else tells it that call no
-  // longer holds. One-shot: the server clears the task-side marker as it launches
-  // this run, so a later turn never sees it.
-  revived?: 'wedged' | 'landed'
+  // Set only on the first turn after an incoming message revived this task. The
+  // daemon renders it as a small `<task-revived>` prompt block. One-shot: the
+  // server clears the task-side marker as it launches this run, so a later turn
+  // never sees it.
+  revived?: RevivedMarker
   prompt: string
   task: {
     allowEdits: boolean
