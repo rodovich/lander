@@ -31,9 +31,7 @@ Unit tests cover the pure logic. Changes to task execution or coordination also 
 
 ## Staging
 
-Stage explicit paths. Never `git add -A` or `git add .`: the working tree routinely holds untracked local files that must not enter history — `.claude/settings.local.json`, the untracked `docs/*-plan.md` implementation plans, and throwaway probe scripts.
-
-The tree may also hold *tracked* files modified by another task working concurrently in the same checkout. Stage only files you changed yourself; never revert, commit, or delete another task's work in passing. Check `git status` before committing and account for everything you are staging.
+Stage explicit paths. Never `git add -A` or `git add .`. The tree may hold untracked or tracked files modified by another task working concurrently in the same checkout. Stage only files you changed yourself; never revert, commit, or delete another task's work in passing. Check `git status` before committing and account for everything you are staging.
 
 Commit directly on `main` — this repo does not branch for ordinary work — and don't push unless asked.
 

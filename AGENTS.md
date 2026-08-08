@@ -42,8 +42,8 @@ does damage before anyone reviews it:
   be editing concurrently.
 - Commit directly on `main`; don't push unless asked.
 
-Implementation plans live in `docs/*-plan.md` and stay **untracked** — never
-commit one.
+Implementation plans and other working notes live in `docs/tmp/`, which git
+ignores. Write them there; never commit one.
 
 For reference rather than convention:
 [docs/architecture.md](docs/architecture.md) documents the HTTP surface, task
