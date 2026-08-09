@@ -7,11 +7,11 @@ import { timed } from './perf'
 // Supported: headers, ordered/unordered lists, blockquotes, fenced code
 // blocks, horizontal rules, and inline bold/italic/code/links.
 
-// Resolves a bare task id (a full UUID) or short id (an 8-char prefix) found in
-// message text to an internal link to that task. Returns the link target and
-// the task's title (used as the link text), or undefined when nothing matches —
-// in which case the id renders as literal text. Purely presentational: it
-// doesn't touch the stored message or what's sent to the model.
+// Resolves a bare task id found in message text to an internal link to that
+// task. Returns the link target and the task's title (used as the link text),
+// or undefined when nothing matches — in which case the id renders as literal
+// text. Purely presentational: it doesn't touch the stored message or what's
+// sent to the model.
 export type TaskLinkResolver = (
   id: string,
 ) => { href: string; title: string; status: string } | undefined
@@ -178,21 +178,28 @@ function renderInline(
     },
   ]
 
-  // A bare task reference: a legacy UUID, or a nanoid-style id (or unambiguous
-  // prefix of one, as `lander view`/`send`/`archive` accept) drawn from the
-  // `[A-Za-z0-9_-]` alphabet the server mints ids from — 8 chars (short enough
-  // to be a usable prefix, long enough that an ordinary word rarely collides)
-  // up through the 21-char full id, standing alone rather than embedded in a
-  // longer alphanumeric/hyphenated run.
-  // The UUID form is matched first so a legacy id is taken whole, not clipped to
-  // its first 21 chars. Only added when a resolver is supplied; the resolver
-  // decides whether the candidate names a real task, so a coincidental token
-  // (an ordinary word of the same length) that matches nothing falls back to
-  // literal text. The internal link uses a plain anchor (no target) like the
+  // A bare task reference, standing alone rather than embedded in a longer
+  // alphanumeric/hyphenated run. Two id formats have existed, and both appear
+  // in stored history:
+  //   - the 36-char uuid legacy tasks are still keyed by, which the server
+  //     minted (and handed claude as its --session-id) before bee1aab;
+  //   - the 10-char token drawn from the `[A-Za-z0-9_-]` alphabet minted since,
+  //     which is what `newTaskId` has always produced.
+  // The 8..10 bound therefore covers a whole current id plus the two legacy
+  // *short* forms that old messages abbreviate one to: the first 8 hex chars of
+  // a uuid, and the 8- or 9-char prefix of a current id that the task prompt
+  // once told agents to print. The CLI no longer accepts either — this is
+  // display-only, so those older conversations keep linking. 8 is the floor
+  // because it is long enough that an ordinary word rarely collides.
+  // The uuid form is matched first so a legacy id is taken whole rather than
+  // clipped to its first 10 chars. Only added when a resolver is supplied; the
+  // resolver decides whether the candidate names a real task, so a coincidental
+  // token (an ordinary word of the same length) that matches nothing falls back
+  // to literal text. The internal link uses a plain anchor (no target) like the
   // lifecycle-event task links, so it navigates within the app.
   if (linkTask) {
     patterns.push({
-      re: /(?<![0-9A-Za-z_-])(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9A-Za-z_-]{8,21})(?![0-9A-Za-z_-])/gi,
+      re: /(?<![0-9A-Za-z_-])(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9A-Za-z_-]{8,10})(?![0-9A-Za-z_-])/gi,
       // Only a candidate that resolves to a real task is treated as a match; the
       // rest fall through to literal text without splitting the run (see accept).
       accept: (m) => linkTask(m[0]) !== undefined,

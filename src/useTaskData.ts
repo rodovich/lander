@@ -133,16 +133,23 @@ export function useTaskData(view: TaskView, onError: (message: string) => void) 
     [linkSig],
   )
 
-  // Resolve a bare task id or an unambiguous prefix found in a message to an
-  // internal link to that task, used to turn such references into clickable
-  // links with the task's title as the text. A full-length id (>= 36 chars) is
-  // matched exactly; anything shorter matches by prefix, and links only when it
-  // uniquely identifies one loaded task (mirroring the CLI's unambiguous-prefix
-  // rule). Returns undefined otherwise so the id renders as plain text. This is
-  // purely presentational — the stored message and what's sent to the model are
-  // untouched. Keyed on linkIndex (see above) so it re-renders messages exactly
-  // when resolution could change — including the first-load transition from an
-  // empty list, without which ids would stay literal forever.
+  // Resolve a bare task id found in a message to an internal link to that task,
+  // used to turn such references into clickable links with the task's title as
+  // the text. A uuid (>= 36 chars) is matched exactly; anything shorter matches
+  // by prefix and links only when it uniquely identifies one loaded task.
+  //
+  // That prefix fallback is deliberately kept even though the CLI now requires
+  // whole ids. Stored messages are immutable, and for months the task prompt
+  // told agents to print "an unambiguous prefix" — so history is full of 8- and
+  // 9-char abbreviations (and, from the uuid era, 8-char hex ones) that would
+  // otherwise stop linking. It is safe here in a way it was not in the CLI:
+  // resolution is presentational, an ambiguous prefix simply falls back to
+  // plain text, and nothing is mutated on the strength of the guess.
+  //
+  // Returns undefined when nothing matches, so the id renders as plain text.
+  // Keyed on linkIndex (see above) so it re-renders messages exactly when
+  // resolution could change — including the first-load transition from an empty
+  // list, without which ids would stay literal forever.
   const resolveTaskLink = useCallback<TaskLinkResolver>(
     (id) => {
       // A legacy/garbled reference can hand us an empty id (e.g. an old

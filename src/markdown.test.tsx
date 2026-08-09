@@ -442,7 +442,7 @@ describe('Markdown rendering', () => {
 describe('task-mention linking', () => {
   const FULL = 'abcd1234-5678-90ab-cdef-1234567890ab'
   // A resolver standing in for the app's: links the one known task, by full id
-  // or by an 8-char prefix.
+  // or by the 8-char hex prefix that prose from the uuid era abbreviates it to.
   const linkTask = (id: string) => {
     const needle = id.toLowerCase()
     if (FULL === needle || (needle.length === 8 && FULL.startsWith(needle)))
@@ -507,9 +507,11 @@ describe('task-mention linking', () => {
 })
 
 describe('task-mention linking — nanoid ids', () => {
-  // The server now mints nanoid-style ids (mixed case, `_`/`-`, lengths 10 and
-  // 21) rather than hex uuids; the detector must linkify those too.
-  const ID = 'gqc9qIVdF-I8nsAxwHwDk'
+  // Since bee1aab the server mints a 10-char token (mixed case, `_`/`-`) rather
+  // than a hex uuid; the detector must linkify those too, plus the 8- and 9-char
+  // abbreviations of one left in history by the old "print an unambiguous
+  // prefix" guidance.
+  const ID = 'gqc9qIVd_F'
   const linkTask = (id: string) => {
     const needle = id.toLowerCase()
     if (ID.toLowerCase().startsWith(needle))
@@ -519,15 +521,14 @@ describe('task-mention linking — nanoid ids', () => {
   const render = (text: string) =>
     renderToStaticMarkup(<Markdown text={text} linkTask={linkTask} />)
 
-  it('links a full 21-char nanoid id in a backlink prefix', () => {
+  it('links a whole 10-char id in a backlink prefix', () => {
     const html = render(`From ${ID}:\n\nhello`)
     expect(html).toContain(`href="/proj/${ID}"`)
     expect(html).toContain('>Fix the parser</a>')
   })
 
-  it('links a 10-char prefix of a nanoid id', () => {
-    // `gqc9qIVdF-` is the first 10 chars of the known id and resolves uniquely.
-    const html = render('gqc9qIVdF- pinged')
+  it('links a 9-char legacy abbreviation of an id', () => {
+    const html = render('gqc9qIVd_ pinged')
     expect(html).toContain(`href="/proj/${ID}"`)
   })
 
@@ -540,6 +541,32 @@ describe('task-mention linking — nanoid ids', () => {
   it('links a standalone 8-char short id', () => {
     const html = render('gqc9qIVd is riding')
     expect(html).toContain(`href="/proj/${ID}"`)
+  })
+
+  // No id longer than 10 characters has ever been minted apart from the legacy
+  // uuids, which the detector matches as their own whole shape. So a longer run
+  // is prose and must never even be offered to the resolver. Asserted with a
+  // resolver that links *anything* it is handed, so the length bound in the
+  // detector is the only thing that can keep the token literal — with the real
+  // resolver above, a too-long token is rejected on lookup and the test would
+  // pass no matter what the bound said.
+  it('never offers a token longer than any minted id to the resolver', () => {
+    const linkAnything = (id: string) => ({
+      href: `/proj/${id}`,
+      title: 'Fix the parser',
+      status: 'riding',
+    })
+    const html = renderToStaticMarkup(
+      <Markdown text="gqc9qIVd_FI8nsAxwHwDk acked" linkTask={linkAnything} />,
+    )
+    expect(html).not.toContain('<a')
+    expect(html).toContain('gqc9qIVd_FI8nsAxwHwDk')
+    // Control: the same permissive resolver does link a whole 10-char id, so the
+    // assertion above is about the length bound and not a broken fixture.
+    const ok = renderToStaticMarkup(
+      <Markdown text={`${ID} acked`} linkTask={linkAnything} />,
+    )
+    expect(ok).toContain(`href="/proj/${ID}"`)
   })
 
   it('leaves an ordinary same-length word as literal text', () => {
