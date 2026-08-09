@@ -55,6 +55,11 @@ export {
   fillTaskPrompt,
   forwardableAccess,
   taskManagementPrompt,
+  // Still exported though no bundled flow calls it: it is published stdlib, and
+  // a third-party flow whose provider has no deliver-once problem may want it.
   promptWithTaskManagement,
   buildRevivedBlock,
+  // Deliver-once, for a provider whose only prose channel is the user message.
+  deliveryDigest,
+  shouldDeliver,
 } from '../daemon/task-management'

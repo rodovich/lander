@@ -35,9 +35,24 @@ session announcements.
 
 In-task self-management is shared. The daemon injects `LANDER_API`,
 `LANDER_PROJECT`, `LANDER_TASK`, `LANDER_TOKEN`, and a `PATH` that finds
-`bin/lander`. Codex receives the task-management instructions as part of the
-prompt, and the adapter passes Codex config overrides so `LANDER_*` and `PATH`
+`bin/lander`. The adapter passes Codex config overrides so `LANDER_*` and `PATH`
 are visible to shell commands without putting the task token in argv.
+
+Codex receives the task-management instructions in the user message, because it
+has no request-scoped channel for lander's own prose — Claude's
+`--append-system-prompt` is rebuilt every invocation, so one copy rides every
+request and is replaced when it changes, and Codex has no equivalent. A message
+put in front of one Codex turn stays in that turn's message and is replayed on
+every later one, so the flow delivers the template **once per thread** and
+re-delivers it only when the rendered text changes.
+
+The record of that delivery is a content digest in `flowState.taskPrompt`, written
+only after a turn produces output — proof the model consumed the turn, and
+therefore that the thread holds it. Two consequences worth knowing: a template
+edit or a mid-task grant flip re-renders, re-digests, and re-delivers on the next
+turn, so live threads do not go stale; and every failure direction is a duplicate
+copy rather than a suppressed one, which is why the gate also fires whenever no
+thread id is recorded.
 
 `lander assist` and the flow API are provider-aware one-shot helpers. They use
 `claude -p` for Claude and `codex exec` for Codex based on the same provider

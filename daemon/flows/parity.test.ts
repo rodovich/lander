@@ -209,7 +209,14 @@ describe('codex parity — session and identity', () => {
         'resumed turn re-emitting thread.started writes no duplicate session',
     )!
     const flow = await driveFlow(g, codexFlow())
-    expect(flow.events.filter((e) => e.kind === 'state-patch')).toEqual([])
+    // Narrowed to sessionId ops: the flow also commits its deliver-once record
+    // (`taskPrompt`) on a turn that produced output, which the adapter has no
+    // state channel to mirror. This assertion is about the session id only.
+    const sessionOps = flow.events
+      .filter((e) => e.kind === 'state-patch')
+      .flatMap((e) => (e as { ops?: { path?: string[] }[] }).ops ?? [])
+      .filter((op) => op.path?.[0] === 'sessionId')
+    expect(sessionOps).toEqual([])
   })
 
   it('persists the thread id the stream reports on a fresh turn', async () => {
@@ -251,8 +258,9 @@ describe('codex parity — session and identity', () => {
 // the notice actually reaches the child, as a prompt part rather than as part of
 // the delta-compared context block.
 describe('the revival notice reaches the prompt', () => {
-  // Not `args.at(-1)`: codex puts a fresh `exec`'s flags AFTER the positional
-  // prompt (its variadic --image would otherwise swallow it).
+  // Found by content rather than position so this reads the same on both
+  // providers. (Codex's flags used to trail the positional prompt on a fresh
+  // `exec`; since the `--` terminator landed they precede it on both paths.)
   const promptOf = (args: string[]) =>
     args.find((a) => a.includes('do the thing')) as string
 

@@ -1,13 +1,66 @@
+import { createHash } from 'node:crypto'
 import type { AgentTaskView } from './agent'
 import type { RevivedMarker } from '../server/protocol'
 
+// Deliver-once, for a provider whose only channel for lander's own prose is the
+// user message — i.e. codex, where a message put in front of one turn stays in
+// that turn's message forever and is replayed on every later one.
+//
+// The pair is deliberately PURE: it takes the state values rather than a Ctx, so
+// this module keeps no dependency on daemon/flows (which imports
+// buildRevivedBlock from here — the reverse edge would be a cycle) and stays
+// testable without a harness. The caller owns the two state touches.
+//
+// The contract is a two-phase one, and the phases must stay split:
+//
+//   decide (before the spawn)  shouldDeliver(sessionId, ctx.state.get([key]), digest)
+//   commit (after the turn)    ctx.state.set([key], digest) — only if it delivered
+//                              AND the turn produced output
+//
+// "Produced output" is the whole safety argument: the model emitting a step or a
+// reply proves it consumed the turn, which proves the thread exists, is durable,
+// and holds that turn's user message. Committing earlier than that records a
+// delivery that may not have happened, which is permanent; committing later, or
+// never, costs one duplicate copy. Every failure direction must stay on the
+// duplicate side.
+export function deliveryDigest(text: string): string {
+  // Stable across processes and versions — a per-process salt would re-deliver
+  // every turn, the benign direction, but would look like success in a
+  // single-session test. Prefixed so a future format change compares unequal
+  // loudly rather than by accident.
+  return `sha256:${createHash('sha256').update(text).digest('hex')}`
+}
+
+// `!sessionId` is not belt-and-braces; it is the invariant. `sealForRelaunch`
+// deletes the whole flowState blob mid-turn, and the dying turn's flush can then
+// replay a buffered patch that restores the digest alone (server/tasks.ts,
+// daemon/run.ts) — leaving a task with a delivery record and no thread. Without
+// this disjunct the fresh thread inherits "delivered" and is sealed for life.
+// Claude carries the same guard for its context block, for the same reason.
+export function shouldDeliver(
+  sessionId: string | undefined,
+  delivered: unknown,
+  digest: string,
+): boolean {
+  return !sessionId || delivered !== digest
+}
+
 // Fill the task prompt template's slots: {{id}} with the task's own id (constant
 // for the task's life, so it's safe in Claude's byte-stable --append-system-prompt)
-// and {{forwardable}} with a per-agent access sentence. The two adapters diverge on
-// the latter: Codex interpolates the live grants (its whole template rides the user
-// message each turn, so it's always fresh); Claude substitutes a static pointer and
-// delivers the live grants via the per-turn task-context block instead, keeping its
-// --append-system-prompt byte-stable across turns for prompt-cache reuse.
+// and {{forwardable}} with a per-agent access sentence. The two providers diverge
+// on the latter, because their channels differ in scope:
+//
+// Claude's --append-system-prompt is request-scoped — regenerated every
+// invocation, never accumulated in the conversation — so it substitutes a static
+// pointer and delivers the live grants through the per-turn task-context block,
+// keeping the appended prompt byte-stable for prompt-cache reuse.
+//
+// Codex has no request-scoped channel, only the user message, so its template is
+// delivered once per thread (see deliveryDigest/shouldDeliver) and it interpolates
+// the live grants directly. Freshness comes from the digest being
+// content-addressed: a grant flip re-renders, re-digests, and re-delivers on the
+// next turn. That is also why the codex sentence must not claim to describe
+// "this turn" — a superseded copy stays in codex's append-only history.
 export function fillTaskPrompt(
   taskPromptTemplate: string,
   forwardable: string,
@@ -72,8 +125,14 @@ export function forwardableAccess(task: AgentTaskView): string {
     const permissions = task.allowEdits
       ? 'workspace-scoped edit permission profile'
       : 'workspace-scoped read-only permission profile'
+    // "As of this message", not "this turn": the sentence is interpolated into a
+    // template that codex now receives once per thread, so a copy of it sits in
+    // history being read on later turns. A grant change re-renders and
+    // re-delivers it (the digest is content-addressed), but the superseded copy
+    // stays — append-only history — so the wording must not assert a fact about
+    // whichever turn happens to be reading it.
     return (
-      `This Codex turn runs with the ${permissions}. ` +
+      `As of this message, this task runs with the ${permissions}. ` +
       'Task allow rules are stored by Lander but do not affect Codex runs yet'
     )
   }

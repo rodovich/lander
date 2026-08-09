@@ -162,10 +162,29 @@ function freshTask(start: StartRunMessage): Record<string, unknown> {
   return task
 }
 
-// applyStatePatch stamps flowStateRev on the flow path while the oracle's
-// accessor writes never do. It is a dedupe counter, not state — the single named
-// exception to "no normalization" in this compare.
+// Two named exceptions to "no normalization" in this compare, and no others.
+//
+// `flowStateRev` — applyStatePatch stamps it on the flow path while the oracle's
+// accessor writes never do. A dedupe counter, not state.
+//
+// `flowState.taskPrompt` — the codex flow's deliver-once record. The compiled
+// adapter has no durable state channel at all (AgentTaskView carries no
+// flowState, and run-agent never emits a state-patch), so it cannot hold this
+// key by construction, and the divergence is expected rather than a defect. It
+// is dropped narrowly, by name, and only from flowState: the argv compare — the
+// thing this oracle exists to protect — is untouched and still runs over every
+// golden, because a delivering turn's prompt is byte-identical to the
+// pre-change one and a suppressing turn is a deliberate behavior difference the
+// flow-only tests cover directly.
 export function forCompare(task: Record<string, unknown>): Record<string, unknown> {
   const { flowStateRev: _drop, ...rest } = task
+  const flowState = rest.flowState
+  if (flowState && typeof flowState === 'object') {
+    const { taskPrompt: _delivery, ...restState } = flowState as Record<
+      string,
+      unknown
+    >
+    return { ...rest, flowState: restState }
+  }
   return rest
 }

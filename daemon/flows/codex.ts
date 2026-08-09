@@ -1,7 +1,12 @@
 // Codex as a driver flow. Shorter than claude's because codex carries less: no
 // session minting (the thread id arrives in the stream), no per-turn context
-// block (its managed prompt interpolates the live grants every turn anyway), and
-// no project grants or usage snapshot to own.
+// block, and no project grants or usage snapshot to own.
+//
+// What it carries instead is deliver-once. Codex has no request-scoped channel
+// for lander's own prose — claude appends to the system prompt, which is rebuilt
+// every invocation — so the task-management prompt has to ride the user message,
+// where a copy sent on one turn is replayed on every later one. It is therefore
+// delivered once per thread and re-delivered only when its rendered text changes.
 //
 // What it does carry that claude doesn't is an in-stream error channel — codex
 // reports failures as `error` / `turn.failed` events, which fold into the turn's
@@ -16,9 +21,11 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import {
   addUsage,
+  deliveryDigest,
   extractCodexSession,
-  promptWithTaskManagement,
   reduceCodexStreamLine,
+  shouldDeliver,
+  taskManagementPrompt,
   type Usage,
 } from 'lander/flow'
 import type { Ctx, FlowMeta, ToolHandle, TurnResult } from './ctx'
@@ -75,12 +82,47 @@ export function makeFlow({
       const known = ctx.state.get(['sessionId'])
       const sessionId = typeof known === 'string' && known ? known : undefined
 
+      // ── Task prompt ──────────────────────────────────────────────────────
+      // Codex has no request-scoped channel for lander's own prose (claude uses
+      // --append-system-prompt), so this rides the user message — which means a
+      // copy sent on one turn stays in that turn's message and replays on every
+      // later one. Deliver it once per thread, and again only when the rendered
+      // text changes: the digest is content-addressed, so a template edit or a
+      // mid-task grant flip re-delivers the corrected text on the next turn
+      // without any separate staleness machinery.
+      //
+      // The commit is deferred to after the read loop, gated on the turn having
+      // produced output. See deliveryDigest/shouldDeliver for why that ordering
+      // is the whole safety argument.
+      const rendered = taskManagementPrompt(
+        {
+          agent: 'codex',
+          allowEdits: ctx.task.allowEdits,
+          ...(ctx.task.allow !== undefined ? { allow: ctx.task.allow } : {}),
+          ...(ctx.task.worktree !== undefined
+            ? { worktree: ctx.task.worktree }
+            : {}),
+          ...(sessionId !== undefined ? { sessionId } : {}),
+        },
+        taskPromptTemplate,
+        ctx.task.taskId,
+      )
+      const digest = deliveryDigest(rendered)
+      const sendTaskPrompt = shouldDeliver(
+        sessionId,
+        ctx.state.get(['taskPrompt']),
+        digest,
+      )
+
       // ── Prompt ───────────────────────────────────────────────────────────
       const promptParts = [ctx.turn.prompts.join('\n\n')]
       if (ctx.turn.manifestBlock) promptParts.push(ctx.turn.manifestBlock)
       // Codex has no turn-context block to hide this in, which is half of why the
       // revival notice is a prompt part rather than an adapter concern.
       if (ctx.turn.revivedBlock) promptParts.push(ctx.turn.revivedBlock)
+      // Leads the prompt, matching what promptWithTaskManagement used to build,
+      // so a delivering turn's argv is byte-identical to the pre-change one.
+      if (sendTaskPrompt) promptParts.unshift(rendered)
 
       const args = [
         ...ctx.task.reentryArgs,
@@ -108,6 +150,13 @@ export function makeFlow({
       let terminalError: string | undefined
       let announced = sessionId !== undefined
       let stderrText = ''
+      // Proof the model consumed this turn — and therefore that the thread holds
+      // this turn's user message. A terminal error folds into `terminalError`
+      // with no steps and no finalText, so a turn that only failed leaves this
+      // false and the task prompt is re-sent next turn. `steps.length` (not
+      // finalText) is what catches an empty agent_message, which still pushes a
+      // text step.
+      let producedOutput = false
 
       const collectStderr = (async () => {
         for await (const l of child.stderr) stderrText += `${l}\n`
@@ -129,6 +178,8 @@ export function makeFlow({
         }
 
         const r = reduceCodexStreamLine(trimmed, ctx.now())
+
+        if (r.steps.length || r.finalText !== undefined) producedOutput = true
 
         if (r.terminalError) {
           if (!terminalError) terminalError = r.terminalError
@@ -189,6 +240,20 @@ export function makeFlow({
         }
       }
 
+      // Commit the delivery only now, and only if the model actually consumed
+      // the turn. Written after the loop rather than inside it so the decision
+      // sees the whole turn; runFlowTurn flushes state after onTurn returns, so
+      // this still reaches the server. Non-throwing on purpose: a rejected state
+      // write (oversize blob) must degrade to a duplicate next turn, never to a
+      // failed turn.
+      if (sendTaskPrompt && producedOutput) {
+        try {
+          ctx.state.set(['taskPrompt'], digest)
+        } catch {
+          // Deliberate: re-delivering is the benign direction.
+        }
+      }
+
       const exitCode = await child.exit
       await collectStderr
       return {
@@ -227,20 +292,9 @@ function buildCodexArgs(
     ),
     ...codexShellEnvConfigOverrides(),
   ]
-  const managedPrompt = promptWithTaskManagement(
-    {
-      agent: 'codex',
-      allowEdits: ctx.task.allowEdits,
-      ...(ctx.task.allow !== undefined ? { allow: ctx.task.allow } : {}),
-      ...(ctx.task.worktree !== undefined
-        ? { worktree: ctx.task.worktree }
-        : {}),
-      ...(sessionId !== undefined ? { sessionId } : {}),
-    },
-    prompt,
-    taskPromptTemplate,
-    ctx.task.taskId,
-  )
+  // The task-management prompt is no longer spliced in here: onTurn decides
+  // whether this thread still needs it and, when it does, leads `prompt` with it.
+  const managedPrompt = prompt
   // One `-i <path>` per image (the repeatable short form), then `--`, then the
   // prompt. The terminator is what makes the placement uniform across both
   // paths: without it a fresh `exec`'s variadic --image swallows a trailing

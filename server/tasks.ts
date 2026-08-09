@@ -709,9 +709,18 @@ export function clearTaskThread(task: ThreadStateTask): void {
 // turn with no `sessionId` (it resumes the same one otherwise), so deleting the
 // field is all it takes — the new session is minted lazily on the next turn that
 // drains a queued message, never pre-allocated. The old session's still-streaming
-// turn emits no session announcement, so nothing races this clear (see
-// reduceRunWs's set-once `if (!t.sessionId)`). Touches only session + event
-// state; the caller owns the message/queue/status for the next turn.
+// turn emits no session announcement, so nothing races this clear for the
+// top-level field (see reduceRunWs's set-once `if (!t.sessionId)`).
+//
+// It does NOT follow that nothing races the flowState blob: a still-running turn
+// flushes its own state after this seal, and a buffered patch replayed on
+// reconnect can restore individual keys onto the blob just deleted. Anything a
+// flow keys off flowState must therefore tolerate a key outliving the thread it
+// described — which is why codex's deliver-once gate reads `!sessionId ||` and
+// not the delivery record alone (daemon/task-management.ts).
+//
+// Touches only session + event state; the caller owns the message/queue/status
+// for the next turn.
 export function sealForRelaunch(
   task: {
     sessionId?: string

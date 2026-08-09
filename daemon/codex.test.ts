@@ -157,7 +157,7 @@ describe('Codex adapter reducer', () => {
       '--',
       managedPrompt(
         'hello codex',
-        'This Codex turn runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
+        'As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
       ),
     ])
     expect(launch.args.join('\0')).not.toContain('secret-token')
@@ -193,7 +193,7 @@ describe('Codex adapter reducer', () => {
       '--',
       managedPrompt(
         'edit files',
-        'This Codex turn runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
+        'As of this message, this task runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
       ),
     ])
     expect(launch.args.join('\0')).toContain('extends=":workspace"')
@@ -232,7 +232,7 @@ describe('Codex adapter reducer', () => {
       '--',
       managedPrompt(
         'edit worktree',
-        'This Codex turn runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
+        'As of this message, this task runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
       ),
     ])
   })
@@ -266,7 +266,7 @@ describe('Codex adapter reducer', () => {
       '--',
       managedPrompt(
         'follow up',
-        'This Codex turn runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
+        'As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
       ),
     ])
   })
@@ -300,7 +300,7 @@ describe('Codex adapter reducer', () => {
       '--',
       managedPrompt(
         'follow up with edits',
-        'This Codex turn runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
+        'As of this message, this task runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
       ),
     ])
   })
@@ -345,7 +345,7 @@ describe('Codex adapter reducer', () => {
       '--',
       managedPrompt(
         'configured follow up',
-        'This Codex turn runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
+        'As of this message, this task runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
       ),
     ])
   })
@@ -387,7 +387,7 @@ describe('Codex adapter reducer', () => {
       '--',
       managedPrompt(
         'use configured codex',
-        'This Codex turn runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
+        'As of this message, this task runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
       ),
     ])
   })

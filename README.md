@@ -54,7 +54,7 @@ Because turns run in the separate host daemon, restarting the API doesn't interr
 
 ### Self-management (`bin/lander`)
 
-A task's agent can call back into lander to manage itself. When the daemon launches a turn, it injects `LANDER_API`, `LANDER_PROJECT`, `LANDER_TASK`, and `LANDER_TOKEN` (a per-task secret) into the agent environment, prepends `bin/` to `PATH`, and includes task-management instructions in the prompt. Claude also gets `Bash(lander:*)` pre-approved. So inside any task the agent can run:
+A task's agent can call back into lander to manage itself. When the daemon launches a turn, it injects `LANDER_API`, `LANDER_PROJECT`, `LANDER_TASK`, and `LANDER_TOKEN` (a per-task secret) into the agent environment, prepends `bin/` to `PATH`, and delivers task-management instructions to the agent — appended to the system prompt on Claude, and delivered once per thread on Codex, which has no equivalent channel. Claude also gets `Bash(lander:*)` pre-approved. So inside any task the agent can run:
 
 | Command | Effect |
 |---------|--------|

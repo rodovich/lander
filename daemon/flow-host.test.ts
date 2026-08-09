@@ -9,6 +9,7 @@ import { runHost } from './flow-host'
 import { makeFlow as makeClaudeFlow } from './flows/claude'
 import { makeFlow as makeCodexFlow } from './flows/codex'
 import { settle } from './flows/testCtx'
+import { deliveryDigest, taskManagementPrompt } from './task-management'
 
 class FakeChild extends EventEmitter {
   stdout = new EventEmitter()
@@ -211,7 +212,7 @@ describe('flow host', () => {
         '--cd',
         '/repo',
         '--',
-        'Prompt: This Codex turn runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.\n\ncodex prompt',
+        'Prompt: As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.\n\ncodex prompt',
       ],
       options: { cwd: '/repo' },
     })
@@ -334,9 +335,14 @@ describe('flow host', () => {
     // Codex has cut over too, so the thread id it reports in-stream is persisted
     // through ctx.state rather than announced as a SessionMessage. It flushes
     // immediately — ahead of the chunk's update — so a crash can't lose it.
+    // The trailing state-patch is the deliver-once commit: this turn led with
+    // the task-management prompt (fresh thread) and produced output, so the
+    // digest is recorded and later turns on this thread omit the prompt. It
+    // lands after the update because it is written once the read loop ends.
     expect(h.events.map((e) => e.kind)).toEqual([
       'state-patch',
       'update',
+      'state-patch',
       'done',
     ])
     expect(h.events[0]).toMatchObject({
@@ -344,7 +350,115 @@ describe('flow host', () => {
       ops: [{ op: 'set', path: ['sessionId'], value: 'thread-1' }],
     })
     expect(h.events[1]).toMatchObject({ kind: 'update', finalText: 'codex ok' })
-    expect(h.events[2]).toMatchObject({ kind: 'done', exitCode: 0, stderr: '' })
+    expect(h.events[2]).toMatchObject({
+      kind: 'state-patch',
+      ops: [{ op: 'set', path: ['taskPrompt'] }],
+    })
+    expect(h.events[3]).toMatchObject({ kind: 'done', exitCode: 0, stderr: '' })
+  })
+
+  // ── Deliver-once ─────────────────────────────────────────────────────────
+  //
+  // Codex has no request-scoped channel for lander's own prose, so the task
+  // prompt rides the user message — where a copy sent on one turn stays in that
+  // turn's message and replays on every later one. The flow therefore delivers
+  // it once per thread and re-delivers only when the rendered text changes.
+  //
+  // These are flow-only by necessity: the compiled adapter has no durable state
+  // channel, so parity cannot express suppression, and a symmetrically-wrong
+  // gate would leave the oracle green. See parity.ts's forCompare note.
+  describe('codex deliver-once', () => {
+    const TEMPLATE = 'Prompt: {{forwardable}}.'
+    const digestFor = (allowEdits: boolean) =>
+      deliveryDigest(
+        taskManagementPrompt({ agent: 'codex', allowEdits }, TEMPLATE, 'task-1'),
+      )
+    const promptOf = (h: ReturnType<typeof harness>) => {
+      const args = h.spawns[0].args
+      return args[args.length - 1] as string
+    }
+    const finish = async (h: ReturnType<typeof harness>, ok = true) => {
+      const child = h.spawns[0].child
+      child.stdout.emit(
+        'data',
+        Buffer.concat([
+          line({ type: 'thread.started', thread_id: 'thread-1' }),
+          ok
+            ? line({
+                type: 'item.completed',
+                item: { id: 'i1', type: 'agent_message', text: 'ok' },
+              })
+            : line({ type: 'error', message: 'upstream blew up' }),
+        ]),
+      )
+      await settle()
+      child.stdout.emit('end')
+      child.emit('close', ok ? 0 : 1)
+      await settle()
+    }
+
+    it('omits the task prompt on a thread that already has it', async () => {
+      const h = harness()
+      h.run(
+        makeInput({
+          sessionId: 'thread-1',
+          flowState: { sessionId: 'thread-1', taskPrompt: digestFor(false) },
+        }),
+      )
+      expect(promptOf(h)).toBe('prompt')
+      expect(promptOf(h)).not.toContain('Prompt: As of this message')
+    })
+
+    // The regression for the one suppression path review found: sealForRelaunch
+    // deletes the whole flowState blob mid-turn, and the dying turn's flush can
+    // replay a buffered patch that restores the digest ALONE — leaving a
+    // delivery record with no thread. Without the `!sessionId` disjunct the
+    // fresh thread inherits "delivered" and never receives the prompt again.
+    // Deleting that disjunct must turn this red.
+    it('sends it when the digest matches but no thread is recorded', async () => {
+      const h = harness()
+      h.run(makeInput({ flowState: { taskPrompt: digestFor(false) } }))
+      expect(promptOf(h)).toContain('As of this message')
+    })
+
+    // The same content-addressing that handles a template edit handles a
+    // mid-task grant flip, with no separate staleness machinery: allowEdits is
+    // interpolated into the render, so flipping it changes the digest and the
+    // corrected sentence is re-delivered on the next turn.
+    it('re-sends when the rendered text changes under it', async () => {
+      const h = harness()
+      h.run(
+        makeInput({
+          sessionId: 'thread-1',
+          task: { allowEdits: true },
+          flowState: { sessionId: 'thread-1', taskPrompt: digestFor(false) },
+        }),
+      )
+      expect(promptOf(h)).toContain('workspace-scoped edit permission profile')
+    })
+
+    it('records the delivery when the turn produced output', async () => {
+      const h = harness()
+      h.run(makeInput())
+      await finish(h)
+      const ops = h.events
+        .filter((e) => e.kind === 'state-patch')
+        .flatMap((e) => (e as { ops: { path: string[] }[] }).ops)
+      expect(ops.some((o) => o.path[0] === 'taskPrompt')).toBe(true)
+    })
+
+    // A turn whose only output is a terminal error folds to no steps and no
+    // finalText, so nothing is recorded and the next turn re-sends. Every
+    // failure direction has to land on a duplicate, never a suppression.
+    it('records nothing when the turn produced no output', async () => {
+      const h = harness()
+      h.run(makeInput())
+      await finish(h, false)
+      const ops = h.events
+        .filter((e) => e.kind === 'state-patch')
+        .flatMap((e) => (e as { ops: { path: string[] }[] }).ops)
+      expect(ops.some((o) => o.path[0] === 'taskPrompt')).toBe(false)
+    })
   })
 
   it('extracts the codex session id mid-stream and records it once', async () => {
@@ -367,12 +481,15 @@ describe('flow host', () => {
     child.emit('close', 0)
     await settle()
 
-    expect(h.events.filter((e) => e.kind === 'state-patch')).toEqual([
-      {
-        kind: 'state-patch',
-        ops: [{ op: 'set', path: ['sessionId'], value: 'thread-9' }],
-        rev: 1,
-      },
+    // "Once" is about the session id specifically: thread.started is re-emitted
+    // across chunks and must persist only the first time. The deliver-once
+    // commit is a separate key on a later patch and is asserted elsewhere.
+    const sessionOps = h.events
+      .filter((e) => e.kind === 'state-patch')
+      .flatMap((e) => (e as { ops: { path: string[] }[] }).ops)
+      .filter((op) => op.path[0] === 'sessionId')
+    expect(sessionOps).toEqual([
+      { op: 'set', path: ['sessionId'], value: 'thread-9' },
     ])
   })
 
