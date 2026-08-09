@@ -286,22 +286,19 @@ function validateSchedule(o) {
     die('--time expects a positive number of minutes')
 }
 
-// Resolve a comma-separated --await value (task ids or unambiguous prefixes) to
-// full ids, so the server stores canonical ids. `self` rejects a task awaiting
-// itself (a deadlock). Returns the resolved ids, or undefined when no --await.
-async function resolveAwait(value, { self } = {}) {
+// Split a comma-separated --await value into task ids. `self` rejects a task
+// awaiting itself (a deadlock) before the round trip; the server independently
+// validates that every id names a real task in this project, and rejects an
+// await edge that would close a cycle. Returns the ids, or undefined when no
+// --await was passed.
+function resolveAwait(value, { self } = {}) {
   if (value == null) return undefined
-  const parts = value
+  const ids = value
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
-  if (!parts.length) die('--await expects one or more task ids')
-  const ids = []
-  for (const p of parts) {
-    const id = await resolveId(p)
-    if (self && id === self) die('a task cannot await itself')
-    ids.push(id)
-  }
+  if (!ids.length) die('--await expects one or more task ids')
+  if (self && ids.includes(self)) die('a task cannot await itself')
   return ids
 }
 
@@ -363,7 +360,7 @@ async function launchTask(rest) {
   // --await defers the launch until the named tasks land (resolved to full ids
   // here); combinable with --date/--time, in which case launch fires on
   // whichever trigger comes first.
-  o.await = await resolveAwait(o.await)
+  o.await = resolveAwait(o.await)
   // Upload any --files first so the new task's opening message references them.
   if (o.files.length) o.attachments = await uploadAttachments(o.project, o.files)
   // --title sets the name directly; without it the server asks haiku. --date or
@@ -411,7 +408,7 @@ async function restTask(args) {
       'usage: lander rest (--date <when> | --time <minutes> | --await <ids> | --clear)',
     )
   validateSchedule(o)
-  o.await = await resolveAwait(o.await, { self: TASK })
+  o.await = resolveAwait(o.await, { self: TASK })
   await call(PROJECT, `/tasks/${TASK}/rest`, {
     method: 'POST',
     body: JSON.stringify(o),
@@ -496,7 +493,7 @@ async function relaunchTask(args) {
     )
   validateSchedule(o)
   validateRepeat(o)
-  o.await = await resolveAwait(o.await, { self: TASK })
+  o.await = resolveAwait(o.await, { self: TASK })
   await call(PROJECT, `/tasks/${TASK}/relaunch`, {
     method: 'POST',
     body: JSON.stringify({
@@ -513,31 +510,6 @@ async function relaunchTask(args) {
   let line = scheduled ? 'relaunch scheduled' : 'relaunching'
   if (o.interval != null) line += ` (repeating every ${o.interval}m)`
   console.log(line)
-}
-
-// Resolve a task id from a full id or any unambiguous prefix (so an agent can
-// paste the short id `lander list` prints). Matches within the caller's project.
-// `archived` resolves among archived tasks instead of active ones (for restore);
-// `'both'` resolves across active and archived together (for `view`, which reads
-// either pool).
-async function resolveId(idOrPrefix, { archived = false } = {}) {
-  if (!idOrPrefix) die('a task id is required')
-  const modes = archived === 'both' ? [false, true] : [archived]
-  const pool = []
-  for (const arch of modes) {
-    const res = await call(PROJECT, `/tasks${arch ? '?archived=1' : ''}`, {
-      method: 'GET',
-    })
-    // The list endpoint wraps the array as `{ tasks, usage }` (account usage rides
-    // along with every poll); tolerate a bare array too in case the shape reverts.
-    const tasks = Array.isArray(res) ? res : (res.tasks ?? [])
-    pool.push(...(arch ? tasks.filter((t) => t.archived) : tasks))
-  }
-  const matches = pool.filter((t) => t.id.startsWith(idOrPrefix))
-  if (matches.length === 0) die(`no task matching ${idOrPrefix}`)
-  if (matches.length > 1)
-    die(`ambiguous task id ${idOrPrefix} (${matches.length} matches)`)
-  return matches[0].id
 }
 
 // Parse a --since/--until value (anything Date can parse, same leniency as
@@ -676,10 +648,9 @@ async function viewTask(args) {
   }
   if (!pos[0])
     die('usage: lander view <id> [--tools] [--messages N] [--clip N] [--json]')
-  // Resolve across active and archived so a view works whether or not the task
-  // has been archived; the endpoint reads both pools too.
-  const id = await resolveId(pos[0], { archived: 'both' })
-  const task = await call(PROJECT, `/tasks/${id}`, { method: 'GET' })
+  // The endpoint reads both pools, so a view works whether or not the task has
+  // been archived.
+  const task = await call(PROJECT, `/tasks/${pos[0]}`, { method: 'GET' })
   if (json) return void console.log(JSON.stringify(task, null, 2))
   console.log(`${task.title}  [${task.status}]${task.archived ? ' (archived)' : ''}`)
   console.log(`id: ${task.id}${task.id === TASK ? '  ← this task' : ''}`)
@@ -764,12 +735,11 @@ async function sendTask(args) {
         'use `-` (stdin).',
     )
   validateSchedule(o)
-  const awaitIds = await resolveAwait(o.await)
-  const id = await resolveId(target)
+  const awaitIds = resolveAwait(o.await)
   const attachments = o.files.length
     ? await uploadAttachments(PROJECT, o.files)
     : undefined
-  await call(PROJECT, `/tasks/${id}/messages`, {
+  await call(PROJECT, `/tasks/${target}/messages`, {
     method: 'POST',
     body: JSON.stringify({
       message,
@@ -781,14 +751,13 @@ async function sendTask(args) {
   })
   const verb =
     o.date != null || o.time != null || o.await != null ? 'scheduled' : 'sent'
-  console.log(`${verb} → ${id.slice(0, 8)}`)
+  console.log(`${verb} → ${target}`)
 }
 
 // `lander archive <id...> [--restore]` — move one or more tasks out of the list
 // into the project's archived/ dir (or back, with --restore). Archiving needs a
-// non-riding task; the server rejects a riding one. Resolves a full id or an
-// unambiguous prefix — among active tasks to archive, among archived ones to
-// restore.
+// non-riding task; the server rejects a riding one, and looks each id up in the
+// pool the direction implies — active to archive, archived to restore.
 async function archiveTask(args) {
   let restore = false
   const pos = []
@@ -797,33 +766,31 @@ async function archiveTask(args) {
     else pos.push(a)
   }
   if (!pos[0]) die('usage: lander archive <id...> [--restore]')
-  for (const arg of pos) {
-    const id = await resolveId(arg, { archived: restore })
+  for (const id of pos) {
     await call(PROJECT, `/tasks/${id}/archive`, {
       method: 'POST',
       body: JSON.stringify({ archived: !restore }),
     })
-    console.log(`${restore ? 'restored' : 'archived'} → ${id.slice(0, 8)}`)
+    console.log(`${restore ? 'restored' : 'archived'} → ${id}`)
   }
 }
 
 // `lander land [id...]` — with no id, land the current task: the terminal "I'm
 // done" an agent calls when its work is finished. With ids, land those tasks
-// instead, resolving a full id or an unambiguous prefix among active tasks. The
-// server only lets a task land another it spawned (`lander launch`), so this
-// winds down a task's own children, not arbitrary ones; landing yourself, or by
-// id from the UI, stays unrestricted. A self-land stays silent (it's terminal —
-// nothing to react to, see setStatus); landing other tasks prints a line per
-// task, since the caller runs on and the outcome is worth confirming.
+// instead. The server only lets a task land another it spawned (`lander
+// launch`), so this winds down a task's own children, not arbitrary ones;
+// landing yourself, or by id from the UI, stays unrestricted. A self-land stays
+// silent (it's terminal — nothing to react to, see setStatus); landing other
+// tasks prints a line per task, since the caller runs on and the outcome is
+// worth confirming.
 async function landTask(args) {
   if (!args.length) return setStatus('landed', { quiet: true })
-  for (const arg of args) {
-    const id = await resolveId(arg)
+  for (const id of args) {
     await call(PROJECT, `/tasks/${id}`, {
       method: 'PATCH',
       body: JSON.stringify({ status: 'landed' }),
     })
-    console.log(`landed → ${id.slice(0, 8)}`)
+    console.log(`landed → ${id}`)
   }
 }
 
@@ -968,7 +935,7 @@ function makeLander(inputs) {
         ...(opts.config ? { flowConfig: opts.config } : {}),
       }
       validateSchedule(o)
-      o.await = await resolveAwait(opts.await)
+      o.await = resolveAwait(opts.await)
       if (opts.files?.length)
         o.attachments = await uploadAttachments(o.project, opts.files)
       const task = await call(o.project, '/tasks', {
@@ -980,12 +947,11 @@ function makeLander(inputs) {
     async send(target, message, opts = {}) {
       if (!message?.trim()) die('lander.send: a message is required')
       validateSchedule(opts)
-      const awaitIds = await resolveAwait(opts.await)
-      const id = await resolveId(target)
+      const awaitIds = resolveAwait(opts.await)
       const attachments = opts.files?.length
         ? await uploadAttachments(PROJECT, opts.files)
         : undefined
-      await call(PROJECT, `/tasks/${id}/messages`, {
+      await call(PROJECT, `/tasks/${target}/messages`, {
         method: 'POST',
         body: JSON.stringify({
           message,
@@ -995,11 +961,10 @@ function makeLander(inputs) {
           attachments,
         }),
       })
-      return id
+      return target
     },
     async view(target) {
-      const id = await resolveId(target)
-      return call(PROJECT, `/tasks/${id}`, { method: 'GET' })
+      return call(PROJECT, `/tasks/${target}`, { method: 'GET' })
     },
     async list(opts = {}) {
       const tasks = await call(PROJECT, '/tasks', { method: 'GET' })
@@ -1034,7 +999,7 @@ function makeLander(inputs) {
       }
       const o = { date: opts.date, time: opts.time }
       validateSchedule(o)
-      o.await = await resolveAwait(opts.await, { self: TASK })
+      o.await = resolveAwait(opts.await, { self: TASK })
       if (o.date == null && o.time == null && o.await == null)
         die('lander.rest: pass date, time, await, or clear')
       await call(PROJECT, `/tasks/${TASK}/rest`, {
@@ -1064,7 +1029,7 @@ function makeLander(inputs) {
       }
       validateSchedule(o)
       validateRepeat(o)
-      o.await = await resolveAwait(opts.await, { self: TASK })
+      o.await = resolveAwait(opts.await, { self: TASK })
       await call(PROJECT, `/tasks/${TASK}/relaunch`, {
         method: 'POST',
         body: JSON.stringify({
