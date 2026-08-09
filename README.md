@@ -48,6 +48,10 @@ Everything else — git, package managers, anything you'd run in a shell — fol
 
 [docs/architecture.md](docs/architecture.md) documents how each provider's flags and profiles produce these boundaries.
 
+### Project instructions (`LANDER.md`)
+
+A project may put a `LANDER.md` at its root for conventions that apply to lander tasks specifically. Lander delivers it to assistants in that project, alongside the repo's `CLAUDE.md`/`AGENTS.md`.
+
 ### Restart & hot reload
 
 Because turns run in the separate host daemon, restarting the API doesn't interrupt in-flight work: the API hot-reloads on server edits, an in-flight turn keeps streaming, and a fresh server reattaches to it without re-running the agent. See [docs/architecture.md](docs/architecture.md) for the graceful-shutdown and reattach mechanics.

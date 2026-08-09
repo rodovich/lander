@@ -16,6 +16,7 @@
 
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
+import { readProjectDoc } from 'lander/flow'
 import type { AgentKind, FlowAnnouncement } from '../../server/protocol'
 import type { AgentAdapter, AgentLaunchDir, AgentLaunchDirInput } from '../agent'
 import { makeFlow as makeClaudeFlow, meta as claudeMeta } from './claude'
@@ -46,12 +47,21 @@ export function buildFlows({
     path.join(root, 'server', 'task-prompt.md'),
     'utf8',
   ).trim()
+  // NOTE: `root` here is lander's own install root — it is where task-prompt.md
+  // and bin/lander live, NOT the project the task runs in. The project doc must
+  // therefore be read per turn from the task's own directory, so what is wired in
+  // is the reader itself, never a path or a resolved doc.
   return {
     claude: makeClaudeFlow({
       landerBin: path.join(root, 'bin', 'lander'),
       taskPromptTemplate,
+      readProjectDoc,
     }),
-    codex: makeCodexFlow({ taskPromptTemplate, ...codexOptionsFromEnv(env) }),
+    codex: makeCodexFlow({
+      taskPromptTemplate,
+      readProjectDoc,
+      ...codexOptionsFromEnv(env),
+    }),
     // The first bundled flow with no compiled adapter — which is what C5's
     // enumeration fix exists to make reachable at all.
     'open-pr': makeOpenPrFlow(),

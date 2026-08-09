@@ -46,6 +46,14 @@ put in front of one Codex turn stays in that turn's message and is replayed on
 every later one, so the flow delivers the template **once per thread** and
 re-delivers it only when the rendered text changes.
 
+The project's optional `LANDER.md` rides the same channel, under its own key
+`flowState.landerDoc`, for the same reason. Claude does not need the record —
+there it is appended to `--append-system-prompt`, which is request-scoped, so one
+copy is present on every request with nothing to track. That asymmetry is
+deliberate: sharing one gate across both providers reinstates a suppression bug,
+because Claude writes its session id before the spawn while Codex learns its
+thread id from the stream.
+
 The record of that delivery is a content digest in `flowState.taskPrompt`, written
 only after a turn produces output — proof the model consumed the turn, and
 therefore that the thread holds it. Two consequences worth knowing: a template

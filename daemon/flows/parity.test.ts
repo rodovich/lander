@@ -31,12 +31,20 @@ function claudeAdapters() {
   }
 }
 
+// No project doc on either side. The compiled adapters have no reader and cannot
+// grow one, so the doc path is deliberately OUTSIDE this oracle's coverage —
+// stated rather than implied, and covered by flow-only tests instead. Passing the
+// stub explicitly (rather than relying on the goldens' fake root not existing on
+// the host) is what makes that a property of the test and not of the machine.
+const NO_PROJECT_DOC = () => undefined
+
 function claudeFlow() {
   return makeClaudeFlow({
     landerBin: LANDER_BIN,
     taskPromptTemplate: TASK_PROMPT,
     gitContext: GIT_STUB,
     mint: () => MINTED,
+    readProjectDoc: NO_PROJECT_DOC,
   })
 }
 
@@ -57,6 +65,7 @@ function codexFlow() {
   return makeCodexFlow({
     taskPromptTemplate: TASK_PROMPT,
     resolveGitCommonDir: GIT_COMMON_STUB,
+    readProjectDoc: NO_PROJECT_DOC,
   })
 }
 

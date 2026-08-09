@@ -23,6 +23,7 @@ import {
   fillTaskPrompt,
   forwardableAccess,
   gitContext as realGitContext,
+  projectDocBlock,
   reduceStreamLine,
   type Usage,
 } from 'lander/flow'
@@ -76,6 +77,11 @@ export type ClaudeFlowDeps = {
   // Injectable so tests are deterministic and touch neither git nor crypto.
   gitContext?: (cwd: string) => string | undefined
   mint?: () => string
+  // The project's optional LANDER.md. REQUIRED, with no default on purpose: a
+  // default would make the parity goldens pass only because their fake root
+  // happens not to exist on the host, which is how an earlier revision of this
+  // was green by luck. Required makes every construction site decide.
+  readProjectDoc: (dir: string) => string | undefined
 }
 
 export type ClaudeFlow = {
@@ -88,6 +94,7 @@ export function makeFlow({
   taskPromptTemplate,
   gitContext = realGitContext,
   mint = randomUUID,
+  readProjectDoc,
 }: ClaudeFlowDeps): ClaudeFlow {
   return {
     meta,
@@ -136,6 +143,15 @@ export function makeFlow({
         ...buildClaudeArgs(ctx, promptParts.join('\n\n'), {
           landerBin,
           taskPromptTemplate,
+          // Read from the tree the shell actually lands in, so a worktree task
+          // gets its own branch's conventions rather than the main checkout's;
+          // falls back to root when there is no worktree or none is present
+          // there. Deliberately NOT stateful: this channel is request-scoped, so
+          // an edit takes effect on the next turn with nothing to remember.
+          projectDoc:
+            (ctx.task.effectiveCwd !== undefined
+              ? readProjectDoc(ctx.task.effectiveCwd)
+              : undefined) ?? readProjectDoc(ctx.task.root),
         }),
       ]
 
@@ -314,7 +330,15 @@ function manualCdHint(root: string, recordedCwd: string, landed: string): string
 function buildClaudeArgs(
   ctx: Ctx,
   prompt: string,
-  { landerBin, taskPromptTemplate }: { landerBin: string; taskPromptTemplate: string },
+  {
+    landerBin,
+    taskPromptTemplate,
+    projectDoc,
+  }: {
+    landerBin: string
+    taskPromptTemplate: string
+    projectDoc?: string | undefined
+  },
 ): string[] {
   // Extra workspace root for the materialized attachment store, so Read can open
   // an attached image sitting outside the task's cwd. Gated on the dir existing
@@ -380,7 +404,18 @@ function buildClaudeArgs(
     '--settings',
     hookSettings,
     '--append-system-prompt',
-    `${fillTaskPrompt(taskPromptTemplate, FORWARDABLE_POINTER, ctx.task.taskId)}\n\n${GIT_TIPS}`,
+    // The project doc rides here rather than in the prompt because this string
+    // is request-scoped: rebuilt every invocation, so one copy is present on
+    // every turn, it tracks edits with no delivery record to keep, and it
+    // survives compaction. It trails GIT_TIPS so lander's own instructions
+    // precede the repo's. The cost is that a LANDER.md edit — or a branch switch
+    // that changes it — busts this conversation's prompt cache, which is why
+    // nothing else in this string is allowed to vary per turn.
+    [
+      fillTaskPrompt(taskPromptTemplate, FORWARDABLE_POINTER, ctx.task.taskId),
+      GIT_TIPS,
+      ...(projectDoc ? [projectDocBlock(projectDoc)] : []),
+    ].join('\n\n'),
     '--output-format',
     'stream-json',
     '--verbose',

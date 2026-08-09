@@ -20,6 +20,13 @@
 // ── The neutral git snapshot (physically homed here) ────────────────────────
 export { gitContext } from './git'
 
+// ── The optional repo-level LANDER.md ───────────────────────────────────────
+export {
+  readProjectDoc,
+  projectDocBlock,
+  PROJECT_DOC_FILENAME,
+} from './project-doc'
+
 // ── Stream reduction and the item/step vocabulary ───────────────────────────
 export {
   reduceStreamLine,

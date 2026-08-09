@@ -23,6 +23,7 @@ import {
   addUsage,
   deliveryDigest,
   extractCodexSession,
+  projectDocBlock,
   reduceCodexStreamLine,
   shouldDeliver,
   taskManagementPrompt,
@@ -59,6 +60,9 @@ export type CodexFlowDeps = {
   profile?: string
   configOverrides?: string[]
   resolveGitCommonDir?: (cwd: string) => string | undefined
+  // The project's optional LANDER.md. REQUIRED, with no default — see the note
+  // on ClaudeFlowDeps: a default makes the goldens green by accident.
+  readProjectDoc: (dir: string) => string | undefined
 }
 
 export type CodexFlow = {
@@ -71,6 +75,7 @@ export function makeFlow({
   profile,
   configOverrides = [],
   resolveGitCommonDir = resolveGitCommonDirWithGit,
+  readProjectDoc,
 }: CodexFlowDeps): CodexFlow {
   return {
     meta,
@@ -120,6 +125,27 @@ export function makeFlow({
       // Codex has no turn-context block to hide this in, which is half of why the
       // revival notice is a prompt part rather than an adapter concern.
       if (ctx.turn.revivedBlock) promptParts.push(ctx.turn.revivedBlock)
+      // ── Project doc ──────────────────────────────────────────────────────
+      // The project's optional LANDER.md, delivered through the same
+      // deliver-once record as the task prompt but under its own key, because
+      // the two change independently. Codex has no request-scoped channel, so
+      // unlike claude — where this rides --append-system-prompt with no record
+      // at all — it has to be tracked. Read from the tree the shell lands in,
+      // falling back to root.
+      const doc =
+        (ctx.task.effectiveCwd !== undefined
+          ? readProjectDoc(ctx.task.effectiveCwd)
+          : undefined) ?? readProjectDoc(ctx.task.root)
+      const docDigest = doc === undefined ? undefined : deliveryDigest(doc)
+      const sendDoc =
+        docDigest !== undefined &&
+        shouldDeliver(sessionId, ctx.state.get(['landerDoc']), docDigest)
+
+      // Both unshift, so the final order is: task prompt, project doc, user
+      // text. Lander's own instructions precede the repo's, and the repo's
+      // precede the user's — each layer able to be read in light of the one
+      // before it.
+      if (sendDoc && doc !== undefined) promptParts.unshift(projectDocBlock(doc))
       // Leads the prompt, matching what promptWithTaskManagement used to build,
       // so a delivering turn's argv is byte-identical to the pre-change one.
       if (sendTaskPrompt) promptParts.unshift(rendered)
@@ -246,9 +272,12 @@ export function makeFlow({
       // this still reaches the server. Non-throwing on purpose: a rejected state
       // write (oversize blob) must degrade to a duplicate next turn, never to a
       // failed turn.
-      if (sendTaskPrompt && producedOutput) {
+      if (producedOutput) {
         try {
-          ctx.state.set(['taskPrompt'], digest)
+          if (sendTaskPrompt) ctx.state.set(['taskPrompt'], digest)
+          // Separate key: an edit to one must not suppress the other.
+          if (sendDoc && docDigest !== undefined)
+            ctx.state.set(['landerDoc'], docDigest)
         } catch {
           // Deliberate: re-delivering is the benign direction.
         }
