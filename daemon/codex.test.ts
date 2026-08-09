@@ -154,6 +154,7 @@ describe('Codex adapter reducer', () => {
       'shell_environment_policy.include_only=["PATH","LANDER_*"]',
       '--cd',
       '/repo/subdir',
+      '--',
       managedPrompt(
         'hello codex',
         'This Codex turn runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
@@ -189,6 +190,7 @@ describe('Codex adapter reducer', () => {
       'shell_environment_policy.include_only=["PATH","LANDER_*"]',
       '--cd',
       '/repo',
+      '--',
       managedPrompt(
         'edit files',
         'This Codex turn runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
@@ -227,6 +229,7 @@ describe('Codex adapter reducer', () => {
       'shell_environment_policy.include_only=["PATH","LANDER_*"]',
       '--cd',
       '/worktrees/feature',
+      '--',
       managedPrompt(
         'edit worktree',
         'This Codex turn runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
@@ -260,6 +263,7 @@ describe('Codex adapter reducer', () => {
       '/repo/subdir',
       'resume',
       '019f0000-0000-7000-8000-000000000001',
+      '--',
       managedPrompt(
         'follow up',
         'This Codex turn runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
@@ -293,6 +297,7 @@ describe('Codex adapter reducer', () => {
       '/repo',
       'resume',
       '019f0000-0000-7000-8000-000000000001',
+      '--',
       managedPrompt(
         'follow up with edits',
         'This Codex turn runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
@@ -337,6 +342,7 @@ describe('Codex adapter reducer', () => {
       '/repo/subdir',
       'resume',
       '019f0000-0000-7000-8000-000000000001',
+      '--',
       managedPrompt(
         'configured follow up',
         'This Codex turn runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
@@ -378,10 +384,70 @@ describe('Codex adapter reducer', () => {
       'shell_environment_policy.include_only=["PATH","LANDER_*"]',
       '--cd',
       '/repo',
+      '--',
       managedPrompt(
         'use configured codex',
         'This Codex turn runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
       ),
+    ])
+  })
+
+  // Codex parses the prompt as a positional, so a prompt whose first character
+  // is `-` is read as a flag: `codex exec "- bullet"` errors with "unexpected
+  // argument" (v0.144.5), and codex's own tip is to pass it after `--`. The
+  // task-management template currently leads every prompt, so no user text can
+  // reach argv position 1 — these assertions keep that a property of the argv
+  // rather than an accident of what the template happens to start with.
+  it('terminates flag parsing before the prompt on a fresh exec', () => {
+    const launch = adapter.buildLaunch({
+      task: { allowEdits: false },
+      prompt: '- bullet one\n- bullet two',
+      root: '/repo',
+      cwd: '/repo',
+      landerEnv: {},
+    })
+
+    expect(launch.args.at(-2)).toBe('--')
+    expect(launch.args.at(-1)).toContain('- bullet one')
+  })
+
+  it('terminates flag parsing before the prompt on resume', () => {
+    const launch = adapter.buildLaunch({
+      task: {
+        sessionId: '019f0000-0000-7000-8000-000000000001',
+        allowEdits: false,
+      },
+      prompt: '--help me',
+      root: '/repo',
+      cwd: '/repo',
+      landerEnv: {},
+    })
+
+    expect(launch.args.at(-2)).toBe('--')
+    expect(launch.args.at(-1)).toContain('--help me')
+  })
+
+  // The terminator is what makes image placement uniform: everything past `--`
+  // is positional, so the repeatable `-i` flags must precede it. Before the
+  // terminator they had to trail the prompt on a fresh exec, because the
+  // variadic form would otherwise swallow it.
+  it('places image flags before the terminator on a fresh exec', () => {
+    const launch = adapter.buildLaunch({
+      task: { allowEdits: false },
+      prompt: 'look at this',
+      root: '/repo',
+      cwd: '/repo',
+      landerEnv: {},
+      images: ['/files/img1', '/files/img2'],
+    })
+
+    expect(launch.args.slice(-6)).toEqual([
+      '-i',
+      '/files/img1',
+      '-i',
+      '/files/img2',
+      '--',
+      launch.args.at(-1),
     ])
   })
 

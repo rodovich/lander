@@ -210,6 +210,7 @@ describe('flow host', () => {
         'shell_environment_policy.include_only=["PATH","LANDER_*"]',
         '--cd',
         '/repo',
+        '--',
         'Prompt: This Codex turn runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.\n\ncodex prompt',
       ],
       options: { cwd: '/repo' },
@@ -464,11 +465,15 @@ describe('flow host', () => {
     )
 
     const [call] = h.spawns
-    // Fresh exec places `-i <path>` after the positional prompt.
-    const prompt = call.args[call.args.indexOf('-i') - 1]
+    // Image flags precede the `--` terminator; the prompt is the final arg.
+    const prompt = call.args.at(-1)
     expect(prompt).toContain('look')
     expect(prompt).toContain('<task-attachments>')
-    expect(call.args.slice(-2)).toEqual(['-i', '/files/proj/task-1/img1'])
+    expect(call.args.slice(-4, -1)).toEqual([
+      '-i',
+      '/files/proj/task-1/img1',
+      '--',
+    ])
     expect((call.options.env as Record<string, string>).LANDER_FILES_DIR).toBe(
       '/files/proj/task-1',
     )

@@ -102,10 +102,10 @@ function buildCodexArgs(
     taskPromptTemplate,
     id,
   )
-  // One `-i <path>` per image (the repeatable short form). Placement differs by
-  // path: `resume` parses a trailing prompt fine, so the flags go before it; a
-  // fresh `exec`'s variadic `--image` would swallow the positional prompt, so
-  // the flags go AFTER the prompt there (confirmed Codex v0.143.0).
+  // One `-i <path>` per image (the repeatable short form), then `--`, then the
+  // prompt — mirroring daemon/flows/codex.ts, which carries the full rationale.
+  // The terminator makes the placement uniform across both paths and keeps a
+  // prompt that begins with `-` out of argv parsing.
   const imageArgs = images.flatMap((p) => ['-i', p])
   if (task.sessionId)
     return [
@@ -117,6 +117,7 @@ function buildCodexArgs(
       'resume',
       task.sessionId,
       ...imageArgs,
+      '--',
       managedPrompt,
     ]
   const configArgs = codexConfigArgs(profile, configOverridesWithLanderDefaults)
@@ -126,8 +127,9 @@ function buildCodexArgs(
     ...configArgs,
     '--cd',
     cwd,
-    managedPrompt,
     ...imageArgs,
+    '--',
+    managedPrompt,
   ]
 }
 

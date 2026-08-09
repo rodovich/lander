@@ -241,10 +241,17 @@ function buildCodexArgs(
     taskPromptTemplate,
     ctx.task.taskId,
   )
-  // One `-i <path>` per image (the repeatable short form). Placement differs by
-  // path: `resume` parses a trailing prompt fine, so the flags go before it; a
-  // fresh `exec`'s variadic --image would swallow the positional prompt, so the
-  // flags go AFTER the prompt there (confirmed Codex v0.143.0).
+  // One `-i <path>` per image (the repeatable short form), then `--`, then the
+  // prompt. The terminator is what makes the placement uniform across both
+  // paths: without it a fresh `exec`'s variadic --image swallows a trailing
+  // positional, which is why the flags used to sit AFTER the prompt there.
+  // Everything past `--` is positional, so the flags must precede it — and a
+  // prompt that begins with `-` stops being parsed as argv. Today the prompt
+  // always leads with the task-management template, so no user text can reach
+  // argv position 1; the terminator is what keeps that a property of the argv
+  // rather than of the prompt's contents (confirmed Codex v0.144.5: a bare
+  // `- bullet…` prompt errors with "unexpected argument", and codex's own tip
+  // is to pass it after `--`).
   const imageArgs = ctx.turn.images.flatMap((p) => ['-i', p])
   if (sessionId)
     return [
@@ -256,6 +263,7 @@ function buildCodexArgs(
       'resume',
       sessionId,
       ...imageArgs,
+      '--',
       managedPrompt,
     ]
   return [
@@ -264,8 +272,9 @@ function buildCodexArgs(
     ...codexConfigArgs(profile, configOverridesWithLanderDefaults),
     '--cd',
     ctx.task.cwd,
-    managedPrompt,
     ...imageArgs,
+    '--',
+    managedPrompt,
   ]
 }
 
