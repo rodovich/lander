@@ -290,6 +290,47 @@ const flowAnn = (name: string): FlowAnnouncement => ({
   },
 })
 
+// A server configured with no daemon token must turn every upgrade away. Before
+// the explicit guard, the bare `!==` made this backwards: `?token=` (empty value)
+// compared equal to '' and attached, while the honest daemon — which omits the
+// param when its own token is empty — sent null and was rejected. An attached
+// daemon receives start-run messages carrying tasks' LANDER_TOKEN.
+describe('daemon link with no token configured', () => {
+  let http3: Server
+  let port3: number
+
+  beforeAll(async () => {
+    http3 = createServer()
+    attachDaemonServer(http3, { token: '' })
+    await new Promise<void>((r) => http3.listen(0, r))
+    port3 = (http3.address() as AddressInfo).port
+  })
+
+  afterAll(async () => {
+    await new Promise<void>((r) => http3.close(() => r()))
+  })
+
+  const upgrade = (query: string) =>
+    new Promise<void>((resolve, reject) => {
+      const ws = new WebSocket(`ws://localhost:${port3}/daemon${query}`)
+      ws.on('error', reject)
+      ws.on('open', () => {
+        ws.close()
+        resolve()
+      })
+    })
+
+  it('rejects an empty token that would otherwise compare equal', async () => {
+    await expect(upgrade('?token=')).rejects.toThrow(/401/)
+  })
+
+  it('rejects the honest daemon shape too — no token param at all', async () => {
+    // The negative control for the fix: whoever later "simplifies" the guard by
+    // normalizing null to '' reintroduces the bypass and this catches it.
+    await expect(upgrade('')).rejects.toThrow(/401/)
+  })
+})
+
 describe('flow announcement over the daemon link', () => {
   let http2: Server
   let port2: number

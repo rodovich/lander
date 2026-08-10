@@ -265,6 +265,25 @@ export function attachDaemonServer(
   server.on('upgrade', (req: IncomingMessage, socket, head) => {
     const url = new URL(req.url ?? '', 'http://localhost')
     if (url.pathname !== '/daemon') return // not ours — leave it for others
+    // An empty configured token must reject everything, not authenticate anyone.
+    // The comparison below is a bare `!==`, so with opts.token === '' a caller
+    // that sends `?token=` (empty value) MATCHES and attaches, while the honest
+    // daemon — which omits the param entirely when its own token is empty
+    // (daemon/index.ts) — sends null and is turned away. That inverts the check:
+    // it locks out the real daemon and lets an unconfigured one in, and an
+    // attached daemon receives start-run messages carrying tasks' LANDER_TOKEN.
+    // The server reaches this state whenever it starts with neither
+    // LANDER_DAEMON_TOKEN nor LANDER_UI_TOKEN in its env.
+    if (!opts.token) {
+      console.warn(
+        'daemon upgrade rejected (401): this server has no daemon token ' +
+          'configured (neither LANDER_DAEMON_TOKEN nor LANDER_UI_TOKEN was set ' +
+          'in its environment), so no daemon can attach. Restart it with one set.',
+      )
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
+      socket.destroy()
+      return
+    }
     if (url.searchParams.get('token') !== opts.token) {
       // A token mismatch otherwise fails silently — the daemon just retries the
       // upgrade every second forever and no task can start. Log it so a desynced
