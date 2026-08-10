@@ -20,6 +20,7 @@ import {
   providerCaps,
   type ProviderCaps,
 } from './flows/index'
+import { scrubProcessEnv } from '../server/secrets'
 import type { AgentKind, TelemetryItem } from '../server/protocol'
 import type {
   ServerToDaemon,
@@ -63,6 +64,18 @@ for (const p of projectDirs) pathBySlug.set(projectSlug(p), p)
 
 const WS_URL = process.env.LANDER_WS?.trim() || 'ws://localhost:6181/daemon'
 const TOKEN = process.env.LANDER_DAEMON_TOKEN?.trim() || ''
+// Drop lander's own credentials from the environment now that TOKEN holds the
+// one this process needs — it is a module const, reused by every reconnect, so
+// nothing reads the variable again. Everything the daemon spawns inherits
+// `{ ...process.env }` (the flow host, and through it the agent child), so
+// without this the UI token reached every task's shell, where presenting it as
+// `x-lander-ui-token` resolves as the trusted human on every route.
+//
+// Here rather than in daemon-watch.mjs: the watcher spawns each daemon with its
+// own env and must keep the value to hand to the successor across a drain
+// handoff. Here rather than at the spawn sites: a new spawn site can forget a
+// filter, but it cannot un-inherit what is no longer in the environment.
+scrubProcessEnv()
 const DEFAULT_IDLE_MS = Number(process.env.LANDER_IDLE_TIMEOUT_MS ?? 10 * 60_000)
 const ADAPTERS = buildAdapters({ root: ROOT, env: process.env })
 // What the daemon needs to know about each provider before a host exists —

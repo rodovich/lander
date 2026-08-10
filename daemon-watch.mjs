@@ -40,6 +40,10 @@ const WATCHED_SERVER_FILES = [
   'server/projects.ts',
   'server/usage.ts',
   'server/protocol.ts',
+  // The env-scrub denylist. Watched for the reason above: unwatched, an edit to
+  // it would reload the api while the daemon kept spawning children from a stale
+  // list, silently.
+  'server/secrets.ts',
 ]
 
 // A daemon-source change is any non-test .ts file under daemon/.
