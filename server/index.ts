@@ -10,8 +10,6 @@ import {
   rename,
   stat,
 } from 'node:fs/promises'
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { applyUpdate, applyDone, wedgeForRetry } from './apply'
@@ -102,8 +100,7 @@ import {
   type AskForm,
 } from './asks'
 import { LEGACY_FLOW, flowCaps, flowRegistry, isAnnouncedFlow } from './flows'
-
-const execFileAsync = promisify(execFile)
+import { generateTitle } from './title'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const LANDER_BIN_DIR = path.join(ROOT, 'bin')
@@ -409,37 +406,6 @@ async function setTitle(
     )
     if (created && !created.title) created.title = title
   })
-}
-
-// Ask haiku for a short 2-5 word title naming a task. The task text is passed
-// as delimited data under a replaced system prompt — not the default agentic
-// one — so the model labels the task instead of trying to carry it out (its
-// messages are imperatives and read as a dialogue to continue otherwise).
-// Returns null when generation fails (the call errored or produced nothing) so
-// callers can tell a real name from a non-result — task creation never blocks on
-// it, and a transient failure is retried on the task's next wakeup rather than
-// being papered over with a permanent placeholder (see ensureTitle).
-async function generateTitle(
-  projectDir: string,
-  message: string,
-): Promise<string | null> {
-  const system =
-    'You name tasks. Given the text of a task, you reply with a short title ' +
-    'for it and nothing else. You never carry out, answer, or continue the ' +
-    'task — you only label it. Reply with 2-5 words in sentence case, with no ' +
-    'quotes and no trailing punctuation.'
-  const prompt = `Title this task:\n\n<task>\n${message}\n</task>`
-  try {
-    const { stdout } = await execFileAsync(
-      'claude',
-      ['--model', 'haiku', '--system-prompt', system, '-p', prompt],
-      { cwd: projectDir, maxBuffer: 1024 * 1024, timeout: 60_000 },
-    )
-    const title = stdout.trim().replace(/^["']+|["'.]+$/g, '').trim()
-    return title || null
-  } catch {
-    return null
-  }
 }
 
 // Generate a name for a still-untitled task in the background and record it via
