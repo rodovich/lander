@@ -7,7 +7,9 @@
 //
 // Usage: node daemon/index.ts /path/to/project [/path/to/another ...]
 //   env: LANDER_WS (server ws url, default ws://localhost:6181/daemon)
-//        LANDER_DAEMON_TOKEN (must match the server's)
+//        LANDER_DAEMON_TOKEN (must match the server's; read once at startup and
+//          then deleted from the environment, so it is not inherited by the flow
+//          hosts and agent children this process spawns — see server/secrets.ts)
 //        LANDER_IDLE_TIMEOUT_MS (per-run idle kill, default 10m — start-run wins)
 
 import path from 'node:path'

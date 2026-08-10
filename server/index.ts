@@ -1064,9 +1064,19 @@ const telemetryCache = new Map<string, TelemetryItem[]>()
 // (vs. a task's `lander` CLI). Prefer the env var dev.mjs sets — it hands the
 // same value to Vite so the client can send it — and fall back to a persisted
 // file so a manual API restart keeps the value the running browser already
-// holds. Generated on first use. Tasks don't get this in their env; a fully
-// adversarial task on the same machine could still read the file, which is
-// inherent to running untrusted agents as the same user.
+// holds. Generated on first use.
+//
+// Tasks don't get this in their env — but only because two things keep it out:
+// dev.mjs hands it to this process alone rather than to the environment all
+// three processes inherit, and the daemon deletes its own copy once it has read
+// it (server/secrets.ts). Both were absent until recently, and the value did
+// reach every task's shell, where presenting it here resolves as `ui`.
+//
+// It is not out of a task's reach, and nothing here can put it there: a fully
+// adversarial task on the same machine can read the file, fetch it from the Vite
+// dev server, or read another process's exec-time environment. That is inherent
+// to running untrusted agents as the same user. What the two measures above buy
+// is that it no longer arrives by default, in every shell, for free.
 async function loadUiToken(): Promise<string> {
   const fromEnv = process.env.LANDER_UI_TOKEN?.trim()
   if (fromEnv) return fromEnv
