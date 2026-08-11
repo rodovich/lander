@@ -1,7 +1,7 @@
 // Project-path helpers: turn each configured project directory into the two
 // identifiers the rest of the server keys off — a case-preserving on-disk dir
 // name and a lowercased URL slug — and assemble the per-project data dirs.
-// Pure given (root, env, cwd), so it can be unit-tested without the server.
+// Pure given (dataRoot, env, cwd), so it can be unit-tested without the server.
 
 import path from 'node:path'
 
@@ -51,9 +51,10 @@ export function projectSlug(p: string): string {
 // Projects come in newline-separated via PROJECT_DIRS (set by dev.mjs from the
 // command-line args), falling back to the legacy single PROJECT_DIR, then cwd.
 // Duplicate paths are dropped (keyed on slug); the first survivor is the default.
-// `root` is the lander repo root under which the data dirs live.
+// `dataRoot` is the directory the per-project data dirs live under — ./data in
+// the repo normally, a temp dir under test (see DATA_ROOT in index.ts).
 export function parseProjects(
-  root: string,
+  dataRoot: string,
   env: Record<string, string | undefined>,
   cwd: string,
 ): Project[] {
@@ -73,11 +74,11 @@ export function parseProjects(
     projects.push({
       path: resolved,
       slug,
-      dataDir: path.join(root, 'data', norm, 'tasks'),
-      runsDir: path.join(root, 'data', norm, 'runs'),
-      archiveDir: path.join(root, 'data', norm, 'archived'),
-      flowsDir: path.join(root, 'data', norm, 'flows'),
-      attachmentsDir: path.join(root, 'data', norm, 'attachments'),
+      dataDir: path.join(dataRoot, norm, 'tasks'),
+      runsDir: path.join(dataRoot, norm, 'runs'),
+      archiveDir: path.join(dataRoot, norm, 'archived'),
+      flowsDir: path.join(dataRoot, norm, 'flows'),
+      attachmentsDir: path.join(dataRoot, norm, 'attachments'),
     })
   }
   return projects

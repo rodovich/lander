@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { WebSocket } from 'ws'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
@@ -15,12 +14,12 @@ import {
 import { normalizeProjectPath, projectSlug } from './projects'
 import type { RevivedMarker } from './protocol'
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const UI_TOKEN = 'test-ui-token'
 const AT = '2026-01-01T00:00:00.000Z'
 
 let app: (typeof import('./index'))['app']
 let projectDir: string
+let dataDirRoot: string
 let dataRoot: string
 let tasksDir: string
 let slug: string
@@ -54,11 +53,16 @@ beforeAll(async () => {
   originalEnv = { ...process.env }
   projectDir = await mkdtemp(path.join(tmpdir(), 'lander-server-project-'))
   slug = projectSlug(projectDir)
-  dataRoot = path.join(ROOT, 'data', normalizeProjectPath(projectDir))
+  // Point the server's data root at a temp dir rather than letting it default
+  // to ./data in the checkout: the suite creates, lands and deletes tasks, and
+  // a run that dies before afterAll would otherwise strand a project dir inside
+  // the developer's live data — as one interrupted run in fact did.
+  dataDirRoot = await mkdtemp(path.join(tmpdir(), 'lander-server-data-'))
+  dataRoot = path.join(dataDirRoot, normalizeProjectPath(projectDir))
   tasksDir = path.join(dataRoot, 'tasks')
-  await rm(dataRoot, { recursive: true, force: true })
 
   process.env.NODE_ENV = 'test'
+  process.env.LANDER_DATA_ROOT = dataDirRoot
   process.env.PROJECT_DIRS = projectDir
   process.env.LANDER_UI_TOKEN = UI_TOKEN
   process.env.LANDER_AGENT = 'codex'
@@ -68,7 +72,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await rm(projectDir, { recursive: true, force: true })
-  await rm(dataRoot, { recursive: true, force: true })
+  await rm(dataDirRoot, { recursive: true, force: true })
   process.env = originalEnv
 })
 

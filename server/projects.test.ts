@@ -45,13 +45,13 @@ describe('projectSlug', () => {
 })
 
 describe('parseProjects', () => {
-  const root = '/root'
+  const root = '/root/data'
   const dirs = (norm: string) => ({
-    dataDir: path.join(root, 'data', norm, 'tasks'),
-    runsDir: path.join(root, 'data', norm, 'runs'),
-    archiveDir: path.join(root, 'data', norm, 'archived'),
-    flowsDir: path.join(root, 'data', norm, 'flows'),
-    attachmentsDir: path.join(root, 'data', norm, 'attachments'),
+    dataDir: path.join(root, norm, 'tasks'),
+    runsDir: path.join(root, norm, 'runs'),
+    archiveDir: path.join(root, norm, 'archived'),
+    flowsDir: path.join(root, norm, 'flows'),
+    attachmentsDir: path.join(root, norm, 'attachments'),
   })
 
   it('splits PROJECT_DIRS on newlines, trims, and drops empty lines', () => {
@@ -71,7 +71,7 @@ describe('parseProjects', () => {
     expect(parseProjects(root, {}, '/cwd').map((p) => p.path)).toEqual(['/cwd'])
   })
 
-  it('builds the sibling dirs under data/<normalized>/', () => {
+  it('builds the sibling dirs under <dataRoot>/<normalized>/', () => {
     const [p] = parseProjects(root, { PROJECT_DIRS: '/a' }, '/cwd')
     expect(p).toMatchObject({ path: '/a', slug: 'a', ...dirs('a') })
   })

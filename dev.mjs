@@ -22,8 +22,10 @@ process.env.PROJECT_DIRS = projects.join('\n')
 // permission than it has. The same value goes to Vite — which inlines it into
 // the client as VITE_LANDER_UI_TOKEN — and to the API server as
 // LANDER_UI_TOKEN. Persisted under data/ (gitignored) so a manual API restart
-// keeps the value the running browser already holds; mode 0600.
-const tokenFile = path.resolve('data', '.ui-token')
+// keeps the value the running browser already holds; mode 0600. Resolved the
+// same way as DATA_ROOT in server/index.ts, so an overridden data root doesn't
+// leave the two disagreeing about where the token is.
+const tokenFile = path.resolve(process.env.LANDER_DATA_ROOT ?? 'data', '.ui-token')
 let uiToken
 try {
   uiToken = readFileSync(tokenFile, 'utf8').trim()

@@ -105,7 +105,16 @@ import { generateTitle } from './title'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const LANDER_BIN_DIR = path.join(ROOT, 'bin')
 
-const PROJECTS = parseProjects(ROOT, process.env, process.cwd())
+// Everything this installation persists — per-project task dirs, the UI token —
+// lives under here. ./data in the checkout normally; LANDER_DATA_ROOT moves it,
+// which is how the test suite keeps its scratch project out of the developer's
+// live data dir (the suite recursively deletes its own root at teardown, and an
+// interrupted run would otherwise strand a task dir inside the repo).
+const DATA_ROOT = process.env.LANDER_DATA_ROOT
+  ? path.resolve(process.env.LANDER_DATA_ROOT)
+  : path.join(ROOT, 'data')
+
+const PROJECTS = parseProjects(DATA_ROOT, process.env, process.cwd())
 const PROJECT_BY_SLUG = new Map<string, Project>(
   PROJECTS.map((p) => [p.slug, p]),
 )
@@ -1080,7 +1089,7 @@ const telemetryCache = new Map<string, TelemetryItem[]>()
 async function loadUiToken(): Promise<string> {
   const fromEnv = process.env.LANDER_UI_TOKEN?.trim()
   if (fromEnv) return fromEnv
-  const file = path.join(ROOT, 'data', '.ui-token')
+  const file = path.join(DATA_ROOT, '.ui-token')
   try {
     const existing = (await readFile(file, 'utf8')).trim()
     if (existing) return existing
