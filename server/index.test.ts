@@ -236,6 +236,102 @@ describe('server task provider behavior', () => {
     expect(body.items?.some((i) => i.kind === 'message')).toBe(true)
   })
 
+  it('serves the task list with its conversation when no view is asked for', async () => {
+    // The opt-in half of `?view=summary`: an unparameterized list request is
+    // byte-for-byte what it always was, so the running client and any
+    // third-party caller of `lander.list()` see no change.
+    const task = await createTask('Full list row')
+    await post(`/api/${slug}/tasks/${task.id}/messages`, { message: 'hello full' })
+    // Populate the two arrays the summary projection drops, so they fall inside
+    // the frozen set below rather than being absent from it — a row that never
+    // rode would pin `items` alone and let `rides` vanish unnoticed. The ride is
+    // closed and the deferred message is dated past any horizon, so neither
+    // makes this task look live to anything else in the suite.
+    const file = path.join(tasksDir, `${task.id}.json`)
+    const stored = JSON.parse(await readFile(file, 'utf8'))
+    await writeFile(
+      file,
+      JSON.stringify({
+        ...stored,
+        rides: [{ id: 'r1', startedAt: AT, endedAt: AT, outcome: 'done' }],
+        scheduledMessages: [{ text: 'later', deliverAt: '2099-01-01T00:00:00.000Z' }],
+      }),
+    )
+
+    const body = (await (await app.request(`/api/${slug}/tasks`)).json()) as {
+      tasks: {
+        id: string
+        items?: { kind: string }[]
+        scheduledMessages?: { text?: string }[]
+      }[]
+      telemetry?: unknown
+    }
+    const row = body.tasks.find((t) => t.id === task.id)!
+    // The field set is frozen as a literal rather than asserted against
+    // `publicTask`'s own output. The promise is made to callers who never run
+    // this code, so a test that recomputed the projection would follow it
+    // wherever it went — dropping `rides` from `publicTask` would leave this
+    // green while the wire changed under `lander.list()` and the old client.
+    // Adding or removing a field here IS the breaking change; editing the
+    // literal is how you say you meant to make it.
+    expect(Object.keys(row).sort()).toEqual([
+      'agent',
+      'allowEdits',
+      'createdAt',
+      'flow',
+      'grants',
+      'id',
+      'items',
+      'reportsCost',
+      'revived',
+      'rides',
+      'scheduledMessages',
+      'seenAt',
+      'shape',
+      'status',
+      'title',
+      'updatedAt',
+    ])
+    expect(row.items?.some((i) => i.kind === 'message')).toBe(true)
+    // Present *and* unprojected: the summary's `scheduledMessages` map keeps the
+    // key while dropping the text, so the key set alone can't tell the two paths
+    // apart.
+    expect(row.scheduledMessages?.[0].text).toBe('later')
+    expect(body).toHaveProperty('telemetry')
+  })
+
+  it('drops the conversation under ?view=summary, in both list branches', async () => {
+    const active = await createTask('Summary of an active task')
+    await post(`/api/${slug}/tasks/${active.id}/messages`, { message: 'hello summary' })
+    const gone = await createTask('Summary of an archived task')
+    await post(`/api/${slug}/tasks/${gone.id}/messages`, { message: 'archived prose' })
+    expect((await post(`/api/${slug}/tasks/${gone.id}/archive`, {})).status).toBe(200)
+
+    for (const [query, id] of [
+      ['?view=summary', active.id],
+      ['?archived=1&view=summary', gone.id],
+    ]) {
+      const res = await app.request(`/api/${slug}/tasks${query}`)
+      const raw = await res.text()
+      const body = JSON.parse(raw) as {
+        tasks: Record<string, unknown>[]
+        telemetry?: unknown
+      }
+      const row = body.tasks.find((t) => t.id === id)!
+      expect(row, query).toBeTruthy()
+      expect('items' in row, query).toBe(false)
+      expect('rides' in row, query).toBe(false)
+      expect(row.title, query).toBe(
+        id === active.id ? 'Summary of an active task' : 'Summary of an archived task',
+      )
+      // The telemetry envelope is what makes this a projection inside each
+      // branch rather than a third branch beside them.
+      expect(body, query).toHaveProperty('telemetry')
+      expect(raw, query).not.toContain('hello summary')
+      expect(raw, query).not.toContain('archived prose')
+    }
+  })
+
   it('reads an archived task on GET /tasks/:id, tagged archived', async () => {
     // `lander view` resolves an id across both pools, so the single-task endpoint
     // must fall back to the archive — otherwise a viewable id would 404.

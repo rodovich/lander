@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   publicTask,
+  taskSummary,
   taskFlow,
   latestUpdateAt,
   recordStatusTransition,
@@ -228,6 +229,83 @@ describe('publicTask', () => {
     )
     expect(out.grants).toEqual({ task: false, project: true })
     expect(out.reportsCost).toBe(false)
+  })
+})
+
+describe('taskSummary', () => {
+  const openR2: Ride = { id: 'r1', startedAt: AT }
+  const closedR2: Ride = { id: 'r0', startedAt: AT, endedAt: later(1), outcome: 'done' }
+
+  it('serves the status publicTask derives from the rides it then drops', () => {
+    // The whole reason the projection runs full-then-drop: a stored `riding`
+    // task is served `riding` only while a ride is open, and the summary has no
+    // rides left to derive that from.
+    const riding = taskSummary({ id: 's', status: 'riding', items: [], rides: [openR2] })
+    expect((riding as { status?: string }).status).toBe('riding')
+    const idle = taskSummary({ id: 's', status: 'riding', items: [], rides: [closedR2] })
+    expect((idle as { status?: string }).status).toBe('resting')
+  })
+
+  it('omits items and rides, and strips everything publicTask strips', () => {
+    const out = taskSummary({
+      id: 's',
+      title: 't',
+      status: 'riding',
+      items: [userItem('hi')],
+      rides: [openR2],
+      token: 'secret',
+      runId: 'r1',
+      runCursor: 42,
+      retry: { committed: true, prompts: ['x'] },
+      flowState: { k: 1 },
+      flowStateRev: 3,
+      allowEdits: true,
+    })
+    expect('items' in out).toBe(false)
+    expect('rides' in out).toBe(false)
+    expect('token' in out).toBe(false)
+    expect('runId' in out).toBe(false)
+    expect('runCursor' in out).toBe(false)
+    expect('retry' in out).toBe(false)
+    expect('flowState' in out).toBe(false)
+    expect('flowStateRev' in out).toBe(false)
+    // Everything else the list reads survives, capability flags included.
+    expect(out).toMatchObject({ id: 's', title: 't', allowEdits: true, flow: 'claude' })
+  })
+
+  it('projects scheduledMessages to the schedule, keeping the index and dropping the text', () => {
+    const scheduled: ScheduledMessage[] = [
+      { text: 'plain deferred send', deliverAt: later(1) },
+      { text: 'waiting on siblings', waitFor: ['a', 'b'] },
+      {
+        text: 'repeating relaunch',
+        deliverAt: later(2),
+        relaunch: true,
+        repeat: { interval: 60, remaining: 2 },
+      },
+    ]
+    const out = taskSummary({
+      id: 's',
+      status: 'riding',
+      items: [],
+      scheduledMessages: scheduled,
+    }) as { scheduledMessages?: ScheduledMessage[] }
+    // Index-preserving: the row and bin/task-metadata.js read entries
+    // positionally, so the middle entry keeps its slot even with nothing left
+    // in it.
+    expect(out.scheduledMessages).toEqual([
+      { deliverAt: later(1) },
+      {},
+      { deliverAt: later(2), relaunch: true, repeat: { interval: 60, remaining: 2 } },
+    ])
+    expect(out.scheduledMessages!.some((m) => 'text' in m)).toBe(false)
+    expect(JSON.stringify(out)).not.toContain('deferred send')
+  })
+
+  it('leaves scheduledMessages absent when the task has none', () => {
+    expect('scheduledMessages' in taskSummary({ id: 's', status: 'riding', items: [] })).toBe(
+      false,
+    )
   })
 })
 

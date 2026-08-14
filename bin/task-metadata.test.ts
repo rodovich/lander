@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { inDateRange, matchesText, taskMetadata } from './task-metadata.js'
+import { publicTask, taskSummary } from '../server/tasks'
 
 describe('taskMetadata', () => {
   it('keeps only id/title/status/timestamps, dropping the conversation', () => {
@@ -112,6 +113,45 @@ describe('taskMetadata', () => {
     expect(oneShot).not.toHaveProperty('repeats')
 
     expect(taskMetadata(base)).not.toHaveProperty('repeats')
+  })
+})
+
+describe('taskMetadata over a summarized task', () => {
+  // `lander list` asks for `?view=summary`, so every row it renders is a
+  // taskSummary rather than a publicTask. This pins the only thing that makes
+  // that substitution safe: the two produce the same metadata.
+  const full = {
+    id: 'stu',
+    title: 'Summarized but identical',
+    status: 'riding',
+    createdAt: '2026-06-30T00:00:00.000Z',
+    updatedAt: '2026-06-30T02:00:00.000Z',
+    scheduledFor: undefined,
+    items: [
+      { id: 'i1', at: '2026-06-30T01:00:00.000Z', kind: 'message', role: 'user', text: 'go' },
+    ],
+    rides: [{ id: 'r1', startedAt: '2026-06-30T01:00:00.000Z' }],
+    scheduledMessages: [
+      {
+        text: 'run again in an hour',
+        deliverAt: '2026-07-01T00:00:00.000Z',
+        relaunch: true,
+        repeat: { interval: 60, remaining: 3 },
+      },
+    ],
+    token: 'secret',
+  }
+
+  it('produces identical output from a summary and from the full record', () => {
+    expect(taskMetadata(taskSummary(full))).toEqual(taskMetadata(publicTask(full)))
+  })
+
+  it('still reads the schedule the summary carries', () => {
+    const meta = taskMetadata(taskSummary(full))
+    expect(meta.scheduledFor).toBe('2026-07-01T00:00:00.000Z')
+    expect(meta.relaunching).toBe(true)
+    expect(meta.repeats).toBe(true)
+    expect(meta.status).toBe('riding') // derived from the ride the summary drops
   })
 })
 

@@ -8,7 +8,7 @@ running lander needs; this file is the level a person changing it needs.
 ## HTTP API (`server/index.ts`)
 
 - `GET /api/projects` — list the configured projects (`{ path, slug }`); the first is the default.
-- `GET /api/:project/tasks` — list a project's tasks (sorted newest-first). `?archived=1` also merges in archived tasks, each tagged `archived: true`.
+- `GET /api/:project/tasks` — list a project's tasks (sorted newest-first). `?archived=1` also merges in archived tasks, each tagged `archived: true`. `?view=summary` serves each task without its conversation — no `items`/`rides`, and `scheduledMessages` reduced to `deliverAt`/`relaunch`/`repeat` — which is ~99% of the bytes off a list response; everything else, including the ride-derived `status`, is unchanged. Opt-in on purpose: with no `view` param the response is exactly what it has always been, so an old client or a third-party caller never has to know the parameter exists. Callers that read only metadata should ask for it (the client's link-resolution poll and `lander list` do); anything that reads message text must not.
 - `POST /api/:project/tasks` — create a task, store its chosen agent, and queue the first turn on the daemon.
 - `POST /api/:project/tasks/:id/messages` — append a user message; the daemon resumes the task's stored provider session. Both this and `POST .../tasks` accept `attachments: id[]` to associate uploaded files with the message.
 - `POST /api/:project/attachments` — upload one or more files (multipart) to the project's durable blob store, returning their refs (`{id, name, mime, size}`). `GET /api/:project/attachments/:id` streams a stored file's bytes. Both require an identified caller (the browser's UI token or a task's `LANDER_TOKEN`).

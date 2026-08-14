@@ -41,6 +41,7 @@ import {
 import { parseProjects, type Project } from './projects'
 import {
   publicTask,
+  taskSummary,
   taskFlow,
   latestUpdateAt,
   recordStatusTransition,
@@ -1160,11 +1161,19 @@ app.get('/api/:project/tasks', async (c) => {
     // — decision 6). It's global, not per-project — the same { agent: items } map
     // on every project's response.
     const telemetry = Object.fromEntries(telemetryCache)
+    // `?view=summary` serves each task without its conversation (see
+    // taskSummary). Opt-in: with no param the response is what it always was,
+    // so the running client and any third-party caller are unaffected. Applied
+    // as a projection *inside* both branches below rather than as a third
+    // branch beside them, so the telemetry envelope can't be dropped from it.
+    const summary = c.req.query('view') === 'summary'
+    const toWire = <T extends object>(t: T) =>
+      summary ? taskSummary(t) : publicTask(t)
     if (c.req.query('archived') !== '1')
       return c.json({
         // Arrow-wrapped: a bare `.map(publicTask)` binds the array index to the
         // options parameter.
-        tasks: (await readTasks(project.dataDir)).map((t) => publicTask(t)),
+        tasks: (await readTasks(project.dataDir)).map((t) => toWire(t)),
         telemetry,
       })
     const archived = (await readTasks(project.archiveDir)).map((t) => ({
@@ -1174,7 +1183,7 @@ app.get('/api/:project/tasks', async (c) => {
     archived.sort((a, b) =>
       (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt),
     )
-    return c.json({ tasks: archived.map((t) => publicTask(t)), telemetry })
+    return c.json({ tasks: archived.map((t) => toWire(t)), telemetry })
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }

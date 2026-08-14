@@ -526,6 +526,48 @@ export function publicTask<T extends object>(
   }
 }
 
+// The public task without its conversation: everything `publicTask` serves,
+// minus `items`/`rides`, for callers that only need a task's metadata (the
+// client's link-resolution poll, `lander list`). Those two arrays are ~99% of a
+// list response's bytes.
+//
+// Projection order is load-bearing. `publicTask` derives the served `status`
+// from `rides` (above): a stored `riding` task with no open ride is served
+// `resting`. So the full projection runs FIRST and the arrays come off its
+// *output* — dropping them on the way in would demote every riding task to
+// resting, emptying the UI's riding section and killing the row spinner.
+//
+// `scheduledMessages` rides through `publicTask` carrying each deferred
+// message's full text, so it is projected too, down to the fields the list
+// consumers read (`bin/task-metadata.js`). The `.map` is index-preserving —
+// entry `[0]` is read positionally — so a message with none of these fields
+// still occupies its slot.
+export function taskSummary<T extends object>(task: T, opts?: { caps?: FlowCaps }) {
+  const full = publicTask(task, opts)
+  const {
+    items: _items,
+    rides: _rides,
+    scheduledMessages: scheduled,
+    ...rest
+  } = full as typeof full & {
+    items?: Item[]
+    rides?: Ride[]
+    scheduledMessages?: ScheduledMessage[]
+  }
+  return {
+    ...rest,
+    ...(scheduled
+      ? {
+          scheduledMessages: scheduled.map((m) => ({
+            ...(m.deliverAt != null ? { deliverAt: m.deliverAt } : {}),
+            ...(m.relaunch != null ? { relaunch: m.relaunch } : {}),
+            ...(m.repeat != null ? { repeat: m.repeat } : {}),
+          })),
+        }
+      : {}),
+  }
+}
+
 // The timestamp of a task's most recent *completed* update: the newest of its
 // finished messages (the in-flight, still-streaming one is skipped) and its
 // lifecycle events. Mirrors the client's helper of the same name; used to seed
