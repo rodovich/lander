@@ -39,15 +39,15 @@ Commit directly on `main` — this repo does not branch for ordinary work — an
 
 At no point should `main` hold a commit that is broken or half-implemented in a way the user or a running task could see. No UI element lands before it is functional end to end, and no `bin/lander` subcommand or flag is described in the README or the task prompt before it works.
 
-Plumbing may land ahead of the surface it will eventually serve — server endpoints, protocol fields, daemon wiring, even an undocumented CLI flag — provided nothing yet advertises it. What must not land early is the *announcement*: a README line, a prompt mention, or a control in the UI implies the capability exists.
+Plumbing may land ahead of the surface it will eventually serve — server endpoints, protocol fields, daemon wiring, even an undocumented CLI flag — provided nothing yet advertises it. What must not land early is the *announcement*: a README line, a prompt mention, or a control in the UI implies the capability exists. Sequencing is a property of the commits, not something the message has to assert; the diff shows what is wired and what is not.
 
 Lander runs as three processes, so "works end to end" spans all of them: every commit must leave client, server, and daemon mutually compatible. A protocol change cannot land half on one side of the WebSocket, because the running stack reloads them independently — the client and server hot-reload while an already-running daemon keeps serving its in-flight turns. Sequence changes accordingly: additive fields and new readers before the writer flips to them, aliases before renames, and nothing that strands an in-flight run's replay or resume across a daemon relaunch. [docs/testing.md](testing.md) describes that topology and how to verify recovery after each change.
 
 ## Commit messages
 
-- Most commits need only a subject line summarizing the change.
-- Write the subject as a present-tense imperative sentence ending with a period.
-- Subjects ideally should be under 72 characters and never exceed 100.
-- If the motivation, context, or impact of a change is non-obvious from the changes and won't fit in a one-liner, then add a body after a blank line. The body should be concise, just one or a few declarative sentences providing the background information.
-- Use markdown `code` or list syntax if appropriate.
-- Use newlines only between paragraphs or list items. Don't manually break the text for line wrapping. Linus was wrong about this.
+- Write the subject as a present-tense imperative sentence ending with a period, ideally under 72 characters and never over 100.
+- Most commits need only that subject.
+- Write a body only when there's important information that the diff itself will not convey: external motivation for the change, measurements, rationale for removing code. One or two sentences.
+- Do not explain the implementation, and don't repeat explanations from comments, docs, help text, etc. The contents of the commit will be in front of the next reader, and a body that repeats it is waste.
+- Don't write a body to say a change is unused, incomplete, or a first step; the diff shows that. If the sequencing needs explaining, the body carries the reason for the split, not the fact of it.
+- Use markdown `code` where it helps. Use newlines only between paragraphs. Don't manually break the text for line wrapping. Linus was wrong about this.
