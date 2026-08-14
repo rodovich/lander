@@ -551,7 +551,14 @@ async function listTasks(args) {
       textGroups.push(terms)
     } else die(`list: unexpected argument ${a}`)
   }
-  const res = await call(PROJECT, `/tasks${archived ? '?archived=1' : ''}`, {
+  // Ask for metadata-only rows (`?view=summary`), which is all this command
+  // ever prints — the full list is ~99% conversation and runs to tens of
+  // megabytes. --text is the exception: matchesText searches message text, so a
+  // filtered call still needs the whole thing.
+  const query = [archived ? 'archived=1' : '', textGroups.length ? '' : 'view=summary']
+    .filter(Boolean)
+    .join('&')
+  const res = await call(PROJECT, `/tasks${query ? `?${query}` : ''}`, {
     method: 'GET',
   })
   let tasks = Array.isArray(res) ? res : (res.tasks ?? [])
