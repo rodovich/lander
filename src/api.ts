@@ -57,15 +57,21 @@ export async function loadFlows(slug: string): Promise<FlowMeta[]> {
 
 // Fetch and merge tasks across every shown project, tagging each with its
 // project slug and sorting the combined list by recency.
+// `summary` asks the server for the metadata-only projection (see taskSummary):
+// the tasks come back without `items`/`rides`, which is the whole conversation
+// and ~99% of the bytes. Only for callers that read metadata alone — the
+// displayed list reads the conversation on every row.
 export async function loadShownTasks(
   slugs: string[],
   includeArchived: boolean,
+  opts?: { summary?: boolean },
 ): Promise<{ tasks: TaskWithProject[]; telemetry: FlowTelemetry }> {
+  const query = [includeArchived ? 'archived=1' : '', opts?.summary ? 'view=summary' : '']
+    .filter(Boolean)
+    .join('&')
   const lists = await Promise.all(
     slugs.map(async (slug) => {
-      const r = await fetch(
-        `/api/${slug}/tasks${includeArchived ? '?archived=1' : ''}`,
-      )
+      const r = await fetch(`/api/${slug}/tasks${query ? `?${query}` : ''}`)
       const body = await r.json()
       if (!r.ok) throw new Error(body.error ?? r.statusText)
       return {

@@ -93,11 +93,20 @@ export function useTaskData(view: TaskView, onError: (message: string) => void) 
   // Maintain the union of active and archived tasks for link resolution,
   // independent of the current view. Archived state changes rarely, so this
   // polls less often than the displayed list.
+  //
+  // Summaries: resolution reads id/projectSlug/title/status (see linkIndex
+  // below) and nothing else, so this poll asks the server to leave the
+  // conversation out — two requests per project against both pools, held in
+  // state, is otherwise tens of megabytes every ten seconds. `items`/`rides`
+  // are optional on `Task`, so a summary is still a `TaskWithProject`.
   useEffect(() => {
     if (shown.length === 0) return
     let cancelled = false
     const refreshLinks = () =>
-      Promise.all([loadShownTasks(shown, false), loadShownTasks(shown, true)])
+      Promise.all([
+        loadShownTasks(shown, false, { summary: true }),
+        loadShownTasks(shown, true, { summary: true }),
+      ])
         .then(([active, archived]) => {
           if (!cancelled) setLinkTasks([...active.tasks, ...archived.tasks])
         })
