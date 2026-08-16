@@ -3,18 +3,52 @@
 // of the server's wiring) so it can be unit-tested against a temp dir; index.ts
 // binds these to the concrete Task type via thin wrappers.
 
-import { readdir, readFile, writeFile, rename } from 'node:fs/promises'
+import { readdir, readFile, writeFile, rename, stat } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 
 // The minimal shape readTasks needs to order a project's records newest-first.
 export type StoredRecord = { createdAt: string; updatedAt?: string }
 
+// A parse retained from an earlier readTasks, with the stat it was valid for.
+type Cached = { mtimeMs: number; size: number; task: unknown }
+
+// Retained parses, per directory, keyed by absolute file path. Keyed by path
+// rather than basename because archiving is a rename between tasks/ and
+// archived/ that preserves both mtime and size, so basenames would collide
+// across the two pools by construction.
+//
+// Each call rebuilds its directory's map from that call's readdir, so entries
+// for files that have been archived or removed are simply not carried forward:
+// the retained set is always exactly the directory's current contents. That is
+// why there is no cap and no eviction policy — a cap below a pool's file count
+// would evict precisely what the next request needs, turning the cache into a
+// slowdown, and every entry is revalidated on every call so "least recently
+// used" would have no meaning here.
+const retained = new Map<string, Map<string, Cached>>()
+
 // Read and parse every *.json record in a project's data dir, newest first
 // (by updatedAt, falling back to createdAt for records saved before that field
 // existed). A missing dir yields []; unreadable or invalid files are skipped
 // rather than aborting the listing — and non-.json entries (e.g. the
 // <id>.json.<uuid>.tmp files that briefly exist mid-write) are ignored.
+//
+// Reparsing is skipped for files whose mtime and size are unchanged since the
+// last call. The list endpoint runs this on every 2s poll over a corpus where
+// at most a handful of tasks are riding, so nearly every file is byte-identical
+// to the one parsed two seconds earlier; validating against the stat the
+// filesystem already maintains turns "parse everything" into "parse what moved".
+//
+// This stays a pure function of what is on disk — no write-through, no
+// invalidation protocol, and an edit made outside the server is still picked up.
+// The one case it cannot see is a write that lands an identical mtime AND an
+// identical size (`cp -p`, `touch -r`), or a filesystem whose stat is
+// attribute-cached (NFS) rather than local.
+//
+// IMPORTANT: the returned records are shared with the cache, not freshly parsed
+// per call. Callers must treat them as read-only — both of today's copy before
+// serving (publicTask spreads; the archived branch spreads to add `archived`).
+// A caller that mutates one in place would corrupt every later response.
 export async function readTasks<T extends StoredRecord>(
   dataDir: string,
 ): Promise<T[]> {
@@ -22,18 +56,44 @@ export async function readTasks<T extends StoredRecord>(
   try {
     names = await readdir(dataDir)
   } catch {
+    retained.delete(dataDir)
     return []
   }
+  const prior = retained.get(dataDir)
+  const next = new Map<string, Cached>()
+  // Concurrently: a sequential await per file would cost more than the parses
+  // this exists to avoid.
+  const stats = await Promise.all(
+    names
+      .filter((name) => name.endsWith('.json'))
+      .map(async (name) => {
+        const file = path.join(dataDir, name)
+        try {
+          const s = await stat(file)
+          return { file, mtimeMs: s.mtimeMs, size: s.size }
+        } catch {
+          return null
+        }
+      }),
+  )
   const tasks: T[] = []
-  for (const name of names) {
-    if (!name.endsWith('.json')) continue
+  for (const s of stats) {
+    if (!s) continue
+    const hit = prior?.get(s.file)
+    if (hit && hit.mtimeMs === s.mtimeMs && hit.size === s.size) {
+      next.set(s.file, hit)
+      tasks.push(hit.task as T)
+      continue
+    }
     try {
-      const raw = await readFile(path.join(dataDir, name), 'utf8')
-      tasks.push(JSON.parse(raw) as T)
+      const task = JSON.parse(await readFile(s.file, 'utf8')) as T
+      next.set(s.file, { mtimeMs: s.mtimeMs, size: s.size, task })
+      tasks.push(task)
     } catch {
       // skip unreadable/invalid files
     }
   }
+  retained.set(dataDir, next)
   tasks.sort((a, b) =>
     (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt),
   )
