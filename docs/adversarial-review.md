@@ -41,7 +41,10 @@ catches plans that solve an adjacent problem convincingly.
 **Is the mechanism proven out** — or does the plan lean on machinery that nothing
 has actually exercised? This is where the false-premise failure gets caught. Ask
 reviewers to verify every load-bearing present-tense claim about current behavior
-against the code, and to report the claim as a finding when it doesn't hold.
+against the code, and to report the claim as a finding when it doesn't hold. A
+claim about how a harness behaves needs more than a citation: a result from a
+bare `claude -p` or `codex exec` run is insufficient to establish how the same
+thing behaves inside a lander task.
 
 **Does existing functionality continue to work?** Enumerate what has to keep
 working: both providers, permission grants, telemetry, retry asks, drain and
@@ -64,9 +67,9 @@ agent-specific knowledge, and free of knowledge about the specifics of the user'
 development environment?
 
 **Does it cover every provider?** Are the resulting capabilities available under
-both Claude and Codex, or is some part limited to one — and if it must differ, is
-the difference declared through capability metadata rather than branching on the
-provider's name?
+both Claude and Codex, or is some part limited to one? Where the plan accepts a
+difference, don't let it pass as given: ask whether an actual difference in what
+the harnesses can do forces it, or whether a different design would eliminate it.
 
 **How does it look from the agent's side?** For anything an agent experiences —
 delivery timing, token cost, what arrives in the prompt — is the behavior in line

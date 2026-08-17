@@ -20,9 +20,9 @@ Follow these when developing lander. Each doc is short; read the one that covers
 what you are about to do.
 
 - **[docs/testing.md](docs/testing.md)** — when changing task execution or
-  coordination logic, test end-to-end in the running app when possible. Launch
-  real sibling tasks as instruments; subagents and one-off `claude -p` runs do
-  not reproduce the real permission world or survive a turn boundary.
+  coordination logic, test end-to-end in the running app when possible.
+- **[docs/codex-support.md](docs/codex-support.md)** — the provider adapter
+  layer and the Claude/Codex differences that exist today.
 - **[docs/commit-authoring.md](docs/commit-authoring.md)** — author commits,
   their sequence, and their messages with care. Never commit a surface before it
   works end to end.
@@ -47,6 +47,5 @@ ignores. Write them there; never commit one.
 
 For reference rather than convention:
 [docs/architecture.md](docs/architecture.md) documents the HTTP surface, task
-ids, the permission mechanics behind each provider's flags and profiles, and the
-restart/reattach machinery. [docs/codex-support.md](docs/codex-support.md)
-covers the provider adapter layer.
+ids, the provider layering rule, the permission mechanics behind each provider's
+flags and profiles, and the restart/reattach machinery.

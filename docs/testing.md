@@ -41,12 +41,16 @@ terminal, and they will say when it is back up.
 
 ## Sibling tasks are the instrument
 
+Subagents and direct `claude -p` / `codex exec` runs can be used to probe what
+a harness does natively — whether a flag is honored, what an event stream emits,
+etc. However, a finding there is a fact about the harness, not about lander, so
+when testing a provider's behavior in this manner, **verify, don't assume, that
+the result applies to the lander integration.**
+
 Launch real tasks with `lander launch` and drive them with `lander send`. A
 sibling task is the only instrument that runs in the real permission world, with
 the real prompt, the real environment, and a real lifecycle that survives the
-parent's turn. Subagents and one-off `claude -p` invocations do not reproduce any
-of that, so they cannot settle a question about permissions, prompts, wakeups, or
-cross-turn behavior.
+parent's turn.
 
 Choose the cheapest instrument that is still faithful:
 
@@ -56,11 +60,15 @@ Choose the cheapest instrument that is still faithful:
 - **Launch a sibling** when the subject is task creation, message delivery,
   inheritance, permission grants, or anything the parent cannot do to itself.
   Pass `--edits` only when the behavior under test needs it; a read-only
-  instrument is the default and is itself a useful assertion.
+  instrument is the default and is itself a useful assertion. `--flow codex`
+  launches it as a Codex task; without it you get the instance default.
 - **Ask the user to drive the UI.** Anything that has to be seen or clicked — an
   ask's option buttons, a chip's disclosure, a status transition in the list — is
   verified by doing the thing and telling the user plainly what to look at and
   what counts as correct.
+
+Cover both providers when making changes to task execution; such a change isn't
+tested until it has run under Claude *and* Codex.
 
 Remember that the parent is inside the system under test. Its own actions can
 contaminate the measurement: a probe process the parent leaves running, a
@@ -105,10 +113,8 @@ cannot pass.
 Verify what the user and the next turn actually see, not only what the server
 stored: the task record, the rendered conversation, the prompt the following turn
 receives. And when a change rests on a claim about how the agent CLI or the
-harness behaves, check that premise against the corpus (`data/`, `~/.claude`
-transcripts) or a probe before building on it — a load-bearing assumption about
-agent behavior has been wrong here before, and the disproof was already sitting
-in the task history.
+harness behaves, check that premise against the corpus (`data/`, or the harness's
+own record) or a probe before building on it.
 
 ## Probes and scratch files
 

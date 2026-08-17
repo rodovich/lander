@@ -1,8 +1,9 @@
 # Codex support
 
-Lander supports multiple local coding-agent CLIs through a provider adapter layer.
-Claude remains the default provider, but new tasks can run through Codex when
-selected in the UI or when `LANDER_AGENT=codex` sets the default.
+Lander hosts multiple local coding-agent CLIs through a provider adapter layer.
+Codex is intended as a first-class target; tasks runs through Codex when Codex
+is selected in the UI, when it is launched with `lander launch --flow codex`,
+or when `LANDER_FLOW=codex` sets the instance default.
 
 ## Multi-agent architecture
 
@@ -100,8 +101,9 @@ Codex shell environment receives the injected `LANDER_*` values.
 
 ## Current limitations
 
-Codex support is useful for basic task execution and resume, but it is not at
-Claude feature parity.
+Codex is not at Claude feature parity. Some differences are due to limitations of
+the harness, while others are unfinished work that a different design could
+remove.
 
 Permission grants are coarse. Lander selects a read-only or editable Codex
 permission profile, but Codex runs do not honor task allow rules or Claude-style

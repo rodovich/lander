@@ -32,7 +32,25 @@ validated against `/^[A-Za-z0-9_-]{1,64}$/` before it is used to build a
 filesystem path. The closed character class excludes `/` and `.`, so the `:id`
 route can't traverse, and it admits both shapes.
 
+## Provider layering
+
+Lander hosts more than one agent CLI, and the boundary that keeps that tractable
+is that **the server and the web client hold no agent-specific knowledge.** Each
+flow — today `claude` and `codex`, plus whatever a daemon announces — declares
+capability metadata. The server and client do not branch on a provider's name:
+instead, the server derives per-task flags from the flow's declaration and serves
+them on the task; the client reads the flags.
+
+Provider-specific mechanics live in the daemon's adapters, so the two sections
+below describe adapter behavior rather than a shape the rest of the system knows
+about. When a change needs the server or the client to care about a provider
+difference, that difference belongs in the capability declaration.
+
 ## Permission mechanics
+
+Each provider reaches its boundary by its own mechanism — Claude through CLI
+flags, Codex through a named sandbox profile — and the differences that result
+are declared rather than incidental (`grants` in the capability list above).
 
 Claude turns build `--allowedTools` from `Bash(lander:*)` (always) and the task's
 `allow` list (rules granted in **task** scope from the per-turn blocked-permissions
