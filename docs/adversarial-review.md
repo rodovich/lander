@@ -1,22 +1,22 @@
 # Adversarial review
 
 Before a substantial design or implementation plan is executed, it goes through
-adversarial review: independent reviewers whose job is to find what is wrong with
-it, not to approve it.
+adversarial review: independent review subagents whose job is to find what is
+wrong with it, not to approve it.
 
 ## The process
 
 1. **The author writes the plan and does their own pass first.** Fix what you can
    find yourself; reviewers are not a substitute for reading your own work.
-2. **Spin up at least two independent reviewers, on at least two different axes.**
-   They must not see each other's findings — parallel and blind, not a relay.
-   Run them in the foreground; a review that lands after the work has started is
-   not a review.
-3. **Reviewers return severity-ranked findings**, each grounded in a citation to
-   the actual code, and each labeled by type: the plan's premise is wrong, the
-   plan is wrong, the plan is internally inconsistent, the plan is underspecified,
-   or the plan is missing a failure mode.
-4. **Fold in the majors, then issue a fresh round** — new reviewers, not the same
+2. **Spin up at least two independent review subagents, on at least two different
+   axes.** They must not see each other's findings — parallel and blind, not a
+   relay. Run them in the foreground and wait for all of them before touching the
+   plan; a review that arrives after the work has started is not a review.
+3. **Each subagent returns severity-ranked findings**, each grounded in a
+   citation to the actual code, and each labeled by type: the plan's premise is
+   wrong, the plan is wrong, the plan is internally inconsistent, the plan is
+   underspecified, or the plan is missing a failure mode.
+4. **Fold in the majors, then issue a fresh round** — new subagents, not the same
    ones iterating, so a reviewer never grades their own correction. Repeat until a
    round produces no major findings.
 5. **Record the outcome at the bottom of the plan**: what each round found, what
@@ -83,5 +83,5 @@ recorded.
 Two more worth adding when they apply: for a design that replaces a prior rejected
 one, **re-ask the questions that killed the predecessor** — carry them forward
 explicitly. And for competing sketches, review each independently, fix the majors
-on both, then hand the *revised* sketches to fresh reviewers, so the comparison is
+on both, then hand the *revised* sketches to fresh subagents, so the comparison is
 made between each option's best form.
