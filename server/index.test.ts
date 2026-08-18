@@ -43,6 +43,24 @@ async function readTaskField(id: string, field: string): Promise<unknown> {
   return raw[field]
 }
 
+// A task's record once it has stopped moving: posting a message drives a turn
+// that settles asynchronously (there is no daemon in this suite, so it settles
+// by failing), and each stage of that rewrites the file. Two identical reads in
+// a row is the settle; the content is returned so a caller can amend it without
+// re-reading.
+async function settled(id: string, ms = 2000): Promise<string> {
+  const file = path.join(tasksDir, `${id}.json`)
+  const start = Date.now()
+  let last = ''
+  while (Date.now() - start < ms) {
+    const now = await readFile(file, 'utf8')
+    if (now === last) return now
+    last = now
+    await new Promise((r) => setTimeout(r, 10))
+  }
+  return last
+}
+
 async function createTask(title: string): Promise<{ id: string; agent: string }> {
   const res = await post(`/api/${slug}/tasks`, { title })
   expect(res.status).toBe(201)
@@ -288,17 +306,25 @@ describe('server task provider behavior', () => {
     // third-party caller of `lander.list()` see no change.
     const task = await createTask('Full list row')
     await post(`/api/${slug}/tasks/${task.id}/messages`, { message: 'hello full' })
-    // Populate the two arrays the summary projection drops, so they fall inside
-    // the frozen set below rather than being absent from it — a row that never
-    // rode would pin `items` alone and let `rides` vanish unnoticed. The ride is
+    // Populate the fields the summary projection drops, so they fall inside the
+    // frozen set below rather than being absent from it — a row that never rode
+    // would pin `items` alone and let `rides` vanish unnoticed. The ride is
     // closed and the deferred message is dated past any horizon, so neither
     // makes this task look live to anything else in the suite.
+    //
+    // All three are written by hand, after waiting for the message's turn to
+    // settle. The turn rewrites the record asynchronously, so a hand-written
+    // field placed before that lands under it; and `revived` is a ONE-SHOT
+    // marker the queue drain deletes as it launches the run, so observing the
+    // real one means winning a race against the drain. What this test freezes is
+    // the projection's field set, not how a field came to be set.
     const file = path.join(tasksDir, `${task.id}.json`)
-    const stored = JSON.parse(await readFile(file, 'utf8'))
+    const stored = JSON.parse(await settled(task.id))
     await writeFile(
       file,
       JSON.stringify({
         ...stored,
+        revived: { from: 'landed' },
         rides: [{ id: 'r1', startedAt: AT, endedAt: AT, outcome: 'done' }],
         scheduledMessages: [{ text: 'later', deliverAt: '2099-01-01T00:00:00.000Z' }],
       }),
