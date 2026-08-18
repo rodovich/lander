@@ -36,7 +36,7 @@ import type {
   HookRunResultMessage,
 } from '../server/protocol'
 import { gitExec, resolveHooks } from './hooks'
-import { runHook } from './hook-run'
+import { createHookRuns, runHook } from './hook-run'
 import { statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { createRunManager, type RunManagerMessage } from './run'
@@ -342,10 +342,10 @@ const runManager = createRunManager({
 // server waits out its timeout and the next sweep dispatches the same fire to
 // the successor. Not hypothetical: daemon-watch sends SIGUSR2 on every
 // `daemon/**` edit.
-const hookRuns = new Map<string, () => void>()
+const hookRuns = createHookRuns()
 
 const drain = createDrain({
-  runsHeld: () => runManager.size() + hookRuns.size,
+  runsHeld: () => runManager.size() + hookRuns.held(),
   exit: () => {
     console.log('drained; exiting for handoff')
     process.exit(0)
@@ -414,7 +414,7 @@ function onMessage(raw: string): void {
         // Belt for a synchronous throw before runHook's own .catch is attached
         // (resolveHooksCwd throws for an unknown slug). The run is released
         // here too, since the .finally never ran.
-        hookRuns.delete(msg.fireId)
+        hookRuns.release(msg.fireId)
         send({
           type: 'hook-run-result',
           requestId: msg.requestId,
@@ -556,7 +556,7 @@ function handleMessage(msg: ServerToDaemon): void {
       const { root, cwd } = resolveHooksCwd(msg.project, msg.target)
       // Registered before the spawn so a shutdown in the gap still counts it;
       // the real kill replaces this as soon as the host exists.
-      hookRuns.set(msg.fireId, () => {})
+      hookRuns.hold(msg.fireId)
       // `.catch` INSIDE the handler, like project-grant and hooks-resolve:
       // onMessage's try/catch covers only a synchronous throw, and a floating
       // rejection here would leave the server holding the exchange to its
@@ -566,7 +566,7 @@ function handleMessage(msg: ServerToDaemon): void {
         projectRoot: root,
         targetCwd: cwd,
         stateDir: hookStateDir(msg.project),
-        onSpawn: (kill) => hookRuns.set(msg.fireId, kill),
+        onSpawn: (kill) => hookRuns.arm(msg.fireId, kill),
       })
         .then((report) =>
           send({ type: 'hook-run-result', requestId: msg.requestId, ok: true, report }),
@@ -583,7 +583,7 @@ function handleMessage(msg: ServerToDaemon): void {
         .finally(() => {
           // Released only once runHook has settled, which it does on the host's
           // `close` — so a host still tearing down still holds the drain.
-          hookRuns.delete(msg.fireId)
+          hookRuns.release(msg.fireId)
           drain.check()
         })
       break
@@ -636,7 +636,7 @@ function handleMessage(msg: ServerToDaemon): void {
 // they are not runs, so runManager does not know about them.
 function killChildren(): void {
   runManager.killChildren()
-  for (const kill of hookRuns.values()) kill()
+  hookRuns.killAll()
 }
 process.on('SIGTERM', () => {
   killChildren()

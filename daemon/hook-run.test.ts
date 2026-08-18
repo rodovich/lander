@@ -62,6 +62,46 @@ afterAll(async () => {
   await rm(scratch, { recursive: true, force: true })
 })
 
+// The drain's view of hook work. Both properties are invisible to runManager, so
+// without them a `daemon/**` edit — which is how this feature was built — would
+// exit a handing-off daemon straight through a live detached body.
+describe('createHookRuns', () => {
+  it('holds a fire from before its host exists until it is released', async () => {
+    const { createHookRuns } = await import('./hook-run')
+    const runs = createHookRuns()
+    expect(runs.held()).toBe(0)
+    runs.hold('fire-1')
+    // Held during the spawn gap, when there is nothing to kill yet.
+    expect(runs.held()).toBe(1)
+    expect(runs.has('fire-1')).toBe(true)
+    runs.release('fire-1')
+    expect(runs.held()).toBe(0)
+  })
+
+  it('kills every held host, through the group kill each armed', async () => {
+    const { createHookRuns } = await import('./hook-run')
+    const runs = createHookRuns()
+    const killed: string[] = []
+    runs.hold('fire-1')
+    runs.arm('fire-1', () => killed.push('fire-1'))
+    runs.hold('fire-2')
+    runs.arm('fire-2', () => killed.push('fire-2'))
+    runs.killAll()
+    expect(killed.sort()).toEqual(['fire-1', 'fire-2'])
+  })
+
+  // A kill arriving after the run finished must not put it back in the map, or
+  // the drain waits forever on a host that is already gone.
+  it('ignores a kill armed after release', async () => {
+    const { createHookRuns } = await import('./hook-run')
+    const runs = createHookRuns()
+    runs.hold('fire-1')
+    runs.release('fire-1')
+    runs.arm('fire-1', () => {})
+    expect(runs.held()).toBe(0)
+  })
+})
+
 describe('runHook', () => {
   // The fd-3 protocol end to end, against a real pipe. A test that faked the
   // stream would pass just as happily with the event channel on stdout, which

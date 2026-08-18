@@ -42,8 +42,10 @@ const outcome = (over: Record<string, unknown> = {}) => ({
 })
 
 // A resolve seam that answers with whatever hooks the test declares.
+type ResolveInput = { select?: { trigger?: string; by?: string }[] }
+
 const resolving = (hooks: unknown[], ok = true) =>
-  vi.fn(async () =>
+  vi.fn(async (_input: ResolveInput) =>
     ok
       ? {
           ok: true as const,
@@ -93,7 +95,7 @@ const hookItems = (items: Item[]) =>
 const dispatch = (
   id: string,
   seams: { resolve?: unknown; run?: unknown },
-): Promise<void> =>
+): Promise<boolean> =>
   dispatchPendingHooks(project, id, {
     api: 'http://localhost:0',
     now: () => AT,
@@ -143,6 +145,22 @@ describe('dispatchPendingHooks', () => {
       hook: 'supervise',
       ride: 'ride-1',
     })
+  })
+
+  // Half the selection axis: a fire resolves against its OWN trigger and its own
+  // principal, plus `any`. Without asserting the argument, the call site could
+  // pass the two swapped, or a hard-coded 'any', and every other test here would
+  // still pass — while a hook under `landed/human/` silently never ran.
+  it('resolves against the fire’s own trigger and principal', async () => {
+    await writeTask('t1', {
+      pendingHooks: [fire({ trigger: 'landed', by: 'human', rideId: undefined })],
+    })
+    const resolve = resolving([])
+    await dispatch('t1', { resolve, run: running(null) })
+    expect(resolve.mock.calls[0][0].select).toEqual([
+      { trigger: 'landed', by: 'human' },
+      { trigger: 'landed', by: 'any' },
+    ])
   })
 
   // The ancestry fallback: an unapproved edit sits over an approved ancestor, so
@@ -341,7 +359,7 @@ describe('dispatchPendingHooks', () => {
         }),
         run: running(null),
       }),
-    ).resolves.toBeUndefined()
+    ).resolves.toBe(true)
   })
 
   it('drops a fire nothing could resolve within a day', async () => {

@@ -204,6 +204,14 @@ describe('the supervision hook', () => {
 
   // Per Appendix A the unit is the segment, and a segment can hold several
   // rides. Judging per ride would multiply every measured rate.
+  //
+  // The later ride is stamped AFTER the fire, which is the only way it can
+  // happen: a ride that follows this one necessarily starts after this one
+  // closed, and the fire's `at` IS that close. An earlier draft of this test
+  // dated it before the fire, which made the fixture temporally impossible —
+  // and hid that the body was truncating the record at `trigger.at`, so
+  // `isLast` was true for 3,129 of 3,129 real rides and the segment guard did
+  // nothing at all.
   it('judges the segment once, at the ride that closes it', async () => {
     target = {
       id: 'tsk-1',
@@ -211,7 +219,7 @@ describe('the supervision hook', () => {
       items: [
         user('u1', 'Please:\n1. fix the parser\n2. add a test\n'),
         flow('f1', 'ride-1', 'Working on it.'),
-        flow('f2', 'ride-2', 'Done with the parser.'),
+        flow('f2', 'ride-2', 'Done with the parser.', AFTER),
       ],
     }
     // The first ride of the segment: not the closing one, so no judgment.
@@ -224,11 +232,15 @@ describe('the supervision hook', () => {
     expect(second.reports[0]).toContain('enumerated')
   })
 
-  // A segment whose next instruction has been queued but not read is still open.
-  it('skips while the target has an unread follow-up', async () => {
+  // The mirror image, and the one that matters most: a human replying inside
+  // the dispatch window ENDS this segment rather than reopening it. Skipping
+  // here would discard the ground-truth positive — "a human had to nudge" is
+  // the label the whole exercise exists to collect — and would do it on a race
+  // between the queue drain and this body's read.
+  it('still judges a segment a human replied to while the fire was in flight', async () => {
     target = {
       id: 'tsk-1',
-      status: 'resting',
+      status: 'riding',
       items: [
         user('u1', 'Fix the parser and then land.'),
         flow('f1', 'ride-1', 'Fixed it.'),
@@ -236,8 +248,11 @@ describe('the supervision hook', () => {
       ],
     }
     const report = await run()
-    expect(report.reports).toEqual([])
-    expect((await loggedRows())[0].skipped).toBe('segment-open')
+    expect(report.reports[0]).toContain('land-instruction')
+    const rows = await loggedRows()
+    expect(rows[0].matched).toEqual(['land-instruction'])
+    // …and it says the record had moved on, so a later reading can tell.
+    expect(rows[0].live).toBe(false)
   })
 
   it('skips the ride that landed the task', async () => {
@@ -258,22 +273,24 @@ describe('the supervision hook', () => {
   // A fire is dispatched a sweep plus a body's runtime after its trigger, so the
   // record has usually moved on. Judging the live record would discard the case
   // whose label matters most — a human replying inside that window.
-  it('judges as of the fire, not as of the read, and says which it was', async () => {
+  it('judges the segment the reply ended, not the one it started', async () => {
     target = {
       id: 'tsk-1',
       status: 'riding',
       items: [
-        user('u1', 'Fix the parser and then land.'),
+        user('u1', 'Fix the parser.'),
         flow('f1', 'ride-1', 'Fixed it. Want me to continue?'),
-        // The human replied while the fire was in flight. That opens a NEW
-        // segment; the one being judged is unaffected.
+        // The human replied and the task went back to work. The span being
+        // judged is bounded by that reply, so the later ride is a different
+        // segment and its closing message is not this one's.
         user('u2', 'yes please', AFTER),
-        flow('f2', 'ride-2', 'On it.', AFTER),
+        flow('f2', 'ride-2', 'On it, no questions here.', AFTER),
       ],
     }
     const report = await run()
     expect(report.reports[0]).toContain('offer-to-continue')
     const rows = await loggedRows()
+    expect(rows[0].closingFirstLine).toBe('Fixed it. Want me to continue?')
     expect(rows[0].live).toBe(false)
   })
 

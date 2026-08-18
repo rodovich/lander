@@ -157,9 +157,15 @@ export const MAX_PENDING_HOOKS = 20
 type HookFireTask = {
   pendingHooks?: PendingHook[]
   hookFireSeq?: number
+  items?: Item[]
 }
 
 // Record a fire, returning it along with any entries the cap displaced.
+//
+// A displaced entry says so on the timeline. The other two ceilings (attempts,
+// age) report from the dispatcher; this one has to report here, and it is the
+// worst of the three to lose silently — the cap drops OLDEST first, so during a
+// daemon outage the entry it discards is the longest-unsupervised one.
 export function recordHookFire(
   task: HookFireTask,
   fire: Omit<PendingHook, 'id'>,
@@ -175,6 +181,23 @@ export function recordHookFire(
     pending.length > MAX_PENDING_HOOKS
       ? pending.splice(0, pending.length - MAX_PENDING_HOOKS)
       : []
+  for (const lost of dropped)
+    pushHookItem(
+      task,
+      {
+        hook: lost.trigger,
+        path: '',
+        trigger: lost.trigger,
+        by: lost.by,
+        fireId: lost.id,
+        ...(lost.rideId ? { ride: lost.rideId } : {}),
+        outcome: 'dispatch-failed',
+        error:
+          `dropped without running: more than ${MAX_PENDING_HOOKS} fires were ` +
+          `waiting to be dispatched`,
+      },
+      fire.at,
+    )
   return { entry, dropped }
 }
 

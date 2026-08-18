@@ -117,7 +117,7 @@ import {
   taskCheckout,
 } from './hooks'
 import { readHookCredential } from './hook-runs'
-import { dispatchPendingHooks } from './hook-dispatch'
+import { dispatchPendingHooks, hookDispatchInFlightFor } from './hook-dispatch'
 import { generateTitle } from './title'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -1095,6 +1095,15 @@ async function deliverScheduledMessages(
 // rejection needs no guard, since with no `unhandledRejection` handler the
 // process dies and `tsx watch` brings it back.
 let sweeping = false
+let sweepStartedAt = 0
+// Past this, a sweep is assumed wedged rather than slow and the guard is
+// released. Without it the guard can become the outage it prevents: the
+// `finally` only runs when the promise settles, so a sweep hung on a wedged
+// `awaitSatisfied` or an unresponsive filesystem would latch the flag and stop
+// scheduled-message delivery, deferred launches and every `lander rest` wakeup
+// instance-wide until a restart. Before the guard existed a hung sweep only
+// delayed itself.
+const SWEEP_STUCK_MS = 5 * 60_000
 
 // How many tasks per project may have their fires dispatched in one sweep. A
 // rate limit, paired with the instance-wide ceiling on concurrent hook hosts in
@@ -1108,8 +1117,16 @@ let sweeping = false
 const MAX_HOOK_DISPATCHES_PER_SWEEP = 4
 
 async function launchScheduled(): Promise<void> {
-  if (sweeping) return
+  if (sweeping) {
+    if (Date.now() - sweepStartedAt < SWEEP_STUCK_MS) return
+    console.warn(
+      `scheduler sweep has been running for ${Math.round(
+        (Date.now() - sweepStartedAt) / 1000,
+      )}s; starting another rather than stalling every wakeup`,
+    )
+  }
   sweeping = true
+  sweepStartedAt = Date.now()
   try {
     await sweepOnce()
   } finally {
@@ -1156,7 +1173,16 @@ async function sweepOnce(): Promise<void> {
       // Not awaited: a body may run for minutes, and the sweep also delivers
       // every project's scheduled messages. dispatchPendingHooks has its own
       // per-task guard and never rejects.
-      if (task.pendingHooks?.length && dispatched < MAX_HOOK_DISPATCHES_PER_SWEEP) {
+      // A task whose previous dispatch is still in flight consumes no budget:
+      // otherwise four long-running bodies would spend the whole per-project
+      // allowance on every sweep they span — a dozen or more — while every
+      // other task in the project waited, silently, since a hold records
+      // nothing.
+      if (
+        task.pendingHooks?.length &&
+        !hookDispatchInFlightFor(project, id) &&
+        dispatched < MAX_HOOK_DISPATCHES_PER_SWEEP
+      ) {
         dispatched++
         void dispatchPendingHooks(project, id, { api })
       }
@@ -3159,6 +3185,10 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
         await mutateTask(file, (t) => {
           const allow = (t.allow ??= [])
           if (!allow.includes(rule)) allow.push(rule)
+          // Answering a permission prompt is human contact — this route is
+          // UI-only, and for some tasks it is the whole of the human's
+          // involvement.
+          t.hookActionsResetAt = new Date().toISOString()
         })
       } catch {
         return c.json({ error: 'task not found' }, 404)

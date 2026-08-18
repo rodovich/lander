@@ -35,14 +35,28 @@
 // in a segment, and the ~20% figure the cost argument rests on would stop
 // meaning anything.
 //
-// ── Everything is evaluated AS OF THE FIRE ─────────────────────────────────
+// ── Why the segment is cut on the record as it stands ──────────────────────
 //
 // A fire is dispatched a sweep (15s) plus a body's runtime after its ride
-// closed, so the record read here has usually moved on. Judging the live record
-// would systematically discard the case whose label matters most: a human
-// replying inside that window opens a new segment, and "a human had to nudge"
-// is precisely the positive class. So the segment is cut at `ctx.trigger.at`
-// and the live state is recorded beside it as a flag.
+// closed, so the record read here has usually moved on. The instinct is to
+// truncate at `ctx.trigger.at` and judge the past — but that is wrong twice,
+// and both ways were caught by replaying this body over the corpus:
+//
+//   - A truncated view can never contain a LATER ride, so "is this the last
+//     ride in the segment" is vacuously true — 3,129 of 3,129 real rides.
+//     The guard that makes the unit a segment rather than a ride does nothing.
+//   - A human replying inside the dispatch window is not a reason to skip. It
+//     is the opposite: their message ENDS this segment, so the thing being
+//     judged is complete, and "a human had to nudge" is the positive class the
+//     whole exercise is trying to collect.
+//
+// Cutting the live record answers both, because segment boundaries are user
+// messages. A human's reply bounds the span, so nothing after it is judged. A
+// further ride under the same instruction falls INSIDE the span, so this fire
+// defers and the ride that closes the segment judges the whole of it.
+//
+// `live` still records whether the record had moved on, so a later reading can
+// tell a fire that judged a settled segment from one that raced.
 
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -131,18 +145,13 @@ export default async function onTurn(ctx) {
   }
 
   const task = await ctx.target.read()
-  const all = task.items ?? []
-  // As of the fire, not as of now.
-  const items = all.filter((it) => it.at <= ctx.trigger.at)
+  const items = task.items ?? []
   const segment = cutSegment(items, ctx.trigger.rideId)
   if (!segment) return log(ctx, { ...row, skipped: 'no-segment' })
 
-  // A segment that has not closed will be judged by the fire of the ride that
-  // does close it. `queued` is projected onto trailing user items the agent has
-  // not read yet.
-  const queued = all.some((it) => isUser(it) && it.queued)
-  if (!segment.isLast || queued)
-    return log(ctx, { ...row, skipped: 'segment-open', queued })
+  // Another ride ran under the same instruction, so this segment has not closed
+  // — the fire of the ride that does close it will judge the whole span.
+  if (!segment.isLast) return log(ctx, { ...row, skipped: 'segment-open' })
   // The ride that landed a task needs no supervision.
   if (segment.landed) return log(ctx, { ...row, skipped: 'landed' })
 
@@ -156,9 +165,9 @@ export default async function onTurn(ctx) {
   await log(ctx, {
     ...row,
     matched,
-    // Whether the record had already moved on by the time this ran, so a later
-    // reading can tell a stale judgment from a live one.
-    live: all.length === items.length,
+    // Whether anything landed on the record after the fire, so a later reading
+    // can tell a judgment of a settled segment from one that raced a reply.
+    live: !items.some((it) => it.at > ctx.trigger.at),
     closingFirstLine: segment.closing.split('\n').find((l) => l.trim()) ?? '',
   })
 

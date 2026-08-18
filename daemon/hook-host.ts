@@ -57,10 +57,22 @@ function channel(): net.Socket {
 }
 
 let sent = false
+// The directory the blob was materialized into, removed on the way out. Held at
+// module scope because the exit happens inside `report`: `end()`'s callback
+// fires within a turn or two, while an `rm` needs a round trip through the
+// threadpool, so a `finally` that cleans up AFTER reporting always loses the
+// race — which left one abandoned directory containing the hook's source per
+// fire, forever. Cleanup goes before the report, not after it.
+let materializedDir: string | null = null
+// The body's findings so far, at module scope so the crash handlers can report
+// what it had already said rather than only the stack that killed it.
+const reports: string[] = []
 
-function report(report: HookRunReport): void {
+async function report(report: HookRunReport): Promise<void> {
   if (sent) return
   sent = true
+  if (materializedDir)
+    await rm(materializedDir, { recursive: true, force: true }).catch(() => {})
   const line = JSON.stringify(report) + '\n'
   try {
     channel().end(line, () => process.exit(0))
@@ -248,11 +260,10 @@ async function readInput(): Promise<HookHostInput> {
 async function main(): Promise<void> {
   const input = await readInput()
   const { run } = input
-  const reports: string[] = []
 
   const approval = await checkApproval(input)
   if (!approval.ok) {
-    report({ outcome: approval.outcome, reports, error: approval.error })
+    await report({ outcome: approval.outcome, reports, error: approval.error })
     return
   }
 
@@ -260,7 +271,7 @@ async function main(): Promise<void> {
   // project root regardless of which tree the target was working in.
   const blob = await git(input.projectRoot, ['cat-file', 'blob', run.hook.runs])
   if (!blob.ok) {
-    report({
+    await report({
       outcome: 'error',
       reports,
       error: `could not read hook blob ${run.hook.runs}`,
@@ -272,6 +283,7 @@ async function main(): Promise<void> {
   // run's cwd) and never anywhere under the project: this is the moment an
   // unapproved-until-now module would otherwise land in a working tree.
   const dir = await mkdtemp(path.join(tmpdir(), 'lander-hook-'))
+  materializedDir = dir
   const file = path.join(dir, `${run.hook.name.replace(/[^\w.-]/g, '_')}.mjs`)
   await writeFile(file, blob.stdout, 'utf8')
 
@@ -281,7 +293,7 @@ async function main(): Promise<void> {
       default?: (ctx: HookCtx) => unknown
     }
     if (mod.meta?.api !== HOOK_API) {
-      report({
+      await report({
         outcome: 'error',
         reports,
         error: `hook declares meta.api ${String(mod.meta?.api)}; this daemon runs api ${HOOK_API}`,
@@ -289,7 +301,7 @@ async function main(): Promise<void> {
       return
     }
     if (typeof mod.default !== 'function') {
-      report({ outcome: 'error', reports, error: 'hook has no default export' })
+      await report({ outcome: 'error', reports, error: 'hook has no default export' })
       return
     }
 
@@ -309,21 +321,21 @@ async function main(): Promise<void> {
     ])
     if (timer) clearTimeout(timer)
     if (outcome === 'timeout')
-      report({
+      await report({
         outcome: 'timeout',
         reports,
         error: `the hook body did not finish within ${Math.round(run.timeoutMs / 1000)}s`,
       })
-    else report({ outcome: 'ran', reports })
+    else await report({ outcome: 'ran', reports })
   } catch (e) {
-    report({
+    await report({
       outcome: 'error',
       reports,
       error: e instanceof Error ? (e.stack ?? e.message) : String(e),
     })
-  } finally {
-    await rm(dir, { recursive: true, force: true }).catch(() => {})
   }
+  // No `finally` cleanup: `report` removes the directory before it exits, which
+  // is the only ordering that wins the race against its own process.exit.
 }
 
 // Run only when executed as the entry, not when imported by a test.
@@ -335,9 +347,13 @@ if (
   // which terminates Node by default — and would take the report with it. These
   // turn both into the report they should have been.
   const fatal = (e: unknown): void => {
-    report({
+    // Carrying `reports` rather than an empty array: a body that reported its
+    // finding and then tripped an unhandled rejection has still found the thing,
+    // and losing it to the stack that killed the process defeats the point of
+    // these handlers.
+    void report({
       outcome: 'error',
-      reports: [],
+      reports,
       error: `hook body crashed the host: ${
         e instanceof Error ? (e.stack ?? e.message) : String(e)
       }`,

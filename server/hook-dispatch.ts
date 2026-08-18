@@ -36,6 +36,7 @@ import {
   HOOK_BODY_TIMEOUT_MS,
   HOOK_DISPATCH_TIMEOUT_MS,
   HOOK_KILL_BUDGET_MS,
+  MAX_CONCURRENT_HOOK_RUNS,
 } from './hook-runs'
 import type { HookRunReport } from './protocol'
 
@@ -62,6 +63,15 @@ const dispatching = new Set<string>()
 
 export function hookDispatchInFlight(): number {
   return dispatching.size
+}
+
+// Whether a loop for this task is running right now. Read synchronously by the
+// sweep so an in-flight task costs no budget.
+export function hookDispatchInFlightFor(
+  project: { slug: string },
+  id: string,
+): boolean {
+  return dispatching.has(`${project.slug}\0${id}`)
 }
 
 type DispatchDeps = {
@@ -129,13 +139,18 @@ async function report(
 // unawaited from the scheduler sweep, where a rejection would take the server
 // down — and because the entry survives a restart, the same fire would re-throw
 // on the next boot, turning one bad state into a crash loop.
+// Returns false when a loop for this task was already in flight, so the sweep's
+// per-project budget is spent on dispatches that actually start. Counting the
+// call rather than the start would let four long-running bodies consume the
+// whole budget on every sweep they span — up to a dozen — while every other
+// task in that project waited, silently, since a hold records nothing.
 export async function dispatchPendingHooks(
   project: Project,
   id: string,
   deps: DispatchDeps,
-): Promise<void> {
+): Promise<boolean> {
   const key = `${project.slug}\0${id}`
-  if (dispatching.has(key)) return
+  if (dispatching.has(key)) return false
   dispatching.add(key)
   try {
     await dispatchTask(project, id, deps)
@@ -147,6 +162,7 @@ export async function dispatchPendingHooks(
   } finally {
     dispatching.delete(key)
   }
+  return true
 }
 
 async function dispatchTask(
@@ -249,11 +265,23 @@ async function dispatchOne(
     now: () => string
   },
 ): Promise<'done' | 'hold'> {
+  // Read the checkout BEFORE claiming anything: `readTask` can reject on an
+  // unreadable file, and a throw between the claim and the try below would leak
+  // a live credential and one of only four instance-wide concurrency slots.
+  const checkout = await taskCheckout(project, id)
+
   // Refuse a second live run of the same fire, and stay under the instance-wide
   // ceiling on concurrent hosts — each is a full Node process spawned by the
   // daemon that owns every in-flight agent child.
   const claim = claimHookRun(project.slug, entry.id)
-  if (!claim.ok) return 'hold'
+  if (!claim.ok) {
+    if (claim.reason === 'at-capacity')
+      console.warn(
+        `hook dispatch at capacity (${MAX_CONCURRENT_HOOK_RUNS} in flight); ` +
+          `holding ${project.slug}/${id} ${entry.id}`,
+      )
+    return 'hold'
+  }
 
   // `hook.runs`, never `hook.blob`. The two differ exactly when the tree carries
   // an unapproved edit over an approved ancestor, which is the fallback that
@@ -269,7 +297,6 @@ async function dispatchOne(
     name: hook.name,
   })
 
-  const checkout = await taskCheckout(project, id)
   let response
   try {
     response = await deps.run({
@@ -297,11 +324,19 @@ async function dispatchOne(
     })
   } finally {
     // All three of askDaemon's settle paths — reply, timeout, and the immediate
-    // unsent when no daemon is connected — release here, or the map leaks a live
-    // token per attempt per fire.
+    // unsent when no daemon is connected — release the credential here, or the
+    // map leaks a live token per attempt per fire.
     releaseHookCredential(cred.token)
-    releaseHookRun(project.slug, entry.id)
   }
+
+  // The CLAIM is released only when we know nothing is still running: the daemon
+  // answered, or it was never asked. On a dispatch timeout the body is probably
+  // still alive on the other side, so the claim is left to expire on its own
+  // TTL — which is the whole reason the claim has one. Releasing it here
+  // unconditionally would make the in-flight set exactly as useful as not having
+  // it: the next sweep would re-dispatch the same fire into a live body.
+  if (response.ok || response.status === 503)
+    releaseHookRun(project.slug, entry.id)
 
   const at = deps.now()
   // The daemon could not be asked, or could not answer. A hold: no attempt, no

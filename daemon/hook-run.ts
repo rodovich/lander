@@ -73,6 +73,42 @@ function tail(text: string, limit: number): string {
   return text.length > limit ? text.slice(-limit) : text
 }
 
+// The hook hosts this daemon currently holds, keyed by fire.
+//
+// Extracted from the daemon entry so the two properties the drain depends on are
+// testable at all: a live hook host must count as work (or a SIGUSR2 handoff
+// exits straight through a detached body that still holds a credential), and it
+// must be reachable by killChildren (or a shutdown orphans it). Neither is
+// visible to `runManager`, which knows only about agent runs.
+export type HookRuns = {
+  // Register a fire before its host exists, so a shutdown in the spawn gap still
+  // counts it; `onSpawn` replaces the placeholder with the real group kill.
+  hold: (fireId: string) => void
+  arm: (fireId: string, kill: () => void) => void
+  release: (fireId: string) => void
+  has: (fireId: string) => boolean
+  held: () => number
+  killAll: () => void
+}
+
+export function createHookRuns(): HookRuns {
+  const runs = new Map<string, () => void>()
+  return {
+    hold: (fireId) => runs.set(fireId, () => {}),
+    arm: (fireId, kill) => {
+      // Only if still held: a run that finished before its kill arrived must not
+      // be resurrected into the map.
+      if (runs.has(fireId)) runs.set(fireId, kill)
+    },
+    release: (fireId) => runs.delete(fireId),
+    has: (fireId) => runs.has(fireId),
+    held: () => runs.size,
+    killAll: () => {
+      for (const kill of runs.values()) kill()
+    },
+  }
+}
+
 export function runHook(
   msg: HookRunMessage,
   deps: RunHookDeps,
