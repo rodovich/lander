@@ -10,12 +10,22 @@ import type {
 // so every project's response repeats it; an agent with no items is simply absent.
 export type FlowTelemetry = Record<string, TelemetryItem[]>
 
-// Request headers that mark a call as coming from the human's browser. The
-// server gates permission-granting endpoints (creating a task with edit/commit
-// access, toggling those grants, allowing a tool) on this token so a task can't
-// hit the same API to escalate itself. dev.mjs hands the value to both Vite
-// (here) and the API server. JSON content-type rides along since every caller
-// that needs the token also sends a JSON body.
+// Request headers that mark a call as coming from the human's browser. Two jobs
+// now, and the second is why routes that gate on nothing still send it:
+//
+//   - **Authorization.** The server gates permission-granting endpoints
+//     (creating a task with edit/commit access, toggling those grants, allowing
+//     a tool) on this token so a task can't hit the same API to escalate itself.
+//   - **Attribution.** `resolvePrincipal` answers `anon` without it, and task
+//     hooks select on the principal that caused a transition — so a land, wedge,
+//     rest, launch, archive or rename sent without the token is recorded as
+//     `by: system`, and a hook under `landed/human/` never fires for the single
+//     most common human action there is. Every mutating call from the browser
+//     sends it, whether or not the route reads it.
+//
+// dev.mjs hands the value to both Vite (here) and the API server. JSON
+// content-type rides along since every caller that needs the token also sends a
+// JSON body.
 export const uiHeaders = (): Record<string, string> => {
   const token = import.meta.env.VITE_LANDER_UI_TOKEN
   return {

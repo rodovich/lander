@@ -90,7 +90,7 @@ export function useTaskActions(opts: {
       try {
         const r = await fetch(`/api/${proj}/tasks/${id}`, {
           method: 'PATCH',
-          headers: { 'content-type': 'application/json' },
+          headers: uiHeaders(),
           body: JSON.stringify({ status }),
         })
         if (!r.ok) {
@@ -117,7 +117,7 @@ export function useTaskActions(opts: {
       try {
         const r = await fetch(`/api/${proj}/tasks/${id}/archive`, {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: uiHeaders(),
           body: JSON.stringify({ archived }),
         })
         if (!r.ok) {
@@ -150,7 +150,7 @@ export function useTaskActions(opts: {
           targets.map(async (t) => {
             const r = await fetch(`/api/${t.projectSlug}/tasks/${t.id}/archive`, {
               method: 'POST',
-              headers: { 'content-type': 'application/json' },
+              headers: uiHeaders(),
               body: JSON.stringify({ archived: true }),
             })
             if (!r.ok) {
@@ -187,7 +187,7 @@ export function useTaskActions(opts: {
       try {
         const r = await fetch(`/api/${proj}/tasks/${id}/launch`, {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: uiHeaders(),
         })
         if (!r.ok) {
           const body = await r.json()
@@ -277,7 +277,7 @@ export function useTaskActions(opts: {
       try {
         const r = await fetch(`/api/${proj}/tasks/${id}`, {
           method: 'PATCH',
-          headers: { 'content-type': 'application/json' },
+          headers: uiHeaders(),
           body: JSON.stringify({ title: next }),
         })
         if (!r.ok) {
