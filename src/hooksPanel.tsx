@@ -32,13 +32,17 @@ export function HookRow({
   onSetApproval: (hook: Hook, approved: boolean) => void
 }) {
   const approvedByBranch = hook.state === 'approved' && hook.via === 'trust-root'
+  // `searchTruncated` WEAKENS the claim — it means the walk back through this
+  // path's history stopped at its limit, so "no approved version" is what was
+  // found rather than what is true. The certain case is the one that gets to say
+  // the hook will not run.
   const note =
     hook.state === 'approved'
       ? null
       : hook.reason === 'unapproved-version'
         ? `Not approved. An earlier approved version (${shortBlob(hook.runs ?? '')}) runs until this one is.`
         : hook.searchTruncated
-          ? 'Not approved, and no approved earlier version was found. This hook will not run.'
+          ? 'Not approved, and no approved earlier version was found in this path’s recent history.'
           : 'Not approved. This hook will not run.'
   return (
     <li className="hook-row">
@@ -123,7 +127,9 @@ export function TrustedBranch({
       </form>
       {hooks.trustRoot.ref && hooks.trustRoot.reason === 'unresolved-ref' && (
         <div className="hooks-note hooks-note-warn">
-          No branch named {hooks.trustRoot.ref} in this checkout.
+          No remote-tracking branch named {hooks.trustRoot.ref} in this checkout.
+          It has to be a branch on a remote, like <code>origin/main</code> — a
+          local branch is not one.
         </div>
       )}
       {hooks.trustRoot.commit && (

@@ -69,6 +69,16 @@ describe('HookRow', () => {
   it('shows the short blob, so the version can be read with git', () => {
     expect(row({})).toContain('b10bb10')
   })
+
+  // `searchTruncated` says the walk back through this path's history stopped at
+  // its limit — so it WEAKENS "no approved version", and the row must not read as
+  // the more certain of the two.
+  it('hedges when the search for an earlier approved version was cut short', () => {
+    const html = row({ searchTruncated: true })
+    expect(html).toContain('recent history')
+    expect(html).not.toContain('This hook will not run.')
+    expect(row({})).toContain('This hook will not run.')
+  })
 })
 
 describe('HooksList', () => {
@@ -128,7 +138,9 @@ describe('TrustedBranch', () => {
       configured: true,
       reason: 'unresolved-ref',
     })
-    expect(html).toContain('No branch named origin/nope in this checkout.')
+    expect(html).toContain('No remote-tracking branch named origin/nope')
+    // And says what one is, since "origin/nope" and "nope" fail identically.
+    expect(html).toContain('a local branch is not one')
   })
 
   it('leaves the field empty when no branch is named', () => {
