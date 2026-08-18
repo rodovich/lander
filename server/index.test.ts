@@ -12,6 +12,7 @@ import {
   daemonServes,
 } from './daemon'
 import { normalizeProjectPath, projectSlug } from './projects'
+import { clearHookRunState, mintHookCredential } from './hook-runs'
 import type { RevivedMarker } from './protocol'
 
 const UI_TOKEN = 'test-ui-token'
@@ -300,6 +301,152 @@ describe('hook approval', () => {
   ])('refuses a branch name that %s', async (ref) => {
     const res = await post(`/api/${slug}/hooks/trust-root`, { ref })
     expect(res.status).toBe(400)
+  })
+})
+
+// Approval gates MATERIALIZATION, not only dispatch: a hook host asks again,
+// after it has been spawned and before it imports anything, and a human who
+// revoked in that window must be obeyed.
+describe('hook materialization re-check', () => {
+  const SUPERVISE = '.lander/hooks/ride-ended/any/supervise.js'
+  const BLOB = 'b10bb10bb10bb10bb10bb10bb10bb10bb10bb10b'
+  const store = () => path.join(dataRoot, 'hooks.json')
+
+  afterEach(async () => {
+    clearHookRunState()
+    await rm(store(), { force: true })
+  })
+
+  const mint = (over: Partial<Parameters<typeof mintHookCredential>[0]> = {}) =>
+    mintHookCredential({
+      project: slug,
+      target: 'tsk-target',
+      fireId: 'fire-1-abc',
+      path: SUPERVISE,
+      blob: BLOB,
+      name: 'supervise',
+      ...over,
+    })
+
+  const materialize = (
+    token: string | undefined,
+    body: Record<string, unknown>,
+  ) =>
+    app.request(`/api/${slug}/hooks/materialize`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(token ? { 'x-lander-hook-token': token } : {}),
+      },
+      body: JSON.stringify(body),
+    })
+
+  const ask = (token: string) =>
+    materialize(token, { fireId: 'fire-1-abc', path: SUPERVISE, blob: BLOB })
+
+  it('permits an approved pair', async () => {
+    await post(`/api/${slug}/hooks/approve`, { path: SUPERVISE, blob: BLOB })
+    const res = await ask(mint().token)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+  })
+
+  // T7. The dispatch happened while the pair was approved; the revoke lands in
+  // the window between the spawn and the import.
+  it('refuses a pair revoked between dispatch and materialization', async () => {
+    await post(`/api/${slug}/hooks/approve`, { path: SUPERVISE, blob: BLOB })
+    const cred = mint()
+    expect((await ask(cred.token)).status).toBe(200)
+
+    await post(`/api/${slug}/hooks/revoke`, { path: SUPERVISE, blob: BLOB })
+    const res = await ask(cred.token)
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({ reason: 'not-approved' })
+  })
+
+  // Distinct from a revocation, and load-bearing: the server restarts on every
+  // `server/**` edit, taking the credential map with it, and a host mid-run then
+  // gets a miss that is nobody's fault. Collapsing the two would make the T7
+  // check above confoundable by an incidental hot-reload, and would burn a retry
+  // attempt on something that is not the fire's fault.
+  it('answers credential-unknown for a token it never held', async () => {
+    const res = await ask('not-a-token')
+    expect(res.status).toBe(401)
+    expect(await res.json()).toMatchObject({ reason: 'credential-unknown' })
+  })
+
+  it('answers credential-unknown once the credential has expired', async () => {
+    const cred = mint()
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date(Date.now() + 10 * 60_000))
+      const res = await ask(cred.token)
+      expect(res.status).toBe(401)
+      expect(await res.json()).toMatchObject({ reason: 'credential-unknown' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // A credential names one version of one hook. Asking about anything else is
+  // how a narrow credential would become a broad one.
+  const mismatches: [string, { blob?: string; path?: string; fireId?: string }][] = [
+    ['a different blob', { blob: 'c0ffee1c0ffee1c0ffee1c0ffee1c0ffee1c0ffe' }],
+    ['a different path', { path: '.lander/hooks/landed/any/cleanup.js' }],
+    ['a different fire', { fireId: 'fire-2-abc' }],
+  ]
+  it.each(mismatches)('refuses %s', async (_label, over) => {
+    await post(`/api/${slug}/hooks/approve`, { path: SUPERVISE, blob: BLOB })
+    // Approve the other pair too, so the refusal is the credential's doing and
+    // not the approval store's.
+    if (over.path)
+      await post(`/api/${slug}/hooks/approve`, { path: over.path, blob: BLOB })
+    if (over.blob)
+      await post(`/api/${slug}/hooks/approve`, { path: SUPERVISE, blob: over.blob })
+    const res = await materialize(mint().token, {
+      fireId: 'fire-1-abc',
+      path: SUPERVISE,
+      blob: BLOB,
+      ...over,
+    })
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({ reason: 'mismatch' })
+  })
+
+  it('refuses a credential minted for another project', async () => {
+    await post(`/api/${slug}/hooks/approve`, { path: SUPERVISE, blob: BLOB })
+    const res = await ask(mint({ project: 'some-other-project' }).token)
+    expect(res.status).toBe(401)
+  })
+
+  // The header is read by this route and the create route, and nowhere else —
+  // which is what makes "landing, wedging and nudging are absent from the
+  // surface" true without a deny floor on every mutating path. A hook
+  // credential must therefore buy nothing on a route that gates on `anon`, and
+  // nothing at all on one that gates on neither.
+  it('confers nothing on routes that do not read it', async () => {
+    const token = mint().token
+    const hooked = (pathname: string, method = 'POST', body?: unknown) =>
+      app.request(pathname, {
+        method,
+        headers: {
+          'content-type': 'application/json',
+          'x-lander-hook-token': token,
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      })
+
+    // Gates on `anon`: still anonymous.
+    expect((await hooked(`/api/${slug}/hooks`, 'GET')).status).toBe(403)
+    // Gates on `ui`: still not the UI.
+    expect(
+      (await hooked(`/api/${slug}/hooks/approve`, 'POST', {
+        path: SUPERVISE,
+        blob: BLOB,
+      })).status,
+    ).toBe(403)
+    // And the approval store is untouched by any of it.
+    expect(await readFile(store(), 'utf8').catch(() => null)).toBeNull()
   })
 })
 

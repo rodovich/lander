@@ -104,13 +104,17 @@ import {
 import { LEGACY_FLOW, flowCaps, flowRegistry, isAnnouncedFlow } from './flows'
 import {
   approveHookPairs,
+  effectiveApprovals,
   isSafeTrustRoot,
+  pairKey,
+  readHooksStore,
   resolveProjectHooks,
   revokeHookPairs,
   selectorsFor,
   setTrustRoot,
   taskCheckout,
 } from './hooks'
+import { readHookCredential } from './hook-runs'
 import { generateTitle } from './title'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -1346,6 +1350,52 @@ app.post('/api/:project/hooks/approve', async (c) => {
   await approveHookPairs(project.hooksFile, [pair], 'content', {
     at: new Date().toISOString(),
   })
+  return c.json({ ok: true })
+})
+
+// The last gate before a hook body is imported: the host asks whether the pair
+// it was dispatched with is approved *now*, and refuses to materialize if not.
+//
+// Approval gates materialization, not only dispatch. A dispatch and its run are
+// separated by a process spawn and a `git cat-file`, and a human revoking an
+// approval in that window must be obeyed — otherwise "revoke" means "stop the
+// next one", which is not what the button says.
+//
+// Answered by the server rather than the daemon because the approval store is
+// the server's and the daemon holds no approval knowledge — the split increment
+// A established. Three distinct answers, and the distinction between the first
+// two matters: `credential-unknown` means this server restarted and no longer
+// holds the token (it happens on every `server/**` edit, and must not burn a
+// retry attempt or read as a revocation), while `not-approved` is the real T7
+// case.
+app.post('/api/:project/hooks/materialize', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  const cred = readHookCredential(c.req.header('x-lander-hook-token'))
+  if (!cred || cred.project !== project.slug)
+    return c.json(
+      { error: 'unknown or expired hook credential', reason: 'credential-unknown' },
+      401,
+    )
+  const body = await c.req.json<{ fireId?: unknown; path?: unknown; blob?: unknown }>()
+  // The host may only ask about what it was dispatched with. A mismatch is a bug
+  // or an attempt to widen the credential; either way it is not approved.
+  if (
+    body.fireId !== cred.fireId ||
+    body.path !== cred.path ||
+    body.blob !== cred.blob
+  )
+    return c.json(
+      { error: 'credential does not cover this hook version', reason: 'mismatch' },
+      403,
+    )
+  const store = await readHooksStore(project.hooksFile)
+  const approvals = effectiveApprovals(store)
+  if (!approvals.has(pairKey({ path: cred.path, blob: cred.blob })))
+    return c.json(
+      { error: 'this hook version is not approved', reason: 'not-approved' },
+      403,
+    )
   return c.json({ ok: true })
 })
 
