@@ -1,4 +1,10 @@
-import type { FlowMeta, Task, TaskWithProject, TelemetryItem } from './types'
+import type {
+  FlowMeta,
+  ProjectHooks,
+  Task,
+  TaskWithProject,
+  TelemetryItem,
+} from './types'
 
 // The per-flow status telemetry map (agent → items) the tasks poll carries. Global,
 // so every project's response repeats it; an agent with no items is simply absent.
@@ -53,6 +59,48 @@ export async function loadFlows(slug: string): Promise<FlowMeta[]> {
   } catch {
     return []
   }
+}
+
+// What a project's tree declares under .lander/hooks/, and each declared
+// version's approval state. Throws on failure — unlike loadFlows, an empty list
+// here would be a claim ("this project declares no hooks") rather than a
+// degradation, so the caller shows the error instead.
+export async function loadHooks(slug: string): Promise<ProjectHooks> {
+  const r = await fetch(`/api/${slug}/hooks`, { headers: uiHeaders() })
+  const body = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(body.error ?? r.statusText)
+  return body as ProjectHooks
+}
+
+// Approve, or withdraw approval of, one version of one hook. Human-only
+// server-side: an approved hook runs unattended with daemon privileges.
+export async function setHookApproval(
+  slug: string,
+  hook: { path: string; blob: string },
+  approved: boolean,
+): Promise<void> {
+  const r = await fetch(`/api/${slug}/hooks/${approved ? 'approve' : 'revoke'}`, {
+    method: 'POST',
+    headers: uiHeaders(),
+    body: JSON.stringify(hook),
+  })
+  const body = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(body.error ?? r.statusText)
+}
+
+// Name the branch whose hooks run without individual approval, or clear it.
+export async function setTrustedBranch(
+  slug: string,
+  ref: string | null,
+): Promise<string | null> {
+  const r = await fetch(`/api/${slug}/hooks/trust-root`, {
+    method: 'POST',
+    headers: uiHeaders(),
+    body: JSON.stringify({ ref }),
+  })
+  const body = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(body.error ?? r.statusText)
+  return (body.ref ?? null) as string | null
 }
 
 // Fetch and merge tasks across every shown project, tagging each with its

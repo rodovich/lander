@@ -49,6 +49,7 @@ export const ProjectMenu = memo(function ProjectMenu({
   timeFilter,
   setTimeFilter,
   onPickProject,
+  onOpenHooks,
 }: {
   projects: Project[]
   shown: string[]
@@ -59,6 +60,9 @@ export const ProjectMenu = memo(function ProjectMenu({
   setTimeFilter: Dispatch<SetStateAction<TimeFilter>>
   // Fired when a single project is picked, so the new-task form can follow it.
   onPickProject: (slug: string) => void
+  // Opens the project's hook settings in the detail pane. Here because this is
+  // the only project-scoped control in the UI; the panel picks the project.
+  onOpenHooks: () => void
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -216,6 +220,17 @@ export const ProjectMenu = memo(function ProjectMenu({
               <span className="project-menu-path">{label}</span>
             </button>
           ))}
+          <button
+            type="button"
+            className="project-menu-item project-menu-view project-menu-view-first"
+            onClick={() => {
+              onOpenHooks()
+              setMenuOpen(false)
+            }}
+          >
+            <span className="project-menu-check" />
+            <span className="project-menu-path">Hooks…</span>
+          </button>
         </div>
       )}
     </div>

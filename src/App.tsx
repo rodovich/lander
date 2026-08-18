@@ -4,6 +4,7 @@ import { Conversation } from './conversation'
 import { dataTransferHasFiles } from './fileDrop'
 import { lastPathComponent, taskIdFromPath, worktreeName } from './format'
 import { usePersistentState, useSessionState } from './hooks'
+import { HooksPanel } from './hooksPanel'
 import type { TaskAction } from './menus'
 import { NewTaskForm } from './newTaskForm'
 import { tick } from './perf'
@@ -72,6 +73,10 @@ export function App() {
   )
   // The list search box, session-scoped alongside the other list filters.
   const [filter, setFilter] = useSessionState('lander:filter', '')
+  // The project whose hook settings are open in the detail pane, or null for the
+  // ordinary conversation view. Not persisted: it is a place you go, not a mode
+  // the app should still be in tomorrow.
+  const [hooksProject, setHooksProject] = useState<string | null>(null)
 
   // The new-task form's agent/project picks. Session-scoped like the form's
   // draft message (which lives in the form): two tabs keep independent picks,
@@ -176,6 +181,8 @@ export function App() {
   // on unrelated App state (the underlying setters and actions are stable).
   const selectTask = useCallback((id: string, projectSlug: string) => {
     setSelectedTaskId(id)
+    // Picking a task is how you leave the hooks panel; it shares the pane.
+    setHooksProject(null)
     window.history.pushState(null, '', `/${projectSlug}/${id}`)
   }, [])
 
@@ -238,6 +245,9 @@ export function App() {
             timeFilter={timeFilter}
             setTimeFilter={setTimeFilter}
             onPickProject={setNewProject}
+            onOpenHooks={() =>
+              setHooksProject(shown[0] ?? projects[0]?.slug ?? null)
+            }
           />
         )}
         <TaskList
@@ -287,7 +297,14 @@ export function App() {
 
       <div className="detail">
         {error && <div className="error">{error}</div>}
-        {current ? (
+        {hooksProject ? (
+          <HooksPanel
+            projects={projects}
+            slug={hooksProject}
+            setSlug={setHooksProject}
+            onClose={() => setHooksProject(null)}
+          />
+        ) : current ? (
           <>
             <Conversation
               task={current}

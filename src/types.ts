@@ -290,6 +290,45 @@ export type FlowMeta = {
   projectGrantsUnsupportedReason?: string
 }
 
+// One hook module a project's tree declares, with the state of the version it
+// declares. Mirrors server/hooks.ts's HookOutcome by hand, like FlowMeta above.
+//
+// `blob` is the version this tree carries; `runs` is the version that would
+// actually run, which differs when the declared one is unapproved and an earlier
+// version of the same path was approved. `via` and `runsVia` say which of the two
+// independent mechanisms approved it: a human approving that exact version, or
+// the version being present on the trusted branch.
+export type Hook = {
+  path: string
+  blob: string
+  trigger: string
+  by: string
+  name: string
+  state: 'approved' | 'pending'
+  via?: 'trust-root' | 'content'
+  runs: string | null
+  runsVia?: 'trust-root' | 'content'
+  reason?: 'unapproved-version' | 'no-approved-version'
+  searchTruncated?: boolean
+}
+
+// What GET /api/:project/hooks serves: the checkout it read, the trusted branch
+// setting, and every declared hook's state.
+export type ProjectHooks = {
+  cwd: string
+  commit?: string
+  // Why there is no commit to read hooks from: 'not-a-repo' | 'unborn-head'.
+  reason?: string
+  trustRoot: {
+    ref: string | null
+    configured: boolean
+    commit?: string
+    // Why the named branch could not be read: 'unresolved-ref' | 'invalid-ref'.
+    reason?: string
+  }
+  hooks: Hook[]
+}
+
 // The list's time window: tasks updated today, this week (from Sunday), before
 // this week ('older', same Sunday cutoff), or with no bound. 'today'/'week'/
 // 'older' also surface in the dropdown title.

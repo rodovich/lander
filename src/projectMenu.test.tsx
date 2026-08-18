@@ -69,6 +69,7 @@ describe('ProjectMenu closed button', () => {
         timeFilter="today"
         setTimeFilter={() => {}}
         onPickProject={() => {}}
+        onOpenHooks={() => {}}
       />,
     )
     expect(html).toContain('project-select-name')
