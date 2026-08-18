@@ -228,12 +228,101 @@ export type AckMessage = {
   runId: string
 }
 
+// ── Task hooks ─────────────────────────────────────────────────────────────
+// A hook is a flow module a project checks in at
+// `.lander/hooks/<trigger>/<by>/<name>.js` and lander runs when some other task
+// reaches a defined state (docs/tmp/hooks.md). Resolving which modules a tree
+// declares is a git question, so the daemon answers it; whether a given version
+// may run is an approval question, so the server answers that. The two halves
+// meet on these shapes, and neither carries the other's knowledge: the daemon
+// never learns what is approved, and the server's store is an opaque set of
+// (path, blob) strings with no repository semantics.
+
+// One (trigger, by) directory pair to enumerate. An absent field matches every
+// value at that level, so `{}` selects everything the tree declares. Both are
+// open sets of directory names rather than closed unions — adding a principal
+// later must not mean touching a mirrored type.
+export type HookSelector = { trigger?: string; by?: string }
+
+// The approval unit: a path together with the blob it carried. The pair rather
+// than the blob alone, because with the trigger in the path the same content at a
+// different path fires at a different time.
+export type HookPair = { path: string; blob: string }
+
+// One module a commit reaches under `.lander/hooks/`.
+export type HookDeclaration = {
+  path: string
+  blob: string
+  trigger: string
+  by: string
+  name: string
+  // Blobs this path carried earlier in the enumerated commit's ancestry, most
+  // recent first, excluding `blob` itself — the fallback candidates when the
+  // declared version is not approved.
+  ancestry: string[]
+  // The ancestry walk hit its commit limit, so the list is a prefix rather than
+  // the whole history of the path.
+  ancestryTruncated?: boolean
+}
+
+export type HooksResolution = {
+  // The checkout the tree was read from — a task's worktree when it has one.
+  cwd: string
+  // The commit enumerated. Absent when nothing is reachable to enumerate from.
+  commit?: string
+  // Why there is no commit: 'not-a-repo' | 'unborn-head'.
+  reason?: string
+  // Present when the request asked to enumerate; empty when the tree declares
+  // nothing matching.
+  declared?: HookDeclaration[]
+  trustRoot?: {
+    ref: string
+    // Absent when the ref does not resolve in this checkout.
+    commit?: string
+    // Why it did not: 'unresolved-ref' | 'invalid-ref'.
+    reason?: string
+    // Every pair the trust root's tip carries under `.lander/hooks/`, when the
+    // request asked to enumerate.
+    tip?: HookPair[]
+    // Of the pairs the request asked about, those found at that path somewhere in
+    // the trust root's history — a version that has since moved on from the tip.
+    found?: HookPair[]
+    // Paths whose history walk hit its limit, so a miss on one means "not found
+    // within the limit" rather than "never on the trust root".
+    historyTruncated?: string[]
+  }
+}
+
+// Ask the daemon what a checkout declares. Request/response like
+// `project-grant`: the server correlates on `requestId` and times out on its own.
+export type HooksResolveMessage = {
+  type: 'hooks-resolve'
+  requestId: string
+  // The project slug; the daemon maps it to a host path.
+  project: string
+  // Which checkout to read, as cwd hints the daemon resolves the same way it
+  // resolves a run's launch dir — so a task working in a worktree is answered
+  // from that worktree's HEAD. All absent → the project root.
+  flow?: string
+  recordedCwd?: string
+  worktree?: string
+  // The remote-tracking ref this project approves wholesale, when it designates
+  // one. The server holds the setting; the daemon only reads the ref.
+  trustRoot?: string
+  // Enumerate the tree (and, with a trust root, that ref's tip).
+  declare?: { select?: HookSelector[]; ancestryLimit?: number }
+  // Scan the trust root's history for these pairs — the second phase, for
+  // declared pairs the server could answer from neither the tip nor its store.
+  history?: { pairs: HookPair[]; limit?: number }
+}
+
 export type ServerToDaemon =
   | StartRunMessage
   | ProjectGrantMessage
   | InterruptMessage
   | ResumeFromMessage
   | AckMessage
+  | HooksResolveMessage
 
 // ── Daemon → server ────────────────────────────────────────────────────────
 
@@ -380,6 +469,15 @@ export type StatePatchMessage = {
   rev: number
 }
 
+export type HooksResolveResultMessage = {
+  type: 'hooks-resolve-result'
+  requestId: string
+  ok: boolean
+  error?: string
+  status?: number
+  resolution?: HooksResolution
+}
+
 export type DaemonToServer =
   | RegisterMessage
   | UpdateMessage
@@ -389,3 +487,4 @@ export type DaemonToServer =
   | StatePatchMessage
   | ProjectGrantResultMessage
   | TelemetryMessage
+  | HooksResolveResultMessage

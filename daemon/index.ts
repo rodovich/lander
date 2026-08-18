@@ -27,10 +27,13 @@ import type { AgentKind, TelemetryItem } from '../server/protocol'
 import type {
   ServerToDaemon,
   StartRunMessage,
+  HooksResolveMessage,
   RegisterMessage,
   TelemetryMessage,
   ProjectGrantResultMessage,
+  HooksResolveResultMessage,
 } from '../server/protocol'
+import { gitExec, resolveHooks } from './hooks'
 import { statSync } from 'node:fs'
 import { createRunManager, type RunManagerMessage } from './run'
 import { createDrain } from './drain'
@@ -93,7 +96,8 @@ function send(
     | RunManagerMessage
     | RegisterMessage
     | TelemetryMessage
-    | ProjectGrantResultMessage,
+    | ProjectGrantResultMessage
+    | HooksResolveResultMessage,
 ): void {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
 }
@@ -207,6 +211,32 @@ function resolveRunPaths(
     reentryArgs: launch.reentryArgs,
     ...(launch.effectiveCwd ? { effectiveCwd: launch.effectiveCwd } : {}),
   }
+}
+
+// Which checkout a hook resolution reads. The tree that matters is the one the
+// target task is working in, so this goes through the same provider-owned
+// resolveLaunchDir a run does — `effectiveCwd` being where the agent actually
+// works when the flow re-enters a worktree through argv.
+//
+// It falls back to the project root twice over: for a flow the daemon does not
+// know (a resolve can arrive for any task, including one whose flow this build
+// has never heard of), and for a resolved directory that is no longer there (a
+// removed worktree). Answering from the root is the honest degradation — that
+// tree's hooks are the project's — where answering from a missing directory would
+// report "not a git repository" for a repository that plainly is one.
+function resolveHooksCwd(msg: HooksResolveMessage): string {
+  const root = pathBySlug.get(msg.project)
+  if (!root) throw new Error(`daemon serves no project for slug ${msg.project}`)
+  const caps = msg.flow ? CAPS[msg.flow] : undefined
+  if (!caps) return root
+  const launch = caps.resolveLaunchDir({
+    root,
+    recordedCwd: msg.recordedCwd,
+    worktree: msg.worktree,
+    isDir,
+  })
+  const dir = launch.effectiveCwd ?? launch.cwd
+  return isDir(dir) ? dir : root
 }
 
 // Root under which each task's materialized attachment blobs live (cached across
@@ -326,6 +356,17 @@ function onMessage(raw: string): void {
         )
         runManager.failRun(msg.runId, `daemon error during resume: ${err}`)
         break
+      case 'hooks-resolve':
+        // Same reasoning as project-grant: the server is holding a correlated
+        // request that would otherwise hang to its timeout.
+        send({
+          type: 'hooks-resolve-result',
+          requestId: msg.requestId,
+          ok: false,
+          error: `daemon error: ${err}`,
+          status: 500,
+        })
+        break
       case 'interrupt':
       case 'ack':
         // Nothing is waiting on a reply for these, but they must not be silent.
@@ -415,6 +456,35 @@ function handleMessage(msg: ServerToDaemon): void {
         .catch((e) =>
           send({
             type: 'project-grant-result',
+            requestId: msg.requestId,
+            ok: false,
+            error: e instanceof Error ? e.message : String(e),
+            status: 500,
+          }),
+        )
+      break
+    }
+    case 'hooks-resolve': {
+      // Read-only and answerable while draining: it spawns no run and holds
+      // nothing, so a daemon on its way out can still answer one.
+      const cwd = resolveHooksCwd(msg)
+      resolveHooks(gitExec, {
+        cwd,
+        ...(msg.trustRoot ? { trustRoot: msg.trustRoot } : {}),
+        ...(msg.declare ? { declare: msg.declare } : {}),
+        ...(msg.history ? { history: msg.history } : {}),
+      })
+        .then((resolution) =>
+          send({
+            type: 'hooks-resolve-result',
+            requestId: msg.requestId,
+            ok: true,
+            resolution,
+          }),
+        )
+        .catch((e) =>
+          send({
+            type: 'hooks-resolve-result',
             requestId: msg.requestId,
             ok: false,
             error: e instanceof Error ? e.message : String(e),

@@ -9,6 +9,7 @@ import {
   closeRunChannel,
   requestResume,
   requestProjectGrant,
+  requestHooksResolution,
   daemonConnected,
   daemonServes,
 } from './daemon'
@@ -263,6 +264,103 @@ describe('daemon transport handoff', () => {
 
     await d.close()
     await waitFor(() => !daemonConnected())
+  })
+
+  it('routes hook resolution to the primary daemon and resolves its result', async () => {
+    const d = await connectDaemon(port)
+    d.register()
+    await waitFor(() => daemonServes('proj'))
+
+    const result = requestHooksResolution({
+      project: 'proj',
+      trustRoot: 'origin/main',
+      declare: { select: [{ trigger: 'landed', by: 'any' }] },
+      timeoutMs: 1000,
+    })
+    await waitFor(() => d.received.some((m) => m.type === 'hooks-resolve'))
+    const req = d.received.find((m) => m.type === 'hooks-resolve')
+    expect(req).toMatchObject({
+      type: 'hooks-resolve',
+      project: 'proj',
+      trustRoot: 'origin/main',
+      declare: { select: [{ trigger: 'landed', by: 'any' }] },
+    })
+    // `timeoutMs` is the server's own bookkeeping and has no business on the wire.
+    expect(req && 'timeoutMs' in req).toBe(false)
+
+    const resolution = {
+      cwd: '/tmp/proj',
+      commit: 'c0ffee',
+      declared: [
+        {
+          path: '.lander/hooks/landed/any/cleanup.js',
+          blob: 'b10b',
+          trigger: 'landed',
+          by: 'any',
+          name: 'cleanup',
+          ancestry: [],
+        },
+      ],
+    }
+    d.send({
+      type: 'hooks-resolve-result',
+      requestId: req && 'requestId' in req ? req.requestId : '',
+      ok: true,
+      resolution,
+    })
+
+    await expect(result).resolves.toMatchObject({ ok: true, resolution })
+
+    await d.close()
+    await waitFor(() => !daemonConnected())
+  })
+
+  // The two correlated exchanges share one pending-request map, so a reply must
+  // settle its own caller and nobody else's.
+  it('settles concurrent exchanges independently', async () => {
+    const d = await connectDaemon(port)
+    d.register()
+    await waitFor(() => daemonServes('proj'))
+
+    const grant = requestProjectGrant({
+      project: 'proj',
+      flow: 'claude',
+      rule: 'Bash(npm test)',
+      timeoutMs: 1000,
+    })
+    const hooks = requestHooksResolution({
+      project: 'proj',
+      declare: {},
+      timeoutMs: 1000,
+    })
+    await waitFor(() => d.received.some((m) => m.type === 'hooks-resolve'))
+    const hooksReq = d.received.find((m) => m.type === 'hooks-resolve')
+    const grantReq = d.received.find((m) => m.type === 'project-grant')
+
+    // Answered out of order, deliberately.
+    d.send({
+      type: 'hooks-resolve-result',
+      requestId: hooksReq && 'requestId' in hooksReq ? hooksReq.requestId : '',
+      ok: true,
+      resolution: { cwd: '/tmp/proj', declared: [] },
+    })
+    await expect(hooks).resolves.toMatchObject({ ok: true })
+    d.send({
+      type: 'project-grant-result',
+      requestId: grantReq && 'requestId' in grantReq ? grantReq.requestId : '',
+      ok: true,
+    })
+    await expect(grant).resolves.toMatchObject({ ok: true })
+
+    await d.close()
+    await waitFor(() => !daemonConnected())
+  })
+
+  it('answers a hook resolution at once when no daemon is connected', async () => {
+    await waitFor(() => !daemonConnected())
+    await expect(
+      requestHooksResolution({ project: 'proj', declare: {}, timeoutMs: 1000 }),
+    ).resolves.toMatchObject({ ok: false, status: 503 })
   })
 })
 

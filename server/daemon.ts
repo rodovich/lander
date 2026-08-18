@@ -16,6 +16,8 @@ import type {
   SessionMessage,
   TurnContextMessage,
   StatePatchMessage,
+  HooksResolveMessage,
+  HooksResolution,
   AgentKind,
   TelemetryItem,
 } from './protocol'
@@ -79,10 +81,14 @@ const daemons = new Set<WebSocket>()
 const runOwner = new Map<string, WebSocket>()
 const registeredSlugs = new Set<string>()
 const channels = new Map<string, RunChannel>()
-const grantRequests = new Map<
+// Correlated request/response exchanges awaiting their reply, keyed by requestId.
+// Erased to `unknown` because the map is shared across exchange kinds; askDaemon
+// re-narrows on the way out, and each reply handler settles with the shape its
+// own caller asked for.
+const requests = new Map<
   string,
   {
-    resolve: (result: ProjectGrantResponse) => void
+    resolve: (result: unknown) => void
     timer: ReturnType<typeof setTimeout>
   }
 >()
@@ -130,7 +136,8 @@ export function sendToDaemon(msg: ServerToDaemon): boolean {
   if (msg.type === 'start-run') {
     target = primary
     if (target) runOwner.set(msg.runId, target)
-  } else if (msg.type === 'project-grant') {
+  } else if (msg.type === 'project-grant' || msg.type === 'hooks-resolve') {
+    // Not tied to a run, so there is no owner to follow — the primary answers.
     target = primary
   } else {
     target = runOwner.get(msg.runId) ?? primary
@@ -138,6 +145,40 @@ export function sendToDaemon(msg: ServerToDaemon): boolean {
   if (!target) return false
   target.send(JSON.stringify(msg))
   return true
+}
+
+// One correlated exchange with the daemon: mint an id, park a resolver under it,
+// and settle from the matching reply — or from the timeout, or immediately when
+// there is no daemon to take it. Every such exchange must settle on all three
+// paths; a caller left awaiting a reply that will never come is the one failure
+// this shape exists to make impossible to write.
+function askDaemon<T>(
+  build: (requestId: string) => ServerToDaemon,
+  opts: { timeoutMs: number; onTimeout: T; onUnsent: T },
+): Promise<T> {
+  const requestId = randomUUID()
+  return new Promise<T>((resolve) => {
+    const timer = setTimeout(() => {
+      requests.delete(requestId)
+      resolve(opts.onTimeout)
+    }, opts.timeoutMs)
+    timer.unref?.()
+    requests.set(requestId, { resolve: (r) => resolve(r as T), timer })
+    if (sendToDaemon(build(requestId))) return
+    clearTimeout(timer)
+    requests.delete(requestId)
+    resolve(opts.onUnsent)
+  })
+}
+
+// Settle a parked exchange from the daemon's reply. A reply for an id we no
+// longer hold (it already timed out) is dropped.
+function settleRequest(requestId: string, result: unknown): void {
+  const pending = requests.get(requestId)
+  if (!pending) return
+  clearTimeout(pending.timer)
+  requests.delete(requestId)
+  pending.resolve(result)
 }
 
 export type ProjectGrantResponse = {
@@ -155,36 +196,63 @@ export function requestProjectGrant(input: {
   rule: string
   timeoutMs?: number
 }): Promise<ProjectGrantResponse> {
-  const requestId = randomUUID()
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      grantRequests.delete(requestId)
-      resolve({
-        ok: false,
-        error: 'daemon did not answer project grant request',
-        status: 504,
-      })
-    }, input.timeoutMs ?? 15_000)
-    timer.unref?.()
-    grantRequests.set(requestId, { resolve, timer })
-    const sent = sendToDaemon({
+  return askDaemon<ProjectGrantResponse>(
+    (requestId) => ({
       type: 'project-grant',
       requestId,
       project: input.project,
       ...(input.agent ? { agent: input.agent } : {}),
       flow: input.flow,
       rule: input.rule,
-    })
-    if (!sent) {
-      clearTimeout(timer)
-      grantRequests.delete(requestId)
-      resolve({
+    }),
+    {
+      timeoutMs: input.timeoutMs ?? 15_000,
+      onTimeout: {
+        ok: false,
+        error: 'daemon did not answer project grant request',
+        status: 504,
+      },
+      onUnsent: {
         ok: false,
         error: 'no daemon connected for this project',
         status: 503,
-      })
-    }
-  })
+      },
+    },
+  )
+}
+
+export type HooksResolveResponse = {
+  ok: boolean
+  error?: string
+  status?: number
+  resolution?: HooksResolution
+}
+
+// Ask the daemon what a checkout declares under `.lander/hooks/`. Read-only and
+// fast (a couple of `ls-tree`s and a bounded `log`), so it shares the grant
+// path's timeout rather than the longer one a hook *run* will need.
+export function requestHooksResolution(
+  input: Omit<HooksResolveMessage, 'type' | 'requestId'> & {
+    timeoutMs?: number
+  },
+): Promise<HooksResolveResponse> {
+  const { timeoutMs, ...msg } = input
+  return askDaemon<HooksResolveResponse>(
+    (requestId) => ({ type: 'hooks-resolve', requestId, ...msg }),
+    {
+      timeoutMs: timeoutMs ?? 15_000,
+      onTimeout: {
+        ok: false,
+        error: 'daemon did not answer hook resolution request',
+        status: 504,
+      },
+      onUnsent: {
+        ok: false,
+        error: 'no daemon connected for this project',
+        status: 503,
+      },
+    },
+  )
 }
 
 // Open run-ids that no currently-connected daemon owns — candidates to crash once
@@ -365,18 +433,21 @@ export function attachDaemonServer(
         case 'state-patch':
           channels.get(msg.runId)?.push({ kind: msg.type, msg } as RunEvent)
           break
-        case 'project-grant-result': {
-          const pending = grantRequests.get(msg.requestId)
-          if (!pending) break
-          clearTimeout(pending.timer)
-          grantRequests.delete(msg.requestId)
-          pending.resolve({
+        case 'project-grant-result':
+          settleRequest(msg.requestId, {
             ok: msg.ok,
             error: msg.error,
             status: msg.status,
-          })
+          } satisfies ProjectGrantResponse)
           break
-        }
+        case 'hooks-resolve-result':
+          settleRequest(msg.requestId, {
+            ok: msg.ok,
+            error: msg.error,
+            status: msg.status,
+            resolution: msg.resolution,
+          } satisfies HooksResolveResponse)
+          break
         case 'telemetry':
           opts.onTelemetry?.(msg.flow ?? msg.agent, msg.items)
           break
