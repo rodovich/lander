@@ -316,6 +316,94 @@ export type HooksResolveMessage = {
   history?: { pairs: HookPair[]; limit?: number }
 }
 
+// Run one approved hook against one target. Request/response like
+// `hooks-resolve`, with a much longer timeout: a body may run for minutes.
+//
+// The daemon spawns a short-lived host per run and never imports the body
+// itself. Hook bodies are user-authored code with daemon privileges, and a throw
+// or a hang in-process would take down the owner of every in-flight run — the
+// same containment reasoning that puts a ride's flow in its own host, and the
+// reason the in-process `onGrant`/`onStatus` pattern is explicitly not the
+// precedent here.
+export type HookRunMessage = {
+  type: 'hook-run'
+  requestId: string
+  // The project slug; the daemon maps it to a host path.
+  project: string
+  // The fire this run answers. Minted when the fire was recorded and stable
+  // across retries, so an interrupted run's retry is recognizable as the same
+  // fire on both sides.
+  fireId: string
+  // The target, plus the cwd hints that locate its checkout — resolved the same
+  // way a run's launch dir is, so a task working in a worktree is answered from
+  // that worktree.
+  target: {
+    id: string
+    flow?: string
+    recordedCwd?: string
+    worktree?: string
+  }
+  trigger: {
+    kind: string
+    by: string
+    at: string
+    // `ride-ended` only: the ride that closed, and how.
+    rideId?: string
+    outcome?: string
+  }
+  hook: {
+    path: string
+    // The blob to materialize — `HookOutcome.runs`, which is the declared
+    // version when it is approved and the most recent approved ancestor when it
+    // is not. Named for the field it comes from, because dispatching the
+    // *declared* blob instead would make an approved hook stop running the
+    // moment anyone committed an unreviewed edit.
+    runs: string
+    name: string
+    trigger: string
+    by: string
+  }
+  // How the host reaches the server back, and what it presents. Server-owned,
+  // exactly as StartRunMessage.env is.
+  callback: { api: string; project: string; token: string }
+  // The body's own budget, and the point at which the daemon kills the host
+  // group regardless. Both below the server's wait, so a late report is never
+  // dropped by a timed-out exchange.
+  timeoutMs: number
+  killMs: number
+}
+
+// What a hook run did, as the host reports it and the server records it.
+export type HookRunReport = {
+  // `refused` is the T7 case — approval withdrawn between dispatch and
+  // materialization. `credential-unknown` is deliberately separate: the server
+  // restarts on every `server/**` edit and no longer holds the token, which is
+  // nobody's fault and must neither read as a revocation nor burn a retry.
+  outcome:
+    | 'ran'
+    | 'refused'
+    | 'credential-unknown'
+    | 'already-running'
+    | 'error'
+    | 'timeout'
+  // What ctx.report was given, in order.
+  reports: string[]
+  // The tail of whatever the body and its children wrote to stdout/stderr. The
+  // host's own event stream is on fd 3, so this is the body's alone.
+  output?: string
+  error?: string
+  durationMs?: number
+}
+
+export type HookRunResultMessage = {
+  type: 'hook-run-result'
+  requestId: string
+  ok: boolean
+  error?: string
+  status?: number
+  report?: HookRunReport
+}
+
 export type ServerToDaemon =
   | StartRunMessage
   | ProjectGrantMessage
@@ -323,6 +411,7 @@ export type ServerToDaemon =
   | ResumeFromMessage
   | AckMessage
   | HooksResolveMessage
+  | HookRunMessage
 
 // ── Daemon → server ────────────────────────────────────────────────────────
 
@@ -488,3 +577,4 @@ export type DaemonToServer =
   | ProjectGrantResultMessage
   | TelemetryMessage
   | HooksResolveResultMessage
+  | HookRunResultMessage

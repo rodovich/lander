@@ -28,13 +28,17 @@ import type {
   ServerToDaemon,
   StartRunMessage,
   HooksResolveMessage,
+  HookRunMessage,
   RegisterMessage,
   TelemetryMessage,
   ProjectGrantResultMessage,
   HooksResolveResultMessage,
+  HookRunResultMessage,
 } from '../server/protocol'
 import { gitExec, resolveHooks } from './hooks'
+import { runHook } from './hook-run'
 import { statSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { createRunManager, type RunManagerMessage } from './run'
 import { createDrain } from './drain'
 import {
@@ -97,7 +101,8 @@ function send(
     | RegisterMessage
     | TelemetryMessage
     | ProjectGrantResultMessage
-    | HooksResolveResultMessage,
+    | HooksResolveResultMessage
+    | HookRunResultMessage,
 ): void {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
 }
@@ -228,18 +233,21 @@ function resolveRunPaths(
 // The root travels with it because resolution checks that the two are the same
 // repository before reading the target's: both hints are task-writable, so a
 // directory being under the project root does not make it the project's tree.
-function resolveHooksCwd(msg: HooksResolveMessage): {
+function resolveHooksCwd(
+  project: string,
+  hints: { flow?: string; recordedCwd?: string; worktree?: string },
+): {
   root: string
   cwd: string
 } {
-  const root = pathBySlug.get(msg.project)
-  if (!root) throw new Error(`daemon serves no project for slug ${msg.project}`)
-  const caps = msg.flow ? CAPS[msg.flow] : undefined
+  const root = pathBySlug.get(project)
+  if (!root) throw new Error(`daemon serves no project for slug ${project}`)
+  const caps = hints.flow ? CAPS[hints.flow] : undefined
   if (!caps) return { root, cwd: root }
   const launch = caps.resolveLaunchDir({
     root,
-    recordedCwd: msg.recordedCwd,
-    worktree: msg.worktree,
+    recordedCwd: hints.recordedCwd,
+    worktree: hints.worktree,
     isDir,
   })
   const dir = launch.effectiveCwd ?? launch.cwd
@@ -250,6 +258,24 @@ function resolveHooksCwd(msg: HooksResolveMessage): {
 // turns). Overridable for tests/containers; defaults to the OS temp dir.
 // (Claude reads attached images from here via the adapter's --add-dir grant.)
 const FILES_ROOT = process.env.LANDER_FILES_ROOT?.trim() || defaultFilesRoot()
+
+// Where a hook body may keep durable state, per project. A NEW convention, not
+// an existing one: the daemon's other per-project directory (attachments) lives
+// under the OS temp dir, which is right for a cache and wrong for anything a
+// hook is accumulating deliberately. Provided rather than left to a body to
+// guess — the project root is the repository, where logs do not belong, and the
+// server's data layout is not something the daemon knows.
+const HOOK_STATE_ROOT =
+  process.env.LANDER_HOOK_STATE_ROOT?.trim() ||
+  path.join(homedir(), '.lander', 'hook-state')
+
+function hookStateDir(slug: string): string {
+  // The slug is the daemon's own (projectSlug strips everything but
+  // [A-Za-z0-9._-]), but it reaches a path join, so refuse anything that could
+  // walk out of the root rather than trusting provenance.
+  const safe = /^[A-Za-z0-9._-]+$/.test(slug) && slug !== '.' && slug !== '..'
+  return path.join(HOOK_STATE_ROOT, safe ? slug : 'unknown')
+}
 
 // Fetch an attachment's bytes from the server's authed download endpoint,
 // authenticating as the task (the same LANDER_TOKEN/headers the in-task CLI
@@ -308,8 +334,18 @@ const runManager = createRunManager({
 // source edit): finish the runs we're riding, take no new ones, and exit once
 // they're all done — so a code edit never interrupts an in-flight turn. SIGTERM
 // still hard-kills as the max-drain cap.
+// Fire ids whose hook host is alive right now. Held so a hook run counts as work
+// for the drain and is killed with everything else — a hook host is not a
+// `runManager` run, so without this a daemon told to hand off would see
+// `runsHeld() === 0` and `process.exit(0)` straight through a running body,
+// orphaning a detached process that still holds a live credential while the
+// server waits out its timeout and the next sweep dispatches the same fire to
+// the successor. Not hypothetical: daemon-watch sends SIGUSR2 on every
+// `daemon/**` edit.
+const hookRuns = new Map<string, () => void>()
+
 const drain = createDrain({
-  runsHeld: () => runManager.size(),
+  runsHeld: () => runManager.size() + hookRuns.size,
   exit: () => {
     console.log('drained; exiting for handoff')
     process.exit(0)
@@ -368,6 +404,19 @@ function onMessage(raw: string): void {
         // request that would otherwise hang to its timeout.
         send({
           type: 'hooks-resolve-result',
+          requestId: msg.requestId,
+          ok: false,
+          error: `daemon error: ${err}`,
+          status: 500,
+        })
+        break
+      case 'hook-run':
+        // Belt for a synchronous throw before runHook's own .catch is attached
+        // (resolveHooksCwd throws for an unknown slug). The run is released
+        // here too, since the .finally never ran.
+        hookRuns.delete(msg.fireId)
+        send({
+          type: 'hook-run-result',
           requestId: msg.requestId,
           ok: false,
           error: `daemon error: ${err}`,
@@ -471,10 +520,78 @@ function handleMessage(msg: ServerToDaemon): void {
         )
       break
     }
+    case 'hook-run': {
+      // Refused while draining, unlike hooks-resolve: this one spawns a host
+      // that may run for minutes, and a daemon on its way out must not accept
+      // work it would have to abandon. The server treats the refusal as a hold —
+      // no attempt counted, no report item — and retries once the successor is
+      // primary, which is seconds away.
+      //
+      // This is the only mechanism, not a race-closer on top of one: the server
+      // keeps no per-socket draining state and a SIGUSR2'd daemon never
+      // re-registers, so its `primary` still points here for the whole handoff
+      // window.
+      if (drain.draining()) {
+        send({
+          type: 'hook-run-result',
+          requestId: msg.requestId,
+          ok: false,
+          error: 'daemon draining; hook not run',
+          status: 503,
+        })
+        break
+      }
+      // A fire already running here is not run again. Two live bodies for one
+      // fire is a strictly stronger hazard than the retry-after-death that
+      // bodies are asked to tolerate.
+      if (hookRuns.has(msg.fireId)) {
+        send({
+          type: 'hook-run-result',
+          requestId: msg.requestId,
+          ok: true,
+          report: { outcome: 'already-running', reports: [] },
+        })
+        break
+      }
+      const { root, cwd } = resolveHooksCwd(msg.project, msg.target)
+      // Registered before the spawn so a shutdown in the gap still counts it;
+      // the real kill replaces this as soon as the host exists.
+      hookRuns.set(msg.fireId, () => {})
+      // `.catch` INSIDE the handler, like project-grant and hooks-resolve:
+      // onMessage's try/catch covers only a synchronous throw, and a floating
+      // rejection here would leave the server holding the exchange to its
+      // timeout — the swallow that the note in onMessage calls strictly worse
+      // than a crash.
+      runHook(msg, {
+        projectRoot: root,
+        targetCwd: cwd,
+        stateDir: hookStateDir(msg.project),
+        onSpawn: (kill) => hookRuns.set(msg.fireId, kill),
+      })
+        .then((report) =>
+          send({ type: 'hook-run-result', requestId: msg.requestId, ok: true, report }),
+        )
+        .catch((e) =>
+          send({
+            type: 'hook-run-result',
+            requestId: msg.requestId,
+            ok: false,
+            error: e instanceof Error ? e.message : String(e),
+            status: 500,
+          }),
+        )
+        .finally(() => {
+          // Released only once runHook has settled, which it does on the host's
+          // `close` — so a host still tearing down still holds the drain.
+          hookRuns.delete(msg.fireId)
+          drain.check()
+        })
+      break
+    }
     case 'hooks-resolve': {
       // Read-only and answerable while draining: it spawns no run and holds
       // nothing, so a daemon on its way out can still answer one.
-      const { root, cwd } = resolveHooksCwd(msg)
+      const { root, cwd } = resolveHooksCwd(msg.project, msg)
       resolveHooks(gitExec, {
         root,
         cwd,
@@ -515,8 +632,11 @@ function handleMessage(msg: ServerToDaemon): void {
 
 // Kill any live agent children — best effort, on our own termination — so a
 // daemon restart doesn't orphan them (decision 2 aborts in-flight turns anyway).
+// Hook hosts too: they are detached process groups this process spawned, and
+// they are not runs, so runManager does not know about them.
 function killChildren(): void {
   runManager.killChildren()
+  for (const kill of hookRuns.values()) kill()
 }
 process.on('SIGTERM', () => {
   killChildren()

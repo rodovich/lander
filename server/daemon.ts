@@ -18,6 +18,8 @@ import type {
   StatePatchMessage,
   HooksResolveMessage,
   HooksResolution,
+  HookRunMessage,
+  HookRunReport,
   AgentKind,
   TelemetryItem,
 } from './protocol'
@@ -136,8 +138,19 @@ export function sendToDaemon(msg: ServerToDaemon): boolean {
   if (msg.type === 'start-run') {
     target = primary
     if (target) runOwner.set(msg.runId, target)
-  } else if (msg.type === 'project-grant' || msg.type === 'hooks-resolve') {
+  } else if (
+    msg.type === 'project-grant' ||
+    msg.type === 'hooks-resolve' ||
+    msg.type === 'hook-run'
+  ) {
     // Not tied to a run, so there is no owner to follow — the primary answers.
+    //
+    // For `hook-run` that means a DRAINING daemon may receive it: `primary` is
+    // reassigned only when a non-draining daemon registers, and a daemon told to
+    // drain neither re-registers nor drops its socket, so it stays primary for
+    // the whole handoff window. The daemon refuses one while draining and the
+    // server treats that as a hold, which is the mechanism rather than a
+    // fallback — there is no per-socket draining state here to route around it.
     target = primary
   } else {
     target = runOwner.get(msg.runId) ?? primary
@@ -244,6 +257,43 @@ export function requestHooksResolution(
       onTimeout: {
         ok: false,
         error: 'daemon did not answer hook resolution request',
+        status: 504,
+      },
+      onUnsent: {
+        ok: false,
+        error: 'no daemon connected for this project',
+        status: 503,
+      },
+    },
+  )
+}
+
+export type HookRunResponse = {
+  ok: boolean
+  error?: string
+  status?: number
+  report?: HookRunReport
+}
+
+// Ask the daemon to run one approved hook. Unlike every other exchange here this
+// one waits out a whole body, so its timeout is the top of the ladder the daemon
+// enforces from below: the body's own budget, then the daemon's hard group kill
+// and report assembly, then this. A late reply is dropped by settleRequest, and
+// a dropped reply means the fire is retried against a body whose direct effects
+// are explicitly not deduped — so the ordering is the contract, not a guess.
+export function requestHookRun(
+  // `waitMs` is how long WE wait; `timeoutMs`/`killMs` on the message are the
+  // body's budget and the daemon's kill, both below it.
+  input: Omit<HookRunMessage, 'type' | 'requestId'> & { waitMs: number },
+): Promise<HookRunResponse> {
+  const { waitMs, ...msg } = input
+  return askDaemon<HookRunResponse>(
+    (requestId) => ({ type: 'hook-run', requestId, ...msg }),
+    {
+      timeoutMs: waitMs,
+      onTimeout: {
+        ok: false,
+        error: 'daemon did not answer hook run request',
         status: 504,
       },
       onUnsent: {
@@ -447,6 +497,14 @@ export function attachDaemonServer(
             status: msg.status,
             resolution: msg.resolution,
           } satisfies HooksResolveResponse)
+          break
+        case 'hook-run-result':
+          settleRequest(msg.requestId, {
+            ok: msg.ok,
+            error: msg.error,
+            status: msg.status,
+            report: msg.report,
+          } satisfies HookRunResponse)
           break
         case 'telemetry':
           opts.onTelemetry?.(msg.flow ?? msg.agent, msg.items)
