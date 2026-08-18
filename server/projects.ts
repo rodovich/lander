@@ -28,6 +28,11 @@ export type Project = {
   // source of truth the web UI renders and the browser uploads to; the daemon
   // lazily materializes a task's attachments from here into its own per-task dir.
   attachmentsDir: string
+  // Sibling of dataDir: ./data/<normalized-project-path>/hooks.json, the task-hook
+  // approval store — the trust root this project designates (if any) and the
+  // monotonic set of approved (path, blob) pairs. A file rather than a directory:
+  // it is one small record per project, read and rewritten whole.
+  hooksFile: string
 }
 
 // Namespace each project's tasks under ./data/<normalized-project-path>/tasks.
@@ -79,6 +84,7 @@ export function parseProjects(
       archiveDir: path.join(dataRoot, norm, 'archived'),
       flowsDir: path.join(dataRoot, norm, 'flows'),
       attachmentsDir: path.join(dataRoot, norm, 'attachments'),
+      hooksFile: path.join(dataRoot, norm, 'hooks.json'),
     })
   }
   return projects

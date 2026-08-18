@@ -52,6 +52,7 @@ describe('parseProjects', () => {
     archiveDir: path.join(root, norm, 'archived'),
     flowsDir: path.join(root, norm, 'flows'),
     attachmentsDir: path.join(root, norm, 'attachments'),
+    hooksFile: path.join(root, norm, 'hooks.json'),
   })
 
   it('splits PROJECT_DIRS on newlines, trims, and drops empty lines', () => {

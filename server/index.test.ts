@@ -120,6 +120,52 @@ describe('flow registry endpoint', () => {
   })
 })
 
+// The hooks endpoint's own half: who may ask, what it refuses to ask the daemon,
+// and how it fails when no daemon can answer. What a tree actually declares is
+// the daemon's answer (daemon/hooks.test.ts) and the join is the store's
+// (server/hooks.test.ts); no daemon is connected in this suite.
+describe('hooks endpoint', () => {
+  const get = (query: string) =>
+    app.request(`/api/${slug}/hooks${query}`, {
+      headers: { 'x-lander-ui-token': UI_TOKEN },
+    })
+
+  it('404s an unknown project', async () => {
+    const res = await app.request('/api/not-a-project/hooks', {
+      headers: { 'x-lander-ui-token': UI_TOKEN },
+    })
+    expect(res.status).toBe(404)
+  })
+
+  it('refuses an unidentified caller', async () => {
+    const res = await app.request(`/api/${slug}/hooks`)
+    expect(res.status).toBe(403)
+  })
+
+  it.each(['?trigger=../etc', '?by=a b', '?trigger=-x'])(
+    'rejects %s before it reaches the daemon',
+    async (query) => {
+      const res = await get(query)
+      expect(res.status).toBe(400)
+    },
+  )
+
+  it('404s a task it is asked to resolve against that does not exist', async () => {
+    const res = await get('?task=nosuchtask')
+    expect(res.status).toBe(404)
+  })
+
+  it('reports that no daemon can answer, rather than answering emptily', async () => {
+    const res = await get('?trigger=landed&by=agent')
+    // An empty hook list and "nobody could look" are different facts, and only
+    // one of them means "this task declares no hooks".
+    expect(res.status).toBe(503)
+    expect(await res.json()).toMatchObject({
+      error: 'no daemon connected for this project',
+    })
+  })
+})
+
 describe('server task provider behavior', () => {
   it('stores the configured default provider on new tasks', async () => {
     const task = await createTask('Codex default task')

@@ -3,7 +3,7 @@
 // of the server's wiring) so it can be unit-tested against a temp dir; index.ts
 // binds these to the concrete Task type via thin wrappers.
 
-import { readdir, readFile, writeFile, rename, stat } from 'node:fs/promises'
+import { mkdir, readdir, readFile, writeFile, rename, stat } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 
@@ -162,6 +162,54 @@ export function mutateTask<T>(
     if (chains.get(file) === tail) chains.delete(file)
   })
   return run
+}
+
+// Read-modify-write a JSON file that may not exist yet, on the same per-file
+// queue as mutateTask — so a record whose absence is its initial state (the hook
+// approval store) gets the same atomicity as a task without a create-then-mutate
+// dance that two callers could race. Returns the committed value.
+export function mutateJson<T>(
+  file: string,
+  initial: () => T,
+  fn: (value: T) => void,
+): Promise<T> {
+  const prior = chains.get(file) ?? Promise.resolve()
+  const run = prior.then(
+    () => applyJsonMutation<T>(file, initial, fn),
+    () => applyJsonMutation<T>(file, initial, fn),
+  )
+  const tail = run.then(
+    () => {},
+    () => {},
+  )
+  chains.set(file, tail)
+  void tail.then(() => {
+    if (chains.get(file) === tail) chains.delete(file)
+  })
+  return run
+}
+
+async function applyJsonMutation<T>(
+  file: string,
+  initial: () => T,
+  fn: (value: T) => void,
+): Promise<T> {
+  let value: T
+  try {
+    value = JSON.parse(await readFile(file, 'utf8')) as T
+  } catch {
+    // Missing or unreadable both start from the initial value. A corrupt file is
+    // deliberately overwritten rather than made fatal: this store's contents are
+    // re-derivable (a trust-root pair rescans; a content approval is re-granted),
+    // and a parse error that wedged every write would be worse than losing them.
+    value = initial()
+  }
+  fn(value)
+  // The per-project data dir exists once a task has been created there, which is
+  // not a precondition for approving a hook.
+  await mkdir(path.dirname(file), { recursive: true })
+  await writeTask(file, value)
+  return value
 }
 
 async function applyMutation<T>(

@@ -28,6 +28,7 @@ import {
 } from './daemon'
 import type {
   AgentKind,
+  HookSelector,
   RevivedMarker,
   StartRunMessage,
   TelemetryItem,
@@ -101,6 +102,7 @@ import {
   type AskForm,
 } from './asks'
 import { LEGACY_FLOW, flowCaps, flowRegistry, isAnnouncedFlow } from './flows'
+import { resolveProjectHooks, selectorsFor, taskCheckout } from './hooks'
 import { generateTitle } from './title'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -1220,6 +1222,67 @@ app.get('/api/:project/flows', (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
   return c.json({ flows: flowRegistry(project.slug) })
+})
+
+// A trigger or principal, as the directory level naming it. An open set — adding
+// a principal must not mean editing a union here — so this validates the shape of
+// a directory name rather than enumerating the values.
+const HOOK_SEGMENT = /^[\w][\w.-]{0,63}$/
+
+// What this project's tree declares under `.lander/hooks/`, and what each
+// declared version's approval state is. The daemon answers the git half (the
+// server has no repository access); the store answers the approval half.
+//
+// `?trigger=` and `?by=` narrow it to what one transition would select — `by`
+// implying `any` alongside it, as dispatch does. `?task=` resolves against that
+// task's own checkout, which is the tree whose hooks would actually run for it;
+// without it the project root answers.
+//
+// Identified callers only. It exposes no file content — paths, blobs and states —
+// but it does describe the project's tree, and an anon caller has no business
+// with it.
+app.get('/api/:project/hooks', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  const principal = await resolvePrincipal(c.req)
+  if (principal.kind === 'anon') return c.json({ error: 'not authorized' }, 403)
+
+  const trigger = c.req.query('trigger')
+  const by = c.req.query('by')
+  for (const [name, value] of [
+    ['trigger', trigger],
+    ['by', by],
+  ] as const)
+    if (value !== undefined && !HOOK_SEGMENT.test(value))
+      return c.json({ error: `invalid ${name}` }, 400)
+  const select: HookSelector[] | undefined =
+    trigger && by
+      ? selectorsFor(trigger, by)
+      : trigger
+        ? [{ trigger }]
+        : by
+          ? [{ by }]
+          : undefined
+
+  let checkout: Awaited<ReturnType<typeof taskCheckout>> = {}
+  const taskId = c.req.query('task')
+  if (taskId) {
+    if (!TASK_ID.test(taskId)) return c.json({ error: 'invalid task id' }, 400)
+    checkout = await taskCheckout(project, taskId)
+    if (!checkout) return c.json({ error: 'task not found' }, 404)
+  }
+
+  const result = await resolveProjectHooks({
+    project,
+    ...(select ? { select } : {}),
+    ...checkout,
+  })
+  if (!result.ok)
+    return c.json(
+      { error: result.error },
+      result.status as ContentfulStatusCode,
+    )
+  return c.json(result.hooks)
 })
 
 // Flow names are bare filenames (<name>.js under the project's flows dir), so
