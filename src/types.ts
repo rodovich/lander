@@ -166,7 +166,29 @@ export type AskItem = ItemCommon & {
   origin?: 'retry'
 }
 
-export type Item = MessageItem | ToolItem | EventItem | AskItem
+// A task hook's account of itself. A hook run has no task and no ride, so its
+// report lands on the target it fired for — which is where someone asking "why
+// did this fire" looks.
+//
+// It carries `ride`, not `rideId`: buildTimeline routes anything with a `rideId`
+// into that ride's bubble before it looks at the kind, and the report is about a
+// turn rather than part of one.
+export type HookItem = ItemCommon & {
+  kind: 'hook'
+  hook: string
+  path: string
+  trigger: string
+  by: string
+  fireId: string
+  ride?: string
+  outcome: string
+  text?: string
+  output?: string
+  error?: string
+  durationMs?: number
+}
+
+export type Item = MessageItem | ToolItem | EventItem | AskItem | HookItem
 
 export type Task = {
   // The task's own short id (a nanoid; legacy tasks carry the uuid they were

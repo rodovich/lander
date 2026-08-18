@@ -30,7 +30,7 @@
 //   - `now` anchors an open ride's entry so the in-flight turn sorts by the wall
 //     clock, not the timestamp of whatever it happens to have streamed first.
 
-import type { Item, MessageItem, EventItem, AskItem, Ride } from './types'
+import type { Item, MessageItem, EventItem, AskItem, HookItem, Ride } from './types'
 
 export type TimelineEntry =
   // A user message bubble (out of any ride). `queued` rides on the item.
@@ -44,6 +44,11 @@ export type TimelineEntry =
   // An unanchored (platform) ask, standing on its own where it was raised. Its
   // prompt is the entry's substance; the form renders only while it's open.
   | { kind: 'ask'; at: string; ask: AskItem }
+  // A task hook's report. Chronological by ARRIVAL, not by the moment it
+  // answers: a fire is dispatched a sweep and a body's runtime after its
+  // trigger, and this stream trusts array order rather than sorting by `at`.
+  // The item's `ride` is the join back to the turn it is about.
+  | { kind: 'hook'; at: string; hook: HookItem }
 
 export function buildTimeline(
   task: { items?: Item[]; rides?: Ride[] },
@@ -103,6 +108,7 @@ export function buildTimeline(
       continue
     }
     if (it.kind === 'event') out.push({ kind: 'event', at: it.at, event: it })
+    else if (it.kind === 'hook') out.push({ kind: 'hook', at: it.at, hook: it })
     else if (it.kind === 'message')
       out.push({ kind: 'user', at: it.at, item: it })
   }

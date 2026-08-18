@@ -5,7 +5,7 @@
 // The subset of a ride item these helpers read. A client Item satisfies it
 // structurally, so callers pass a ride's items straight through.
 export type BlockedItem = {
-  kind: 'message' | 'tool' | 'event' | 'ask'
+  kind: 'message' | 'tool' | 'event' | 'ask' | 'hook'
   name?: string
   rule?: string
   status?: string

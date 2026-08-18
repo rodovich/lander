@@ -117,6 +117,7 @@ import {
   taskCheckout,
 } from './hooks'
 import { readHookCredential } from './hook-runs'
+import { dispatchPendingHooks } from './hook-dispatch'
 import { generateTitle } from './title'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -1083,8 +1084,43 @@ async function deliverScheduledMessages(
 // (and one on boot) acts as soon as each is due, or right away if its time
 // already passed while the server was down. launchTask guards against launching
 // one twice.
+// Set while a sweep is in flight. The sweep is `setInterval`-driven with no
+// coupling to its own completion, so a slow pass already overlapped the next one
+// — and this increment puts more work beneath it.
+//
+// Cleared in a `finally`, and that is not decoration: the sweep has no internal
+// try/catch around `awaitSatisfied`/`launchTask`, so a latched flag would kill
+// scheduled-message delivery, deferred launches and every `lander rest` wakeup
+// for the whole instance until a restart. The guard is against a HANG; a
+// rejection needs no guard, since with no `unhandledRejection` handler the
+// process dies and `tsx watch` brings it back.
+let sweeping = false
+
+// How many tasks per project may have their fires dispatched in one sweep. A
+// rate limit, paired with the instance-wide ceiling on concurrent hook hosts in
+// hook-runs.ts — this one keeps a backlog from being fired off all at once, that
+// one keeps the daemon from holding forty Node processes at a time.
+//
+// Per project rather than global: the sweep walks PROJECTS in order and readdir
+// in order, so a single global budget would be consumed by the same early tasks
+// in the same early project every pass, and later projects would never dispatch
+// at all — silently, since a hold records nothing.
+const MAX_HOOK_DISPATCHES_PER_SWEEP = 4
+
 async function launchScheduled(): Promise<void> {
+  if (sweeping) return
+  sweeping = true
+  try {
+    await sweepOnce()
+  } finally {
+    sweeping = false
+  }
+}
+
+async function sweepOnce(): Promise<void> {
   const now = Date.now()
+  const api =
+    process.env.LANDER_PUBLIC_API?.trim() || `http://localhost:${port}`
   for (const project of PROJECTS) {
     let names: string[]
     try {
@@ -1092,6 +1128,7 @@ async function launchScheduled(): Promise<void> {
     } catch {
       continue
     }
+    let dispatched = 0
     for (const name of names) {
       if (!name.endsWith('.json')) continue
       const id = name.slice(0, -'.json'.length)
@@ -1109,6 +1146,20 @@ async function launchScheduled(): Promise<void> {
       // triggers); just gate on there being anything pending.
       if (task.scheduledMessages?.length)
         await deliverScheduledMessages(project, id, now)
+      // Dispatch this task's recorded fires. ABOVE the `running` guard below,
+      // for the same reason scheduled-message delivery is: `running` holds every
+      // task with a live driveTask, including one working through a chain of
+      // queued turns, which is the common shape here. Below it, a busy task's
+      // fires would sit until its whole chain ended and then age out — and the
+      // symptom would be "hooks mostly work".
+      //
+      // Not awaited: a body may run for minutes, and the sweep also delivers
+      // every project's scheduled messages. dispatchPendingHooks has its own
+      // per-task guard and never rejects.
+      if (task.pendingHooks?.length && dispatched < MAX_HOOK_DISPATCHES_PER_SWEEP) {
+        dispatched++
+        void dispatchPendingHooks(project, id, { api })
+      }
       // Then launch a deferred task whose trigger has fired.
       if (running.has(id)) continue
       const timeDue =

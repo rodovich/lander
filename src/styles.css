@@ -1260,6 +1260,20 @@ body {
   opacity: 0.55;
 }
 
+/* A hook report's failure line and its captured output. The body ran outside any
+   ride, so neither is a tool result — the output is whatever it printed. */
+.hook-error {
+  color: var(--wedged);
+}
+
+.hook-output {
+  margin: 0;
+  overflow-x: auto;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
 .message-text {
   word-break: break-word;
   line-height: 1.6;

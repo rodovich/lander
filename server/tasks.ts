@@ -323,7 +323,41 @@ export type AskItem = ItemCommon & {
   origin?: 'retry'
 }
 
-export type Item = MessageItem | ToolItem | EventItem | AskItem
+// A hook run's account of itself, on the target's timeline.
+//
+// A hook run has no task and no ride of its own, so this is where "why did this
+// fire, or why didn't it" gets answered. It records what the body reported plus
+// the host's captured output — a body stays debuggable without a rendered
+// transcript, which is the price of not creating a task per fire.
+//
+// It carries `ride`, never `rideId`: buildTimeline routes any item with a
+// `rideId` into the ride bubble before it looks at the kind, and counts it
+// toward `ridesWithItems`, which changes where an anchored ask renders. The
+// report belongs beside the conversation, not inside the turn it is about.
+export type HookItem = ItemCommon & {
+  kind: 'hook'
+  // The hook's display name and the path that is its identity.
+  hook: string
+  path: string
+  trigger: string
+  by: string
+  fireId: string
+  // The ride a `ride-ended` fire answered, when there was one.
+  ride?: string
+  // ran | refused | credential-unknown | error | timeout | dispatch-failed
+  outcome: string
+  // What ctx.report was given, joined.
+  text?: string
+  // The tail of what the body wrote. NOTE for hook authors: this is served on
+  // the task's public record, so whatever a body prints is published, not
+  // logged.
+  output?: string
+  error?: string
+  // How long the run took, so a fire's cost is observable without reading logs.
+  durationMs?: number
+}
+
+export type Item = MessageItem | ToolItem | EventItem | AskItem | HookItem
 
 // ── Item-log builders (v2 storage) ──────────────────────────────────────────
 
@@ -396,6 +430,27 @@ export function pushEventItem(
     ...(ev.title !== undefined ? { title: ev.title } : {}),
     ...(ev.scheduledFor !== undefined ? { scheduledFor: ev.scheduledFor } : {}),
     ...(ev.awaiting !== undefined ? { awaiting: ev.awaiting } : {}),
+  }
+  ;(task.items ??= []).push(item)
+  return item
+}
+
+// Append a hook run's report (out of any ride, like a user message or an event).
+//
+// Deliberately does NOT bump `updatedAt`: the sidebar sorts on it, so a report
+// would resurface a resting task to the top of the list for a finding that, in a
+// report-only hook, nobody is being asked to act on — at the gate's own measured
+// rate, on roughly a fifth of all ride ends.
+export function pushHookItem(
+  task: { items?: Item[] },
+  hook: Omit<HookItem, 'id' | 'at' | 'kind'>,
+  at: string,
+): HookItem {
+  const item: HookItem = {
+    id: nextItemId(task, at),
+    at,
+    kind: 'hook',
+    ...hook,
   }
   ;(task.items ??= []).push(item)
   return item

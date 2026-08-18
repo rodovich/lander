@@ -3,7 +3,7 @@
 // separator that splits text sequences). A ToolItem/MessageItem satisfies this
 // structurally, so callers pass a ride's items straight through.
 type CollapsibleItem = {
-  kind: 'message' | 'tool' | 'event' | 'ask'
+  kind: 'message' | 'tool' | 'event' | 'ask' | 'hook'
   text?: string
 }
 

@@ -340,6 +340,25 @@ export const Conversation = memo(function Conversation({
               </div>
             )
           }
+          if (entry.kind === 'hook') {
+            // A hook's report, in the platform's voice like a standalone ask:
+            // the run had no task and no ride of its own, so this is its only
+            // account of itself. The hook is named because a project may
+            // declare several, and the outcome because "found nothing" and
+            // "could not run" are different answers.
+            const h = entry.hook
+            return (
+              <div className="message message-platform" key={`h-${h.id}`}>
+                <div className="message-head">
+                  <span className="message-role">hook {h.hook}</span>
+                  <span className="message-time">{formatTimestamp(h.at)}</span>
+                </div>
+                {h.text && <MessageText text={h.text} linkTask={linkTask} />}
+                {h.error && <div className="hook-error">{h.error}</div>}
+                {h.output && <pre className="hook-output">{h.output}</pre>}
+              </div>
+            )
+          }
           if (entry.kind === 'user') {
             const m = entry.item
             return (

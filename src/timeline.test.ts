@@ -68,7 +68,9 @@ const seq = (items: ReturnType<typeof buildTimeline>['items']) =>
         ? `user:${it.item.id}`
         : it.kind === 'ask'
           ? `ask:${it.ask.id}`
-          : `asst:${it.ride.id}`,
+          : it.kind === 'hook'
+            ? `hook:${it.hook.id}`
+            : `asst:${it.ride.id}`,
   )
 
 describe('buildTimeline ride grouping', () => {
