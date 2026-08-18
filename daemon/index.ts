@@ -224,11 +224,18 @@ function resolveRunPaths(
 // removed worktree). Answering from the root is the honest degradation — that
 // tree's hooks are the project's — where answering from a missing directory would
 // report "not a git repository" for a repository that plainly is one.
-function resolveHooksCwd(msg: HooksResolveMessage): string {
+//
+// The root travels with it because resolution checks that the two are the same
+// repository before reading the target's: both hints are task-writable, so a
+// directory being under the project root does not make it the project's tree.
+function resolveHooksCwd(msg: HooksResolveMessage): {
+  root: string
+  cwd: string
+} {
   const root = pathBySlug.get(msg.project)
   if (!root) throw new Error(`daemon serves no project for slug ${msg.project}`)
   const caps = msg.flow ? CAPS[msg.flow] : undefined
-  if (!caps) return root
+  if (!caps) return { root, cwd: root }
   const launch = caps.resolveLaunchDir({
     root,
     recordedCwd: msg.recordedCwd,
@@ -236,7 +243,7 @@ function resolveHooksCwd(msg: HooksResolveMessage): string {
     isDir,
   })
   const dir = launch.effectiveCwd ?? launch.cwd
-  return isDir(dir) ? dir : root
+  return { root, cwd: isDir(dir) ? dir : root }
 }
 
 // Root under which each task's materialized attachment blobs live (cached across
@@ -467,8 +474,9 @@ function handleMessage(msg: ServerToDaemon): void {
     case 'hooks-resolve': {
       // Read-only and answerable while draining: it spawns no run and holds
       // nothing, so a daemon on its way out can still answer one.
-      const cwd = resolveHooksCwd(msg)
+      const { root, cwd } = resolveHooksCwd(msg)
       resolveHooks(gitExec, {
+        root,
         cwd,
         ...(msg.trustRoot ? { trustRoot: msg.trustRoot } : {}),
         ...(msg.declare ? { declare: msg.declare } : {}),

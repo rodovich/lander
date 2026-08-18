@@ -56,6 +56,22 @@ export function isSafeRef(ref: string): boolean {
   return REF_SAFE.test(ref) && !ref.includes('..')
 }
 
+// The full ref a designated trust root resolves to — always under
+// `refs/remotes/`, never whatever git's lookup order happens to prefer.
+//
+// Both halves of that are load-bearing. Git resolves a bare name by checking
+// `refs/heads/` BEFORE `refs/remotes/`, so a local branch literally named
+// `origin/main` shadows the remote-tracking ref of the same name — and creating
+// one is a typo-grade command, not the deliberate `update-ref` forgery the design
+// accepts as out of scope (docs/tmp/hooks.md §5). Qualifying here also means a
+// human who types `main` designates `refs/remotes/main`, which almost never
+// exists, rather than the local branch any agent that can merge could advance:
+// the remote-tracking requirement stops being a comment and becomes the lookup.
+export function trustRootRef(ref: string): string {
+  const bare = ref.replace(/^refs\/remotes\//, '')
+  return `refs/remotes/${bare}`
+}
+
 export const gitExec: GitExec = (cwd, args, input) =>
   new Promise((resolve) => {
     const child = execFile(
@@ -83,13 +99,20 @@ export const gitExec: GitExec = (cwd, args, input) =>
 export function parseHookPath(
   p: string,
 ): { trigger: string; by: string; name: string } | null {
+  // A newline would split a `cat-file --batch-check` input line in two; `-z`
+  // parsing means such a path can actually reach here.
+  if (p.includes('\n')) return null
   const parts = p.split('/')
   if (parts.length !== 5) return null
   const [dot, hooks, trigger, by, file] = parts
   if (dot !== '.lander' || hooks !== 'hooks') return null
   if (!trigger || !by || !file.endsWith('.js')) return null
+  // `.` and `..` are legal characters-wise but name a directory rather than a
+  // trigger or a principal, and the server mirrors this grammar to key its
+  // store.
+  if ([trigger, by].some((s) => s === '.' || s === '..')) return null
   const name = file.slice(0, -'.js'.length)
-  if (!name) return null
+  if (!name || name === '.' || name === '..') return null
   return { trigger, by, name }
 }
 
@@ -156,7 +179,23 @@ async function lsHooks(
   cwd: string,
   commit: string,
 ): Promise<TreeEntry[]> {
-  const r = await git(cwd, ['ls-tree', '-z', '-r', commit, '--', HOOKS_ROOT])
+  // `--full-tree` because a pathspec is resolved relative to the PROCESS cwd, not
+  // the repository root, and the cwd here is wherever the target task works — for
+  // Codex, the directory its last turn ended in, which `POST /tasks/:id/cwd`
+  // explicitly permits to be a subdirectory. Without it, `.lander/hooks` names
+  // `<subdir>/.lander/hooks`, every project resolves to zero hooks from a
+  // subdirectory, and the answer is indistinguishable from "declares none".
+  // It also makes the reported paths repository-root-relative, which is what
+  // parseHookPath and the approval store are keyed on.
+  const r = await git(cwd, [
+    'ls-tree',
+    '--full-tree',
+    '-z',
+    '-r',
+    commit,
+    '--',
+    HOOKS_ROOT,
+  ])
   // A tree with no `.lander/hooks` exits 0 with no output, so a failure here is a
   // real one (a bad commit-ish); an empty answer is indistinguishable from "no
   // hooks", which is the correct reading either way.
@@ -165,11 +204,27 @@ async function lsHooks(
 
 // Every blob one path has carried, most recent first, walking back from a commit.
 // `git log` names the commits that touched the path; one batched `cat-file`
-// resolves each to the blob the path held there. Consecutive duplicates collapse
-// (a merge can list a commit that changed nothing at the path).
+// resolves each to the blob the path held there, and each blob is kept at its
+// first (most recent) appearance.
 //
-// `truncated` reports that the walk hit its limit — which is what keeps a
-// "not found" answer from being cached as "never existed".
+// `--full-history` because default history simplification follows ONE parent
+// through a merge, so a version that is genuinely reachable from the enumerated
+// commit can be missing from the walk — verified: a version committed on the
+// mainline and then superseded by a merge taking the other side's file does not
+// appear without it. That would break both promises this function serves: the
+// fallback would skip an approved version and report the hook as unrunnable, and
+// the trust-root scan would demand approval for a version that did reach the
+// branch. `--topo-order` because "most recent" must mean ancestry, not a commit
+// date an author can set to anything.
+//
+// `:(top)` anchors the pathspec at the repository root for the same reason
+// `lsHooks` passes `--full-tree` — the cwd may be a subdirectory of it.
+//
+// `truncated` means "absence is not proven here", and covers both the walk
+// hitting its limit and git failing to answer at all. Its whole job is to keep a
+// "not found" from being cached as "never existed", so a failure has to take the
+// same branch as a limit; reporting a git error as an exhaustive empty history is
+// how a transient failure becomes a permanent wrong answer.
 async function pathBlobHistory(
   git: GitExec,
   cwd: string,
@@ -180,12 +235,14 @@ async function pathBlobHistory(
   const log = await git(cwd, [
     'log',
     '--format=%H',
+    '--full-history',
+    '--topo-order',
     `-n${limit}`,
     start,
     '--',
-    hookPath,
+    `:(top)${hookPath}`,
   ])
-  if (!log.ok) return { blobs: [], truncated: false }
+  if (!log.ok) return { blobs: [], truncated: true }
   const commits = log.stdout.split('\n').filter(Boolean)
   if (!commits.length) return { blobs: [], truncated: false }
   const batch = await git(
@@ -193,15 +250,17 @@ async function pathBlobHistory(
     ['cat-file', '--batch-check=%(objectname) %(objecttype)'],
     commits.map((c) => `${c}:${hookPath}\n`).join(''),
   )
+  if (!batch.ok) return { blobs: [], truncated: true }
+  const seen = new Set<string>()
   const blobs: string[] = []
-  if (batch.ok)
-    for (const line of batch.stdout.split('\n')) {
-      const [object, type] = line.split(' ')
-      // A `missing` line is the path not existing at that commit — the deletion
-      // side of a rename, or the commit that introduced it.
-      if (type !== 'blob') continue
-      if (blobs[blobs.length - 1] !== object) blobs.push(object)
-    }
+  for (const line of batch.stdout.split('\n')) {
+    const [object, type] = line.split(' ')
+    // A `missing` line is the path not existing at that commit — the deletion
+    // side of a rename, or the commit that introduced it.
+    if (type !== 'blob' || seen.has(object)) continue
+    seen.add(object)
+    blobs.push(object)
+  }
   return { blobs, truncated: commits.length >= limit }
 }
 
@@ -218,7 +277,48 @@ async function headCommit(
   return { reason: repo.ok ? 'unborn-head' : 'not-a-repo' }
 }
 
+// How many paths are walked at once. Each walk spawns two `git` children, and
+// this runs in the process that owns every in-flight run — an uncapped fan-out
+// over a project with many hooks would put hundreds of children against it at
+// once, and increment B moves this onto the 15-second scheduler sweep.
+const WALK_CONCURRENCY = 4
+
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out = new Array<R>(items.length)
+  let next = 0
+  const worker = async (): Promise<void> => {
+    for (let i = next++; i < items.length; i = next++) out[i] = await fn(items[i])
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, () => worker()),
+  )
+  return out
+}
+
+// Whether two directories are the same repository, by the object store they
+// share. A linked worktree answers with its parent's common dir, which is exactly
+// the identity wanted: a worktree of the project IS the project's repository, and
+// a nested `git init` under the project root is not.
+async function sameRepository(
+  git: GitExec,
+  a: string,
+  b: string,
+): Promise<boolean> {
+  const [ra, rb] = await Promise.all([
+    git(a, ['rev-parse', '--path-format=absolute', '--git-common-dir']),
+    git(b, ['rev-parse', '--path-format=absolute', '--git-common-dir']),
+  ])
+  return ra.ok && rb.ok && !!ra.stdout.trim() && ra.stdout.trim() === rb.stdout.trim()
+}
+
 export type ResolveInput = {
+  // The project's own root. Both the fallback when the target's checkout is
+  // unusable and the identity every read is checked against.
+  root: string
   // The checkout to read — a task's worktree when it has one, the project root
   // otherwise. Resolved by the caller, which owns the host paths.
   cwd: string
@@ -238,7 +338,25 @@ export async function resolveHooks(
   git: GitExec,
   input: ResolveInput,
 ): Promise<HooksResolution> {
-  const { cwd } = input
+  // Read the target's checkout only once it is established to be the project's
+  // own repository. The two cwd hints are both task-writable — `POST
+  // /tasks/:id/cwd` takes any directory under the project root, and the worktree
+  // name is validated for shape rather than existence — so without this a task
+  // could `git init` a scratch repository, commit hooks and a
+  // `refs/remotes/origin/main` into it, point its own cwd there, and have the
+  // server cache that repository's pairs into THIS project's approval store.
+  // Blobs are content-addressed, so the same bytes at the same path in the real
+  // repository would then already be approved.
+  //
+  // The benign case matters as much: a vendored dependency or a submodule under
+  // a task's cwd would otherwise mix another repository's hooks into this
+  // project's. Falling back to the project root answers with the project's own
+  // hooks, which is the honest degradation; `cwd` in the response reports which
+  // directory was actually read.
+  const cwd =
+    input.cwd === input.root || (await sameRepository(git, input.cwd, input.root))
+      ? input.cwd
+      : input.root
   const { commit, reason } = await headCommit(git, cwd)
   const resolution: HooksResolution = { cwd }
   if (commit) resolution.commit = commit
@@ -251,8 +369,10 @@ export async function resolveHooks(
       await lsHooks(git, cwd, commit),
       input.declare.select,
     )
-    resolution.declared = await Promise.all(
-      found.map(async (d): Promise<HookDeclaration> => {
+    resolution.declared = await mapLimit(
+      found,
+      WALK_CONCURRENCY,
+      async (d): Promise<HookDeclaration> => {
         const { blobs, truncated } = await pathBlobHistory(
           git,
           cwd,
@@ -268,7 +388,7 @@ export async function resolveHooks(
           ancestry: blobs.filter((b) => b !== d.blob),
           ...(truncated ? { ancestryTruncated: true } : {}),
         }
-      }),
+      },
     )
   } else if (input.declare) {
     resolution.declared = []
@@ -284,7 +404,7 @@ export async function resolveHooks(
     'rev-parse',
     '--verify',
     '--quiet',
-    `${ref}^{commit}`,
+    `${trustRootRef(ref)}^{commit}`,
   ])
   const tipCommit = tipRev.stdout.trim()
   if (!tipRev.ok || !tipCommit) {
@@ -306,18 +426,16 @@ export async function resolveHooks(
     const limit = input.history.limit ?? DEFAULT_TRUST_ROOT_LIMIT
     const paths = [...new Set(input.history.pairs.map((p) => p.path))]
     const seen = new Map<string, { blobs: Set<string>; truncated: boolean }>()
-    await Promise.all(
-      paths.map(async (p) => {
-        const { blobs, truncated } = await pathBlobHistory(
-          git,
-          cwd,
-          tipCommit,
-          p,
-          limit,
-        )
-        seen.set(p, { blobs: new Set(blobs), truncated })
-      }),
-    )
+    await mapLimit(paths, WALK_CONCURRENCY, async (p) => {
+      const { blobs, truncated } = await pathBlobHistory(
+        git,
+        cwd,
+        tipCommit,
+        p,
+        limit,
+      )
+      seen.set(p, { blobs: new Set(blobs), truncated })
+    })
     trustRoot.found = input.history.pairs.filter((pair) =>
       seen.get(pair.path)?.blobs.has(pair.blob),
     )
