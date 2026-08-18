@@ -29,8 +29,12 @@ import {
   taskTurnContext,
   setTaskTurnContext,
   clearTaskThread,
+  recordAssistantError,
+  recordRideEnded,
+  MAX_PENDING_HOOKS,
   type Item,
   type MessageItem,
+  type PendingHook,
   type ScheduledMessage,
   type Ride,
 } from './tasks'
@@ -466,25 +470,25 @@ describe('recordStatusTransition', () => {
 
   it('records entry into a notable status', () => {
     const t = task('riding')
-    recordStatusTransition(t, 'wedged', AT)
+    recordStatusTransition(t, 'wedged', AT, 'human')
     expect(eventItems(t)[0]).toMatchObject({ eventKind: 'wedged', title: 'My task', at: AT })
   })
 
   it('records the inverse when leaving a notable status', () => {
     const t = task('wedged')
-    recordStatusTransition(t, 'riding', AT)
+    recordStatusTransition(t, 'riding', AT, 'human')
     expect(kinds(t)).toEqual(['unwedged'])
   })
 
   it('records nothing for a quiet-to-quiet move or no change', () => {
     const t = task('riding')
-    recordStatusTransition(t, 'riding', AT)
+    recordStatusTransition(t, 'riding', AT, 'human')
     expect(kinds(t)).toEqual([])
   })
 
   it('records only the arrival between two notable statuses', () => {
     const t = task('wedged')
-    recordStatusTransition(t, 'landed', AT)
+    recordStatusTransition(t, 'landed', AT, 'human')
     expect(kinds(t)).toEqual(['landed'])
   })
 
@@ -502,7 +506,7 @@ describe('recordStatusTransition', () => {
 
     it('drops both triggers when a riding task lands', () => {
       const t = armed('riding')
-      recordStatusTransition(t, 'landed', AT)
+      recordStatusTransition(t, 'landed', AT, 'human')
       expect(t.scheduledFor).toBeUndefined()
       expect(t.waitingFor).toBeUndefined()
     })
@@ -511,7 +515,7 @@ describe('recordStatusTransition', () => {
     // the task comes back, here there is nothing left to come back to.
     it('drops them from a wedged task too', () => {
       const t = armed('wedged')
-      recordStatusTransition(t, 'landed', AT)
+      recordStatusTransition(t, 'landed', AT, 'human')
       expect(t.scheduledFor).toBeUndefined()
       expect(t.waitingFor).toBeUndefined()
     })
@@ -520,7 +524,7 @@ describe('recordStatusTransition', () => {
       'leaves them alone crossing to %s',
       (next) => {
         const t = armed(next === 'riding' ? 'wedged' : 'riding')
-        recordStatusTransition(t, next, AT)
+        recordStatusTransition(t, next, AT, 'human')
         expect(t.scheduledFor).toBe('2026-08-07T15:00:00.000Z')
         expect(t.waitingFor).toEqual(['sib-a', 'sib-b'])
       },
@@ -529,9 +533,9 @@ describe('recordStatusTransition', () => {
     // Un-landing still works; it just has no stale trigger left to revive.
     it('leaves a landed task revivable, with nothing armed', () => {
       const t = armed('riding')
-      recordStatusTransition(t, 'landed', AT)
+      recordStatusTransition(t, 'landed', AT, 'human')
       t.status = 'landed'
-      recordStatusTransition(t, 'riding', AT)
+      recordStatusTransition(t, 'riding', AT, 'human')
       expect(kinds(t)).toEqual(['landed', 'unlanded'])
       expect(t.scheduledFor).toBeUndefined()
       expect(t.waitingFor).toBeUndefined()
@@ -550,7 +554,7 @@ describe('recordStatusTransition', () => {
       'stamps the prior status crossing %s → riding',
       (prev) => {
         const t = revivedTask(prev)
-        recordStatusTransition(t, 'riding', AT)
+        recordStatusTransition(t, 'riding', AT, 'human')
         expect(t.revived).toEqual({ from: prev })
       },
     )
@@ -559,13 +563,13 @@ describe('recordStatusTransition', () => {
     // can run either side of this: merge, don't assign.
     it('keeps a cleared-timer half another path already stamped', () => {
       const t = { ...revivedTask('wedged'), revived: { restUntil: '3:00 PM' } }
-      recordStatusTransition(t, 'riding', AT)
+      recordStatusTransition(t, 'riding', AT, 'human')
       expect(t.revived).toEqual({ restUntil: '3:00 PM', from: 'wedged' })
     })
 
     it('stamps nothing when the status does not actually change', () => {
       const t = revivedTask('riding')
-      recordStatusTransition(t, 'riding', AT)
+      recordStatusTransition(t, 'riding', AT, 'human')
       expect(t.revived).toBeUndefined()
     })
 
@@ -573,13 +577,13 @@ describe('recordStatusTransition', () => {
     // it had been revived on the very turn it wedged.
     it('stamps nothing entering wedged', () => {
       const t = revivedTask('riding')
-      recordStatusTransition(t, 'wedged', AT)
+      recordStatusTransition(t, 'wedged', AT, 'human')
       expect(t.revived).toBeUndefined()
     })
 
     it('stamps nothing crossing wedged → landed', () => {
       const t = revivedTask('wedged')
-      recordStatusTransition(t, 'landed', AT)
+      recordStatusTransition(t, 'landed', AT, 'human')
       expect(t.revived).toBeUndefined()
     })
   })
@@ -606,7 +610,7 @@ describe('recordStatusTransition', () => {
       ['riding', 'landed'],
     ])('withdraws an open ask crossing %s → %s', (prev, next) => {
       const t = asking(prev)
-      recordStatusTransition(t, next, AT)
+      recordStatusTransition(t, next, AT, 'human')
       expect(askState(t)).toBe('withdrawn')
     })
 
@@ -614,7 +618,7 @@ describe('recordStatusTransition', () => {
     // ask, so settling one here would eat the ask being raised.
     it('keeps an open ask crossing into wedged', () => {
       const t = asking('riding')
-      recordStatusTransition(t, 'wedged', AT)
+      recordStatusTransition(t, 'wedged', AT, 'human')
       expect(askState(t)).toBe('open')
     })
 
@@ -622,16 +626,158 @@ describe('recordStatusTransition', () => {
     // what lets an advisory `lander ask` rest with its question still up.
     it('keeps an open ask when the status does not actually change', () => {
       const t = asking('riding')
-      recordStatusTransition(t, 'riding', AT)
+      recordStatusTransition(t, 'riding', AT, 'human')
       expect(askState(t)).toBe('open')
     })
 
     it('leaves an already-settled ask alone', () => {
       const t = asking('wedged')
       askItems(t)[0].state = 'answered'
-      recordStatusTransition(t, 'riding', AT)
+      recordStatusTransition(t, 'riding', AT, 'human')
       expect(askState(t)).toBe('answered')
     })
+  })
+})
+
+// The trigger funnel: what a transition records for task hooks. The invariant
+// that matters most is negative — developing lander must not fire hooks — so
+// several of these assert that nothing was recorded.
+describe('the task-hook trigger funnel', () => {
+  const task = (status: string) => ({
+    status,
+    title: 'My task',
+    items: [] as Item[],
+    pendingHooks: undefined as PendingHook[] | undefined,
+    hookFireSeq: undefined as number | undefined,
+  })
+  const fires = (t: { pendingHooks?: PendingHook[] }) =>
+    (t.pendingHooks ?? []).map((f) => `${f.trigger}/${f.by}`)
+
+  describe('status crossings', () => {
+    it.each([
+      ['riding', 'wedged', 'wedged'],
+      ['riding', 'landed', 'landed'],
+      ['wedged', 'riding', 'unwedged'],
+      ['landed', 'riding', 'unlanded'],
+      ['wedged', 'landed', 'landed'],
+    ])('records one fire crossing %s → %s', (prev, next, trigger) => {
+      const t = task(prev)
+      recordStatusTransition(t, next, AT, 'human')
+      expect(fires(t)).toEqual([`${trigger}/human`])
+      expect(t.pendingHooks![0]).toMatchObject({ at: AT })
+    })
+
+    // riding↔resting is not a crossing at all (both store as `riding`), and it
+    // is by far the most common move a task makes. Firing here would mean a hook
+    // per turn boundary on top of the ride-ended one.
+    it('records nothing when the status does not actually change', () => {
+      const t = task('riding')
+      recordStatusTransition(t, 'riding', AT, 'human')
+      expect(fires(t)).toEqual([])
+    })
+
+    // `by` is half the selection axis: a hook under `landed/agent/` must not see
+    // a human's landing, and vice versa. Carried verbatim rather than mapped, so
+    // a new principal needs no change here.
+    it.each(['human', 'agent', 'task', 'system'])('carries by=%s', (by) => {
+      const t = task('riding')
+      recordStatusTransition(t, 'landed', AT, by)
+      expect(t.pendingHooks![0].by).toBe(by)
+    })
+
+    it('gives each fire a distinct, persisted id', () => {
+      const t = task('riding')
+      recordStatusTransition(t, 'wedged', AT, 'human')
+      t.status = 'wedged'
+      recordStatusTransition(t, 'riding', AT, 'human')
+      const ids = t.pendingHooks!.map((f) => f.id)
+      expect(new Set(ids).size).toBe(2)
+      expect(t.hookFireSeq).toBe(2)
+    })
+
+    // Oldest first, because the dispatcher has not landed yet and a daemon
+    // outage holds entries rather than dropping them.
+    it('caps the backlog', () => {
+      const t = task('riding')
+      for (let i = 0; i < MAX_PENDING_HOOKS + 5; i++) {
+        t.status = i % 2 === 0 ? 'riding' : 'wedged'
+        recordStatusTransition(t, i % 2 === 0 ? 'wedged' : 'riding', AT, 'human')
+      }
+      expect(t.pendingHooks).toHaveLength(MAX_PENDING_HOOKS)
+      // The counter keeps climbing, so a dropped fire's id can never recur.
+      expect(t.hookFireSeq).toBe(MAX_PENDING_HOOKS + 5)
+    })
+  })
+
+  describe('ride-ended', () => {
+    const ride = { id: 'ride-1', startedAt: AT }
+
+    it.each([
+      ['done', 'agent'],
+      ['error', 'system'],
+    ] as const)('records a %s ride as by=%s', (outcome, by) => {
+      const t = task('riding')
+      recordRideEnded(t, ride, outcome, AT)
+      expect(fires(t)).toEqual([`ride-ended/${by}`])
+      expect(t.pendingHooks![0]).toMatchObject({ rideId: 'ride-1', outcome })
+    })
+
+    // A human or a sibling interrupting a riding task has already recorded its
+    // own status crossing with the right principal. Firing supervision here is
+    // the "nudge it back to work and undo the interrupt" failure, so it is
+    // excluded structurally rather than left for every body to filter.
+    it('records nothing for an interrupted ride', () => {
+      const t = task('riding')
+      recordRideEnded(t, ride, 'interrupted', AT)
+      expect(fires(t)).toEqual([])
+    })
+
+    // The mechanical-failure case the trigger exists for must survive that
+    // exclusion: an idle-timeout kill settles interrupted:false / exitCode 1, so
+    // it arrives as `error`, not as an interrupt.
+    it('still records the idle-kill shape', () => {
+      const t = task('riding')
+      recordRideEnded(t, ride, 'error', AT)
+      expect(fires(t)).toEqual(['ride-ended/system'])
+    })
+
+    // closeRide no-ops with no open ride, so an unguarded record would emit a
+    // fire naming a ride that some other path closed for another reason.
+    it('records nothing when no ride was open', () => {
+      const t = task('riding')
+      recordRideEnded(t, undefined, 'done', AT)
+      expect(fires(t)).toEqual([])
+    })
+  })
+
+  // The first invariant of the whole feature: developing lander in the instance
+  // doing the developing must not fire hooks. `closeRide` has five callers, two
+  // of which (recoverQueues, driveTask's finally) run on a boot or a drain and
+  // close rides as `interrupted`. Sourcing from closeRide itself would turn every
+  // `server/**` edit into a burst of fires.
+  it('records nothing when closeRide is called directly', () => {
+    const t = { ...task('riding'), rides: [{ id: 'ride-1', startedAt: AT }] }
+    closeRide(t, 'interrupted', AT)
+    closeRide(t, 'done', AT)
+    expect(fires(t)).toEqual([])
+  })
+
+  // The third close site: this branch does not merely close a ride, it opens and
+  // closes a complete one, from runTurn's pre-startRide failures — which are the
+  // "wedged for mechanical reasons" case supervision exists for.
+  it('records exactly one fire for a synthesized error ride', () => {
+    const t = { ...task('riding'), rides: [] as Ride[] }
+    recordAssistantError(t, 'no daemon connected for this project', AT)
+    expect(fires(t)).toEqual(['ride-ended/system'])
+    expect(t.pendingHooks![0].rideId).toBe(t.rides[0].id)
+  })
+
+  // Its other branch fills an open ride and closes nothing, so applyDone or the
+  // platform-kill branch will record that ride's end — not this.
+  it('records nothing when it fills a ride that is already open', () => {
+    const t = { ...task('riding'), rides: [{ id: 'ride-1', startedAt: AT }] }
+    recordAssistantError(t, 'error running assistant: exited 1', AT)
+    expect(fires(t)).toEqual([])
   })
 })
 
@@ -714,7 +860,7 @@ describe('applyRelaunch', () => {
 
   it('seals the session, records the divider event item, and queues the message', () => {
     const t = task()
-    applyRelaunch(t, 'go again', AT2)
+    applyRelaunch(t, 'go again', AT2, 'human')
     expect('sessionId' in t).toBe(false)
     expect(eventItems(t).some((e) => e.eventKind === 'relaunched')).toBe(true)
     expect(userItems(t).at(-1)?.text).toBe('go again')
@@ -724,13 +870,13 @@ describe('applyRelaunch', () => {
 
   it('revives a wedged task, recording the un-wedge ahead of the divider', () => {
     const t = task({ status: 'wedged' })
-    applyRelaunch(t, 'go', AT2)
+    applyRelaunch(t, 'go', AT2, 'human')
     expect(eventItems(t).map((e) => e.eventKind)).toEqual(['unwedged', 'relaunched'])
   })
 
   it('supersedes any pending retry', () => {
     const t = task({ retry: { committed: false, prompts: ['x'] } })
-    applyRelaunch(t, 'go', AT2)
+    applyRelaunch(t, 'go', AT2, 'human')
     expect('retry' in t).toBe(false)
   })
 })

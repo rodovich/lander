@@ -109,6 +109,115 @@ export type Ride = {
   error?: { exitCode?: number; cause?: string; idleMs?: number; stderr?: string }
 }
 
+// ── The task-hook trigger funnel ────────────────────────────────────────────
+//
+// A fire is recorded when a task crosses into or out of a notable status, or
+// when a ride closes. Recording is all that happens here: it is synchronous,
+// inside the task-file mutation lock, and does no resolution — which hooks a
+// tree declares is a git question the daemon answers, later, off the sweep.
+//
+// The entry is durable and cleared only on a completion report, so an
+// interrupted dispatch is retried. That is what makes the fire id load-bearing
+// rather than decorative: accepted actions are recorded against it, so a retry
+// of the same fire cannot act twice.
+
+export type PendingHook = {
+  // `fire-<seq>-<epoch36>`. The counter is persisted so it cannot restart, and
+  // the timestamp is belt — an id that could recur would silently dedupe a
+  // genuine action into a no-op against a pruned action record.
+  id: string
+  // landed | unlanded | wedged | unwedged | ride-ended.
+  trigger: string
+  // The principal that caused it: human | agent | task | system. An open set of
+  // directory names, not a closed union — adding a principal must not mean
+  // editing a mirrored type.
+  by: string
+  at: string
+  // `ride-ended` only: the ride that closed, and how. A gate reads the segment
+  // that ride belongs to, and a closed ride is not otherwise identifiable from
+  // the fire.
+  rideId?: string
+  outcome?: string
+  // Dispatch attempts, per hook path, attributable to the fire itself. A hold —
+  // no daemon, a draining daemon, a timeout — is deliberately not one of these.
+  attempts?: Record<string, number>
+  // Hook paths that have reported terminally. The unit of work is (fire, hook),
+  // not the entry: with two hooks declared for one trigger and one failing, a
+  // per-entry retry would re-run the healthy body too.
+  done?: string[]
+}
+
+// How many undispatched fires a task may hold. A ceiling rather than a
+// guarantee: the funnel lands before the dispatcher, and a daemon outage holds
+// entries rather than dropping them, so without this a task could accumulate one
+// per ride end indefinitely. Oldest first, and the drop is reported — silence
+// would lose exactly the longest-unsupervised ones.
+export const MAX_PENDING_HOOKS = 20
+
+type HookFireTask = {
+  pendingHooks?: PendingHook[]
+  hookFireSeq?: number
+}
+
+// Record a fire, returning it along with any entries the cap displaced.
+export function recordHookFire(
+  task: HookFireTask,
+  fire: Omit<PendingHook, 'id'>,
+): { entry: PendingHook; dropped: PendingHook[] } {
+  const seq = (task.hookFireSeq = (task.hookFireSeq ?? 0) + 1)
+  const entry: PendingHook = {
+    id: `fire-${seq}-${Math.floor(Date.parse(fire.at) || 0).toString(36)}`,
+    ...fire,
+  }
+  const pending = (task.pendingHooks ??= [])
+  pending.push(entry)
+  const dropped =
+    pending.length > MAX_PENDING_HOOKS
+      ? pending.splice(0, pending.length - MAX_PENDING_HOOKS)
+      : []
+  return { entry, dropped }
+}
+
+// Record that a ride ended, for the `ride-ended` trigger.
+//
+// Called where a ride actually TRANSITIONS TO CLOSED with an outcome — a rule,
+// not a list of functions, and deliberately not from `closeRide` itself.
+// `closeRide` is also called by `recoverQueues`, which runs on every server boot
+// and therefore on every `server/**` edit under `tsx watch`; sourcing there
+// would fire a burst of hooks every time someone develops lander in the instance
+// doing the developing. It is called by driveTask's finally too. Both close
+// rides as `interrupted`, which is filtered below anyway — but the rule is what
+// keeps a future third caller from being wrong by accident.
+//
+// `interrupted` is not recorded at all. An interrupt is a deliberate stop by a
+// human or a sibling, which has already recorded its own status crossing with
+// the right principal; firing supervision there is the "nudge it back to work
+// and undo the interrupt" failure the design names. This does NOT swallow the
+// mechanical-failure case the trigger exists for: an idle-timeout kill settles
+// `{ interrupted: false, exitCode: 1 }`, so it arrives here as `error`.
+export function recordRideEnded(
+  task: HookFireTask,
+  ride: Ride | undefined,
+  outcome: Ride['outcome'],
+  at: string,
+): { entry: PendingHook; dropped: PendingHook[] } | null {
+  // Nothing transitioned: a late `done` for a ride some other path already
+  // closed must not emit a fire naming a ride that ended for another reason at
+  // another time.
+  if (!ride) return null
+  if (outcome !== 'done' && outcome !== 'error') return null
+  return recordHookFire(task, {
+    trigger: 'ride-ended',
+    // A clean end is the agent finishing its own turn; an error is the
+    // platform's doing. Neither is ever `human` or `task`, so hooks under
+    // `ride-ended/human/` and `…/task/` are structurally dead directories.
+    by: outcome === 'done' ? 'agent' : 'system',
+    at,
+    rideId: ride.id,
+    outcome,
+  })
+}
+
 // The task's currently-open ride (the last one without an `endedAt`), if any —
 // what a riding task is streaming into. Undefined when no run is in flight, and
 // for tasks saved before rides existed (no `rides` array).
@@ -332,7 +441,12 @@ export function eventItems(task: { items?: Item[] }): EventItem[] {
 // opened a ride (an unreadable task file, or no daemon) — synthesize a one-item
 // closed error ride so the failure still shows as an assistant turn.
 export function recordAssistantError(
-  task: { items?: Item[]; rides?: Ride[] },
+  task: {
+    items?: Item[]
+    rides?: Ride[]
+    pendingHooks?: PendingHook[]
+    hookFireSeq?: number
+  },
   text: string,
   at: string,
 ): void {
@@ -344,6 +458,14 @@ export function recordAssistantError(
     startRide(task, id, at)
     ride = openRide(task) as Ride
     pushFlowItem(task, ride.id, text, at)
+    // This branch does not merely close a ride — it OPENS and closes a complete
+    // one, so it is a third place a ride transitions to closed with an outcome,
+    // alongside applyDone and the platform-kill branch. Its live callers are
+    // runTurn's pre-startRide failures: no daemon serving the project, and a
+    // flow the primary has not announced. Those are exactly the "wedged for
+    // mechanical reasons" case supervision exists for, so omitting them would
+    // leave the trigger blind to its own motivating example.
+    recordRideEnded(task, ride, 'error', at)
     closeRide(task, 'error', at)
     return
   }
@@ -442,7 +564,15 @@ export function publicTask<T extends object>(
   opts?: { caps?: FlowCaps },
 ): Omit<
   T,
-  'token' | 'runId' | 'runCursor' | 'queued' | 'retry' | 'flowState' | 'flowStateRev'
+  | 'token'
+  | 'runId'
+  | 'runCursor'
+  | 'queued'
+  | 'retry'
+  | 'flowState'
+  | 'flowStateRev'
+  | 'hookFireSeq'
+  | 'hookActionsResetAt'
 > & {
   flow: string
   grants: GrantCaps
@@ -457,6 +587,13 @@ export function publicTask<T extends object>(
     // rides back to the flow on start-run, never over HTTP. Absent today.
     flowState: _fs,
     flowStateRev: _fsr,
+    // Hook bookkeeping with no reader outside this process: a fire-id counter
+    // and the timestamp the action bound resets from. `pendingHooks` DOES ride
+    // out — "was a fire ever recorded" is the first question anyone debugging a
+    // hook asks — but every field served here is a promise to callers who never
+    // run this code, and two counters are not worth making one over.
+    hookFireSeq: _hfs,
+    hookActionsResetAt: _hra,
     queued,
     ...rest
   } = task as T & {
@@ -466,6 +603,8 @@ export function publicTask<T extends object>(
     retry?: unknown
     flowState?: unknown
     flowStateRev?: unknown
+    hookFireSeq?: unknown
+    hookActionsResetAt?: unknown
     queued?: string[]
     items?: Item[]
     rides?: Ride[]
@@ -518,7 +657,15 @@ export function publicTask<T extends object>(
   }
   return out as Omit<
     T,
-    'token' | 'runId' | 'runCursor' | 'queued' | 'retry' | 'flowState' | 'flowStateRev'
+    | 'token'
+  | 'runId'
+  | 'runCursor'
+  | 'queued'
+  | 'retry'
+  | 'flowState'
+  | 'flowStateRev'
+  | 'hookFireSeq'
+  | 'hookActionsResetAt'
   > & {
     flow: string
     grants: GrantCaps
@@ -547,11 +694,19 @@ export function taskSummary<T extends object>(task: T, opts?: { caps?: FlowCaps 
   const {
     items: _items,
     rides: _rides,
+    // The hook bookkeeping goes too. Both are capped and small, but this
+    // projection feeds the link-resolution poll, whose whole purpose is to be
+    // id/slug/title/status and nothing else — it was made to shrink that
+    // payload, and quietly re-growing it is the one thing it must not do.
+    pendingHooks: _pending,
+    hookActions: _actions,
     scheduledMessages: scheduled,
     ...rest
   } = full as typeof full & {
     items?: Item[]
     rides?: Ride[]
+    pendingHooks?: PendingHook[]
+    hookActions?: unknown[]
     scheduledMessages?: ScheduledMessage[]
   }
   return {
@@ -625,6 +780,11 @@ export function latestUpdateAt(task: {
 // question still on screen is the point. Superseding one of those is a different
 // rule, about new user intent rather than status, and stays with the paths that
 // carry it.
+// `by` names the principal that caused the crossing, for task hooks: a hook
+// lives at `.lander/hooks/<trigger>/<by>/`, so this value is half the selection
+// axis. Required rather than defaulted, because a default would make every new
+// call site silently `system` — and `system` is the value that matches no
+// `human/` or `agent/` hook at all.
 export function recordStatusTransition(
   task: {
     status: string
@@ -633,9 +793,12 @@ export function recordStatusTransition(
     revived?: RevivedMarker
     scheduledFor?: string
     waitingFor?: string[]
+    pendingHooks?: PendingHook[]
+    hookFireSeq?: number
   },
   next: string,
   at: string,
+  by: string,
 ): void {
   const prev = task.status
   if (prev === next) return
@@ -643,6 +806,7 @@ export function recordStatusTransition(
   // moving straight between two notable ones).
   if (next === 'wedged') {
     pushEventItem(task, { eventKind: 'wedged', title: task.title }, at)
+    recordHookFire(task, { trigger: 'wedged', by, at })
     return
   }
   if (next === 'landed') {
@@ -662,15 +826,11 @@ export function recordStatusTransition(
     // stale trigger left to fire.
     delete task.scheduledFor
     delete task.waitingFor
+    recordHookFire(task, { trigger: 'landed', by, at })
   } else if (prev === 'wedged' || prev === 'landed') {
-    pushEventItem(
-      task,
-      {
-        eventKind: prev === 'wedged' ? 'unwedged' : 'unlanded',
-        title: task.title,
-      },
-      at,
-    )
+    const eventKind = prev === 'wedged' ? 'unwedged' : 'unlanded'
+    pushEventItem(task, { eventKind, title: task.title }, at)
+    recordHookFire(task, { trigger: eventKind, by, at })
     // A revived task's own last act was `lander wedge`/`lander land`, and its
     // resumed session remembers that and nothing else — so left alone it reports
     // itself as still wedged/landed on the next turn. Stamp the crossing here,
@@ -804,12 +964,20 @@ export function applyRelaunch(
     queued?: string[]
     scheduledMessages?: ScheduledMessage[]
     retry?: unknown
+    pendingHooks?: PendingHook[]
+    hookFireSeq?: number
   },
   message: string,
   at: string,
+  by: string,
   repeat?: RepeatSpec,
 ): void {
-  recordStatusTransition(task, 'riding', new Date(Date.parse(at) - 1).toISOString())
+  recordStatusTransition(
+    task,
+    'riding',
+    new Date(Date.parse(at) - 1).toISOString(),
+    by,
+  )
   sealForRelaunch(task, at)
   pushUserItem(task, message, at)
   ;(task.queued ??= []).push(message)
@@ -937,8 +1105,10 @@ export function applyRetryRecovery(
     queued?: string[]
     scheduledFor?: string
     retry?: { committed: boolean; prompts: string[]; resetsAt?: string }
+    pendingHooks?: PendingHook[]
+    hookFireSeq?: number
   },
-  opts: { defer: boolean; resetsAt?: string; now: string },
+  opts: { defer: boolean; resetsAt?: string; now: string; by: string },
 ): void {
   const { defer, resetsAt, now } = opts
   if (!task.retry) return
@@ -959,7 +1129,12 @@ export function applyRetryRecovery(
       now,
     )
   } else {
-    recordStatusTransition(task, 'riding', new Date(Date.parse(now) - 1).toISOString())
+    recordStatusTransition(
+      task,
+      'riding',
+      new Date(Date.parse(now) - 1).toISOString(),
+      opts.by,
+    )
     task.status = 'riding'
   }
   task.updatedAt = now

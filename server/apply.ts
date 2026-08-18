@@ -25,8 +25,10 @@ import {
   lastFlowItem,
   nextItemId,
   recordStatusTransition,
+  recordRideEnded,
   lastTurnPrompts,
   type Item,
+  type PendingHook,
   type ToolItem,
   type Ride,
 } from './tasks'
@@ -46,6 +48,8 @@ export type ApplyTask = {
   runId?: string
   runCursor?: number
   retry?: { committed: boolean; prompts: string[]; resetsAt?: string }
+  pendingHooks?: PendingHook[]
+  hookFireSeq?: number
 }
 
 // One reduced batch of run output to fold onto the task: the activity it
@@ -111,7 +115,12 @@ export function wedgeForRetry(
     prompt?: string
   },
 ): void {
-  recordStatusTransition(task, 'wedged', opts.at)
+  // Always `system`: every caller of this is an infrastructure wedge — an
+  // assistant error, a daemon outage, a platform kill — never a person or a
+  // sibling. A hook under `wedged/human/` or `wedged/agent/` is therefore
+  // untouched by the daemon handoffs and crash-backoff respawns that produce
+  // most of the wedges in a busy instance.
+  recordStatusTransition(task, 'wedged', opts.at, 'system')
   task.status = 'wedged'
   task.retry = {
     committed: opts.committed,
@@ -310,6 +319,10 @@ export function applyDone(
       ...(stderrTail ? { stderr: stderrTail } : {}),
     }
   }
+  // Record the `ride-ended` fire from the ride captured BEFORE the close, so a
+  // late done for a ride some other path already closed emits nothing rather
+  // than naming a ride that ended for another reason at another time.
+  recordRideEnded(task, ride, outcome, at)
   closeRide(task, outcome, at)
   task.updatedAt = at
   delete task.runId

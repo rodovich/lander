@@ -367,6 +367,50 @@ describe('applyDone', () => {
 // A tool's result routinely arrives in a *later* batch than its use (the tool was
 // still running when the previous batch was flushed). The result must fold onto the
 // item the earlier batch created rather than minting a second one.
+// The `ride-ended` half of the trigger funnel, at the site that produces almost
+// all of them. What the outcome is decides both whether a fire is recorded and
+// which principal it names.
+describe('applyDone records the ride-ended fire', () => {
+  const done = (t: ApplyTask, exitCode = 0, interrupted = false) =>
+    applyDone(t, { exitCode, interrupted, stderr: '' }, { at: AT, askId: 'ask-0' })
+  const fires = (t: ApplyTask) =>
+    (t.pendingHooks ?? []).map((f) => `${f.trigger}/${f.by}`)
+
+  it('records a clean turn as by=agent, naming the ride that closed', () => {
+    const t = task()
+    done(t)
+    expect(fires(t)).toEqual(['ride-ended/agent'])
+    expect(t.pendingHooks![0]).toMatchObject({ rideId: 'r1', outcome: 'done' })
+  })
+
+  // An assistant error is the platform's doing, not the agent's — and it is the
+  // "wedged for mechanical reasons" case supervision was motivated by, so it
+  // must produce a fire alongside the wedge.
+  it('records a failed turn as by=system, alongside the wedge fire', () => {
+    const t = task()
+    done(t, 1)
+    expect(fires(t)).toEqual(['wedged/system', 'ride-ended/system'])
+  })
+
+  // A deliberate stop by a human or a sibling. The interrupt already recorded
+  // its own crossing with the right principal; supervising here would nudge the
+  // task back to work and undo it.
+  it('records nothing for a deliberate interrupt', () => {
+    const t = task()
+    done(t, 0, true)
+    expect(fires(t)).toEqual([])
+  })
+
+  // A run that predates rides, or a late done for a ride another path already
+  // closed. closeRide no-ops here, so the funnel must too — otherwise the fire
+  // names a ride that ended for another reason at another time.
+  it('records nothing when no ride was open', () => {
+    const t = task({ rides: [{ id: 'r1', startedAt: AT, endedAt: AT, outcome: 'interrupted' }] })
+    done(t)
+    expect(fires(t)).toEqual([])
+  })
+})
+
 describe('continuation across batches', () => {
   it('folds a later batch’s result onto an already-running tool item and finishes', () => {
     const t = task({

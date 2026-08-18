@@ -620,6 +620,11 @@ describe('server task provider behavior', () => {
       'grants',
       'id',
       'items',
+      // Task hooks: the fires recorded and not yet dispatched. Deliberately
+      // served — it is not a secret, and "why did this not fire" is answered by
+      // seeing whether it was ever recorded. Stripped from the summary
+      // projection below, which exists to be small.
+      'pendingHooks',
       'reportsCost',
       'revived',
       'rides',

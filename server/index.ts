@@ -67,10 +67,12 @@ import {
   userItems,
   eventItems,
   recordAssistantError,
+  recordRideEnded,
   type ScheduledMessage,
   type RepeatSpec,
   type Ride,
   type Item,
+  type PendingHook,
 } from './tasks'
 import {
   saveAttachment,
@@ -359,6 +361,22 @@ type Task = {
   // again. Absent for providers without a context builder (Codex) and on tasks
   // saved before this field existed.
   turnContext?: string
+  // ── Task hooks ────────────────────────────────────────────────────────────
+  // Fires the trigger funnel recorded and the dispatcher has not finished — one
+  // per status crossing and per ride end, capped at MAX_PENDING_HOOKS. Cleared
+  // only when every hook declared for a fire has reported, so an interrupted
+  // dispatch is retried; the fire id is what makes that retry safe. Absent on a
+  // task that has never crossed anything, which is every task before this
+  // existed.
+  pendingHooks?: PendingHook[]
+  // The counter behind the fire id. Persisted so it cannot restart and mint an
+  // id that collides with one a pruned action record still refers to.
+  hookFireSeq?: number
+  // When a human last touched this task, which is what resets the bound on the
+  // actions a hook may take against it. Stamped by every UI-principal route, not
+  // just `/messages`: a human who only answers asks and un-wedges from the kebab
+  // is contacting the task just as unmanufacturably.
+  hookActionsResetAt?: string
   // The working directory the previous turn ended in, recorded by the Stop hook
   // (see ClaudeAdapter / `lander record-cwd`). Each turn is a fresh `claude`
   // process; without this it always restarts at the project root, so a directory
@@ -753,6 +771,13 @@ async function reduceRunWs(
           // The run was abandoned (the daemon stayed gone past the grace) — close
           // its open ride as an error (a platform kill, not a user interrupt),
           // paired with the runId delete below.
+          //
+          // The fire is recorded from the ride captured above, and only if there
+          // was one: `closeRide` no-ops without an open ride, so an unguarded
+          // record here would emit a fire naming a ride that some other path
+          // closed for another reason at another time — which a supervision body
+          // would then try to cut a segment from.
+          recordRideEnded(t, ride, 'error', at)
           closeRide(t, 'error', at)
           delete t.runId
           delete t.runCursor
@@ -933,7 +958,15 @@ async function driveTask(project: Project, id: string): Promise<void> {
 // (returns false) if the task isn't actually scheduled or is already running —
 // so the scheduler sweep and a manual launch racing on the same task can't
 // double-launch it or push two "launched" events.
-async function launchTask(project: Project, id: string): Promise<boolean> {
+// `by` names who launched it, for the hook a resulting un-wedge would fire: the
+// scheduler when the sweep reaches a due task, the human when they press Launch.
+// Parameterized rather than assumed `system` because both callers are real, and
+// the UI's button is the one a `wedged/human/` hook would care about.
+async function launchTask(
+  project: Project,
+  id: string,
+  by: string,
+): Promise<boolean> {
   const file = path.join(project.dataDir, `${id}.json`)
   let go = false
   let everRan = false
@@ -953,7 +986,12 @@ async function launchTask(project: Project, id: string): Promise<boolean> {
     // the /retry handler), so record the un-wedge a hair ahead of the launch —
     // it surfaces in the timeline before the queued recovery prompt that the
     // wakeup is about to drive. A no-op for a merely-resting scheduled task.
-    recordStatusTransition(t, 'riding', new Date(Date.parse(at) - 1).toISOString())
+    recordStatusTransition(
+      t,
+      'riding',
+      new Date(Date.parse(at) - 1).toISOString(),
+      by,
+    )
     pushEventItem(t, { eventKind: 'launched', title: t.title }, at)
     t.status = 'riding'
     t.updatedAt = at
@@ -1014,7 +1052,18 @@ async function deliverScheduledMessages(
     const at = new Date().toISOString()
     // Delivery revives a wedged/landed recipient, same as a live send; record
     // the transition a hair ahead of the messages so the timeline orders right.
-    recordStatusTransition(t, 'riding', new Date(Date.parse(at) - 1).toISOString())
+    //
+    // `system`, and this is a known gap rather than a choice: delivery happens
+    // on the scheduler, long after the sender is gone, so a human's `lander send
+    // --date` arrives here indistinguishable from a timer. A hook under
+    // `unwedged/human/` will not see it. Fixing it means recording the
+    // originator on the ScheduledMessage at send time.
+    recordStatusTransition(
+      t,
+      'riding',
+      new Date(Date.parse(at) - 1).toISOString(),
+      'system',
+    )
     // Append (and queue) the due messages. If any is a relaunch, applyDueMessages
     // seals the session and records the divider before appending, so the
     // delivering turn mints a fresh assistant session — the deferred analog of
@@ -1067,7 +1116,7 @@ async function launchScheduled(): Promise<void> {
       const awaitDue =
         (task.waitingFor?.length ?? 0) > 0 &&
         (await awaitSatisfied(project, task.waitingFor!))
-      if (timeDue || awaitDue) await launchTask(project, id)
+      if (timeDue || awaitDue) await launchTask(project, id, 'system')
     }
   }
 }
@@ -1146,6 +1195,37 @@ async function resolvePrincipal(req: {
       return { kind: 'task', task, slug: projectSlug, id: taskId }
   }
   return { kind: 'anon' }
+}
+
+// The principal a task hook selects on: a hook lives at
+// `.lander/hooks/<trigger>/<by>/`, so this maps who made the request onto the
+// directory level that names them. An open set of strings rather than a union —
+// adding a principal later must not mean touching a mirrored type.
+//
+// `anon` becomes `system` deliberately: an unidentified caller is not a person,
+// and a hook under `human/` must not fire for one. That is also why the browser
+// now sends its token on every mutating call, gated or not — without it a human
+// landing a task from the kebab arrives here as `anon`.
+function hookBy(principal: Principal, taskId: string): string {
+  if (principal.kind === 'ui') return 'human'
+  if (principal.kind === 'task')
+    return principal.id === taskId ? 'agent' : 'task'
+  return 'system'
+}
+
+// Note that a human touched this task, which resets the runaway bound on the
+// actions hooks are allowed to take against it. Every UI-principal route that
+// touches a task calls this, not just `/messages`: a human who only ever answers
+// a task's asks and un-wedges it from the kebab is contacting it just as
+// unmanufacturably as one who types, and a bound that never reset would leave a
+// hook permanently dead on that task while reporting "bound" — indistinguishable
+// from a runaway it correctly stopped.
+function noteHumanContact(
+  task: { hookActionsResetAt?: string },
+  principal: Principal,
+  at: string,
+): void {
+  if (principal.kind === 'ui') task.hookActionsResetAt = at
 }
 
 export const app = new Hono()
@@ -2172,10 +2252,11 @@ app.patch('/api/:project/tasks/:id', async (c) => {
         // A manual land/resume supersedes any open ask; a fresh wedge keeps it.
         // Both fall out of the crossing itself — recordStatusTransition settles
         // open asks on every crossing but the one into `wedged`.
-        recordStatusTransition(t, next, at)
+        recordStatusTransition(t, next, at, hookBy(principal, id))
         if (next !== t.status) t.updatedAt = at
         t.status = next
       }
+      noteHumanContact(t, principal, new Date().toISOString())
     })
 
     if (interrupt && runId) await interruptRun(project, runId)
@@ -2197,9 +2278,14 @@ app.post('/api/:project/tasks/:id/launch', async (c) => {
   try {
     const id = c.req.param('id')
     if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
-    const launched = await launchTask(project, id)
+    const principal = await resolvePrincipal(c.req)
+    const launched = await launchTask(project, id, hookBy(principal, id))
     if (!launched)
       return c.json({ error: 'task is not scheduled' }, 409)
+    // Pressing Launch is human contact, so it resets the hook action bound.
+    await mutateTask(path.join(project.dataDir, `${id}.json`), (t) => {
+      noteHumanContact(t, principal, new Date().toISOString())
+    }).catch(() => {})
     const task = await readTask(project.dataDir, id)
     if (!task) return c.json({ error: 'task not found' }, 404)
     return c.json(publicTask(task))
@@ -2233,6 +2319,11 @@ app.post('/api/:project/tasks/:id/rest', async (c) => {
     const file = path.join(project.dataDir, `${id}.json`)
     if (!(await readTask(project.dataDir, id)))
       return c.json({ error: 'task not found' }, 404)
+
+    // Resolved for attribution, not authorization: this route stays open (the
+    // in-task CLI calls it mid-turn), but who rested the task decides which
+    // `unwedged/<by>/` hook a revival from a notable status would select.
+    const principal = await resolvePrincipal(c.req)
 
     const body = await c.req.json<{
       date?: unknown
@@ -2281,7 +2372,8 @@ app.post('/api/:project/tasks/:id/rest', async (c) => {
     await mutateTask(file, (t) => {
       // Record leaving any notable status (wedged/landed); resting is a derived,
       // quiet presentation, so for the common riding→rest this is a no-op.
-      recordStatusTransition(t, 'riding', at)
+      recordStatusTransition(t, 'riding', at, hookBy(principal, id))
+      noteHumanContact(t, principal, at)
       // Replace any prior triggers so re-resting doesn't leave a stale one armed.
       if (scheduledFor) t.scheduledFor = scheduledFor
       else delete t.scheduledFor
@@ -2427,7 +2519,8 @@ app.post('/api/:project/tasks/:id/relaunch', async (c) => {
     // Immediate (A): seal now and queue the message for the fresh session. A
     // repeat spec arms the first successor off this delivery.
     await mutateTask(file, (t) => {
-      applyRelaunch(t, rawMessage, at, repeat)
+      applyRelaunch(t, rawMessage, at, hookBy(principal, id), repeat)
+      noteHumanContact(t, principal, at)
       // Same as /messages: the crossing inside applyRelaunch covers a
       // wedged/landed task, and this covers the advisory ask on a task that was
       // riding all along, where there's no crossing to carry the rule.
@@ -2744,7 +2837,13 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
       // Sending revives a wedged or landed (terminal) task — record the
       // "un-wedged"/"un-landed" transition a hair before the message's own
       // timestamp so the timeline shows it ahead of the message that caused it.
-      recordStatusTransition(t, 'riding', new Date(Date.parse(now) - 1).toISOString())
+      recordStatusTransition(
+        t,
+        'riding',
+        new Date(Date.parse(now) - 1).toISOString(),
+        hookBy(principal, id),
+      )
+      noteHumanContact(t, principal, now)
       // An out-of-band wake supersedes a *timer*: the task is riding now, so the
       // wakeup it armed would fire later against a task that has moved on (and,
       // in every case we've observed, already landed) and burn a ride announcing
@@ -2853,7 +2952,7 @@ app.post('/api/:project/tasks/:id/asks', async (c) => {
       // `none` ask leaves the status untouched — the task rests, nothing in the
       // list — and only the create endpoint ever wedges, never un-wedges.
       if (blocking === 'task') {
-        recordStatusTransition(t, 'wedged', at)
+        recordStatusTransition(t, 'wedged', at, hookBy(principal, id))
         t.status = 'wedged'
       }
       t.updatedAt = at
@@ -2913,6 +3012,10 @@ app.post('/api/:project/tasks/:id/asks/:askId/answer', async (c) => {
         fail = { error: res.error, status: res.status }
         return
       }
+      // UI-only route, so answering an ask is always human contact — and it is
+      // the whole of some tasks' human interaction, which is why the bound reset
+      // cannot live in `/messages` alone.
+      t.hookActionsResetAt = now
       const ask = res.ask
       const opt = chosenOption(ask)
       const scheduleAt = opt?.at
@@ -2922,7 +3025,7 @@ app.post('/api/:project/tasks/:id/asks/:askId/answer', async (c) => {
       // future option `at`) schedules the recovery for then. It composes its own
       // turn (nudge or prompt re-send) from the `retry` stash.
       if (ask.origin === 'retry') {
-        applyRetryRecovery(t, { defer, resetsAt: scheduleAt, now })
+        applyRetryRecovery(t, { defer, resetsAt: scheduleAt, now, by: 'human' })
         return
       }
       // Deliver the answer as a visible user message so it appears in the
@@ -2943,7 +3046,7 @@ app.post('/api/:project/tasks/:id/asks/:askId/answer', async (c) => {
           now,
         )
       } else {
-        recordStatusTransition(t, 'riding', before)
+        recordStatusTransition(t, 'riding', before, 'human')
         t.status = 'riding'
       }
       t.updatedAt = now
