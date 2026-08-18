@@ -60,8 +60,17 @@ export function emptyHooksStore(): HooksStore {
 // it is the one string in a resolve request that did not come out of the
 // repository, and it reaches an argv there. Rejecting it here as well means a bad
 // value never reaches the store to be sent repeatedly.
+//
+// `refs/heads/…` is refused outright rather than left to resolve to nothing. The
+// trust root has to be a remote-tracking ref — advancing one requires a push, so
+// it passes whatever the remote enforces, where an agent that can merge could
+// advance a local branch on its own. The daemon enforces that structurally by
+// resolving every designation under `refs/remotes/`; refusing the one spelling
+// that says "a local branch" out loud turns a silent "no such branch" into an
+// answer.
 export function isSafeTrustRoot(ref: string): boolean {
-  return /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(ref) && !ref.includes('..')
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(ref) || ref.includes('..')) return false
+  return !ref.startsWith('refs/heads/')
 }
 
 export async function readHooksStore(file: string): Promise<HooksStore> {
@@ -100,14 +109,30 @@ export function effectiveApprovals(
   return out
 }
 
+function hasApproval(
+  store: HooksStore,
+  pair: HookPair,
+  via: HookApprovalVia,
+  ref: string | undefined,
+): boolean {
+  return store.approved.some(
+    (e) => e.via === via && e.ref === ref && e.path === pair.path && e.blob === pair.blob,
+  )
+}
+
 // Add pairs to the monotonic set, skipping any already recorded the same way.
 // Returns the committed store so a caller can join against exactly what landed.
 export function approveHookPairs(
   file: string,
   pairs: HookPair[],
   via: HookApprovalVia,
-  opts: { ref?: string; at: string },
+  opts: { ref?: string; at: string; current?: HooksStore },
 ): Promise<HooksStore> {
+  // Nothing new to record: skip the write entirely rather than rewriting the
+  // file with its own contents. Every resolve consults the trust root's tip, so
+  // without this a plain GET rewrites the store on each request.
+  if (opts.current && !pairs.some((p) => !hasApproval(opts.current!, p, via, opts.ref)))
+    return Promise.resolve(opts.current)
   return mutateJson<HooksStore>(file, emptyHooksStore, (store) => {
     if (!Array.isArray(store.approved)) store.approved = []
     const seen = new Set(
@@ -310,7 +335,13 @@ export async function resolveProjectHooks(input: {
   recordedCwd?: string
   worktree?: string
   now?: () => string
+  // The daemon round trip, injectable so the join, the tip ingestion and the
+  // two-phase scan can be driven without one. Everything below is the half of
+  // the feature that has no git in it, and it was reachable only through a live
+  // daemon until this seam existed.
+  resolve?: typeof requestHooksResolution
 }): Promise<ResolveProjectHooksResult> {
+  const ask = input.resolve ?? requestHooksResolution
   const { project } = input
   const now = input.now ?? (() => new Date().toISOString())
   let store = await readHooksStore(project.hooksFile)
@@ -324,7 +355,7 @@ export async function resolveProjectHooks(input: {
     ...(trustRoot ? { trustRoot } : {}),
   }
 
-  const first = await requestHooksResolution({
+  const first = await ask({
     ...target,
     declare: { ...(input.select?.length ? { select: input.select } : {}) },
   })
@@ -344,6 +375,7 @@ export async function resolveProjectHooks(input: {
     store = await approveHookPairs(project.hooksFile, tip, 'trust-root', {
       ref: trustRoot,
       at: now(),
+      current: store,
     })
 
   let approvals = effectiveApprovals(store)
@@ -356,7 +388,7 @@ export async function resolveProjectHooks(input: {
       ),
     )
     if (unknown.length) {
-      const second = await requestHooksResolution({
+      const second = await ask({
         ...target,
         history: { pairs: unknown },
       })
@@ -373,6 +405,7 @@ export async function resolveProjectHooks(input: {
           store = await approveHookPairs(project.hooksFile, found, 'trust-root', {
             ref: trustRoot,
             at: now(),
+            current: store,
           })
           approvals = effectiveApprovals(store)
         }

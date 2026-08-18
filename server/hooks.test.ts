@@ -2,19 +2,22 @@
 // construction: a (path, blob) pair is an opaque string pair, and no test needs a
 // git repository to state what approving one means.
 
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   approveHookPairs,
   candidatePairs,
+  clearHookMissCache,
   effectiveApprovals,
   emptyHooksStore,
   isSafeTrustRoot,
   joinResolution,
   pairKey,
   readHooksStore,
+  resolveProjectHooks,
+  revokeHookPairs,
   selectorsFor,
   setTrustRoot,
   type HooksStore,
@@ -238,6 +241,225 @@ describe('candidatePairs', () => {
       { path: CLEANUP, blob: 'b2' },
       { path: CLEANUP, blob: 'b1' },
     ])
+  })
+})
+
+// The half of the feature with no git in it: the daemon's answer joined against
+// the store, the trust root's tip cached into it, and the second-phase scan for a
+// version that has moved on. Reachable only through a live daemon until the
+// `resolve` seam existed, so none of it had ever executed in a test.
+describe('resolveProjectHooks', () => {
+  const project = {
+    path: '/proj',
+    slug: 'proj',
+    dataDir: '/d',
+    runsDir: '/r',
+    archiveDir: '/a',
+    flowsDir: '/f',
+    attachmentsDir: '/at',
+    hooksFile: '',
+  }
+  const declaration = (path: string, blob: string, ancestry: string[] = []) => ({
+    path,
+    blob,
+    trigger: 'landed',
+    by: 'any',
+    name: 'cleanup',
+    ancestry,
+  })
+  // A stand-in daemon: answers the declare phase from `declared`/`tip`, and the
+  // history phase by reporting whichever asked-for pairs are in `inHistory`.
+  const daemon = (opts: {
+    declared?: ReturnType<typeof declaration>[]
+    tip?: { path: string; blob: string }[]
+    inHistory?: { path: string; blob: string }[]
+    tipCommit?: string
+  }) => {
+    const calls: unknown[] = []
+    const fn = async (input: Record<string, unknown>) => {
+      calls.push(input)
+      const history = input.history as { pairs: { path: string; blob: string }[] } | undefined
+      return {
+        ok: true,
+        resolution: {
+          cwd: '/proj',
+          commit: 'c1',
+          ...(input.declare ? { declared: opts.declared ?? [] } : {}),
+          ...(input.trustRoot
+            ? {
+                trustRoot: {
+                  ref: input.trustRoot as string,
+                  commit: opts.tipCommit ?? 'tip1',
+                  ...(input.declare ? { tip: opts.tip ?? [] } : {}),
+                  ...(history
+                    ? {
+                        found: history.pairs.filter((p) =>
+                          (opts.inHistory ?? []).some(
+                            (h) => h.path === p.path && h.blob === p.blob,
+                          ),
+                        ),
+                      }
+                    : {}),
+                },
+              }
+            : {}),
+        },
+      }
+    }
+    return Object.assign(fn as never as typeof import('./daemon').requestHooksResolution, {
+      calls,
+    })
+  }
+
+  beforeEach(() => {
+    project.hooksFile = path.join(dir, 'hooks.json')
+    clearHookMissCache()
+  })
+
+  it('joins the daemon’s answer against the store', async () => {
+    await approveHookPairs(project.hooksFile, [{ path: CLEANUP, blob: 'b1' }], 'content', {
+      at: AT,
+    })
+    const r = await resolveProjectHooks({
+      project,
+      resolve: daemon({ declared: [declaration(CLEANUP, 'b1')] }),
+    })
+    expect(r.ok && r.hooks.hooks[0]).toMatchObject({
+      state: 'approved',
+      via: 'content',
+      runs: 'b1',
+    })
+  })
+
+  // T4's first half, which nothing exercised: a version on the trusted branch is
+  // approved with no prompt, and the answer is cached into the store so the git
+  // question is asked once rather than per request.
+  it('approves what the trusted branch’s tip carries, and records it', async () => {
+    await setTrustRoot(project.hooksFile, 'origin/main')
+    const r = await resolveProjectHooks({
+      project,
+      now: () => AT,
+      resolve: daemon({
+        declared: [declaration(CLEANUP, 'b1')],
+        tip: [{ path: CLEANUP, blob: 'b1' }],
+      }),
+    })
+    expect(r.ok && r.hooks.hooks[0]).toMatchObject({
+      state: 'approved',
+      via: 'trust-root',
+    })
+    expect((await readHooksStore(project.hooksFile)).approved).toEqual([
+      { path: CLEANUP, blob: 'b1', via: 'trust-root', ref: 'origin/main', at: AT },
+    ])
+  })
+
+  it('does not rewrite the store when the tip carries nothing new', async () => {
+    await setTrustRoot(project.hooksFile, 'origin/main')
+    const answer = () =>
+      daemon({
+        declared: [declaration(CLEANUP, 'b1')],
+        tip: [{ path: CLEANUP, blob: 'b1' }],
+      })
+    await resolveProjectHooks({ project, now: () => AT, resolve: answer() })
+    const first = await stat(project.hooksFile)
+    await new Promise((r) => setTimeout(r, 10))
+    await resolveProjectHooks({ project, now: () => AT, resolve: answer() })
+    expect((await stat(project.hooksFile)).mtimeMs).toBe(first.mtimeMs)
+  })
+
+  // The second phase: a version that reached the trusted branch and has since
+  // moved on from its tip is still approved, and only the pairs neither the tip
+  // nor the store could answer are asked about.
+  it('scans the trusted branch’s history for a version that moved on', async () => {
+    await setTrustRoot(project.hooksFile, 'origin/main')
+    const ask = daemon({
+      declared: [declaration(CLEANUP, 'b2', ['b1'])],
+      tip: [],
+      inHistory: [{ path: CLEANUP, blob: 'b1' }],
+    })
+    const r = await resolveProjectHooks({ project, now: () => AT, resolve: ask })
+    expect(r.ok && r.hooks.hooks[0]).toMatchObject({
+      state: 'pending',
+      runs: 'b1',
+      runsVia: 'trust-root',
+      reason: 'unapproved-version',
+    })
+    expect(ask.calls).toHaveLength(2)
+    expect((ask.calls[1] as { history: { pairs: unknown[] } }).history.pairs).toEqual([
+      { path: CLEANUP, blob: 'b2' },
+      { path: CLEANUP, blob: 'b1' },
+    ])
+  })
+
+  // A miss is only worth re-deriving once the branch has moved, so the second
+  // phase must not re-run while the tip is unchanged.
+  it('asks about a pair the trusted branch does not carry exactly once', async () => {
+    await setTrustRoot(project.hooksFile, 'origin/main')
+    const opts = { declared: [declaration(CLEANUP, 'b2')], tip: [] }
+    const first = daemon(opts)
+    await resolveProjectHooks({ project, now: () => AT, resolve: first })
+    expect(first.calls).toHaveLength(2)
+    const second = daemon(opts)
+    await resolveProjectHooks({ project, now: () => AT, resolve: second })
+    expect(second.calls).toHaveLength(1)
+    // Until it moves: a new tip is a new question.
+    const moved = daemon({ ...opts, tipCommit: 'tip2' })
+    await resolveProjectHooks({ project, now: () => AT, resolve: moved })
+    expect(moved.calls).toHaveLength(2)
+  })
+
+  it('does not ask the trusted branch anything when none is designated', async () => {
+    const ask = daemon({ declared: [declaration(CLEANUP, 'b1')] })
+    const r = await resolveProjectHooks({ project, resolve: ask })
+    expect(ask.calls).toHaveLength(1)
+    expect(r.ok && r.hooks.trustRoot).toEqual({ ref: null, configured: false })
+  })
+
+  it('reports a daemon that could not answer, rather than an empty tree', async () => {
+    const r = await resolveProjectHooks({
+      project,
+      resolve: (async () => ({
+        ok: false,
+        error: 'no daemon connected for this project',
+        status: 503,
+      })) as never as typeof import('./daemon').requestHooksResolution,
+    })
+    expect(r).toEqual({
+      ok: false,
+      error: 'no daemon connected for this project',
+      status: 503,
+    })
+  })
+})
+
+describe('revokeHookPairs', () => {
+  // Withdrawing removes a human's approval and nothing else: the pair may also be
+  // on the trusted branch, and that permission came from the branch.
+  it('removes a content approval and leaves a cached trust-root one', async () => {
+    await approveHookPairs(file, [{ path: CLEANUP, blob: 'b1' }], 'content', { at: AT })
+    await approveHookPairs(file, [{ path: CLEANUP, blob: 'b1' }], 'trust-root', {
+      ref: 'origin/main',
+      at: AT,
+    })
+    await revokeHookPairs(file, [{ path: CLEANUP, blob: 'b1' }])
+    const store = await readHooksStore(file)
+    expect(store.approved).toEqual([
+      { path: CLEANUP, blob: 'b1', via: 'trust-root', ref: 'origin/main', at: AT },
+    ])
+  })
+
+  it('leaves other versions of the same path alone', async () => {
+    await approveHookPairs(
+      file,
+      [
+        { path: CLEANUP, blob: 'b1' },
+        { path: CLEANUP, blob: 'b2' },
+      ],
+      'content',
+      { at: AT },
+    )
+    await revokeHookPairs(file, [{ path: CLEANUP, blob: 'b2' }])
+    expect((await readHooksStore(file)).approved.map((e) => e.blob)).toEqual(['b1'])
   })
 })
 

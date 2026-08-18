@@ -1296,8 +1296,27 @@ app.get('/api/:project/hooks', async (c) => {
 // A hook module's path, as the tree carries it. Validated on the way into the
 // store because the store is keyed by it — never used to open a file here, since
 // the server reads no repository.
-const HOOK_PATH = /^\.lander\/hooks\/[\w.-]+\/[\w.-]+\/[\w.-]+\.js$/
-const BLOB_ID = /^[0-9a-f]{7,64}$/
+//
+// It must accept exactly what the daemon's parseHookPath enumerates, or a hook
+// this endpoint has just listed as pending would fail to approve with no way
+// forward. Written as the same segment walk rather than as a regex mirroring it:
+// the two live on opposite sides of the WebSocket and cannot share code, so the
+// closer they read the likelier they stay in step. (A regex here had a real bug —
+// `(?!\.\.?$)` anchors at the end of the STRING, so it rejected a trailing `..`
+// and admitted `.lander/hooks/../../evil.js`.)
+function isHookPath(p: string): boolean {
+  if (p.includes('\n')) return false
+  const parts = p.split('/')
+  if (parts.length !== 5) return false
+  const [dot, hooks, trigger, by, file] = parts
+  if (dot !== '.lander' || hooks !== 'hooks' || !file.endsWith('.js')) return false
+  const name = file.slice(0, -'.js'.length)
+  return [trigger, by, name].every((s) => s !== '' && s !== '.' && s !== '..')
+}
+// A whole object name. Git's short forms are unambiguous to git and useless
+// here: the store is a set of exact strings, so a prefix is an entry that can
+// never match the pair it was meant to approve.
+const BLOB_ID = /^([0-9a-f]{40}|[0-9a-f]{64})$/
 
 // Read the (path, blob) pair a content-approval request names.
 async function hookPairFromBody(req: {
@@ -1306,7 +1325,7 @@ async function hookPairFromBody(req: {
   const body = await req.json<{ path?: unknown; blob?: unknown }>()
   const p = typeof body.path === 'string' ? body.path : ''
   const blob = typeof body.blob === 'string' ? body.blob : ''
-  if (!HOOK_PATH.test(p)) return { error: 'invalid hook path' }
+  if (!isHookPath(p)) return { error: 'invalid hook path' }
   if (!BLOB_ID.test(blob)) return { error: 'invalid blob id' }
   return { pair: { path: p, blob } }
 }

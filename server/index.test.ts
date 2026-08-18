@@ -197,11 +197,21 @@ describe('hook approval', () => {
     await rm(store(), { force: true })
   })
 
+  const B1 = 'b10bb10bb10bb10bb10bb10bb10bb10bb10bb10b'
+  const B2 = 'c0ffee1c0ffee1c0ffee1c0ffee1c0ffee1c0ffe'
+
   // An approved hook runs unattended with daemon privileges, so this is the
-  // strongest form of the reason /allow is human-only: a task must not be able
-  // to approve the hook that will run when it lands.
-  it('refuses a task and an anonymous caller', async () => {
-    const task = await createTask('Hook approver')
+  // strongest form of the reason /allow is human-only: a task must not be able to
+  // approve the hook that will run when it lands — nor, through the trusted
+  // branch, to approve every hook at once by naming a ref it can advance itself.
+  // Every one of the three, because they carry the same guard and only one of
+  // them being asserted is how the other two acquire a different one.
+  it.each([
+    ['approve', { path: CLEANUP, blob: B1 }],
+    ['revoke', { path: CLEANUP, blob: B1 }],
+    ['trust-root', { ref: 'origin/main' }],
+  ])('refuses a task and an anonymous caller on /%s', async (route, body) => {
+    const task = await createTask(`Hook ${route}`)
     const raw = JSON.parse(
       await readFile(path.join(tasksDir, `${task.id}.json`), 'utf8'),
     )
@@ -211,44 +221,62 @@ describe('hook approval', () => {
       'x-lander-token': raw.token,
     }
     for (const headers of [{} as Record<string, string>, asTask]) {
-      const res = await app.request(`/api/${slug}/hooks/approve`, {
+      const res = await app.request(`/api/${slug}/hooks/${route}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...headers },
-        body: JSON.stringify({ path: CLEANUP, blob: 'b10bb10' }),
+        body: JSON.stringify(body),
       })
       expect(res.status).toBe(403)
     }
+    expect(await readStore().catch(() => null)).toBeNull()
   })
 
   it.each([
-    ['/etc/passwd', 'b10bb10'],
-    ['.lander/hooks/landed/any/../../../evil.js', 'b10bb10'],
+    ['/etc/passwd', B1],
+    ['.lander/hooks/landed/any/../../../evil.js', B1],
+    // Three segments, so it satisfies the shape while naming a traversal — the
+    // case a segment pattern that admits `..` would let through.
+    ['.lander/hooks/../../evil.js', B1],
     [CLEANUP, 'not-a-blob'],
+    // A short object name: unambiguous to git, useless as a key in a set of
+    // exact strings, so it must not be stored as an approval that can never
+    // match the pair it was meant to approve.
+    [CLEANUP, 'b10bb10'],
     [CLEANUP, ''],
   ])('rejects (%s, %s)', async (hookPath, blob) => {
     const res = await post(`/api/${slug}/hooks/approve`, { path: hookPath, blob })
     expect(res.status).toBe(400)
   })
 
+  // The daemon enumerates any five-segment `.lander/hooks/<t>/<by>/<name>.js`, so
+  // a name this route refused would be listed as pending with an Approve button
+  // that always fails.
+  it('accepts every path shape the daemon can enumerate', async () => {
+    const res = await post(`/api/${slug}/hooks/approve`, {
+      path: '.lander/hooks/ride-ended/any/clean up (2).js',
+      blob: B1,
+    })
+    expect(res.status).toBe(200)
+  })
+
   it('records an approval, and withdrawing it removes it', async () => {
     expect(
-      (await post(`/api/${slug}/hooks/approve`, { path: CLEANUP, blob: 'b10bb10' }))
-        .status,
+      (await post(`/api/${slug}/hooks/approve`, { path: CLEANUP, blob: B1 })).status,
     ).toBe(200)
     expect((await readStore()).approved).toEqual([
-      { path: CLEANUP, blob: 'b10bb10', via: 'content', at: expect.any(String) },
+      { path: CLEANUP, blob: B1, via: 'content', at: expect.any(String) },
     ])
 
     // Monotonic in versions: approving a second version leaves the first.
-    await post(`/api/${slug}/hooks/approve`, { path: CLEANUP, blob: 'c0ffee1' })
+    await post(`/api/${slug}/hooks/approve`, { path: CLEANUP, blob: B2 })
     expect((await readStore()).approved).toHaveLength(2)
 
-    await post(`/api/${slug}/hooks/revoke`, { path: CLEANUP, blob: 'b10bb10' })
-    expect((await readStore()).approved.map((e) => e.blob)).toEqual(['c0ffee1'])
+    await post(`/api/${slug}/hooks/revoke`, { path: CLEANUP, blob: B1 })
+    expect((await readStore()).approved.map((e) => e.blob)).toEqual([B2])
   })
 
   it('names a trusted branch and clears it, without touching approvals', async () => {
-    await post(`/api/${slug}/hooks/approve`, { path: CLEANUP, blob: 'b10bb10' })
+    await post(`/api/${slug}/hooks/approve`, { path: CLEANUP, blob: B1 })
     const named = await post(`/api/${slug}/hooks/trust-root`, { ref: 'origin/main' })
     expect(await named.json()).toEqual({ ref: 'origin/main' })
     expect((await readStore()).trustRoot).toBe('origin/main')
@@ -262,10 +290,15 @@ describe('hook approval', () => {
     expect(after.approved).toHaveLength(1)
   })
 
-  it('refuses a branch name that could be read as a flag', async () => {
-    const res = await post(`/api/${slug}/hooks/trust-root`, {
-      ref: '--upload-pack=evil',
-    })
+  it.each([
+    ['--upload-pack=evil', 'could be read as a flag'],
+    ['origin/../HEAD', 'traverses'],
+    // Refused by name rather than left to resolve to nothing: the trust root has
+    // to be a remote-tracking ref, because advancing one takes a push, where an
+    // agent that can merge could advance a local branch itself.
+    ['refs/heads/main', 'names a local branch'],
+  ])('refuses a branch name that %s', async (ref) => {
+    const res = await post(`/api/${slug}/hooks/trust-root`, { ref })
     expect(res.status).toBe(400)
   })
 })
