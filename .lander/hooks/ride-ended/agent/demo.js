@@ -10,5 +10,5 @@
 export const meta = { api: 1 }
 
 export default async function onTurn(ctx) {
-  await ctx.report('demo hook: nothing to do')
+  await ctx.report('demo hook: still nothing to do, but a different version of it')
 }
