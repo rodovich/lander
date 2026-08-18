@@ -102,7 +102,15 @@ import {
   type AskForm,
 } from './asks'
 import { LEGACY_FLOW, flowCaps, flowRegistry, isAnnouncedFlow } from './flows'
-import { resolveProjectHooks, selectorsFor, taskCheckout } from './hooks'
+import {
+  approveHookPairs,
+  isSafeTrustRoot,
+  resolveProjectHooks,
+  revokeHookPairs,
+  selectorsFor,
+  setTrustRoot,
+  taskCheckout,
+} from './hooks'
 import { generateTitle } from './title'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -1283,6 +1291,76 @@ app.get('/api/:project/hooks', async (c) => {
       result.status as ContentfulStatusCode,
     )
   return c.json(result.hooks)
+})
+
+// A hook module's path, as the tree carries it. Validated on the way into the
+// store because the store is keyed by it — never used to open a file here, since
+// the server reads no repository.
+const HOOK_PATH = /^\.lander\/hooks\/[\w.-]+\/[\w.-]+\/[\w.-]+\.js$/
+const BLOB_ID = /^[0-9a-f]{7,64}$/
+
+// Read the (path, blob) pair a content-approval request names.
+async function hookPairFromBody(req: {
+  json<T>(): Promise<T>
+}): Promise<{ pair?: { path: string; blob: string }; error?: string }> {
+  const body = await req.json<{ path?: unknown; blob?: unknown }>()
+  const p = typeof body.path === 'string' ? body.path : ''
+  const blob = typeof body.blob === 'string' ? body.blob : ''
+  if (!HOOK_PATH.test(p)) return { error: 'invalid hook path' }
+  if (!BLOB_ID.test(blob)) return { error: 'invalid blob id' }
+  return { pair: { path: p, blob } }
+}
+
+// Approve one version of one hook. The pair, not the blob: with the trigger in
+// the path, the same content at a different path fires at a different time.
+//
+// Human-only, like granting a tool rule and for a stronger reason — an approved
+// hook runs unattended, with daemon privileges, so this is approving an entry
+// point rather than a behavior. A task must not be able to approve its own.
+app.post('/api/:project/hooks/approve', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  if ((await resolvePrincipal(c.req)).kind !== 'ui')
+    return c.json({ error: 'not authorized to approve hooks' }, 403)
+  const { pair, error } = await hookPairFromBody(c.req)
+  if (!pair) return c.json({ error }, 400)
+  await approveHookPairs(project.hooksFile, [pair], 'content', {
+    at: new Date().toISOString(),
+  })
+  return c.json({ ok: true })
+})
+
+// Withdraw a content approval. A version that is also on the trust root keeps
+// running: that approval came from the branch, and the way to withdraw it is to
+// stop trusting the branch.
+app.post('/api/:project/hooks/revoke', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  if ((await resolvePrincipal(c.req)).kind !== 'ui')
+    return c.json({ error: 'not authorized to revoke hook approvals' }, 403)
+  const { pair, error } = await hookPairFromBody(c.req)
+  if (!pair) return c.json({ error }, 400)
+  await revokeHookPairs(project.hooksFile, [pair])
+  return c.json({ ok: true })
+})
+
+// Designate the branch whose hooks run without individual approval, or clear it
+// (`ref: null`). A remote-tracking ref rather than a local branch: advancing one
+// requires a push, so it passes whatever the remote enforces, where an agent that
+// can merge could otherwise approve its own hook.
+app.post('/api/:project/hooks/trust-root', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  if ((await resolvePrincipal(c.req)).kind !== 'ui')
+    return c.json({ error: 'not authorized to set the trusted branch' }, 403)
+  const body = await c.req.json<{ ref?: unknown }>()
+  const raw = typeof body.ref === 'string' ? body.ref.trim() : ''
+  if (body.ref !== null && typeof body.ref !== 'string')
+    return c.json({ error: 'ref must be a string or null' }, 400)
+  if (raw && !isSafeTrustRoot(raw))
+    return c.json({ error: 'invalid branch name' }, 400)
+  const store = await setTrustRoot(project.hooksFile, raw || null)
+  return c.json({ ref: store.trustRoot ?? null })
 })
 
 // Flow names are bare filenames (<name>.js under the project's flows dir), so

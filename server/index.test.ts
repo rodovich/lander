@@ -184,6 +184,92 @@ describe('hooks endpoint', () => {
   })
 })
 
+describe('hook approval', () => {
+  const CLEANUP = '.lander/hooks/landed/any/cleanup.js'
+  const store = () => path.join(dataRoot, 'hooks.json')
+  const readStore = async () =>
+    JSON.parse(await readFile(store(), 'utf8')) as {
+      trustRoot?: string | null
+      approved: { path: string; blob: string; via: string }[]
+    }
+
+  afterEach(async () => {
+    await rm(store(), { force: true })
+  })
+
+  // An approved hook runs unattended with daemon privileges, so this is the
+  // strongest form of the reason /allow is human-only: a task must not be able
+  // to approve the hook that will run when it lands.
+  it('refuses a task and an anonymous caller', async () => {
+    const task = await createTask('Hook approver')
+    const raw = JSON.parse(
+      await readFile(path.join(tasksDir, `${task.id}.json`), 'utf8'),
+    )
+    const asTask: Record<string, string> = {
+      'x-lander-task': task.id,
+      'x-lander-project': slug,
+      'x-lander-token': raw.token,
+    }
+    for (const headers of [{} as Record<string, string>, asTask]) {
+      const res = await app.request(`/api/${slug}/hooks/approve`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...headers },
+        body: JSON.stringify({ path: CLEANUP, blob: 'b10bb10' }),
+      })
+      expect(res.status).toBe(403)
+    }
+  })
+
+  it.each([
+    ['/etc/passwd', 'b10bb10'],
+    ['.lander/hooks/landed/any/../../../evil.js', 'b10bb10'],
+    [CLEANUP, 'not-a-blob'],
+    [CLEANUP, ''],
+  ])('rejects (%s, %s)', async (hookPath, blob) => {
+    const res = await post(`/api/${slug}/hooks/approve`, { path: hookPath, blob })
+    expect(res.status).toBe(400)
+  })
+
+  it('records an approval, and withdrawing it removes it', async () => {
+    expect(
+      (await post(`/api/${slug}/hooks/approve`, { path: CLEANUP, blob: 'b10bb10' }))
+        .status,
+    ).toBe(200)
+    expect((await readStore()).approved).toEqual([
+      { path: CLEANUP, blob: 'b10bb10', via: 'content', at: expect.any(String) },
+    ])
+
+    // Monotonic in versions: approving a second version leaves the first.
+    await post(`/api/${slug}/hooks/approve`, { path: CLEANUP, blob: 'c0ffee1' })
+    expect((await readStore()).approved).toHaveLength(2)
+
+    await post(`/api/${slug}/hooks/revoke`, { path: CLEANUP, blob: 'b10bb10' })
+    expect((await readStore()).approved.map((e) => e.blob)).toEqual(['c0ffee1'])
+  })
+
+  it('names a trusted branch and clears it, without touching approvals', async () => {
+    await post(`/api/${slug}/hooks/approve`, { path: CLEANUP, blob: 'b10bb10' })
+    const named = await post(`/api/${slug}/hooks/trust-root`, { ref: 'origin/main' })
+    expect(await named.json()).toEqual({ ref: 'origin/main' })
+    expect((await readStore()).trustRoot).toBe('origin/main')
+
+    const cleared = await post(`/api/${slug}/hooks/trust-root`, { ref: null })
+    expect(await cleared.json()).toEqual({ ref: null })
+    const after = await readStore()
+    expect(after.trustRoot).toBeNull()
+    // Clearing the branch stops its approvals counting; it does not erase a
+    // human's.
+    expect(after.approved).toHaveLength(1)
+  })
+
+  it('refuses a branch name that could be read as a flag', async () => {
+    const res = await post(`/api/${slug}/hooks/trust-root`, {
+      ref: '--upload-pack=evil',
+    })
+    expect(res.status).toBe(400)
+  })
+})
+
 describe('server task provider behavior', () => {
   it('stores the configured default provider on new tasks', async () => {
     const task = await createTask('Codex default task')

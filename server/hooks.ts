@@ -129,6 +129,28 @@ export function approveHookPairs(
   })
 }
 
+// Withdraw a human's approval of a pair. Only `content` entries are removed: a
+// pair that is also on the trust root stays approved, because withdrawing an
+// approval nobody granted is not a thing the store can express — un-designating
+// the branch is.
+//
+// Monotonicity is a statement about versions, not about time: approving a new
+// version never un-approves an old one (so a pending version blocks nothing).
+// Deliberately withdrawing one is a different act, and the plan's invariant that
+// approval is re-checked at materialization only means anything if it exists.
+export function revokeHookPairs(
+  file: string,
+  pairs: HookPair[],
+): Promise<HooksStore> {
+  const revoked = new Set(pairs.map(pairKey))
+  return mutateJson<HooksStore>(file, emptyHooksStore, (store) => {
+    if (!Array.isArray(store.approved)) store.approved = []
+    store.approved = store.approved.filter(
+      (e) => e.via !== 'content' || !revoked.has(pairKey(e)),
+    )
+  })
+}
+
 // Designate the trust root, or refuse one (`null`). Never touches the approved
 // set: the entries are monotonic, and re-designating the same ref later should
 // find its cached answers still there rather than rescan the history.
