@@ -452,7 +452,14 @@ describe('the nudge', () => {
     const before = await readFile(path.join(tasksDir, `${ID}.json`), 'utf8')
     const res = await nudge(cred().token, { message: 'get back to work', key: 'nudge#0' })
     expect(res.status).toBe(403)
-    expect(await res.json()).toEqual({ ok: false, reason: 'wedged' })
+    // The refusal carries its own prose, which the host reports verbatim rather
+    // than re-deriving — it must not need the server's constants to explain
+    // itself.
+    expect(await res.json()).toMatchObject({
+      ok: false,
+      reason: 'wedged',
+      error: expect.stringContaining('question for its human'),
+    })
     expect(await readFile(path.join(tasksDir, `${ID}.json`), 'utf8')).toBe(before)
   })
 
@@ -475,7 +482,11 @@ describe('the nudge', () => {
       key: 'nudge#0',
     })
     expect(res.status).toBe(403)
-    expect(await res.json()).toEqual({ ok: false, reason: 'bound' })
+    expect(await res.json()).toMatchObject({
+      ok: false,
+      reason: 'bound',
+      error: expect.stringContaining('since a human last touched it'),
+    })
   })
 
   it('re-arms once a human touches the task', async () => {
@@ -533,6 +544,151 @@ describe('the nudge', () => {
       key: 'nudge#0',
     })
     expect(res.status).toBe(401)
+  })
+})
+
+// A hook may end its target when it judges the work finished. It shares PATCH
+// with wedge and resume, so the branch is whitelisted; and it refuses the states
+// where landing is not the reversible act the design chose it for.
+describe('the land', () => {
+  const HOOK = '.lander/hooks/ride-ended/any/supervise.js'
+  const ID = 'tsk-landed'
+  const file = () => path.join(tasksDir, `${ID}.json`)
+
+  afterEach(() => clearHookRunState())
+
+  const seed = async (over: Record<string, unknown> = {}): Promise<void> => {
+    await writeFile(
+      file(),
+      JSON.stringify({
+        id: ID,
+        title: 'Supervised',
+        status: 'riding',
+        createdAt: AT,
+        updatedAt: AT,
+        allowEdits: false,
+        token: `token-${ID}`,
+        shape: 2,
+        rides: [],
+        items: [{ id: 'u0', at: AT, kind: 'message', role: 'user', text: 'go' }],
+        ...over,
+      }),
+    )
+  }
+
+  const cred = (over: Record<string, unknown> = {}) =>
+    mintHookCredential({
+      project: slug,
+      target: ID,
+      fireId: 'fire-1-abc',
+      path: HOOK,
+      blob: 'b10b',
+      name: 'supervise',
+      ...over,
+    })
+
+  const land = (token: string, body: Record<string, unknown> = {}) =>
+    app.request(`/api/${slug}/tasks/${ID}`, {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        'x-lander-hook-token': token,
+      },
+      body: JSON.stringify({ status: 'landed', key: 'land#0', ...body }),
+    })
+
+  const raw = async (): Promise<Record<string, any>> =>
+    JSON.parse(await readFile(file(), 'utf8'))
+
+  it('lands a resting target and records the crossing as the hook’s', async () => {
+    await seed()
+    const res = await land(cred().token)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+
+    const t = await raw()
+    expect(t.status).toBe('landed')
+    expect(t.items.some((i: any) => i.eventKind === 'landed')).toBe(true)
+    expect(t.hookActions).toMatchObject([{ hook: HOOK, kind: 'land' }])
+    // The fire the landing raised names its cause, so dispatch skips this hook
+    // and only this hook — cleanup and review still see the landing.
+    const fire = (t.pendingHooks ?? []).find((f: any) => f.trigger === 'landed')
+    expect(fire).toMatchObject({ by: 'hook', byHook: HOOK })
+  })
+
+  // The whitelist. Without it the credential reaches `wedged` — which hooks.md
+  // guarantees a hook never does — and `riding`, i.e. reopening, which the
+  // design gates behind a replay harness that does not exist.
+  it.each(['wedged', 'riding'])('refuses to set status %s', async (status) => {
+    await seed()
+    const res = await land(cred().token, { status })
+    expect(res.status).toBe(403)
+    expect((await res.json()).reason).toBe('not-permitted')
+    expect((await raw()).status).toBe('riding')
+  })
+
+  // Landing deletes scheduledFor/waitingFor, and a reply restores neither — so
+  // a landed task resting on a wakeup is NOT reversible by a reply, which is the
+  // whole reason landing is preferred to nudging.
+  it.each([
+    ['scheduledFor', { scheduledFor: '2099-01-01T00:00:00.000Z' }],
+    ['waitingFor', { waitingFor: ['tsk-other'] }],
+  ])('refuses a target resting on %s', async (_name, over) => {
+    await seed(over)
+    const res = await land(cred().token)
+    expect(res.status).toBe(403)
+    expect((await res.json()).reason).toBe('scheduled')
+    const t = await raw()
+    expect(t.status).toBe('riding')
+    expect(t.scheduledFor ?? t.waitingFor).toBeTruthy() // the wakeup survives
+  })
+
+  // The queue is not in publicTask's "live run" derivation, so a task that has
+  // been sent a message but whose ride has not opened reads as resting.
+  it('refuses a target with a queued prompt and no open ride', async () => {
+    await seed({ queued: ['do more'] })
+    const res = await land(cred().token)
+    expect(res.status).toBe(403)
+    expect((await res.json()).reason).toBe('riding')
+  })
+
+  it('refuses a wedged target', async () => {
+    await seed({ status: 'wedged' })
+    expect((await land(cred().token)).status).toBe(403)
+    expect((await raw()).status).toBe('wedged')
+  })
+
+  it('is bounded and deduped by the same record as the nudge', async () => {
+    await seed({
+      hookActions: [
+        { hook: HOOK, fireId: 'f0', key: 'nudge#0', kind: 'nudge', at: AT },
+        { hook: HOOK, fireId: 'f1', key: 'nudge#0', kind: 'nudge', at: AT },
+        { hook: HOOK, fireId: 'f2', key: 'nudge#0', kind: 'nudge', at: AT },
+      ],
+    })
+    // Three nudges already spent, so the land — a different verb, the same
+    // bound — is refused.
+    const res = await land(cred().token)
+    expect(res.status).toBe(403)
+    expect((await res.json()).reason).toBe('bound')
+  })
+
+  it('dedupes a retry of the same fire and key', async () => {
+    await seed({
+      hookActions: [
+        { hook: HOOK, fireId: 'fire-1-abc', key: 'land#0', kind: 'land', at: AT },
+      ],
+    })
+    expect(await (await land(cred().token)).json()).toEqual({ ok: true, deduped: true })
+    // The dedupe is a no-op, not a second landing.
+    expect((await raw()).status).toBe('riding')
+  })
+
+  it('answers an unknown token rather than falling through to an ordinary land', async () => {
+    await seed()
+    const res = await land('not-a-real-token')
+    expect(res.status).toBe(401)
+    expect((await raw()).status).toBe('riding')
   })
 })
 

@@ -2245,6 +2245,92 @@ app.post('/api/:project/tasks', async (c) => {
 })
 
 
+// A hook's land: end the target when the judgment is that it is finished.
+//
+// It shares PATCH rather than getting a route of its own, for the same reason
+// the nudge shares /messages. But this route also accepts `wedged` and `riding`
+// and gates status changes on nobody, so the hook branch is **whitelisted to
+// `landed` and nothing else**: without that, a credential is one field away from
+// wedging its target — which hooks.md §8 says a hook never does — and from
+// reopening one, which the design gates behind a replay harness that does not
+// exist yet.
+//
+// Landing is preferred to nudging when the target looks done because it is
+// reversible where a spent turn is not. That is only true if the wakeups survive,
+// and they do not: the `landed` crossing deletes `scheduledFor` and
+// `waitingFor`, and a reply restores status while restoring neither. So a target
+// holding either trigger is refused, and the reversibility the choice rests on
+// becomes a property rather than an assumption.
+async function landFromHook(
+  c: Context,
+  project: Project,
+  id: string,
+  file: string,
+  token: string,
+  status: unknown,
+  rawKey: unknown,
+): Promise<Response> {
+  const cred = hookCredentialFor(token, project.slug)
+  if (!cred || cred.target !== id)
+    return c.json(
+      { ok: false, error: 'unknown or expired hook credential', reason: 'credential-unknown' },
+      401,
+    )
+  if (status !== 'landed')
+    return c.json(
+      { ok: false, error: 'a hook may only set status to landed', reason: 'not-permitted' },
+      403,
+    )
+  const key = typeof rawKey === 'string' && rawKey ? rawKey : ''
+  if (!key) return c.json({ ok: false, error: 'key is required' }, 400)
+
+  const now = new Date().toISOString()
+  let deduped = false
+  try {
+    await mutateTask(file, (t) => {
+      // Every refusal before the bound, so a refusal never spends a slot.
+      if (t.status === 'wedged') throw new HookRefusal('wedged')
+      // "Not riding" is not what publicTask derives: that reads an open ride or
+      // a runId, and neither is set in the window after /messages queues a
+      // prompt and before driveTask opens the ride. Landing there would leave a
+      // turn riding on a landed task, since the crossing never touches `queued`.
+      if (openRide(t) || t.runId || t.queued?.length || running.has(id))
+        throw new HookRefusal('riding')
+      // The wakeup the crossing would silently delete.
+      if (t.scheduledFor || t.waitingFor?.length) throw new HookRefusal('scheduled')
+
+      const accepted = acceptHookAction(t, {
+        hook: cred.path,
+        fireId: cred.fireId,
+        key,
+        kind: 'land',
+        at: now,
+      })
+      if (!accepted.ok) throw new HookRefusal(accepted.reason)
+      if (accepted.deduped) {
+        deduped = true
+        return
+      }
+
+      // Records the `landed` event and the fire. `byHook` rides onto that fire,
+      // so every OTHER hook still sees the landing — which is what lets one
+      // chain into cleanup — while the hook that landed the target is not woken
+      // by its own landing.
+      recordStatusTransition(t, 'landed', now, 'hook', cred.path)
+      t.status = 'landed'
+      t.updatedAt = now
+    })
+  } catch (e) {
+    // The refusal carries its own prose, because the host reports it verbatim
+    // and must not have to know the bound's value — which would mean importing
+    // the server's task module into a process spawned fresh for every fire.
+    if (e instanceof HookRefusal)
+      return c.json({ ok: false, reason: e.reason, error: e.message }, 403)
+    throw e
+  }
+  return c.json({ ok: true, ...(deduped ? { deduped: true } : {}) })
+}
+
 app.patch('/api/:project/tasks/:id', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
@@ -2264,7 +2350,15 @@ app.patch('/api/:project/tasks/:id', async (c) => {
       title?: unknown
       allowEdits?: unknown
       status?: unknown
+      key?: unknown
     }>()
+
+    // A hook token means a hook request, answered here rather than fallen
+    // through — this route's status change is open to anonymous callers, so a
+    // stale credential must not quietly become an ordinary land.
+    const hookToken = c.req.header('x-lander-hook-token')
+    if (hookToken !== undefined)
+      return landFromHook(c, project, id, file, hookToken, body.status, body.key)
 
     // Resolve the caller once: to gate the privileged allow* change, and to
     // decide whether a wedge should interrupt a live run.
@@ -2937,8 +3031,11 @@ async function nudgeFromHook(
     // Only a refusal is an answer; anything else — a missing or corrupt task
     // file, which rejects from the same call — is a fault, and reporting it to
     // the body as `bound` would be a lie.
+    // The refusal carries its own prose, because the host reports it verbatim
+    // and must not have to know the bound's value — which would mean importing
+    // the server's task module into a process spawned fresh for every fire.
     if (e instanceof HookRefusal)
-      return c.json({ ok: false, reason: e.reason }, 403)
+      return c.json({ ok: false, reason: e.reason, error: e.message }, 403)
     throw e
   }
 

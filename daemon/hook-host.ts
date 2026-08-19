@@ -32,7 +32,6 @@ import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { HookRunReport } from '../server/protocol'
-import { HOOK_ACTION_BOUND } from '../server/tasks'
 import type { HookHostInput } from './hook-run'
 
 // The API version a body declares in `meta`. Bumped when the ctx contract
@@ -167,7 +166,13 @@ export type HookActionResult =
   | { ok: true; deduped?: true }
   | {
       ok: false
-      reason: 'bound' | 'wedged' | 'credential-unknown' | 'error'
+      reason:
+        | 'bound'
+        | 'wedged'
+        | 'riding'
+        | 'scheduled'
+        | 'credential-unknown'
+        | 'error'
       error?: string
     }
 
@@ -221,29 +226,21 @@ function buildCtx(input: HookHostInput, reports: string[]) {
     const reason =
       body.reason === 'bound' ||
       body.reason === 'wedged' ||
+      body.reason === 'riding' ||
+      body.reason === 'scheduled' ||
       body.reason === 'credential-unknown'
         ? body.reason
         : 'error'
+    const error = body.error ?? `the server refused the ${kind} (${res.status})`
     // A refusal says so on the timeline whatever the body does with the result.
     // The bound is the mechanism that keeps a runaway visible, so a body that
     // ignores the return value must not be able to make it the quietest thing in
     // the system — it would leave a fire that acted on nothing and said nothing.
-    // A dedupe is not reported: a retry correctly no-op'ing is not a finding.
-    if (reason === 'bound')
-      reports.push(
-        `lander refused this hook's ${kind}: it has already acted ` +
-          `${HOOK_ACTION_BOUND} times on this task since a human last touched it.`,
-      )
-    else if (reason === 'wedged')
-      reports.push(
-        `lander refused this hook's ${kind}: the task is wedged, holding a ` +
-          `question for its human.`,
-      )
-    return {
-      ok: false,
-      reason,
-      error: body.error ?? `the server refused the ${kind} (${res.status})`,
-    }
+    // A dedupe is not reported: a retry correctly no-op'ing is not a finding, and
+    // `credential-unknown` is this server having restarted, which is nobody's.
+    if (reason !== 'credential-unknown' && reason !== 'error')
+      reports.push(`lander refused this hook's ${kind}: ${error}`)
+    return { ok: false, reason, error }
   }
 
   return {
@@ -338,6 +335,31 @@ function buildCtx(input: HookHostInput, reports: string[]) {
               'x-lander-hook-token': run.callback.token,
             },
             body: JSON.stringify({ message: String(text), key }),
+          },
+        ),
+      )
+    },
+    // End the target, when the judgment is that it is finished.
+    //
+    // Bounded by the same record as the nudge, and refused on a target that is
+    // wedged, still working, or resting on a wakeup — that last because landing
+    // deletes an armed trigger, which would make "a wrongly landed task is
+    // revived by a reply" false in exactly the case a supervisor meets most.
+    //
+    // Landing fires a `landed` trigger, so a landing can chain into cleanup or
+    // review; the fire records this hook as its cause, so it does not come back
+    // here.
+    land(opts: { key?: string } = {}): Promise<HookActionResult> {
+      return act('land', opts.key, (key) =>
+        fetch(
+          `${run.callback.api}/api/${encodeURIComponent(run.callback.project)}/tasks/${encodeURIComponent(run.target.id)}`,
+          {
+            method: 'PATCH',
+            headers: {
+              'content-type': 'application/json',
+              'x-lander-hook-token': run.callback.token,
+            },
+            body: JSON.stringify({ status: 'landed', key }),
           },
         ),
       )

@@ -128,11 +128,16 @@ describe('ctx.nudge', () => {
 
   // A body that ignores the return value must not be able to make the bound the
   // quietest thing in the system: the refusal reaches the timeline either way.
+  // The server's prose is reported verbatim: the host must not have to know the
+  // bound's value, which would mean importing the server's task module into a
+  // process spawned fresh for every fire.
   it('reports a bound or wedged refusal, but not a dedupe', async () => {
     const reports: string[] = []
-    stubFetch([{ status: 403, body: { ok: false, reason: 'bound' } }])
+    stubFetch([
+      { status: 403, body: { ok: false, reason: 'bound', error: 'already acted 3 times' } },
+    ])
     await buildCtx(input(), reports).nudge('x')
-    expect(reports.join('\n')).toContain('already acted')
+    expect(reports.join('\n')).toContain('already acted 3 times')
 
     vi.unstubAllGlobals()
     const quiet: string[] = []

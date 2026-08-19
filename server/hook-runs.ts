@@ -21,6 +21,7 @@
 // project and target it was minted for.
 
 import { randomUUID } from 'node:crypto'
+import { HOOK_ACTION_BOUND } from './tasks'
 
 // The timeout ladder. Ordered, not one number: the daemon must always finish
 // assembling its report before the server stops listening, or `settleRequest`
@@ -143,9 +144,21 @@ export function hookCredentialFor(
 // changed nothing. Throwing is the abort. It has to be a distinguishable type
 // because a missing or corrupt task file rejects from the same call, and a
 // corrupt file reported to a hook body as `bound` would be a lie.
+export type HookRefusalReason = 'bound' | 'wedged' | 'riding' | 'scheduled'
+
+// The prose lives here rather than in the host, which reports it verbatim: the
+// host is spawned fresh for every fire, so anything it must know is an import it
+// pays for on every spawn — and the bound's value is the server's business.
+const REFUSALS: Record<HookRefusalReason, string> = {
+  bound: `this hook has already acted ${HOOK_ACTION_BOUND} times on this task since a human last touched it`,
+  wedged: 'the task is wedged, holding a question for its human',
+  riding: 'the task is working again',
+  scheduled: 'the task is resting on a wakeup, which landing would delete',
+}
+
 export class HookRefusal extends Error {
-  constructor(readonly reason: 'bound' | 'wedged' | 'riding' | 'scheduled') {
-    super(`hook action refused: ${reason}`)
+  constructor(readonly reason: HookRefusalReason) {
+    super(REFUSALS[reason])
     this.name = 'HookRefusal'
   }
 }
