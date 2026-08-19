@@ -65,6 +65,7 @@ import {
   pushFlowItem,
   pushEventItem,
   userItems,
+  promptItems,
   eventItems,
   recordAssistantError,
   recordRideEnded,
@@ -3345,12 +3346,17 @@ async function recoverQueues(): Promise<void> {
       // never got its reply (its queue was drained before the crash). A tracked run
       // (runId) was handled above; wedged/landed are left alone.
       const lastItem = task.items[task.items.length - 1]
-      const trailingUser =
-        lastItem?.kind === 'message' && lastItem.role === 'user'
+      // A hook's nudge counts as a trailing prompt exactly as a user message
+      // does: it was queued, and the queue may have drained before the ride
+      // opened. Without it a nudge lost to a restart is never recovered — and
+      // this server restarts on every `server/**` edit.
+      const trailingPrompt =
+        lastItem?.kind === 'message' &&
+        (lastItem.role === 'user' || lastItem.role === 'hook')
       const interrupted =
         task.status === 'riding' &&
         !hasQueue &&
-        (!!openRide(task) || trailingUser)
+        (!!openRide(task) || trailingPrompt)
       if (!hasQueue && !interrupted) continue
       await mutateTask(file, (t) => {
         // Close any ride the dead process left open (the v2 analog of clearing a
@@ -3368,7 +3374,11 @@ async function recoverQueues(): Promise<void> {
             // prompt (the last user item) without adding a duplicate display item;
             // driveTask runs it as a fresh turn (no sessionId persisted yet, so the
             // daemon mints one).
-            const opening = userItems(t).at(-1)
+            // The trailing PROMPT, not the trailing user message: a task whose
+            // opening run died can have a hook's nudge as its last prompt, and
+            // re-queueing the user message before it would re-run work the task
+            // already did while dropping the nudge entirely.
+            const opening = promptItems(t).at(-1)
             if (opening) (t.queued ??= []).push(opening.text)
           }
         }

@@ -33,7 +33,10 @@
 import type { Item, MessageItem, EventItem, AskItem, HookItem, Ride } from './types'
 
 export type TimelineEntry =
-  // A user message bubble (out of any ride). `queued` rides on the item.
+  // A standalone message bubble (out of any ride) — the slot a prompt occupies,
+  // whether the user typed it or a hook nudged it. The entry names the SLOT; the
+  // voice is `item.role`, and the renderer distinguishes them. `queued` rides on
+  // the item.
   | { kind: 'user'; at: string; item: MessageItem }
   // One ride — an assistant turn — carrying all its items (flow messages and
   // tools, main-thread and subagent-nested); the renderer does the nesting and
@@ -69,7 +72,12 @@ export function buildTimeline(
   const sunk: MessageItem[] = []
   const kept: Item[] = []
   for (const it of all) {
-    if (it.kind === 'message' && it.role === 'user' && it.queued) sunk.push(it)
+    if (
+      it.kind === 'message' &&
+      (it.role === 'user' || it.role === 'hook') &&
+      it.queued
+    )
+      sunk.push(it)
     else kept.push(it)
   }
 

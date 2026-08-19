@@ -605,9 +605,24 @@ function conversationBlocks(items, { tools }) {
   const blocks = []
   let curRide = null
   for (const it of items) {
-    if (it.kind === 'message' && it.role === 'user') {
+    if (it.kind === 'message' && (it.role === 'user' || it.role === 'hook')) {
       curRide = null
-      blocks.push({ role: 'user', parts: [it.text ?? ''] })
+      // A hook's nudge drove the reply that follows it. Dropping it (it is
+      // neither role `user` nor ride-attached) would show that reply with no
+      // visible cause.
+      blocks.push({
+        role: it.role === 'hook' ? `hook ${it.from?.hook ?? ''}`.trim() : 'user',
+        parts: [it.text ?? ''],
+      })
+    } else if (it.kind === 'hook') {
+      // A hook run's report, which has no rideId by design. Included so a
+      // finding — or a refusal, which is the only trace a bounded hook leaves —
+      // is readable over the CLI and not only in the web client.
+      curRide = null
+      blocks.push({
+        role: `hook ${it.hook}`,
+        parts: [it.text || it.error || `(${it.outcome})`],
+      })
     } else if (it.rideId) {
       if (!curRide || curRide.rideId !== it.rideId) {
         curRide = { role: 'assistant', rideId: it.rideId, parts: [] }

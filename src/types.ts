@@ -115,8 +115,13 @@ type ItemCommon = {
 
 export type MessageItem = ItemCommon & {
   kind: 'message'
-  role: 'user' | 'flow'
+  // `hook` is a task hook's nudge — a finding it appended and drove as a turn.
+  // Rendered as its own voice: not the user, who did not say it, and not the
+  // flow, which would make it look like the task's own output.
+  role: 'user' | 'flow' | 'hook'
   text: string
+  // Which hook spoke, on a `hook` message.
+  from?: { hook: string; path: string; fireId: string }
   attachments?: Attachment[]
   artifacts?: Artifact[]
   // Set on a user message once a queued batch delivers it: the ride that

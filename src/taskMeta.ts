@@ -32,6 +32,16 @@ export function latestUpdateAt(task: Task): string {
       if (it.at > latest) latest = it.at
     } else if (it.kind === 'event') {
       if (it.at > latest) latest = it.at
+    } else if (it.kind === 'message' && it.role === 'hook') {
+      // A hook's nudge is new activity on the task, so it lights the unseen dot
+      // like any other arriving message.
+      if (it.at > latest) latest = it.at
+    } else if (it.kind === 'hook') {
+      // A hook run's report — a finding, or an account of why one could not run.
+      // Counted here so a bound refusal is visible rather than silent; the
+      // stored record deliberately does not bump `updatedAt` for it, so this is
+      // the only thing that surfaces it.
+      if (it.at > latest) latest = it.at
     }
   }
   for (const r of task.rides ?? []) {

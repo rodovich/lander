@@ -124,6 +124,31 @@ describe('Conversation timeline dispatch', () => {
     expect(html).toContain('status-transition')
   })
 
+  // A hook's nudge sits in the same slot as a typed message — it was queued and
+  // it drove a turn — but it is not the user speaking. Rendered in the user's
+  // voice it would be indistinguishable from something the human asked for.
+  it('renders a hook’s nudge in its own voice, not the user’s', () => {
+    const html = render(
+      baseTask({
+        items: [
+          {
+            ...user('h1', 'From hook supervise:\n\nreally finished?'),
+            role: 'hook',
+            from: {
+              hook: 'supervise',
+              path: '.lander/hooks/ride-ended/any/supervise.js',
+              fireId: 'fire-1',
+            },
+          } as MessageItem,
+        ],
+      }),
+    )
+    expect(html).toContain('message-hook')
+    expect(html).not.toContain('message-user')
+    expect(html).toContain('hook supervise')
+    expect(html).toContain('really finished?')
+  })
+
   it('marks a queued follow-up bubble', () => {
     const html = render(
       baseTask({ items: [user('u1', 'later', { queued: true })] }),

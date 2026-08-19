@@ -1250,6 +1250,17 @@ body {
   color: var(--wedged);
 }
 
+/* A hook's nudge occupies the same slot as a typed message and drove a turn the
+   same way, so it keeps the prompt tint — but it is the platform speaking, not
+   the user, so the role takes the platform's colour rather than the muted one. */
+.message-hook {
+  background: var(--bg-tinted);
+}
+
+.message-hook .message-role {
+  color: var(--wedged);
+}
+
 .message-time {
   color: var(--muted);
   font-size: 12px;

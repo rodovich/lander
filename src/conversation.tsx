@@ -361,13 +361,21 @@ export const Conversation = memo(function Conversation({
           }
           if (entry.kind === 'user') {
             const m = entry.item
+            // A hook's nudge sits in the same slot as a typed message — it was
+            // queued and drove a turn the same way — but it is not the user
+            // speaking, so it gets its own voice rather than the user's tint.
+            const isHook = m.role === 'hook'
             return (
               <div
-                className={`message message-user${m.queued ? ' message-queued' : ''}`}
+                className={`message message-${isHook ? 'hook' : 'user'}${
+                  m.queued ? ' message-queued' : ''
+                }`}
                 key={`u-${m.id}`}
               >
                 <div className="message-head">
-                  <span className="message-role">user</span>
+                  <span className="message-role">
+                    {isHook ? `hook ${m.from?.hook ?? ''}`.trim() : 'user'}
+                  </span>
                   <span className="message-time">{formatTimestamp(m.at)}</span>
                 </div>
                 <MessageText text={m.text} linkTask={linkTask} />

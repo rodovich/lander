@@ -300,8 +300,18 @@ type ItemCommon = {
 
 export type MessageItem = ItemCommon & {
   kind: 'message'
-  role: 'user' | 'flow'
+  // `hook` is a task hook's nudge: a finding appended and driven as a turn. It is
+  // deliberately not `user` — it would otherwise enter lastTurnPrompts (so a
+  // failed turn would re-send the hook's words as the user's) and a hook reading
+  // "the user's messages" would read a previous hook's output as user intent.
+  // Not `flow` either, which would make it indistinguishable from the target's
+  // own assistant output.
+  role: 'user' | 'flow' | 'hook'
   text: string
+  // Which hook spoke, on a `hook` message. Carried rather than left to be parsed
+  // out of the attributed text: `path` is a hook's identity, and a body asking
+  // "did I already nudge this span" must not have to regex a display prefix.
+  from?: { hook: string; path: string; fireId: string }
   attachments?: Attachment[]
   artifacts?: Artifact[]
   // Set on a user message once a queued batch delivers it: the ride that consumed
@@ -458,6 +468,30 @@ export function pushEventItem(
   return item
 }
 
+// Append a task hook's nudge: a finding the hook wants the target to act on,
+// queued as a prompt like a message and recorded as its own role.
+//
+// The text carries the attribution (`From hook <name>:`) because a prompt has no
+// roles — the agent sees only the joined queue — while `from` carries the
+// identity structurally, for anything that needs to ask which hook spoke.
+export function pushHookMessageItem(
+  task: { items?: Item[] },
+  text: string,
+  from: NonNullable<MessageItem['from']>,
+  at: string,
+): MessageItem {
+  const item: MessageItem = {
+    id: nextItemId(task, at),
+    at,
+    kind: 'message',
+    role: 'hook',
+    text,
+    from,
+  }
+  ;(task.items ??= []).push(item)
+  return item
+}
+
 // Append a hook run's report (out of any ride, like a user message or an event).
 //
 // Deliberately does NOT bump `updatedAt`: the sidebar sorts on it, so a report
@@ -501,11 +535,27 @@ export function lastFlowItem(
 }
 
 // The user message items in order (out-of-ride `message` items with role `user`).
-// The v2 analog of filtering `messages` to role user — used by lastTurnPrompts and
-// turnAttachments.
+// The v2 analog of filtering `messages` to role user. Used where the question is
+// genuinely "what did the human say" — the opening prompt a title is generated
+// from, the goal a summary is built against.
 export function userItems(task: { items?: Item[] }): MessageItem[] {
   return (task.items ?? []).filter(
     (it): it is MessageItem => it.kind === 'message' && it.role === 'user',
+  )
+}
+
+// The message items that carry a queued prompt: a human's, or a hook's nudge.
+//
+// This is the window `task.queued` is made of, and it is NOT `userItems`. A nudge
+// pushes text onto the queue exactly as a message does, so anything deriving
+// "which items is the queue made of" from role `user` alone counts the wrong
+// item — most damagingly deliverQueuedBatch, which would stamp `deliveredIn` on
+// an older human message and move it to the tail of the log, durably reordering
+// the conversation on the first nudge a task ever receives.
+export function promptItems(task: { items?: Item[] }): MessageItem[] {
+  return (task.items ?? []).filter(
+    (it): it is MessageItem =>
+      it.kind === 'message' && (it.role === 'user' || it.role === 'hook'),
   )
 }
 
@@ -613,7 +663,7 @@ export type GrantCaps = { task: boolean; project: boolean }
 // queue entry each, in order — so the client can dim what the agent hasn't read
 // without seeing the server's queue. Shared by the native items and the legacy
 // messages projections.
-function flagQueued<M extends { role: 'user' | 'flow' | 'assistant' }>(
+function flagQueued<M extends { role: 'user' | 'flow' | 'assistant' | 'hook' }>(
   list: M[],
   queueLen: number,
 ): M[] {
@@ -621,7 +671,9 @@ function flagQueued<M extends { role: 'user' | 'flow' | 'assistant' }>(
   const flagged = new Set<number>()
   let remaining = queueLen
   for (let i = list.length - 1; i >= 0 && remaining > 0; i--) {
-    if (list[i].role === 'user') {
+    // A hook's nudge occupies a queue slot exactly as a user message does, so the
+    // trailing-N window spans both or it dims the wrong message.
+    if (list[i].role === 'user' || list[i].role === 'hook') {
       flagged.add(i)
       remaining--
     }
@@ -1226,13 +1278,21 @@ export function applyRetryRecovery(
 // retry path to re-send a turn whose prompt never reached the session.
 export function lastTurnPrompts(task: { items?: Item[] }): string[] {
   const items = task.items ?? []
-  const isUser = (it: Item) => it.kind === 'message' && it.role === 'user'
+  const isPrompt = (it: Item) =>
+    it.kind === 'message' && (it.role === 'user' || it.role === 'hook')
   let i = items.length - 1
   // Skip the trailing assistant turn (the last ride's items) and any events.
-  while (i >= 0 && !isUser(items[i])) i--
+  while (i >= 0 && !isPrompt(items[i])) i--
   const prompts: string[] = []
-  while (i >= 0 && isUser(items[i])) {
-    prompts.unshift((items[i] as MessageItem).text)
+  // The boundary is every prompt item, but only the USER ones are re-sent. A
+  // hook's nudge must not come back as the user's words on a retry — and it must
+  // not be walked past either, or a turn a hook drove would stash the *previous*
+  // human instruction and re-run work the task already finished. A nudge-only
+  // turn therefore yields nothing, which applyRetryRecovery turns into the
+  // generic "try again" — the right recovery for a turn nobody typed.
+  while (i >= 0 && isPrompt(items[i])) {
+    const it = items[i] as MessageItem
+    if (it.role === 'user') prompts.unshift(it.text)
     i--
   }
   return prompts
@@ -1253,7 +1313,10 @@ export function turnAttachments(
   let remaining = count
   for (let i = items.length - 1; i >= 0 && remaining > 0; i--) {
     const it = items[i]
-    if (it.kind === 'message' && it.role === 'user') {
+    // Prompt items, not user items: a nudge carries no attachments but it does
+    // occupy a queue slot, so counting only user items would walk past it and
+    // attribute an older message's files to the hook's turn.
+    if (it.kind === 'message' && (it.role === 'user' || it.role === 'hook')) {
       picked.push(it)
       remaining--
     }
@@ -1288,7 +1351,7 @@ export function deliverQueuedBatch(
   batchLen: number,
   runId: string,
 ): void {
-  const window = userItems(task).slice(-batchLen)
+  const window = promptItems(task).slice(-batchLen)
   const moving = window.filter((u) => !u.deliveredIn)
   for (const u of window) u.deliveredIn = runId
   if (moving.length && task.items) {

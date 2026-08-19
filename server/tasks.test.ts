@@ -61,6 +61,14 @@ const flowItem = (text: string, rideId: string, at = AT): MessageItem => ({
   role: 'flow',
   text,
 })
+const hookItem = (text: string, at = AT, path = '.lander/hooks/a/any/s.js'): MessageItem => ({
+  id: `h-${text}`,
+  at,
+  kind: 'message',
+  role: 'hook',
+  text,
+  from: { hook: 's', path, fireId: 'fire-1' },
+})
 
 describe('item builders', () => {
   it('nextItemId mints itm-<epoch36>-<count>', () => {
@@ -347,6 +355,37 @@ describe('lastTurnPrompts', () => {
     }
     expect(lastTurnPrompts(t)).toEqual(['p1', 'p2'])
   })
+
+  // The retry path stashes this and re-sends it. A hook's nudge must neither be
+  // returned (it would come back as the user's words) nor walked past (the turn
+  // would re-run a human instruction the task already completed) — so a
+  // nudge-driven turn that fails yields nothing, and applyRetryRecovery's
+  // "try again" branch takes over.
+  it('yields nothing for a nudge-only turn, rather than the previous human prompt', () => {
+    const t = {
+      items: [
+        userItem('do the thing', AT),
+        flowItem('did it', 'r1', later(1)),
+        hookItem('From hook s:\n\nreally finished?', later(2)),
+        flowItem('failed', 'r2', later(3)),
+      ],
+    }
+    expect(lastTurnPrompts(t)).toEqual([])
+  })
+
+  // A batch can deliver a human message and a nudge together. The user's half is
+  // re-sendable; the hook's is not.
+  it('returns only the user half of a mixed batch', () => {
+    const t = {
+      items: [
+        flowItem('older', 'r1'),
+        userItem('p1', later(1)),
+        hookItem('From hook s:\n\nalso this', later(2)),
+        flowItem('failed', 'r2', later(3)),
+      ],
+    }
+    expect(lastTurnPrompts(t)).toEqual(['p1'])
+  })
 })
 
 describe('turnAttachments', () => {
@@ -360,6 +399,16 @@ describe('turnAttachments', () => {
     }
     expect(turnAttachments(t, 2)).toEqual(att)
     expect(turnAttachments(t, 1)).toEqual([]) // only p2, which has none
+  })
+
+  // A nudge carries no files but does occupy a queue slot. Counting only user
+  // items would walk past it and hand the hook's turn an older message's files.
+  it('does not attribute an older message’s attachments to a hook turn', () => {
+    const att = [{ id: 'x', name: 'f', mime: 'image/png', size: 1 }]
+    const t = {
+      items: [userItem('p1', AT, { attachments: att }), hookItem('nudge', later(1))],
+    }
+    expect(turnAttachments(t, 1)).toEqual([])
   })
 })
 
@@ -422,6 +471,25 @@ describe('deliverQueuedBatch', () => {
     }
     deliverQueuedBatch(t, 1, 'rB')
     expect(ids(t)).toEqual(['u-doX', 'f-err', 'ev']) // doX stays above its error reply
+  })
+
+  // The regression this whole commit exists to prevent: the queue window is
+  // prompt items, not user items. Derived from `role === 'user'` alone, delivery
+  // stamps and relocates the preceding HUMAN message instead of the nudge —
+  // a durable reordering of the conversation, on the first nudge a task receives.
+  it('moves the hook’s nudge, not the human message above it', () => {
+    const t: { items: Item[] } = {
+      items: [
+        userItem('do the thing', AT),
+        flowItem('a1', 'rA', later(1)),
+        hookItem('From hook s:\n\nreally finished?', later(2)),
+      ],
+    }
+    deliverQueuedBatch(t, 1, 'rB')
+    expect(ids(t)).toEqual(['u-do the thing', 'f-a1', 'h-From hook s:\n\nreally finished?'])
+    const [human, , nudge] = t.items as MessageItem[]
+    expect(nudge.deliveredIn).toBe('rB')
+    expect(human.deliveredIn).toBeUndefined() // the human's message is untouched
   })
 
   it('moves a whole batch of fresh follow-ups, preserving their order', () => {
