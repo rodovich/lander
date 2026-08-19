@@ -304,6 +304,238 @@ describe('hook approval', () => {
   })
 })
 
+// The nudge: a hook appends a finding to its target and drives a turn, without
+// the side effects an ordinary message delivery carries.
+describe('the nudge', () => {
+  const HOOK = '.lander/hooks/ride-ended/any/supervise.js'
+  const ID = 'tsk-nudged'
+
+  afterEach(() => clearHookRunState())
+
+  const seed = async (over: Record<string, unknown> = {}): Promise<void> => {
+    await writeFile(
+      path.join(tasksDir, `${ID}.json`),
+      JSON.stringify({
+        id: ID,
+        title: 'Supervised',
+        status: 'riding',
+        createdAt: AT,
+        updatedAt: AT,
+        allowEdits: false,
+        token: `token-${ID}`,
+        shape: 2,
+        rides: [],
+        items: [{ id: 'u0', at: AT, kind: 'message', role: 'user', text: 'go' }],
+        ...over,
+      }),
+    )
+  }
+
+  const cred = (over: Record<string, unknown> = {}) =>
+    mintHookCredential({
+      project: slug,
+      target: ID,
+      fireId: 'fire-1-abc',
+      path: HOOK,
+      blob: 'b10b',
+      name: 'supervise',
+      ...over,
+    })
+
+  const nudge = (
+    token: string | undefined,
+    body: Record<string, unknown>,
+    target = ID,
+  ) =>
+    app.request(`/api/${slug}/tasks/${target}/messages`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(token ? { 'x-lander-hook-token': token } : {}),
+      },
+      body: JSON.stringify(body),
+    })
+
+  const raw = async (): Promise<Record<string, any>> =>
+    JSON.parse(await settled(ID))
+
+  it('appends the finding as a hook message and queues the same text', async () => {
+    await seed()
+    const res = await nudge(cred().token, { message: 'really finished?', key: 'nudge#0' })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+
+    const t = await raw()
+    const hooks = t.items.filter((i: any) => i.kind === 'message' && i.role === 'hook')
+    expect(hooks).toHaveLength(1)
+    // Attribution is the server's, from the credential — a body cannot forge it.
+    expect(hooks[0].text).toBe('From hook supervise:\n\nreally finished?')
+    expect(hooks[0].from).toEqual({
+      hook: 'supervise',
+      path: HOOK,
+      fireId: 'fire-1-abc',
+    })
+    // Never role `user`: it would enter lastTurnPrompts and be re-sent as the
+    // user's words, and a hook reading "the user's messages" would read it too.
+    expect(t.items.some((i: any) => i.role === 'user' && i.text.includes('really finished'))).toBe(false)
+    expect(t.hookActions).toMatchObject([{ hook: HOOK, kind: 'nudge', key: 'nudge#0' }])
+  })
+
+  // The two suppressions that make a nudge not-a-message. A supervised target
+  // resting on a wakeup must keep it — that wakeup is what would have woken it
+  // anyway — and an advisory ask is a question still worth answering.
+  it('leaves the target’s wakeup armed and its advisory ask open', async () => {
+    await seed({
+      scheduledFor: '2099-01-01T00:00:00.000Z',
+      items: [
+        { id: 'u0', at: AT, kind: 'message', role: 'user', text: 'go' },
+        {
+          id: 'ask-0',
+          at: AT,
+          kind: 'ask',
+          prompt: 'which one?',
+          form: { type: 'text' },
+          blocking: 'none',
+          state: 'open',
+        },
+      ],
+    })
+    await nudge(cred().token, { message: 'still there?', key: 'nudge#0' })
+
+    const t = await raw()
+    expect(t.scheduledFor).toBe('2099-01-01T00:00:00.000Z')
+    expect(t.items.find((i: any) => i.kind === 'ask').state).toBe('open')
+  })
+
+  // The negative control: the safeguards a nudge suppresses must still fire for
+  // an ordinary message, or this passes by having disabled them outright.
+  it('an ordinary message still disarms the wakeup and withdraws the ask', async () => {
+    await seed({
+      scheduledFor: '2099-01-01T00:00:00.000Z',
+      items: [
+        { id: 'u0', at: AT, kind: 'message', role: 'user', text: 'go' },
+        {
+          id: 'ask-0',
+          at: AT,
+          kind: 'ask',
+          prompt: 'which one?',
+          form: { type: 'text' },
+          blocking: 'none',
+          state: 'open',
+        },
+      ],
+    })
+    await post(`/api/${slug}/tasks/${ID}/messages`, { message: 'carry on' })
+
+    const t = await raw()
+    expect(t.scheduledFor).toBeUndefined()
+    expect(t.items.find((i: any) => i.kind === 'ask').state).toBe('withdrawn')
+  })
+
+  it('revives a landed target, recording the crossing as the hook’s', async () => {
+    await seed({ status: 'landed' })
+    expect((await nudge(cred().token, { message: 'not done', key: 'nudge#0' })).status).toBe(200)
+
+    const t = await raw()
+    const unlanded = t.items.find((i: any) => i.eventKind === 'unlanded')
+    expect(unlanded).toBeTruthy()
+    // `by: 'hook'`, not `system`: hookBy maps a Principal, and a hook request
+    // resolves anon — which would file the fire where no selector names it.
+    const fire = (t.pendingHooks ?? []).find((f: any) => f.trigger === 'unlanded')
+    expect(fire).toMatchObject({ by: 'hook', byHook: HOOK })
+  })
+
+  // A wedged task holds a question for its human, and the unwedged crossing
+  // would withdraw it.
+  it('refuses a wedged target and writes nothing', async () => {
+    await seed({ status: 'wedged' })
+    const before = await readFile(path.join(tasksDir, `${ID}.json`), 'utf8')
+    const res = await nudge(cred().token, { message: 'get back to work', key: 'nudge#0' })
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ ok: false, reason: 'wedged' })
+    expect(await readFile(path.join(tasksDir, `${ID}.json`), 'utf8')).toBe(before)
+  })
+
+  // Seeded rather than driven three times: a nudge starts a turn, and with no
+  // daemon in this suite that turn fails and wedges the task — which would
+  // refuse the next nudge for the wrong reason, intermittently.
+  const spent = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      hook: HOOK,
+      fireId: `spent-${i}`,
+      key: 'nudge#0',
+      kind: 'nudge',
+      at: AT,
+    }))
+
+  it('refuses past the bound', async () => {
+    await seed({ hookActions: spent(3) })
+    const res = await nudge(cred({ fireId: 'fire-9' }).token, {
+      message: 'once more',
+      key: 'nudge#0',
+    })
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ ok: false, reason: 'bound' })
+  })
+
+  it('re-arms once a human touches the task', async () => {
+    await seed({ hookActions: spent(3), hookActionsResetAt: '2027-01-01T00:00:00.000Z' })
+    const res = await nudge(cred({ fireId: 'fire-9' }).token, {
+      message: 'once more',
+      key: 'nudge#0',
+    })
+    expect(res.status).toBe(200)
+  })
+
+  // The retry guarantee end to end: an interrupted run is re-dispatched and the
+  // body presents the same action again. It must no-op — one nudge, not two.
+  it('dedupes a retry of the same fire and key', async () => {
+    await seed({
+      hookActions: [
+        { hook: HOOK, fireId: 'fire-1-abc', key: 'nudge#0', kind: 'nudge', at: AT },
+      ],
+    })
+    const res = await nudge(cred().token, { message: 'a', key: 'nudge#0' })
+    expect(await res.json()).toEqual({ ok: true, deduped: true })
+
+    const t = JSON.parse(await readFile(path.join(tasksDir, `${ID}.json`), 'utf8'))
+    expect(t.items.some((i: any) => i.role === 'hook')).toBe(false)
+    expect(t.hookActions).toHaveLength(1)
+  })
+
+  // The hazard the "a token present means a hook request" rule exists for: this
+  // route accepts anonymous callers, so falling through would let an expired
+  // credential quietly become a `role: 'user'` append — a timeout changing who
+  // the record says spoke.
+  it('answers an unknown token rather than falling through to a user message', async () => {
+    await seed()
+    const res = await nudge('not-a-real-token', { message: 'sneak', key: 'nudge#0' })
+    expect(res.status).toBe(401)
+    expect((await res.json()).reason).toBe('credential-unknown')
+
+    const t = JSON.parse(await readFile(path.join(tasksDir, `${ID}.json`), 'utf8'))
+    expect(t.items.some((i: any) => i.text?.includes('sneak'))).toBe(false)
+  })
+
+  it('refuses a credential minted for another target', async () => {
+    await seed()
+    const res = await nudge(cred({ target: 'tsk-somebody-else' }).token, {
+      message: 'wrong task',
+      key: 'nudge#0',
+    })
+    expect(res.status).toBe(401)
+  })
+
+  it('refuses a credential minted for another project', async () => {
+    await seed()
+    const res = await nudge(cred({ project: 'other-project' }).token, {
+      message: 'wrong project',
+      key: 'nudge#0',
+    })
+    expect(res.status).toBe(401)
+  })
+})
+
 // Approval gates MATERIALIZATION, not only dispatch: a hook host asks again,
 // after it has been spawned and before it imports anything, and a human who
 // revoked in that window must be obeyed.

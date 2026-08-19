@@ -32,6 +32,7 @@ import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { HookRunReport } from '../server/protocol'
+import { HOOK_ACTION_BOUND } from '../server/tasks'
 import type { HookHostInput } from './hook-run'
 
 // The API version a body declares in `meta`. Bumped when the ctx contract
@@ -159,9 +160,91 @@ async function checkApproval(
 
 type HookCtx = ReturnType<typeof buildCtx>
 
+// What a bounded action answers. Named failure modes rather than one `refused`:
+// "the hook stopped itself" has to be distinguishable from "the hook found
+// nothing", and a credential this server no longer holds is nobody's fault.
+export type HookActionResult =
+  | { ok: true; deduped?: true }
+  | {
+      ok: false
+      reason: 'bound' | 'wedged' | 'credential-unknown' | 'error'
+      error?: string
+    }
+
 function buildCtx(input: HookHostInput, reports: string[]) {
   const { run } = input
   let cached: unknown
+
+  // The dedupe key's ordinal, per kind, per INVOCATION — and it advances only
+  // when the server accepted the action.
+  //
+  // Both halves are load-bearing. Minted per invocation, a retry (which is a
+  // fresh host process) restarts at zero and so presents the same keys as the
+  // original, which is what lets the server recognise a repeat; derived instead
+  // from the target's stored actions it would never collide, because the
+  // original's entries push the count past them. Advanced only on acceptance,
+  // an attempt the server never recorded — a transport failure, or the
+  // `credential-unknown` this server answers on every restart — leaves the next
+  // action at the same ordinal, where a retry will meet it. Advancing at
+  // composition time instead would offset the retry by one and deliver the
+  // action twice.
+  const ordinals: Record<string, number> = { nudge: 0, land: 0 }
+
+  async function act(
+    kind: 'nudge' | 'land',
+    explicitKey: string | undefined,
+    send: (key: string) => Promise<Response>,
+  ): Promise<HookActionResult> {
+    const key = explicitKey ?? `${kind}#${ordinals[kind]}`
+    let res: Response
+    try {
+      res = await send(key)
+    } catch (e) {
+      return {
+        ok: false,
+        reason: 'error',
+        error: `could not reach the server: ${e instanceof Error ? e.message : String(e)}`,
+      }
+    }
+    const body = (await res.json().catch(() => ({}))) as {
+      ok?: boolean
+      deduped?: boolean
+      reason?: string
+      error?: string
+    }
+    if (res.ok && body.ok) {
+      // A deduped action still occupies its ordinal: it IS the action the
+      // original took, so the next one belongs at the next slot.
+      if (!explicitKey) ordinals[kind]++
+      return { ok: true, ...(body.deduped ? { deduped: true as const } : {}) }
+    }
+    const reason =
+      body.reason === 'bound' ||
+      body.reason === 'wedged' ||
+      body.reason === 'credential-unknown'
+        ? body.reason
+        : 'error'
+    // A refusal says so on the timeline whatever the body does with the result.
+    // The bound is the mechanism that keeps a runaway visible, so a body that
+    // ignores the return value must not be able to make it the quietest thing in
+    // the system — it would leave a fire that acted on nothing and said nothing.
+    // A dedupe is not reported: a retry correctly no-op'ing is not a finding.
+    if (reason === 'bound')
+      reports.push(
+        `lander refused this hook's ${kind}: it has already acted ` +
+          `${HOOK_ACTION_BOUND} times on this task since a human last touched it.`,
+      )
+    else if (reason === 'wedged')
+      reports.push(
+        `lander refused this hook's ${kind}: the task is wedged, holding a ` +
+          `question for its human.`,
+      )
+    return {
+      ok: false,
+      reason,
+      error: body.error ?? `the server refused the ${kind} (${res.status})`,
+    }
+  }
 
   return {
     target: {
@@ -235,6 +318,29 @@ function buildCtx(input: HookHostInput, reports: string[]) {
         child.stdin?.on('error', () => {})
         child.stdin?.end(opts.input ?? '')
       })
+    },
+    // Append a finding to the target and drive a turn, without the side effects
+    // an ordinary message carries: its wakeup stays armed, an advisory ask
+    // survives, and the item is recorded as the hook's rather than the user's.
+    //
+    // Bounded and deduped by the server, against the target's own record. The
+    // three failure modes are named rather than collapsed into one refusal,
+    // because "the hook stopped itself" is only distinguishable from "the hook
+    // found nothing" if the body can tell them apart too.
+    nudge(text: string, opts: { key?: string } = {}): Promise<HookActionResult> {
+      return act('nudge', opts.key, (key) =>
+        fetch(
+          `${run.callback.api}/api/${encodeURIComponent(run.callback.project)}/tasks/${encodeURIComponent(run.target.id)}/messages`,
+          {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-lander-hook-token': run.callback.token,
+            },
+            body: JSON.stringify({ message: String(text), key }),
+          },
+        ),
+      )
     },
     // What happened, for the target's timeline. A body that reports nothing
     // leaves no item — the report is the finding, not the fire.

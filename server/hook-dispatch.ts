@@ -177,7 +177,7 @@ async function dispatchTask(
 
   const task = await readTask<{
     pendingHooks?: PendingHook[]
-    hookOrigin?: { path: string }
+    hookOrigin?: { path?: string }
   }>(project.dataDir, id)
   if (!task?.pendingHooks?.length) return
 
@@ -210,13 +210,19 @@ async function dispatchTask(
     // for the rest of the sweep too.
     if (!resolved.ok) return
 
-    const exempt = task.hookOrigin?.path
+    // Two exemptions, and they are different questions. `hookOrigin` exempts a
+    // hook from the whole life of a task it launched; `byHook` exempts it from
+    // the single fire its own action caused — so a hook-initiated landing still
+    // reaches every OTHER hook, which is what lets one chain into cleanup or
+    // self-review while not waking the hook that landed the target.
+    const exempt = new Set([task.hookOrigin?.path, entry.byHook].filter(Boolean))
+    const eligible = (h: HookOutcome): boolean => !exempt.has(h.path)
     const done = new Set(entry.done ?? [])
     // Both selection axes are path segments, so a hook that does not apply to
     // this principal was never listed and is never dispatched — no process, no
     // import, no approval question.
     const applicable = resolved.hooks.hooks.filter(
-      (h) => h.path !== exempt && !done.has(h.path),
+      (h) => eligible(h) && !done.has(h.path),
     )
 
     for (const hook of applicable) {
@@ -243,9 +249,12 @@ async function dispatchTask(
       if (done.size) e.done = [...done]
     })
     // Every applicable hook has reported terminally (or there were none to
-    // begin with, which is the common case in a project with no hooks).
+    // begin with, which is the common case in a project with no hooks). This
+    // must apply the SAME eligibility as the dispatch loop above: an exempt hook
+    // never reports, so counting it here would leave the entry unclearable —
+    // re-resolved every sweep until the 24-hour ceiling gave up on it.
     const remaining = resolved.hooks.hooks.filter(
-      (h) => h.path !== exempt && !done.has(h.path),
+      (h) => eligible(h) && !done.has(h.path),
     )
     if (!remaining.length) await clearFire(file, entry.id)
   }

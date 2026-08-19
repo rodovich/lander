@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { serve } from '@hono/node-server'
 import { randomBytes, randomUUID } from 'node:crypto'
@@ -73,6 +73,8 @@ import {
   type RepeatSpec,
   type Ride,
   type Item,
+  pushHookMessageItem,
+  acceptHookAction,
   type PendingHook,
   type HookAction,
 } from './tasks'
@@ -118,7 +120,7 @@ import {
   setTrustRoot,
   taskCheckout,
 } from './hooks'
-import { readHookCredential } from './hook-runs'
+import { readHookCredential, hookCredentialFor, HookRefusal } from './hook-runs'
 import { dispatchPendingHooks, hookDispatchInFlightFor } from './hook-dispatch'
 import { generateTitle } from './title'
 
@@ -2836,6 +2838,114 @@ app.post('/api/:project/tasks/:id/retitle', async (c) => {
   }
 })
 
+// A hook's nudge: append a finding to the target and drive a turn, without the
+// side effects an ordinary message delivery carries.
+//
+// It shares this route rather than getting one of its own, because the shared
+// core — append, queue, drive — is the whole of what a nudge does, and a parallel
+// route is how two paths drift. What differs is small and each difference is
+// deliberate:
+//
+//   - the item is `role: 'hook'`, not `role: 'user'` (see MessageItem);
+//   - the wakeup is NOT disarmed, because for a resting supervised target that
+//     wakeup is what would have woken it anyway;
+//   - an open ask is NOT withdrawn, so an advisory question survives a nudge;
+//   - `t.retry` is not touched — unreachable anyway, since a task holding one is
+//     wedged and a wedged target is refused below.
+//
+// The status crossing is a parameter rather than a suppression: a resting target
+// stores `riding`, so recordStatusTransition returns early and there is nothing
+// to suppress; a landed one crosses `unlanded`, which is wanted.
+async function nudgeFromHook(
+  c: Context,
+  project: Project,
+  id: string,
+  file: string,
+  token: string,
+  rawMessage: string,
+  rawKey: unknown,
+): Promise<Response> {
+  const cred = hookCredentialFor(token, project.slug)
+  // Scoped to one target as well as one project: a credential minted for one
+  // task cannot act on another.
+  if (!cred || cred.target !== id)
+    return c.json(
+      { ok: false, error: 'unknown or expired hook credential', reason: 'credential-unknown' },
+      401,
+    )
+  const key = typeof rawKey === 'string' && rawKey ? rawKey : ''
+  if (!key) return c.json({ ok: false, error: 'key is required' }, 400)
+
+  const now = new Date().toISOString()
+  // Attribution is composed here, from the credential, so a body cannot forge
+  // it. The same string goes in the item and on the queue: a prompt has no
+  // roles, so the agent learns who spoke only from the text.
+  const message = `From hook ${cred.name}:\n\n${rawMessage}`
+
+  let deduped = false
+  try {
+    await mutateTask(file, (t) => {
+      // Every refusal BEFORE the bound, so a refused action never spends one of
+      // three slots. Inside the lock, because the route's earlier read is
+      // outside mutateTask's per-file chain and a target that wedges in between
+      // would otherwise be nudged anyway.
+      //
+      // A wedged task is holding a question for its human — `lander wedge
+      // --option`, or the platform's retry ask — and the `unwedged` crossing
+      // would withdraw it. Refusing is not the loss it looks like: hooks.md §2
+      // already excludes retry-after-usage-limit from hooks, and a nudge there
+      // would orphan the `task.retry` stash that the retry exists to re-send.
+      if (t.status === 'wedged') throw new HookRefusal('wedged')
+
+      const accepted = acceptHookAction(t, {
+        hook: cred.path,
+        fireId: cred.fireId,
+        key,
+        kind: 'nudge',
+        at: now,
+      })
+      if (!accepted.ok) throw new HookRefusal(accepted.reason)
+      if (accepted.deduped) {
+        deduped = true
+        return
+      }
+
+      // A hair before the message, so the timeline shows the revival ahead of
+      // what caused it. `by: 'hook'` literally, not via hookBy: that maps a
+      // Principal, and a hook request resolves `anon` → `system`, which would
+      // file the fire under a directory no hook selector names.
+      recordStatusTransition(
+        t,
+        'riding',
+        new Date(Date.parse(now) - 1).toISOString(),
+        'hook',
+        cred.path,
+      )
+      pushHookMessageItem(t, message, {
+        hook: cred.name,
+        path: cred.path,
+        fireId: cred.fireId,
+      }, now)
+      t.updatedAt = now
+      t.queued = [...(t.queued ?? []), message]
+      // recordStatusTransition deliberately does not assign status. Without this
+      // a nudged landed task would ride while stored `landed`, be served
+      // `landed`, and cross `unlanded` again on the next nudge.
+      t.status = 'riding'
+    })
+  } catch (e) {
+    // Only a refusal is an answer; anything else — a missing or corrupt task
+    // file, which rejects from the same call — is a fault, and reporting it to
+    // the body as `bound` would be a lie.
+    if (e instanceof HookRefusal)
+      return c.json({ ok: false, reason: e.reason }, 403)
+    throw e
+  }
+
+  if (!deduped && !running.has(id)) void driveTask(project, id)
+  return c.json({ ok: true, ...(deduped ? { deduped: true } : {}) })
+}
+
 app.post('/api/:project/tasks/:id/messages', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
@@ -2857,9 +2967,19 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
       time?: unknown
       await?: unknown
       attachments?: unknown
+      key?: unknown
     }>()
     const rawMessage = typeof body.message === 'string' ? body.message : ''
     if (!rawMessage.trim()) return c.json({ error: 'message is required' }, 400)
+
+    // The nudge. A request carrying a hook token IS a hook request — resolved
+    // here, before resolvePrincipal, and answered rather than fallen through. An
+    // expired credential must not quietly become an anonymous `role: 'user'`
+    // append: this route accepts anonymous callers, so falling through would let
+    // a timeout change who the record says spoke.
+    const hookToken = c.req.header('x-lander-hook-token')
+    if (hookToken !== undefined)
+      return nudgeFromHook(c, project, id, file, hookToken, rawMessage, body.key)
 
     // A task may only message tasks in its own project (the human, via the UI
     // token, may message any). The `lander send` CLI always targets the caller's

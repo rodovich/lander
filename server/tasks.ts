@@ -145,6 +145,18 @@ export type PendingHook = {
   // not the entry: with two hooks declared for one trigger and one failing, a
   // per-entry retry would re-run the healthy body too.
   done?: string[]
+  // The path of the hook whose own action caused this fire, when one did.
+  // Dispatch skips that hook for this entry and no other, which is what lets a
+  // hook-initiated landing chain into cleanup or self-review — the chaining the
+  // design wants — while the hook that landed the target is not woken by its own
+  // landing.
+  //
+  // It covers the status crossings only. `ride-ended` fires are minted by
+  // recordRideEnded from applyDone and the crashed branch, where no route and no
+  // principal are in scope, so a nudge → ride → ride-ended cycle cannot be
+  // labelled here; that loop is bounded by the action bound instead, which is
+  // what hooks.md §8 says bounds it.
+  byHook?: string
 }
 
 // How many undispatched fires a task may hold. A ceiling rather than a
@@ -1013,14 +1025,18 @@ export function recordStatusTransition(
   next: string,
   at: string,
   by: string,
+  // The hook whose action caused this crossing, when one did. Rides onto the
+  // fire so dispatch can skip that hook and only that hook.
+  byHook?: string,
 ): void {
   const prev = task.status
   if (prev === next) return
+  const cause = byHook ? { byHook } : {}
   // Entering a notable status records the arrival (and only the arrival, when
   // moving straight between two notable ones).
   if (next === 'wedged') {
     pushEventItem(task, { eventKind: 'wedged', title: task.title }, at)
-    recordHookFire(task, { trigger: 'wedged', by, at })
+    recordHookFire(task, { trigger: 'wedged', by, at, ...cause })
     return
   }
   if (next === 'landed') {
@@ -1040,11 +1056,11 @@ export function recordStatusTransition(
     // stale trigger left to fire.
     delete task.scheduledFor
     delete task.waitingFor
-    recordHookFire(task, { trigger: 'landed', by, at })
+    recordHookFire(task, { trigger: 'landed', by, at, ...cause })
   } else if (prev === 'wedged' || prev === 'landed') {
     const eventKind = prev === 'wedged' ? 'unwedged' : 'unlanded'
     pushEventItem(task, { eventKind, title: task.title }, at)
-    recordHookFire(task, { trigger: eventKind, by, at })
+    recordHookFire(task, { trigger: eventKind, by, at, ...cause })
     // A revived task's own last act was `lander wedge`/`lander land`, and its
     // resumed session remembers that and nothing else — so left alone it reports
     // itself as still wedged/landed on the next turn. Stamp the crossing here,
