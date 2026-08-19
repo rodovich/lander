@@ -74,6 +74,7 @@ import {
   type Ride,
   type Item,
   type PendingHook,
+  type HookAction,
 } from './tasks'
 import {
   saveAttachment,
@@ -379,6 +380,12 @@ type Task = {
   // just `/messages`: a human who only answers asks and un-wedges from the kebab
   // is contacting the task just as unmanufacturably.
   hookActionsResetAt?: string
+  // The actions lander accepted on a hook's behalf against this task. Both the
+  // runaway bound and the retry dedupe read it — they are the same record, since
+  // a counter keyed by (hook, target) is a set of accepted actions with its size
+  // taken. Server-internal: stripped from publicTask, because without the reset
+  // stamp beside it the list cannot answer the only question it exists for.
+  hookActions?: HookAction[]
   // The working directory the previous turn ended in, recorded by the Stop hook
   // (see ClaudeAdapter / `lander record-cwd`). Each turn is a fresh `claude`
   // process; without this it always restarts at the project root, so a directory
@@ -3093,7 +3100,7 @@ app.post('/api/:project/tasks/:id/asks/:askId/answer', async (c) => {
       // UI-only route, so answering an ask is always human contact — and it is
       // the whole of some tasks' human interaction, which is why the bound reset
       // cannot live in `/messages` alone.
-      t.hookActionsResetAt = now
+      noteHumanContact(t, { kind: 'ui' }, now)
       const ask = res.ask
       const opt = chosenOption(ask)
       const scheduleAt = opt?.at
@@ -3181,6 +3188,13 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
           { error: result.error ?? 'project grant failed' },
           (result.status ?? 500) as ContentfulStatusCode,
         )
+      // A project-scope grant is human contact too — the rule is persisted
+      // outside the task, but the human answering the prompt is the same signal.
+      // Best-effort: the grant already succeeded, so a failure to stamp must not
+      // fail the request.
+      await mutateTask(file, (t) => {
+        noteHumanContact(t, { kind: 'ui' }, new Date().toISOString())
+      }).catch(() => {})
     } else {
       try {
         await mutateTask(file, (t) => {
@@ -3189,7 +3203,7 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
           // Answering a permission prompt is human contact — this route is
           // UI-only, and for some tasks it is the whole of the human's
           // involvement.
-          t.hookActionsResetAt = new Date().toISOString()
+          noteHumanContact(t, { kind: 'ui' }, new Date().toISOString())
         })
       } catch {
         return c.json({ error: 'task not found' }, 404)

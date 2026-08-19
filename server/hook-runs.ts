@@ -114,6 +114,42 @@ export function readHookCredential(
   return cred
 }
 
+// The credential a request presents, checked against the project AND the target
+// it was minted for, or undefined when it covers neither.
+//
+// The target check is the caller's, not this function's: the two routes that
+// accept a credential disagree about where the target comes from — `/messages`
+// has it in the path, while `POST /tasks` is creating one and takes its target
+// from the credential itself. A third argument would be compared against itself
+// on that route and read like a check.
+//
+// `/hooks/materialize` deliberately keeps its own inline check: it must also
+// answer `mismatch` for a fireId/path/blob that the credential does not cover,
+// which is a different answer from "no such credential".
+export function hookCredentialFor(
+  token: string | undefined,
+  project: string,
+  now = Date.now(),
+): HookCredential | undefined {
+  const cred = readHookCredential(token, now)
+  return cred && cred.project === project ? cred : undefined
+}
+
+// A route's refusal of a hook action, thrown out of a `mutateTask` callback.
+//
+// `applyMutation` writes unless the callback throws (server/store.ts), so a
+// refusal that merely returned would rewrite the file with its own contents —
+// bumping mtime and invalidating the readTasks stat cache for a decision that
+// changed nothing. Throwing is the abort. It has to be a distinguishable type
+// because a missing or corrupt task file rejects from the same call, and a
+// corrupt file reported to a hook body as `bound` would be a lie.
+export class HookRefusal extends Error {
+  constructor(readonly reason: 'bound' | 'wedged' | 'riding' | 'scheduled') {
+    super(`hook action refused: ${reason}`)
+    this.name = 'HookRefusal'
+  }
+}
+
 // Claim a fire as in flight. Refuses when it is already claimed (a re-dispatch
 // racing a live body) or when the instance is at its concurrency ceiling. The
 // two share a structure so a leaked claim shows up as a saturated cap rather

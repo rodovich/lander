@@ -31,7 +31,11 @@ import {
   clearTaskThread,
   recordAssistantError,
   recordRideEnded,
+  acceptHookAction,
+  HOOK_ACTION_BOUND,
+  MAX_HOOK_ACTIONS,
   MAX_PENDING_HOOKS,
+  type HookAction,
   type Item,
   type MessageItem,
   type PendingHook,
@@ -152,6 +156,28 @@ describe('publicTask', () => {
     expect('runId' in out).toBe(false)
     expect('runCursor' in out).toBe(false)
     expect('retry' in out).toBe(false)
+  })
+
+  // The action record answers exactly one question — how much of the bound is
+  // left — and it cannot answer it without the reset stamp, which is stripped.
+  // Serving the list alone would be a promise worth nothing. `pendingHooks` is
+  // deliberately not in this set: it is self-contained, and "was a fire ever
+  // recorded" is the first thing anyone debugging a hook asks.
+  it('strips the hook bookkeeping but keeps pendingHooks', () => {
+    const out = publicTask({
+      id: 's',
+      title: 't',
+      status: 'riding',
+      items: [],
+      hookFireSeq: 3,
+      hookActionsResetAt: AT,
+      hookActions: [{ hook: 'h', fireId: 'f', key: 'k', kind: 'nudge' as const, at: AT }],
+      pendingHooks: [{ id: 'fire-1-x', trigger: 'ride-ended', by: 'agent', at: AT }],
+    })
+    expect('hookActions' in out).toBe(false)
+    expect('hookActionsResetAt' in out).toBe(false)
+    expect('hookFireSeq' in out).toBe(false)
+    expect('pendingHooks' in out).toBe(true)
   })
 
   it('serves the native item log (no legacy messages/events/asks projection)', () => {
@@ -339,6 +365,109 @@ describe('latestUpdateAt', () => {
 
   it('is empty when nothing has completed', () => {
     expect(latestUpdateAt({ items: [], rides: [] })).toBe('')
+  })
+})
+
+describe('acceptHookAction', () => {
+  const PATH = '.lander/hooks/ride-ended/any/supervise.js'
+  const act = (over: Partial<Parameters<typeof acceptHookAction>[1]> = {}) => ({
+    hook: PATH,
+    fireId: 'fire-1',
+    key: 'nudge#0',
+    kind: 'nudge' as const,
+    at: AT,
+    ...over,
+  })
+
+  it('refuses the 4th action for one hook, and admits another hook’s 1st', () => {
+    const t: { hookActions?: HookAction[]; hookActionsResetAt?: string } = {}
+    for (let i = 0; i < HOOK_ACTION_BOUND; i++)
+      expect(acceptHookAction(t, act({ fireId: `f${i}`, at: later(i) })).ok).toBe(true)
+    expect(acceptHookAction(t, act({ fireId: 'f9', at: later(4) }))).toEqual({
+      ok: false,
+      reason: 'bound',
+    })
+    // The bound is per hook, so a different hook on the same target is unaffected.
+    expect(
+      acceptHookAction(t, act({ hook: '.lander/hooks/landed/any/cleanup.js', fireId: 'f9' })).ok,
+    ).toBe(true)
+  })
+
+  // Both stamps are millisecond toISOString(), so an action in the same
+  // millisecond as the reset is on the far side of it.
+  it('counts only actions strictly after the reset', () => {
+    const t: { hookActions?: HookAction[]; hookActionsResetAt?: string } = {
+      hookActions: [
+        { hook: PATH, fireId: 'a', key: 'k', kind: 'nudge', at: AT },
+        { hook: PATH, fireId: 'b', key: 'k', kind: 'nudge', at: later(1) },
+        { hook: PATH, fireId: 'c', key: 'k', kind: 'nudge', at: later(2) },
+      ],
+      hookActionsResetAt: later(1),
+    }
+    // Only the later(2) action counts, so there is room.
+    expect(acceptHookAction(t, act({ fireId: 'd', at: later(3) })).ok).toBe(true)
+  })
+
+  it('counts every action when the target has never been touched', () => {
+    const t: { hookActions?: HookAction[]; hookActionsResetAt?: string } = {
+      hookActions: Array.from({ length: HOOK_ACTION_BOUND }, (_, i) => ({
+        hook: PATH,
+        fireId: `f${i}`,
+        key: 'k',
+        kind: 'nudge' as const,
+        at: later(i),
+      })),
+    }
+    expect(acceptHookAction(t, act({ fireId: 'f9' })).ok).toBe(false)
+  })
+
+  // The retry guarantee: a run that does not complete is re-dispatched, so the
+  // same fire presents the same action again. It must no-op, and it must not
+  // spend a bounded slot — a retry storm would otherwise exhaust the bound
+  // without the hook ever acting twice.
+  it('dedupes a repeat of the same (hook, fire, key) without spending the bound', () => {
+    const t: { hookActions?: HookAction[]; hookActionsResetAt?: string } = {}
+    const first = acceptHookAction(t, act())
+    expect(first).toMatchObject({ ok: true })
+    for (let i = 0; i < 10; i++) {
+      const again = acceptHookAction(t, act({ at: later(1) }))
+      expect(again).toMatchObject({ ok: true, deduped: true })
+    }
+    expect(t.hookActions).toHaveLength(1)
+    // Still two slots left, despite eleven presentations.
+    expect(acceptHookAction(t, act({ fireId: 'f2', key: 'nudge#0' })).ok).toBe(true)
+    expect(acceptHookAction(t, act({ fireId: 'f3', key: 'nudge#0' })).ok).toBe(true)
+    expect(acceptHookAction(t, act({ fireId: 'f4', key: 'nudge#0' })).ok).toBe(false)
+  })
+
+  // The case a payload hash would miss: the body composes different text on the
+  // retry (a timestamp, a moved HEAD), but it is the same action of the same fire.
+  it('dedupes even when the body would have composed a different payload', () => {
+    const t: { hookActions?: HookAction[] } = {}
+    acceptHookAction(t, act())
+    expect(acceptHookAction(t, act({ kind: 'land' }))).toMatchObject({ deduped: true })
+    expect(t.hookActions).toHaveLength(1)
+  })
+
+  it('lets two deliberately different actions in one fire both through', () => {
+    const t: { hookActions?: HookAction[] } = {}
+    expect(acceptHookAction(t, act({ key: 'nudge#0' })).ok).toBe(true)
+    expect(acceptHookAction(t, act({ key: 'nudge#1' })).ok).toBe(true)
+    expect(t.hookActions).toHaveLength(2)
+  })
+
+  it('keeps the most recent MAX_HOOK_ACTIONS entries', () => {
+    const t: { hookActions?: HookAction[] } = {}
+    for (let i = 0; i < MAX_HOOK_ACTIONS + 5; i++)
+      acceptHookAction(t, {
+        hook: `${PATH}${i}`, // a fresh hook each time, so the bound never bites
+        fireId: `f${i}`,
+        key: 'k',
+        kind: 'nudge',
+        at: AT,
+      })
+    expect(t.hookActions).toHaveLength(MAX_HOOK_ACTIONS)
+    expect(t.hookActions!.at(-1)!.hook).toBe(`${PATH}${MAX_HOOK_ACTIONS + 4}`)
   })
 })
 

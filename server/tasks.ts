@@ -201,6 +201,84 @@ export function recordHookFire(
   return { entry, dropped }
 }
 
+// ── The action bound and the retry dedupe ──────────────────────────────────
+//
+// One record, on the TARGET. A counter keyed by (hook, target) IS a set of
+// accepted actions with its size taken, so the runaway bound and the retry
+// dedupe are the same structure rather than two that must agree.
+//
+// The bound counts ACTIONS, not fires: a supervisor that correctly finds nothing
+// on ten consecutive rides must stay armed. It resets on human contact, the one
+// signal a runaway cannot manufacture — and neither an action nor a message from
+// another task may reset it.
+
+export type HookAction = {
+  // The hook's PATH, which is its identity. Not its display name: two hooks can
+  // share a filename at different triggers, and the bound is per hook.
+  hook: string
+  fireId: string
+  // The body's `opts.key` when it gave one, else a host-minted ordinal within
+  // the fire. Never a hash of a body-composed payload: the payload is the body's,
+  // so a message carrying a timestamp hashes differently on a retry and acts
+  // twice — and hooks.md §8 states retry-safety as a PLATFORM guarantee, which a
+  // body-derived key can only deliver for bodies that happen to be deterministic.
+  key: string
+  kind: 'nudge' | 'land'
+  at: string
+}
+
+// How many actions one hook may take against one target between human contacts.
+export const HOOK_ACTION_BOUND = 3
+// How many entries the record keeps. A long-lived task's record must not grow
+// without bound on a 2-second list poll.
+export const MAX_HOOK_ACTIONS = 50
+
+type HookActionTask = {
+  hookActions?: HookAction[]
+  hookActionsResetAt?: string
+}
+
+// Accept an action against this target, or refuse it.
+//
+// Called only from inside a `mutateTask` callback, so the check and the write are
+// one atomic read-modify-write on the target's file — two concurrent fires cannot
+// both see room under the bound.
+//
+// The caller must run every OTHER refusal (a wedged target, a riding one) BEFORE
+// this: a refusal that has already consumed a bounded slot would let three
+// unlucky dispatches — a fire lands up to a sweep plus a body's runtime after the
+// ride closed, by which time the target is often busy again — stand the hook down
+// until a human intervened, reporting `bound`, which reads exactly like a runaway
+// it correctly stopped.
+export function acceptHookAction(
+  task: HookActionTask,
+  action: Omit<HookAction, 'at'> & { at: string },
+): { ok: true; entry: HookAction; deduped?: true } | { ok: false; reason: 'bound' } {
+  const actions = (task.hookActions ??= [])
+
+  // The dedupe. An interrupted run is retried, so the same fire can present the
+  // same action twice; the second is a no-op that does NOT increment the bound —
+  // a retry storm must not exhaust it.
+  const existing = actions.find(
+    (a) => a.hook === action.hook && a.fireId === action.fireId && a.key === action.key,
+  )
+  if (existing) return { ok: true, entry: existing, deduped: true }
+
+  // The bound. Strictly greater than the reset stamp: both are millisecond
+  // `toISOString()`, so an action in the same millisecond as the reset is on the
+  // far side of it. Counted across kinds, because the loop it bounds can run
+  // through either verb.
+  const since = task.hookActionsResetAt ?? ''
+  const taken = actions.filter((a) => a.hook === action.hook && a.at > since).length
+  if (taken >= HOOK_ACTION_BOUND) return { ok: false, reason: 'bound' }
+
+  const entry: HookAction = { ...action }
+  actions.push(entry)
+  if (actions.length > MAX_HOOK_ACTIONS)
+    actions.splice(0, actions.length - MAX_HOOK_ACTIONS)
+  return { ok: true, entry }
+}
+
 // Record that a ride ended, for the `ride-ended` trigger.
 //
 // Called where a ride actually TRANSITIONS TO CLOSED with an outcome — a rule,
@@ -703,6 +781,7 @@ export function publicTask<T extends object>(
   | 'flowStateRev'
   | 'hookFireSeq'
   | 'hookActionsResetAt'
+  | 'hookActions'
 > & {
   flow: string
   grants: GrantCaps
@@ -717,13 +796,17 @@ export function publicTask<T extends object>(
     // rides back to the flow on start-run, never over HTTP. Absent today.
     flowState: _fs,
     flowStateRev: _fsr,
-    // Hook bookkeeping with no reader outside this process: a fire-id counter
-    // and the timestamp the action bound resets from. `pendingHooks` DOES ride
-    // out — "was a fire ever recorded" is the first question anyone debugging a
-    // hook asks — but every field served here is a promise to callers who never
-    // run this code, and two counters are not worth making one over.
+    // Hook bookkeeping with no reader outside this process: a fire-id counter,
+    // the timestamp the action bound resets from, and the accepted actions it
+    // counts. `pendingHooks` DOES ride out — "was a fire ever recorded" is the
+    // first question anyone debugging a hook asks, and it is self-contained —
+    // but every field served here is a promise to callers who never run this
+    // code. `hookActions` in particular would be a promise worth nothing:
+    // without the reset stamp beside it, a reader cannot compute the bound,
+    // which is the only question the list answers.
     hookFireSeq: _hfs,
     hookActionsResetAt: _hra,
+    hookActions: _ha,
     queued,
     ...rest
   } = task as T & {
@@ -735,6 +818,7 @@ export function publicTask<T extends object>(
     flowStateRev?: unknown
     hookFireSeq?: unknown
     hookActionsResetAt?: unknown
+    hookActions?: unknown
     queued?: string[]
     items?: Item[]
     rides?: Ride[]
@@ -796,6 +880,7 @@ export function publicTask<T extends object>(
   | 'flowStateRev'
   | 'hookFireSeq'
   | 'hookActionsResetAt'
+  | 'hookActions'
   > & {
     flow: string
     grants: GrantCaps
@@ -824,19 +909,18 @@ export function taskSummary<T extends object>(task: T, opts?: { caps?: FlowCaps 
   const {
     items: _items,
     rides: _rides,
-    // The hook bookkeeping goes too. Both are capped and small, but this
-    // projection feeds the link-resolution poll, whose whole purpose is to be
-    // id/slug/title/status and nothing else — it was made to shrink that
-    // payload, and quietly re-growing it is the one thing it must not do.
+    // `pendingHooks` goes too. It is capped and small, but this projection feeds
+    // the link-resolution poll, whose whole purpose is to be id/slug/title/status
+    // and nothing else — it was made to shrink that payload, and quietly
+    // re-growing it is the one thing it must not do. (`hookActions` needs no
+    // strip here: publicTask, which this projects, already drops it.)
     pendingHooks: _pending,
-    hookActions: _actions,
     scheduledMessages: scheduled,
     ...rest
   } = full as typeof full & {
     items?: Item[]
     rides?: Ride[]
     pendingHooks?: PendingHook[]
-    hookActions?: unknown[]
     scheduledMessages?: ScheduledMessage[]
   }
   return {
