@@ -139,6 +139,8 @@ beforeAll(async () => {
     let body = ''
     req.on('data', (c) => (body += c))
     req.on('end', () => {
+      // Every path the body called, so a test can assert what it did NOT do.
+      calledPaths.push(`${req.method} ${req.url}`)
       res.writeHead(200, { 'content-type': 'application/json' })
       // The approval re-check and the target read share this stub; only the
       // latter needs a payload.
@@ -165,6 +167,7 @@ beforeAll(async () => {
 // seams the same way. `verdict` is what that fake will say next.
 let judgeBin: string
 let judgeCalls: string
+let calledPaths: string[] = []
 // Reset before every test. Held as a constant rather than a mutable default, or
 // a test that sets its own verdict leaks it into every test after it.
 const DEFAULT_VERDICT =
@@ -201,6 +204,7 @@ beforeEach(async () => {
   stateDir = await mkdtemp(path.join(tmpdir(), 'lander-supervise-state-'))
   await rm(judgeCalls, { force: true })
   await setVerdict(DEFAULT_VERDICT)
+  calledPaths = []
 })
 
 afterAll(async () => {
@@ -245,6 +249,90 @@ describe('the supervision hook', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0].matched).toEqual([predicate])
     expect(rows[0].verdict).toBe('unfinished')
+  })
+
+  // Nothing is armed, and nothing asserts it otherwise: the stub answers 200 to
+  // every path, so a stray ctx.nudge would be swallowed as a body error and no
+  // other assertion in this file would move. This is the one that would.
+  it('takes no action, on the segment most likely to provoke one', async () => {
+    target = {
+      id: 'tsk-1',
+      status: 'resting',
+      flow: 'claude',
+      items: [
+        user('u1', 'Fix the parser and then land.'),
+        flow('f1', 'ride-1', 'Fixed it. Want me to continue with the tests?'),
+      ],
+    }
+    const report = await run()
+    expect(report.outcome, report.error).toBe('ran')
+    // It judged, and said so.
+    expect(report.reports[0]).toContain('unfinished')
+    // And reached neither action verb.
+    expect(calledPaths.filter((p) => p.includes('/messages'))).toEqual([])
+    expect(calledPaths.filter((p) => p.startsWith('PATCH'))).toEqual([])
+  })
+
+  // Without this the same finding is re-judged and re-reported on every later
+  // ride under one instruction, and the runaway bound becomes the routine
+  // terminating condition rather than the backstop it is.
+  it('skips a segment it has already nudged', async () => {
+    target = {
+      id: 'tsk-1',
+      status: 'resting',
+      flow: 'claude',
+      items: [
+        user('u1', 'Fix the parser and then land.'),
+        flow('f1', 'ride-0', 'Fixed it.'),
+        {
+          id: 'h1',
+          at: BEFORE,
+          kind: 'message',
+          role: 'hook',
+          text: 'From hook supervise:\n\nreally finished?',
+          from: {
+            hook: 'supervise',
+            path: '.lander/hooks/ride-ended/any/supervise.js',
+            fireId: 'fire-earlier',
+          },
+        },
+        flow('f2', 'ride-1', 'Yes, done.'),
+      ],
+    }
+    const report = await run()
+    expect(report.reports).toEqual([])
+    expect((await loggedRows())[0].skipped).toBe('already-nudged')
+    // And it did not pay for a judge to reach that conclusion.
+    expect(await judgePrompts()).toBe('')
+  })
+
+  // A nudge from a DIFFERENT hook is not this one's own, so it must not suppress
+  // this one — the guard keys on the path, which is a hook's identity.
+  it('does not treat another hook’s nudge as its own', async () => {
+    target = {
+      id: 'tsk-1',
+      status: 'resting',
+      flow: 'claude',
+      items: [
+        user('u1', 'Fix the parser and then land.'),
+        flow('f1', 'ride-0', 'Fixed it.'),
+        {
+          id: 'h1',
+          at: BEFORE,
+          kind: 'message',
+          role: 'hook',
+          text: 'From hook other:\n\nsomething else',
+          from: {
+            hook: 'other',
+            path: '.lander/hooks/ride-ended/any/other.js',
+            fireId: 'fire-other',
+          },
+        },
+        flow('f2', 'ride-1', 'Yes, done.'),
+      ],
+    }
+    await run()
+    expect((await loggedRows())[0].skipped).toBeUndefined()
   })
 
   // §1: a verdict must not rest on the agent's self-report. The gate may use it

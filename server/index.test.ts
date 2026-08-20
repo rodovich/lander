@@ -641,6 +641,82 @@ describe('the nudge', () => {
   })
 })
 
+// The bound's escape hatch, in both directions.
+//
+// `noteHumanContact` gates on the principal being the UI, and that single
+// condition is the whole of it: human contact re-arms a hook that has spent its
+// three actions, and nothing else may. Drop the guard — or stamp before the
+// principal is known — and a sibling task can re-arm a runaway indefinitely,
+// while every other test in this suite still passes. That is what these pin.
+describe('the action bound’s reset', () => {
+  const ID = 'tsk-reset'
+  const SIBLING = 'tsk-sibling'
+
+  const seedPair = async (): Promise<void> => {
+    for (const id of [ID, SIBLING])
+      await writeFile(
+        path.join(tasksDir, `${id}.json`),
+        JSON.stringify({
+          id,
+          title: 'Reset target',
+          status: 'riding',
+          createdAt: AT,
+          updatedAt: AT,
+          token: `token-${id}`,
+          shape: 2,
+          rides: [],
+          items: [{ id: 'u0', at: AT, kind: 'message', role: 'user', text: 'go' }],
+        }),
+      )
+  }
+
+  const resetAt = async (): Promise<unknown> =>
+    JSON.parse(await settled(ID)).hookActionsResetAt
+
+  it('is stamped by a human’s message', async () => {
+    await seedPair()
+    await post(`/api/${slug}/tasks/${ID}/messages`, { message: 'carry on' })
+    expect(await resetAt()).toBeTruthy()
+  })
+
+  // The signal a runaway must not be able to manufacture. Tasks message each
+  // other constantly in this instance, so if a sibling's message reset the
+  // bound, the bound would effectively not exist.
+  it('is NOT stamped by a sibling task’s message', async () => {
+    await seedPair()
+    const res = await app.request(`/api/${slug}/tasks/${ID}/messages`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-lander-task': SIBLING,
+        'x-lander-project': slug,
+        'x-lander-token': `token-${SIBLING}`,
+      },
+      body: JSON.stringify({ message: 'from your sibling' }),
+    })
+    expect(res.status).toBe(200)
+    expect(await resetAt()).toBeUndefined()
+  })
+
+  it('is NOT stamped by an unidentified caller', async () => {
+    await seedPair()
+    await app.request(`/api/${slug}/tasks/${ID}/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'anonymous' }),
+    })
+    expect(await resetAt()).toBeUndefined()
+  })
+
+  // Answering an ask and granting a tool rule are the whole of some tasks'
+  // human interaction, so the reset cannot live on `/messages` alone.
+  it('is stamped by answering a permission prompt', async () => {
+    await seedPair()
+    await post(`/api/${slug}/tasks/${ID}/allow`, { rule: 'Bash(ls)' })
+    expect(await resetAt()).toBeTruthy()
+  })
+})
+
 // A hook may end its target when it judges the work finished. It shares PATCH
 // with wedge and resume, so the branch is whitelisted; and it refuses the states
 // where landing is not the reversible act the design chose it for.
@@ -783,6 +859,24 @@ describe('the land', () => {
     expect(await (await land(cred().token)).json()).toEqual({ ok: true, deduped: true })
     // The dedupe is a no-op, not a second landing.
     expect((await raw()).status).toBe('riding')
+  })
+
+  // A land that already happened leaves the target landed — so every refusal
+  // below would fire on a state the action itself produced. The replay has to be
+  // answered `done`, or a retry reports a finding as dropped when it was
+  // delivered, and the host's ordinal never advances past a spent key.
+  it('answers a replay `deduped` rather than refusing it for its own effect', async () => {
+    await seed({
+      status: 'landed',
+      scheduledFor: '2099-01-01T00:00:00.000Z',
+      pendingHooks: [],
+      hookActions: [
+        { hook: HOOK, fireId: 'fire-1-abc', key: 'land#0', kind: 'land', at: AT },
+      ],
+    })
+    const res = await land(cred().token)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true, deduped: true })
   })
 
   it('answers an unknown token rather than falling through to an ordinary land', async () => {

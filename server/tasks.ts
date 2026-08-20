@@ -250,6 +250,23 @@ type HookActionTask = {
   hookActionsResetAt?: string
 }
 
+// The action already recorded for this (hook, fire, key), if there is one.
+//
+// Checked by a route BEFORE its refusals, not only inside acceptHookAction: an
+// action a retry re-presents was already delivered, so the honest answer is
+// "done" whatever the target's state has become since. Refusing it as `stale`
+// would put a note on the timeline saying a finding was dropped when it was in
+// fact sent, and would leave the host's ordinal unadvanced — so the next action
+// of that run would re-present a key already spent.
+export function hookActionTaken(
+  task: { hookActions?: HookAction[] },
+  action: Pick<HookAction, 'hook' | 'fireId' | 'key'>,
+): HookAction | undefined {
+  return (task.hookActions ?? []).find(
+    (a) => a.hook === action.hook && a.fireId === action.fireId && a.key === action.key,
+  )
+}
+
 // Accept an action against this target, or refuse it.
 //
 // Called only from inside a `mutateTask` callback, so the check and the write are

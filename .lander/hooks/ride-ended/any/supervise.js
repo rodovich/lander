@@ -1,20 +1,33 @@
-// DRAFT of the next supervision body — the stage that judges and logs a verdict
-// without acting on it. Held in docs/tmp (gitignored) rather than in .lander/
-// while a sibling task rewrites history, so the working tree stays clean for it.
+// Supervision: judging, and acting on nothing.
 //
-// Diff from the shipped body is three things:
-//   1. a gated segment is handed to ctx.assist instead of ending at ctx.report;
-//   2. the verdict, and how it was reached, join the JSONL row;
-//   3. nothing acts. ctx.nudge and ctx.land exist and are not called.
+// A task comes to rest half-finished more often than anyone notices, and the
+// evidence is that ~13-15 tasks in this corpus exist for no reason but to watch
+// another task and nudge it. Their prompts read as specifications for this hook.
+// What they cannot do is scale, and what a rule in the acting agent's own prompt
+// cannot do is bind the agent that is already failing to follow it.
 //
-// That third point is the stage, not an oversight. hooks.md §8: a judge is
-// measured before it is armed, against real segments, so the verdicts can be
-// compared with what a human would have done. Arming on the first verdicts a
-// model ever produces is the destructive-verb mistake with the destruction one
-// step further away — and the log this produces is what §10's harness wants as
-// input anyway.
+// Two stages, and this is the first:
+//
+//   1. A cheap deterministic gate selects segments worth a look, a model judges
+//      each one, and the verdict is LOGGED. Nothing is sent. `ctx.nudge` and
+//      `ctx.land` exist and are deliberately not called.
+//   2. Once those verdicts can be compared with what a human would have done,
+//      the judge is armed.
+//
+// The split is the design's rule, not caution for its own sake (hooks.md §8): a
+// judge is measured before it is armed, exactly as a destructive verb ships
+// report-only first. Arming on the first verdicts a model ever produces is that
+// mistake with the destruction one step further away — and the log this stage
+// writes is what the replay harness wants as input anyway.
+//
+// The gate needs RECALL, not precision. It asks "could this be one of the
+// cases?"; the judge asks "is it?". The first predicate is a good gate signal
+// and a bad finding: of 235 human messages instructing a task to land, 97 saw no
+// `landed` event before the next human message, and reading them shows that
+// residue is almost entirely correct behavior — deferred deliberately,
+// conditional wording, or interrupted. It widens the net; it does not accuse.
 
-import { appendFile, mkdir, readFile } from 'node:fs/promises'
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 export const meta = { api: 1 }
@@ -141,7 +154,11 @@ async function cachedVerdict(ctx) {
 async function cacheVerdict(ctx, verdict) {
   try {
     await mkdir(ctx.stateDir, { recursive: true })
-    await appendFile(
+    // writeFile, not appendFile: two writes for one fire would concatenate into
+    // unparseable JSON, the read would throw, and the cache would silently miss
+    // — re-paying for the model on every retry, which is the one thing it exists
+    // to prevent.
+    await writeFile(
       path.join(ctx.stateDir, `verdict-${ctx.hook.fireId}.json`),
       JSON.stringify(verdict),
     )

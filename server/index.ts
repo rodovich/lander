@@ -75,6 +75,7 @@ import {
   type Item,
   pushHookMessageItem,
   acceptHookAction,
+  hookActionTaken,
   freshHookFire,
   type PendingHook,
   type HookAction,
@@ -2283,6 +2284,13 @@ async function landFromHook(
   let deduped = false
   try {
     await mutateTask(file, (t) => {
+      // A replay of an action already delivered, ahead of every refusal — the
+      // land happened, so the target IS landed, and every check below would
+      // refuse the replay for a state its own action produced.
+      if (hookActionTaken(t, { hook: cred.path, fireId: cred.fireId, key })) {
+        deduped = true
+        return
+      }
       // Every refusal before the bound, so a refusal never spends a slot.
       // Freshness first: a fire that has been overtaken should not have been
       // acted on at all, whatever the target's current state happens to be.
@@ -2997,6 +3005,13 @@ async function nudgeFromHook(
       // would withdraw it. Refusing is not the loss it looks like: hooks.md §2
       // already excludes retry-after-usage-limit from hooks, and a nudge there
       // would orphan the `task.retry` stash that the retry exists to re-send.
+      // A replay of an action already delivered, ahead of every refusal: it
+      // happened, so "done" is the truthful answer however the target has moved
+      // since.
+      if (hookActionTaken(t, { hook: cred.path, fireId: cred.fireId, key })) {
+        deduped = true
+        return
+      }
       // A held fire can outlive the state it was recorded against; nudging then
       // carries a finding about work the target has already moved past.
       if (!freshHookFire(t, cred.fireId)) throw new HookRefusal('stale')
