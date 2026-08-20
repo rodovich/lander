@@ -43,22 +43,16 @@ const FORWARDABLE_POINTER =
   'Your own current grants — which cap what you can forward — are stated in ' +
   'the task-context block in the conversation'
 
-// NOTE (Ship 2, verified on CLI 2.1.216): do NOT try to lengthen a quiet
-// foreground command by pinning BASH_MAX_TIMEOUT_MS here. The CLI caps a
-// foreground Bash command at a hard ~600s and then AUTO-MOVES it to the
-// background (it does not kill it); BASH_MAX_TIMEOUT_MS does not raise that cap.
-// Delivery-guaranteed test: a task on a daemon carrying a 1_800_000 pin on BOTH
-// the process env and the --settings `env` block, running a command with an
-// explicit tool timeout of 780_000, was still backgrounded at exactly 600s
-// (task GviAkz32EN). So the pin is inert for this purpose and was removed. The
-// operative fix lives entirely in the idle-watchdog window (server/index.ts
-// idleTimeoutMs), set ABOVE 600s so the CLI's auto-background — which returns
-// control to the agent and emits a stream event — always beats the watchdog.
-// Before that, the watchdog sat AT 600s, tying the cap and wedging the ride when
-// it won by ~50ms (easel PcnoAnNEyG, 4/4). Making a >600s foreground command
-// actually complete requires the agent to consume the auto-backgrounded task
-// in-turn (poll BashOutput) rather than ending the turn — that's agent guidance
-// (Ship 1/3), not an env knob.
+// The CLI hard-caps a foreground Bash command at ~600s: at the cap it MOVES the
+// command to the background rather than killing it, handing the agent a
+// background task id. Nothing we pass lengthens that wait — BASH_MAX_TIMEOUT_MS
+// does not raise the cap, tested with the pin on both the process env and the
+// --settings `env` block against an explicit 780_000 tool timeout. (Verified on
+// CLI 2.1.216; cap re-observed on 2.1.235.) Two consequences: the idle window
+// (server/index.ts idleTimeoutMs) has to clear 600s, and no foreground Bash ever
+// reaches that watchdog. Work outlasting the cap has to be consumed from the
+// backgrounded task within the same turn — the CLI kills the task, and any
+// Monitor watching it, when the turn's process exits.
 
 export function createClaudeAdapter({
   landerBin,

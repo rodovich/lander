@@ -10,7 +10,7 @@
 //        LANDER_DAEMON_TOKEN (must match the server's; read once at startup and
 //          then deleted from the environment, so it is not inherited by the flow
 //          hosts and agent children this process spawns — see server/secrets.ts)
-//        LANDER_IDLE_TIMEOUT_MS (per-run idle kill, default 10m — start-run wins)
+//        LANDER_IDLE_TIMEOUT_MS (idle-kill fallback, default 10m — start-run wins)
 
 import path from 'node:path'
 import type { AgentAdapter } from './agent'
