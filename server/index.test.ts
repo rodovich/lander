@@ -2347,10 +2347,21 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
   // FAKE timer it could advance, leaving that test to wait out the real 15s
   // grace. It showed up as this suite occasionally taking 16s instead of 2.6s,
   // and as an outright failure whenever the per-test budget ran out first.
-  afterEach(() => {
+  //
+  // The wire is not enough to find them all. A test that ends by answering a
+  // retry-now re-drives the task while this suite has the daemon disconnected,
+  // so the server opens that run's channel and `start-run` finds nobody to send
+  // it to — no message, nothing to close by. Take the ids off disk as well, so a
+  // run nobody was ever told about is dropped too.
+  afterEach(async () => {
     for (const m of received)
       if (m.type === 'start-run' && m.runId) closeRunChannel(m.runId)
     received.length = 0
+    for (const f of await readdir(tasksDir).catch(() => [])) {
+      if (!f.endsWith('.json')) continue
+      const raw = await readRaw(f.slice(0, -'.json'.length)).catch(() => null)
+      if (raw?.runId) closeRunChannel(String(raw.runId))
+    }
   })
 
   // A flow reads its durable state as a free ride-in on start-run, and its
