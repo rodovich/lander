@@ -32,6 +32,7 @@ import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { HookRunReport } from '../server/protocol'
+import { isAssistProvider, runAssist, type AssistResult } from './assist'
 import type { HookHostInput } from './hook-run'
 
 // The API version a body declares in `meta`. Bumped when the ctx contract
@@ -245,6 +246,20 @@ function buildCtx(input: HookHostInput, reports: string[]) {
     return { ok: false, reason, error }
   }
 
+  // The target's public record, fetched once. A free function rather than a
+  // method so `assist` can reach it without `this` — a body that destructures
+  // ctx is doing something ordinary, and would otherwise get a TypeError.
+  async function readTarget(): Promise<unknown> {
+    if (cached !== undefined) return cached
+    const res = await fetch(
+      `${run.callback.api}/api/${encodeURIComponent(run.callback.project)}/tasks/${encodeURIComponent(run.target.id)}`,
+      { headers: { 'x-lander-hook-token': run.callback.token } },
+    )
+    if (!res.ok) throw new Error(`could not read the target (${res.status})`)
+    cached = await res.json()
+    return cached
+  }
+
   return {
     target: {
       id: run.target.id,
@@ -263,16 +278,7 @@ function buildCtx(input: HookHostInput, reports: string[]) {
       // truncated — and `inputFull` is stored only when it differs. Read
       // `inputFull ?? input`, and know that keys other than the chosen one were
       // discarded at ingestion and are not recoverable here.
-      async read(): Promise<unknown> {
-        if (cached !== undefined) return cached
-        const res = await fetch(
-          `${run.callback.api}/api/${encodeURIComponent(run.callback.project)}/tasks/${encodeURIComponent(run.target.id)}`,
-          { headers: { 'x-lander-hook-token': run.callback.token } },
-        )
-        if (!res.ok) throw new Error(`could not read the target (${res.status})`)
-        cached = await res.json()
-        return cached
-      },
+      read: readTarget,
     },
     trigger: run.trigger,
     hook: {
@@ -340,6 +346,48 @@ function buildCtx(input: HookHostInput, reports: string[]) {
           },
         ),
       )
+    },
+    // Reason over inputs the body has already assembled, with the target's own
+    // provider — so a Codex task's hook judges with Codex and no body branches
+    // on a provider name.
+    //
+    // The provider comes from the target's SERVED flow, not from the wire's
+    // `target.flow`: `taskCheckout` omits the `?? 'claude'` fallback, so that
+    // field is absent for exactly the population that predates the `agent` field
+    // — legacy Claude tasks — and would be read as "no provider". It is never
+    // taken from the environment, which is the daemon's rather than the
+    // target's and silently answers claude when unset.
+    async assist(
+      prompt: string,
+      opts: { timeoutMs?: number } = {},
+    ): Promise<AssistResult> {
+      let flow: unknown
+      try {
+        flow = ((await readTarget()) as { flow?: unknown }).flow
+      } catch (e) {
+        return {
+          ok: false,
+          error: `could not read the target to resolve its provider: ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        }
+      }
+      if (!isAssistProvider(flow))
+        return {
+          ok: false,
+          error:
+            `no one-shot provider for a target on flow '${String(flow)}'. ` +
+            `Announced flows declare no provider, so a body judging one must ` +
+            `reach for ctx.spawn instead.`,
+        }
+      return runAssist({
+        provider: flow,
+        prompt: String(prompt),
+        // Where the rest of the body runs. The assist is not the one thing in a
+        // hook body standing somewhere else.
+        cwd: input.projectRoot,
+        ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
+      })
     },
     // End the target, when the judgment is that it is finished.
     //

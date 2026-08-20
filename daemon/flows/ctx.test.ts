@@ -72,11 +72,30 @@ const patches = (events: HostEvent[]) =>
   )
 
 // Drive a fixture flow whose whole body runs against the real runtime.
-function runFlow(
+// `runTurn` turns a throw from the flow into a `done` event with exitCode 1 —
+// which is right in production (a driver that throws must not take the host with
+// it) and silently fatal in a test: every `expect` in these callbacks would be
+// swallowed, so an assertion could not fail. Catch what the body threw and
+// re-raise it here, leaving the runtime's own behaviour untouched.
+// `tolerateThrow` is for the handful of tests whose subject IS a flow throwing;
+// everywhere else a throw is an assertion that wanted to fail.
+async function runFlow(
   h: ReturnType<typeof harness>,
   body: (ctx: Ctx) => Promise<TurnResult>,
+  opts: { tolerateThrow?: boolean } = {},
 ): Promise<void> {
-  return h.runtime.runTurn({ onTurn: body })
+  let thrown: unknown
+  await h.runtime.runTurn({
+    onTurn: async (ctx) => {
+      try {
+        return await body(ctx)
+      } catch (e) {
+        thrown = e
+        throw e
+      }
+    },
+  })
+  if (thrown !== undefined && !opts.tolerateThrow) throw thrown
 }
 
 describe('ctx runtime — identity', () => {
@@ -394,10 +413,14 @@ describe('ctx runtime — the done contract', () => {
 
   it('kills a still-running child when the flow throws, reporting exit 1', async () => {
     const h = harness()
-    await runFlow(h, async (ctx) => {
-      ctx.spawn('agent', [])
-      throw new Error('flow blew up')
-    })
+    await runFlow(
+      h,
+      async (ctx) => {
+        ctx.spawn('agent', [])
+        throw new Error('flow blew up')
+      },
+      { tolerateThrow: true },
+    )
     expect(h.spawns[0].child.kill).toHaveBeenCalledWith('SIGKILL')
     expect(h.events.at(-1)).toMatchObject({
       kind: 'done',
@@ -577,7 +600,6 @@ describe('ctx runtime — reserved v1 surface', () => {
       await expect(ctx.send()).rejects.toThrow('not implemented')
       await expect(ctx.list()).rejects.toThrow('not implemented')
       await expect(ctx.relaunch()).rejects.toThrow('not implemented')
-      await expect(ctx.assist()).rejects.toThrow('not implemented')
       expect(() => ctx.telemetry.set([])).toThrow('not implemented')
       return { exitCode: 0 }
     })
@@ -752,10 +774,14 @@ describe('ctx runtime — orchestration', () => {
       })) as unknown as typeof fetch,
     )
     try {
-      await runFlow(h, async (ctx) => {
-        await ctx.wedge({ options: [{ id: 'g', label: 'Go' }] })
-        return { exitCode: 0 }
-      })
+      await runFlow(
+        h,
+        async (ctx) => {
+          await ctx.wedge({ options: [{ id: 'g', label: 'Go' }] })
+          return { exitCode: 0 }
+        },
+        { tolerateThrow: true },
+      )
       const done = h.events.find((e) => e.kind === 'done')
       expect(done).toMatchObject({ exitCode: 1 })
       expect(JSON.stringify(done)).toContain('only the task itself')

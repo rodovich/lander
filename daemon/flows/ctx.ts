@@ -33,6 +33,7 @@ import type { ChildProcess } from 'node:child_process'
 import type { FlowMeta, StatePatchOp } from '../../server/protocol'
 import type { Step, Usage } from '../../server/stream'
 import type { HostEvent, HostInput, SpawnLike } from '../run-agent'
+import { isAssistProvider, runAssist } from '../assist'
 import { buildRevivedBlock } from '../task-management'
 
 // ── Handles ────────────────────────────────────────────────────────────────
@@ -1071,7 +1072,31 @@ export function createCtxRuntime(
     relaunch: notImplemented('relaunch'),
     land: notImplemented('land'),
     flow: notImplemented('flow'),
-    assist: notImplemented('assist'),
+    // A one-shot with this task's own provider. Same core as a hook body's
+    // `ctx.assist`, wrapped to this surface's contract rather than that one's:
+    // README documents it as returning the trimmed reply and aborting the flow
+    // on a non-zero exit, and this ctx's rule is that errors are THROWN so a
+    // driver can handle a failure instead of vanishing. A hook body gets a
+    // result object instead, because it must be able to report that judgment was
+    // unavailable.
+    assist: async (...args: unknown[]) => {
+      const [prompt, ...material] = args.map((a) => String(a))
+      if (!prompt) throw new Error('assist: a prompt is required')
+      const provider = start.agent ?? start.flow
+      if (!isAssistProvider(provider))
+        throw new Error(
+          `assist: no one-shot provider for flow '${String(provider)}'`,
+        )
+      const result = await runAssist({
+        provider,
+        // The CLI joins further arguments onto their own line as the material to
+        // act on, so `assist('summarize:', notes)` reads the same either way.
+        prompt: material.length ? `${prompt}\n${material.join('')}` : prompt,
+        cwd,
+      })
+      if (!result.ok) throw new Error(`assist: ${result.error}`)
+      return result.text
+    },
     shell: notImplemented('shell'),
   }
 
