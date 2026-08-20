@@ -68,6 +68,22 @@ export function assistArgv(
       command: 'codex',
       args: [
         'exec',
+        // Not a restraint on what a judge may reach — the body holds daemon
+        // privileges either way — but the two providers do not mean the same
+        // thing by default, and a provider-neutral verb has to.
+        //
+        // Probed: at a project root `codex exec` defaults to `workspace-write
+        // [workdir, /tmp, $TMPDIR]` and reports WRITE=yes, while the same call
+        // outside a project defaults to read-only. Claude grants no write in a
+        // one-shot. So without this a Codex judge could modify the target's
+        // repository as a side effect of being asked a question, and an
+        // identical hook would behave differently under the two providers —
+        // which is the one thing this verb promises not to do. `read-only`
+        // still permits shell, matching what Claude allows.
+        '--sandbox',
+        'read-only',
+        // A project need not be a git repository, and Codex refuses one that is
+        // not unless told otherwise.
         '--skip-git-repo-check',
         ...codexConfigArgs(profile, configOverrides),
         '--',

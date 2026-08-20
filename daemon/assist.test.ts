@@ -57,6 +57,8 @@ describe('assistArgv', () => {
     expect(command).toBe('codex')
     expect(args).toEqual([
       'exec',
+      '--sandbox',
+      'read-only',
       '--skip-git-repo-check',
       '--profile',
       'lander-read-only',
@@ -67,6 +69,15 @@ describe('assistArgv', () => {
       '--',
       'judge this',
     ])
+  })
+
+  // Probed: at a project root `codex exec` defaults to workspace-write and
+  // reports WRITE=yes. Claude grants no write in a one-shot, so without this the
+  // same hook would be able to modify the repository under one provider and not
+  // the other — which is the neutrality this verb exists to provide.
+  it('does not let a Codex judge inherit write access to the target', () => {
+    const { args } = assistArgv('codex', 'x', {})
+    expect(args.slice(0, 3)).toEqual(['exec', '--sandbox', 'read-only'])
   })
 
   // A project need not be a git repository, and Codex refuses a directory that

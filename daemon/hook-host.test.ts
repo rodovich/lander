@@ -66,8 +66,15 @@ function message(blob: string, over: Partial<HookRunMessage> = {}): HookRunMessa
       by: 'any',
     },
     callback: { api, project: 'proj', token: 'hook-token' },
-    timeoutMs: 5_000,
-    killMs: 8_000,
+    // Generous because every test here spawns a real host through `tsx`, and
+    // nothing waits out a timer on the happy path — each case settles on the
+    // host's own report, so a large budget costs nothing while a small one
+    // races startup under a loaded suite. (This was not the cause of the
+    // intermittent failures in this file: those settle in milliseconds with an
+    // `error` outcome, so they are something in the host's early setup rather
+    // than a budget. Raised anyway, to take one variable off the table.)
+    timeoutMs: 30_000,
+    killMs: 45_000,
     ...over,
   }
 }
@@ -136,7 +143,7 @@ describe('hook host', () => {
       }
     `)
     const report = await run(message(blob))
-    expect(report.outcome).toBe('ran')
+    expect(report.outcome, report.error).toBe('ran')
     expect(report.reports).toEqual([
       'fired for tsk-1 on ride-ended',
       'ride ride-7',
@@ -169,7 +176,7 @@ describe('hook host', () => {
     approval = { status: 403, body: { error: 'nope', reason: 'not-approved' } }
     try {
       const report = await run(message(blob))
-      expect(report.outcome).toBe('refused')
+      expect(report.outcome, report.error).toBe('refused')
       // Nothing was imported: top-level code in the module never ran.
       expect(await readFile(canary, 'utf8').catch(() => null)).toBeNull()
     } finally {
@@ -184,7 +191,7 @@ describe('hook host', () => {
     `)
     approval = { status: 401, body: { error: 'who?', reason: 'credential-unknown' } }
     const report = await run(message(blob))
-    expect(report.outcome).toBe('credential-unknown')
+    expect(report.outcome, report.error).toBe('credential-unknown')
   })
 
   // T14: the module is written outside every working tree. A body materialized
@@ -215,7 +222,7 @@ describe('hook host', () => {
       export default async function onTurn(ctx) { ctx.report('should not run') }
     `)
     const report = await run(message(blob))
-    expect(report.outcome).toBe('error')
+    expect(report.outcome, report.error).toBe('error')
     expect(report.error).toContain('meta.api 99')
     expect(report.reports).toEqual([])
   })
@@ -223,7 +230,7 @@ describe('hook host', () => {
   it('fails cleanly when the module has no default export', async () => {
     const blob = await commitHook(`export const meta = { api: 1 }`)
     const report = await run(message(blob))
-    expect(report.outcome).toBe('error')
+    expect(report.outcome, report.error).toBe('error')
     expect(report.error).toContain('no default export')
   })
 
@@ -238,7 +245,7 @@ describe('hook host', () => {
       }
     `)
     const report = await run(message(blob))
-    expect(report.outcome).toBe('error')
+    expect(report.outcome, report.error).toBe('error')
     expect(report.error).toContain('deliberate')
     expect(report.reports).toEqual(['got this far'])
   })
@@ -250,11 +257,15 @@ describe('hook host', () => {
         await new Promise(() => {})
       }
     `)
-    const report = await run(message(blob, { timeoutMs: 300, killMs: 10_000 }))
-    expect(report.outcome).toBe('timeout')
-    // The body's own budget won, so this settled well inside the hard kill.
-    expect(report.durationMs).toBeLessThan(8_000)
-  }, 15_000)
+    // The property is the ORDERING — the body's own budget expires first, so a
+    // well-behaved host reports its overrun instead of being killed for it. A
+    // 300 ms budget raced the host's own startup and made this the flakiest test
+    // in the suite; what matters is the gap between the two, not that the first
+    // is small.
+    const report = await run(message(blob, { timeoutMs: 2_000, killMs: 45_000 }))
+    expect(report.outcome, report.error).toBe('timeout')
+    expect(report.durationMs).toBeLessThan(40_000)
+  }, 60_000)
 
   it('reports a body that crashes the host asynchronously', async () => {
     const blob = await commitHook(`
@@ -265,7 +276,7 @@ describe('hook host', () => {
       }
     `)
     const report = await run(message(blob))
-    expect(report.outcome).toBe('error')
+    expect(report.outcome, report.error).toBe('error')
     expect(report.error).toContain('async boom')
   })
 
@@ -282,7 +293,7 @@ describe('hook host', () => {
       }
     `)
     const report = await run(message(blob))
-    expect(report.outcome).toBe('ran')
+    expect(report.outcome, report.error).toBe('ran')
     expect(report.reports[0]).toBe('branch=main code=0')
     expect(report.reports[1]).toBe(`root=${repo}`)
     expect(await readFile(path.join(stateDir, 'note.txt'), 'utf8')).toBe('hello')
@@ -325,7 +336,7 @@ describe('hook host', () => {
     const report = await run(
       message('0000000000000000000000000000000000000000'),
     )
-    expect(report.outcome).toBe('error')
+    expect(report.outcome, report.error).toBe('error')
     expect(report.error).toContain('could not read hook blob')
   })
 })
