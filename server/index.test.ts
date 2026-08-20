@@ -2460,6 +2460,50 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     await waitForRaw(id, (r) => !r.runId)
   })
 
+  // A start-run's idle window has to clear the Claude CLI's ~600s foreground-Bash
+  // cap (see daemon/claude.ts): at or below it, the watchdog kills the run before
+  // the CLI's auto-background can hand control back and re-arm the window. Runs on
+  // the beforeAll daemon too, for the reason the test above gives.
+  it('rides an idle window clear of the foreground-Bash cap on start-run', async () => {
+    const id = 'idle-window'
+    await writeFile(
+      path.join(tasksDir, `${id}.json`),
+      JSON.stringify({
+        id,
+        title: 'Windowed task',
+        status: 'idle',
+        createdAt: AT,
+        updatedAt: AT,
+        allowEdits: false,
+        shape: 2,
+        items: [],
+        rides: [],
+      }),
+    )
+
+    expect(
+      (await post(`/api/${slug}/tasks/${id}/messages`, { message: 'go' })).status,
+    ).toBe(200)
+    await waitFor(() => startRuns(id).length === 1)
+
+    const started = startRuns(id)[0] as unknown as {
+      runId: string
+      idleTimeoutMs: number
+    }
+    expect(started.idleTimeoutMs).toBeGreaterThan(600_000)
+
+    ws.send(
+      JSON.stringify({
+        type: 'done',
+        runId: started.runId,
+        exitCode: 0,
+        interrupted: false,
+        stderr: '',
+      }),
+    )
+    await waitForRaw(id, (r) => !r.runId)
+  })
+
   // The revival marker is one-shot: the drain that launches the reviving turn
   // takes it under the same lock that takes the queue, so the notice rides that
   // turn and nothing after it. Also runs on the beforeAll daemon, before the

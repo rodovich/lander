@@ -10,7 +10,7 @@
 //        LANDER_DAEMON_TOKEN (must match the server's; read once at startup and
 //          then deleted from the environment, so it is not inherited by the flow
 //          hosts and agent children this process spawns — see server/secrets.ts)
-//        LANDER_IDLE_TIMEOUT_MS (idle-kill fallback, default 10m — start-run wins)
+//        LANDER_IDLE_TIMEOUT_MS (idle-kill fallback, default 15m — start-run wins)
 
 import path from 'node:path'
 import type { AgentAdapter } from './agent'
@@ -85,7 +85,7 @@ const TOKEN = process.env.LANDER_DAEMON_TOKEN?.trim() || ''
 // handoff. Here rather than at the spawn sites: a new spawn site can forget a
 // filter, but it cannot un-inherit what is no longer in the environment.
 scrubProcessEnv()
-const DEFAULT_IDLE_MS = Number(process.env.LANDER_IDLE_TIMEOUT_MS ?? 10 * 60_000)
+const DEFAULT_IDLE_MS = Number(process.env.LANDER_IDLE_TIMEOUT_MS ?? 15 * 60_000)
 const ADAPTERS = buildAdapters({ root: ROOT, env: process.env })
 // What the daemon needs to know about each provider before a host exists —
 // answered by its flow once it has cut over, by its compiled adapter until then.
