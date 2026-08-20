@@ -1,6 +1,10 @@
 import { EventEmitter } from 'node:events'
 import type { ChildProcess, SpawnOptions } from 'node:child_process'
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import { assistArgv } from '../assist'
 import type { StartRunMessage } from '../../server/protocol'
 import type { HostEvent, HostInput } from '../run-agent'
 import {
@@ -590,6 +594,178 @@ describe('ctx runtime — turn inputs', () => {
       expect(ctx.turn.prompts).toEqual(['hello'])
       return { exitCode: 0 }
     })
+  })
+})
+
+// `ctx.assist` is the one method on this surface that runs a real child process.
+// It goes through `runAssist`, which spawns the provider itself rather than
+// through the harness's injectable `spawn` — so the only faithful way to observe
+// it is a PATH shim and a real cwd, the same instrument bin/lander-assist.test.ts
+// uses on the CLI's copy of the same argv.
+//
+// It was uncovered until now: the commit that implemented it removed the
+// assertion that it was unimplemented and added nothing in its place.
+describe('ctx runtime — assist', () => {
+  async function shim(): Promise<{
+    dir: string
+    log: string
+    restore: () => Promise<void>
+  }> {
+    const dir = await mkdtemp(path.join(tmpdir(), 'lander-ctx-assist-'))
+    const log = path.join(dir, 'calls.jsonl')
+    for (const command of ['claude', 'codex'] as const) {
+      const file = path.join(dir, command)
+      await writeFile(
+        file,
+        `#!/usr/bin/env node
+import { appendFileSync } from 'node:fs'
+appendFileSync(
+  ${JSON.stringify(log)},
+  JSON.stringify({ command: ${JSON.stringify(command)}, args: process.argv.slice(2) }) + '\\n',
+)
+if (process.env.ASSIST_FAIL) {
+  process.stderr.write('provider blew up\\n')
+  process.exit(3)
+}
+process.stdout.write('  ${command} reply  \\n')
+`,
+      )
+      await chmod(file, 0o755)
+    }
+    const priorPath = process.env.PATH
+    process.env.PATH = `${dir}${path.delimiter}${priorPath ?? ''}`
+    return {
+      dir,
+      log,
+      restore: async () => {
+        process.env.PATH = priorPath
+        delete process.env.ASSIST_FAIL
+        await rm(dir, { recursive: true, force: true })
+      },
+    }
+  }
+
+  const calls = async (log: string) =>
+    (await readFile(log, 'utf8'))
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as { command: string; args: string[] })
+
+  it('returns the trimmed reply, with the argv the write clamp builds', async () => {
+    const s = await shim()
+    try {
+      // cwd must be a real directory: runAssist spawns the provider there.
+      const h = harness(makeInput({}, { cwd: s.dir, root: s.dir }))
+      await runFlow(h, async (ctx) => {
+        const reply = await ctx.assist('summarize:', 'notes')
+        // The flow contract is the reply itself, trimmed — not a result object.
+        // A hook body gets the object, because it has to be able to report that
+        // judgment was unavailable; a driver flow throws instead.
+        expect(reply).toBe('claude reply')
+        return { exitCode: 0 }
+      })
+      // Further arguments join on their own line, so `assist('summarize:', notes)`
+      // reads the same here as through the CLI.
+      expect(await calls(s.log)).toEqual([
+        { command: 'claude', args: assistArgv('claude', 'summarize:\nnotes', {}).args },
+      ])
+    } finally {
+      await s.restore()
+    }
+  })
+
+  it('takes the provider from the task, so a codex task judges with codex', async () => {
+    const s = await shim()
+    try {
+      const h = harness(
+        makeInput({ agent: 'codex', flow: 'codex' }, { cwd: s.dir, root: s.dir }),
+      )
+      await runFlow(h, async (ctx) => {
+        expect(await ctx.assist('ping')).toBe('codex reply')
+        return { exitCode: 0 }
+      })
+      const [call] = await calls(s.log)
+      expect(call).toEqual({
+        command: 'codex',
+        args: assistArgv('codex', 'ping', {}).args,
+      })
+      // Read-only, and the clamp precedes anything a profile could say.
+      expect(call.args).toContain('--sandbox')
+      expect(call.args[call.args.indexOf('--sandbox') + 1]).toBe('read-only')
+    } finally {
+      await s.restore()
+    }
+  })
+
+  it('throws on a non-zero exit, rather than returning a failure', async () => {
+    const s = await shim()
+    process.env.ASSIST_FAIL = '1'
+    try {
+      const h = harness(makeInput({}, { cwd: s.dir, root: s.dir }))
+      let thrown: unknown
+      await runFlow(
+        h,
+        async (ctx) => {
+          try {
+            await ctx.assist('ping')
+          } catch (e) {
+            thrown = e
+          }
+          return { exitCode: 0 }
+        },
+      )
+      // README documents a non-zero exit from assist as aborting the flow, and
+      // this ctx's rule is that errors are thrown rather than exited on.
+      expect(String(thrown)).toContain('assist:')
+      expect(String(thrown)).toContain('provider blew up')
+    } finally {
+      await s.restore()
+    }
+  })
+
+  it('throws naming the flow when that flow declares no one-shot provider', async () => {
+    const s = await shim()
+    try {
+      // An announced flow is not a provider: it has no `agent`, and nothing
+      // anywhere declares which one-shot it would want.
+      const h = harness(
+        makeInput({ agent: undefined, flow: 'open-pr' }, { cwd: s.dir, root: s.dir }),
+      )
+      let thrown: unknown
+      await runFlow(h, async (ctx) => {
+        try {
+          await ctx.assist('ping')
+        } catch (e) {
+          thrown = e
+        }
+        return { exitCode: 0 }
+      })
+      expect(String(thrown)).toContain('open-pr')
+      // And it never reached a provider.
+      await expect(readFile(s.log, 'utf8')).rejects.toThrow()
+    } finally {
+      await s.restore()
+    }
+  })
+
+  it('requires a prompt', async () => {
+    const s = await shim()
+    try {
+      const h = harness(makeInput({}, { cwd: s.dir, root: s.dir }))
+      let thrown: unknown
+      await runFlow(h, async (ctx) => {
+        try {
+          await ctx.assist()
+        } catch (e) {
+          thrown = e
+        }
+        return { exitCode: 0 }
+      })
+      expect(String(thrown)).toContain('a prompt is required')
+    } finally {
+      await s.restore()
+    }
   })
 })
 
