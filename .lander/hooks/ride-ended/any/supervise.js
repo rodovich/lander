@@ -1,94 +1,49 @@
-// Supervision, report-only.
+// DRAFT of the next supervision body — the stage that judges and logs a verdict
+// without acting on it. Held in docs/tmp (gitignored) rather than in .lander/
+// while a sibling task rewrites history, so the working tree stays clean for it.
 //
-// A task comes to rest half-finished more often than anyone notices, and the
-// evidence that it does is that ~13-15 tasks in this corpus exist for no reason
-// but to watch another task and nudge it. Their prompts read as specifications
-// for this hook. What they cannot do is scale, and what a rule in the acting
-// agent's own prompt cannot do is bind the agent that is already failing to
-// follow it.
+// Diff from the shipped body is three things:
+//   1. a gated segment is handed to ctx.assist instead of ending at ctx.report;
+//   2. the verdict, and how it was reached, join the JSONL row;
+//   3. nothing acts. ctx.nudge and ctx.land exist and are not called.
 //
-// This version NUDGES NOTHING. It applies the gate and says what it would have
-// done, because a hook that reopens a task before its judgment has been scored
-// trains the user to ignore hooks — and the gate has not been scored yet. That
-// is what the log below is for.
-//
-// ── The gate ───────────────────────────────────────────────────────────────
-//
-// Three deterministic predicates, measured over 2,930 ride-end segments and
-// reproduced verbatim here. Together they select ~20% of segments; alone, the
-// union is what makes a judging step affordable at all. The predicate needs
-// RECALL, not precision — it asks "could this be one of the cases?", and the
-// judgment that follows (increment C) asks "is it, and what should happen?"
-//
-// The first predicate is a good gate signal and a BAD finding: of 235 human
-// messages instructing a task to land, 97 saw no `landed` event before the next
-// human message, and reading them shows that residue is almost entirely correct
-// behavior — deferred deliberately, conditional wording, or interrupted. It is
-// here to widen the net, not to accuse.
-//
-// ── The unit is the segment, not the ride ──────────────────────────────────
-//
-// Appendix A partitions `items[]` at each user message: the instruction,
-// everything until the next human message, and the last non-user message in
-// that span as the closing message. A segment can contain several rides.
-// Evaluating per ride would multiply every measured rate by the number of rides
-// in a segment, and the ~20% figure the cost argument rests on would stop
-// meaning anything.
-//
-// ── Why the segment is cut on the record as it stands ──────────────────────
-//
-// A fire is dispatched a sweep (15s) plus a body's runtime after its ride
-// closed, so the record read here has usually moved on. The instinct is to
-// truncate at `ctx.trigger.at` and judge the past — but that is wrong twice,
-// and both ways were caught by replaying this body over the corpus:
-//
-//   - A truncated view can never contain a LATER ride, so "is this the last
-//     ride in the segment" is vacuously true — 3,129 of 3,129 real rides.
-//     The guard that makes the unit a segment rather than a ride does nothing.
-//   - A human replying inside the dispatch window is not a reason to skip. It
-//     is the opposite: their message ENDS this segment, so the thing being
-//     judged is complete, and "a human had to nudge" is the positive class the
-//     whole exercise is trying to collect.
-//
-// Cutting the live record answers both, because segment boundaries are user
-// messages. A human's reply bounds the span, so nothing after it is judged. A
-// further ride under the same instruction falls INSIDE the span, so this fire
-// defers and the ride that closes the segment judges the whole of it.
-//
-// `live` still records whether the record had moved on, so a later reading can
-// tell a fire that judged a settled segment from one that raced.
+// That third point is the stage, not an oversight. hooks.md §8: a judge is
+// measured before it is armed, against real segments, so the verdicts can be
+// compared with what a human would have done. Arming on the first verdicts a
+// model ever produces is the destructive-verb mistake with the destruction one
+// step further away — and the log this produces is what §10's harness wants as
+// input anyway.
 
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
 export const meta = { api: 1 }
 
-// Verbatim from hooks.md Appendix A. Changing one of these invalidates the
-// measured rates it was scored against.
+// Verbatim from hooks.md Appendix A. Changing one invalidates the rates it was
+// scored against.
 const LAND_INSTRUCTION = /\b(then|and|,)\s*land\b|\bland it\b|\bcommit and land\b/i
 const OFFER_TO_CONTINUE =
   /let me know if you|would you like me to|want me to (continue|proceed|keep going|go ahead)|shall i (continue|proceed)|should i (continue|proceed)|if you('d| would) like me to|say the word/i
 const ENUMERATED = /(^|\n)\s*(?:[1-9][.)]|-|\*)\s+\S/g
 
 const isUser = (it) => it.kind === 'message' && it.role === 'user'
-// The turn's own closing word, not a subagent's: nested prose carries parentId.
 const isClosing = (it) =>
   it.kind === 'message' && it.role === 'flow' && it.parentId === undefined
+// A nudge this hook already sent. Not a segment boundary — boundaries are human
+// messages, or the unit stops being the one every rate was measured over — but
+// it does mean this span has already been spoken to.
+const isOwnNudge = (it, path) =>
+  it.kind === 'message' && it.role === 'hook' && it.from?.path === path
 
-// The segment the fired ride belongs to, as the record stood at the fire.
-function cutSegment(items, rideId) {
+function cutSegment(items, rideId, hookPath) {
   const first = items.findIndex((it) => it.rideId === rideId)
   if (first < 0) return null
-  // Walk back to the user message that opened this span.
   let start = first
   while (start > 0 && !isUser(items[start - 1])) start--
   while (start > 0 && isUser(items[start - 1])) start--
-  // ...and forward to the next one, which opens the following segment.
   let end = first + 1
   while (end < items.length && !isUser(items[end])) end++
   const span = items.slice(start, end)
-  // A batched turn delivers several user messages into one ride, so the
-  // instruction is all of the leading ones.
   const instruction = span
     .filter(isUser)
     .map((it) => it.text ?? '')
@@ -98,41 +53,99 @@ function cutSegment(items, rideId) {
   return {
     instruction,
     closing: closing?.text ?? '',
-    // Whether the fired ride is the last one in the span. A segment whose next
-    // ride has already started has not closed, and the later fire will judge it.
     isLast: rides[rides.length - 1] === rideId,
     landed: span.some((it) => it.kind === 'event' && it.eventKind === 'landed'),
+    alreadyNudged: span.some((it) => isOwnNudge(it, hookPath)),
   }
 }
 
-function enumeratedCount(text) {
-  return (text.match(ENUMERATED) ?? []).length
+const enumeratedCount = (text) => (text.match(ENUMERATED) ?? []).length
+
+// ── The verdict grammar ────────────────────────────────────────────────────
+//
+// Stated to the model and parsed strictly, because hooks.md §9 makes one
+// platform-level rule for any judging body: an unparseable verdict is INERT. A
+// model that answers off-format produces no action rather than an arbitrary one,
+// so the parse defaults to `unclear` and `unclear` never acts.
+const VERDICT = /^\s*VERDICT:\s*(finished|unfinished|unclear)\b/im
+const BECAUSE = /^\s*BECAUSE:\s*(.+)$/im
+
+function parseVerdict(text) {
+  const verdict = VERDICT.exec(text ?? '')
+  if (!verdict) return { verdict: 'unclear', unparseable: true }
+  return {
+    verdict: verdict[1].toLowerCase(),
+    because: (BECAUSE.exec(text ?? '')?.[1] ?? '').trim().slice(0, 400),
+  }
 }
 
-// One line per fire, whether or not the gate fired. The negatives are the whole
-// point: recall cannot be computed from the positive class alone. (The labels
-// themselves come from reading the corpus offline — this records what the gate
-// SAW and DECIDED at fire time, which the corpus cannot reconstruct.)
+// §1: do not rest a verdict on the agent's self-report. The gate may use it —
+// offer-to-continue reads exactly that prose — but the judge is asked to weigh
+// the closing message against what was actually ASKED, which is the instruction.
+function judgePrompt({ instruction, closing }) {
+  return [
+    'You are judging whether a software task actually finished what it was asked to do.',
+    'You have everything you need below. Do not use tools; do not explore.',
+    '',
+    'Answer in exactly this form, and nothing else:',
+    'VERDICT: finished|unfinished|unclear',
+    'BECAUSE: <one sentence>',
+    '',
+    'Use `unfinished` only when the instruction asked for something specific that the',
+    'closing message shows was not done. A task that deliberately stopped to ask its',
+    'human a question it cannot answer itself is `finished` for this purpose — it is',
+    'waiting on a person, not idling. Use `unclear` when the two do not settle it.',
+    '',
+    '--- THE INSTRUCTION IT WAS GIVEN ---',
+    instruction.slice(0, 6000),
+    '',
+    '--- HOW IT ENDED ---',
+    closing.slice(0, 6000),
+  ].join('\n')
+}
+
+// One line per fire, whether or not the gate fired and whether or not a judge
+// ran. The negatives are the point: recall cannot be computed from the positive
+// class alone.
 async function log(ctx, row) {
   try {
     await mkdir(ctx.stateDir, { recursive: true })
-    // Date-stamped rather than rotated: several hosts can run at once, and
-    // size-triggered rotation performed by a single-file body is a multi-process
-    // rename race.
     const file = path.join(
       ctx.stateDir,
       `supervise-${ctx.trigger.at.slice(0, 10)}.jsonl`,
     )
-    // A run that is retried re-runs the body, and a body's own effects are not
-    // deduped by the platform — so an errored fire would otherwise be counted
-    // twice in the dataset it exists to produce.
     const tail = await readFile(file, 'utf8').catch(() => '')
     if (tail.includes(`"fireId":"${ctx.hook.fireId}"`)) return
     await appendFile(file, JSON.stringify(row) + '\n')
   } catch {
-    // The log is evidence, not a dependency. A body that cannot write it still
-    // reports its finding.
+    // The log is evidence, not a dependency.
   }
+}
+
+// A verdict already reached for this fire, so a retry re-reads rather than
+// re-judges. An assist is a direct body effect, which hooks.md §8 excludes from
+// the platform's retry guarantee — without this, a fire that failed after
+// judging pays for the model again on every one of up to five attempts.
+async function cachedVerdict(ctx) {
+  try {
+    const raw = await readFile(
+      path.join(ctx.stateDir, `verdict-${ctx.hook.fireId}.json`),
+      'utf8',
+    )
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+async function cacheVerdict(ctx, verdict) {
+  try {
+    await mkdir(ctx.stateDir, { recursive: true })
+    await appendFile(
+      path.join(ctx.stateDir, `verdict-${ctx.hook.fireId}.json`),
+      JSON.stringify(verdict),
+    )
+  } catch {}
 }
 
 export default async function onTurn(ctx) {
@@ -146,37 +159,57 @@ export default async function onTurn(ctx) {
 
   const task = await ctx.target.read()
   const items = task.items ?? []
-  const segment = cutSegment(items, ctx.trigger.rideId)
+  const segment = cutSegment(items, ctx.trigger.rideId, ctx.hook.path)
   if (!segment) return log(ctx, { ...row, skipped: 'no-segment' })
-
-  // Another ride ran under the same instruction, so this segment has not closed
-  // — the fire of the ride that does close it will judge the whole span.
   if (!segment.isLast) return log(ctx, { ...row, skipped: 'segment-open' })
-  // The ride that landed a task needs no supervision.
   if (segment.landed) return log(ctx, { ...row, skipped: 'landed' })
+  // This span has already been spoken to. Without this the same finding would be
+  // re-judged and re-reported on every subsequent ride under one instruction,
+  // and the runaway bound would become the routine terminating condition rather
+  // than the backstop it is.
+  if (segment.alreadyNudged) return log(ctx, { ...row, skipped: 'already-nudged' })
 
   const matched = []
   if (LAND_INSTRUCTION.test(segment.instruction)) matched.push('land-instruction')
   if (OFFER_TO_CONTINUE.test(segment.closing)) matched.push('offer-to-continue')
   if (enumeratedCount(segment.instruction) >= 2) matched.push('enumerated')
 
-  // Recorded on every fire, including the ~80% that match nothing — those are
-  // the false negatives any recall figure has to be computed against.
+  const live = !items.some((it) => it.at > ctx.trigger.at)
+  const closingFirstLine = segment.closing.split('\n').find((l) => l.trim()) ?? ''
+
+  // ~80% of segments end here, having cost a process and no tokens.
+  if (!matched.length)
+    return log(ctx, { ...row, matched, live, closingFirstLine })
+
+  const cached = await cachedVerdict(ctx)
+  const judged =
+    cached ??
+    (await (async () => {
+      const answer = await ctx.assist(judgePrompt(segment))
+      if (!answer.ok) return { verdict: 'unavailable', error: answer.error }
+      const parsed = parseVerdict(answer.text)
+      return { ...parsed, raw: answer.text.slice(0, 600) }
+    })())
+  if (!cached) await cacheVerdict(ctx, judged)
+
   await log(ctx, {
     ...row,
     matched,
-    // Whether anything landed on the record after the fire, so a later reading
-    // can tell a judgment of a settled segment from one that raced a reply.
-    live: !items.some((it) => it.at > ctx.trigger.at),
-    closingFirstLine: segment.closing.split('\n').find((l) => l.trim()) ?? '',
+    live,
+    closingFirstLine,
+    verdict: judged.verdict,
+    because: judged.because ?? '',
+    unparseable: judged.unparseable ?? false,
+    judgeError: judged.error ?? '',
+    fromCache: !!cached,
   })
 
-  if (!matched.length) return
-
-  ctx.report(
-    `Would have checked whether this task is really finished — ${matched.join(', ')}.\n\n` +
-      `Nudging is not armed yet, so nothing was sent. ` +
-      `The gate selects roughly one ride-end segment in five; whether that is the ` +
-      `right one is what the log in \`${ctx.stateDir}\` is for.`,
-  )
+  // Nothing acts. The verdict is evidence until it has been compared with what a
+  // human would have done — hooks.md §8, and §8a's arming precondition.
+  if (judged.verdict === 'unfinished')
+    ctx.report(
+      `Judged this task **unfinished** — ${judged.because || 'no reason given'}\n\n` +
+        `Gate: ${matched.join(', ')}. Nothing was sent: supervision is judging and ` +
+        `logging while its verdicts are scored, not acting on them.`,
+    )
 }

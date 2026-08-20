@@ -88,12 +88,23 @@ function message(rideId = 'ride-1'): HookRunMessage {
   }
 }
 
-const run = (rideId = 'ride-1'): Promise<HookRunReport> =>
-  runHook(message(rideId), { projectRoot: repo, targetCwd: repo, stateDir })
+// Takes a whole message when a test needs the SAME fire twice — a retry
+// presents the same fire id, which is what the verdict cache keys on.
+const run = (
+  rideOrMessage: string | HookRunMessage = 'ride-1',
+): Promise<HookRunReport> =>
+  runHook(
+    typeof rideOrMessage === 'string' ? message(rideOrMessage) : rideOrMessage,
+    { projectRoot: repo, targetCwd: repo, stateDir },
+  )
 
 // The one line the body wrote for this fire.
 async function loggedRows(): Promise<Record<string, unknown>[]> {
-  const files = await readdir(stateDir).catch(() => [])
+  // Only the log. The body also keeps its verdict cache in this directory, and
+  // reading every file here would parse that as a row.
+  const files = (await readdir(stateDir).catch(() => [])).filter((f) =>
+    /^supervise-.*\.jsonl$/.test(f),
+  )
   const rows: Record<string, unknown>[] = []
   for (const f of files) {
     const text = await readFile(path.join(stateDir, f), 'utf8')
@@ -103,6 +114,7 @@ async function loggedRows(): Promise<Record<string, unknown>[]> {
 }
 
 beforeAll(async () => {
+  await installFakeJudge()
   repo = await mkdtemp(path.join(tmpdir(), 'lander-supervise-repo-'))
   const git = (args: string[]) => exec('git', ['-C', repo, ...args])
   await git(['init', '-q', '-b', 'main'])
@@ -130,10 +142,13 @@ beforeAll(async () => {
       res.writeHead(200, { 'content-type': 'application/json' })
       // The approval re-check and the target read share this stub; only the
       // latter needs a payload.
+      // `flow` decides which provider ctx.assist reaches for, so it defaults
+      // here rather than in every fixture; a test about provider resolution
+      // overrides it.
       res.end(
         req.url?.endsWith('/hooks/materialize')
           ? '{"ok":true}'
-          : JSON.stringify(target),
+          : JSON.stringify({ flow: 'claude', ...target }),
       )
     })
   })
@@ -141,13 +156,57 @@ beforeAll(async () => {
   api = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
 })
 
+// A stand-in for the provider `ctx.assist` shells out to.
+//
+// The body now calls a model, and `runHook` spawns a real host — so without this
+// `npm test` would make a paid network call, need credentials, and answer
+// differently every run. The host inherits this process's environment, so
+// putting a fake `claude` first on PATH is enough; `bin/lander-assist.test.ts`
+// seams the same way. `verdict` is what that fake will say next.
+let judgeBin: string
+let judgeCalls: string
+// Reset before every test. Held as a constant rather than a mutable default, or
+// a test that sets its own verdict leaks it into every test after it.
+const DEFAULT_VERDICT =
+  'VERDICT: unfinished\nBECAUSE: the second item was never done.'
+
+async function installFakeJudge(): Promise<void> {
+  judgeBin = await mkdtemp(path.join(tmpdir(), 'lander-supervise-bin-'))
+  judgeCalls = path.join(judgeBin, 'calls.log')
+  const script = path.join(judgeBin, 'claude')
+  // Records the prompt it was given, then prints whatever the test set. Reading
+  // `verdict` from a file rather than baking it in keeps the fake constant while
+  // the answer varies.
+  await writeFile(
+    script,
+    [
+      '#!/bin/sh',
+      // A one-line marker per invocation, so calls can be counted without the
+      // prompt's own newlines being mistaken for more of them.
+      `printf '===CALL===\\n%s\\n' "$*" >> ${JSON.stringify(judgeCalls)}`,
+      `cat ${JSON.stringify(path.join(judgeBin, 'verdict.txt'))}`,
+    ].join('\n'),
+    { mode: 0o755 },
+  )
+  process.env.PATH = `${judgeBin}${path.delimiter}${process.env.PATH ?? ''}`
+}
+
+const setVerdict = (text: string): Promise<void> =>
+  writeFile(path.join(judgeBin, 'verdict.txt'), text)
+
+const judgePrompts = (): Promise<string> =>
+  readFile(judgeCalls, 'utf8').catch(() => '')
+
 beforeEach(async () => {
   stateDir = await mkdtemp(path.join(tmpdir(), 'lander-supervise-state-'))
+  await rm(judgeCalls, { force: true })
+  await setVerdict(DEFAULT_VERDICT)
 })
 
 afterAll(async () => {
   await new Promise<void>((r) => server.close(() => r()))
   await rm(repo, { recursive: true, force: true })
+  await rm(judgeBin, { recursive: true, force: true })
 })
 
 describe('the supervision hook', () => {
@@ -168,21 +227,123 @@ describe('the supervision hook', () => {
       'Please:\n1. fix the parser\n2. add a test\n',
       'Fixed the parser.',
     ],
-  ])('fires on %s', async (predicate, instruction, closing) => {
+  ])('gates on %s, then judges', async (predicate, instruction, closing) => {
     target = {
       id: 'tsk-1',
       status: 'resting',
+      flow: 'claude',
       items: [user('u1', instruction), flow('f1', 'ride-1', closing)],
     }
     const report = await run()
-    expect(report.outcome).toBe('ran')
+    expect(report.outcome, report.error).toBe('ran')
     expect(report.reports[0]).toContain(predicate)
-    // It says plainly that it did not act.
-    expect(report.reports[0]).toContain('not armed')
+    // The verdict, and the fact that nothing was sent on the strength of it.
+    expect(report.reports[0]).toContain('unfinished')
+    expect(report.reports[0]).toContain('not acting on them')
 
     const rows = await loggedRows()
     expect(rows).toHaveLength(1)
     expect(rows[0].matched).toEqual([predicate])
+    expect(rows[0].verdict).toBe('unfinished')
+  })
+
+  // §1: a verdict must not rest on the agent's self-report. The gate may use it
+  // — offer-to-continue reads exactly that prose — but the judge is handed the
+  // instruction as well, and is told the inputs are complete.
+  it('hands the judge the instruction, not only the closing message', async () => {
+    target = {
+      id: 'tsk-1',
+      status: 'resting',
+      flow: 'claude',
+      items: [
+        user('u1', 'Fix the parser and then land.'),
+        flow('f1', 'ride-1', 'Fixed the parser.'),
+      ],
+    }
+    await run()
+    const prompt = await judgePrompts()
+    expect(prompt).toContain('Fix the parser and then land.')
+    expect(prompt).toContain('Fixed the parser.')
+    expect(prompt).toContain('Do not use tools')
+  })
+
+  // hooks.md §9's one platform-level rule for any judging body.
+  it('treats a verdict it cannot parse as inert', async () => {
+    await setVerdict('I think it probably did most of it, hard to say really.')
+    target = {
+      id: 'tsk-1',
+      status: 'resting',
+      flow: 'claude',
+      items: [
+        user('u1', 'Fix the parser and then land.'),
+        flow('f1', 'ride-1', 'Fixed the parser.'),
+      ],
+    }
+    const report = await run()
+    expect(report.outcome, report.error).toBe('ran')
+    // Nothing reported, because nothing was concluded.
+    expect(report.reports).toEqual([])
+    const rows = await loggedRows()
+    expect(rows[0]).toMatchObject({ verdict: 'unclear', unparseable: true })
+  })
+
+  // A task that stopped to ask its human something it cannot answer itself is
+  // waiting on a person, not idling — and it is the shape the offer-to-continue
+  // predicate matches most often, so a judge that got this wrong would nudge
+  // exactly the tasks that were behaving correctly.
+  it('records a finished verdict without reporting anything', async () => {
+    await setVerdict('VERDICT: finished\nBECAUSE: it is waiting on a decision only its human can make.')
+    target = {
+      id: 'tsk-1',
+      status: 'resting',
+      flow: 'claude',
+      items: [
+        user('u1', 'Fix the parser.'),
+        flow('f1', 'ride-1', 'Fixed it. Want me to continue with the tests?'),
+      ],
+    }
+    const report = await run()
+    expect(report.reports).toEqual([])
+    const rows = await loggedRows()
+    expect(rows[0].verdict).toBe('finished')
+  })
+
+  // An assist is a direct body effect, which the platform's retry dedupe does
+  // not cover: without the cache a fire that failed after judging would pay for
+  // the model again on each of up to five attempts.
+  it('reuses its verdict rather than re-judging when a fire is retried', async () => {
+    target = {
+      id: 'tsk-1',
+      status: 'resting',
+      flow: 'claude',
+      items: [
+        user('u1', 'Fix the parser and then land.'),
+        flow('f1', 'ride-1', 'Fixed the parser.'),
+      ],
+    }
+    const msg = message()
+    await run(msg)
+    await run(msg) // the same fire, re-dispatched
+    expect((await judgePrompts()).match(/===CALL===/g) ?? []).toHaveLength(1)
+  })
+
+  // The provider is the target's. A target on an announced flow declares none,
+  // so the body reports that judgment was unavailable rather than guessing.
+  it('does not judge a target whose flow declares no provider', async () => {
+    target = {
+      id: 'tsk-1',
+      status: 'resting',
+      flow: 'open-pr',
+      items: [
+        user('u1', 'Fix the parser and then land.'),
+        flow('f1', 'ride-1', 'Fixed the parser.'),
+      ],
+    }
+    const report = await run()
+    expect(report.outcome, report.error).toBe('ran')
+    expect(await judgePrompts()).toBe('')
+    const rows = await loggedRows()
+    expect(rows[0].verdict).toBe('unavailable')
   })
 
   // The ~80% the gate skips. They still get a row — recall cannot be computed
