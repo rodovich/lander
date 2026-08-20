@@ -108,7 +108,31 @@ export type RunManagerOptions = {
 // Fallback idle window, outranked by the daemon's own defaultIdleMs and by the
 // server's per-run idleTimeoutMs; server/index.ts states the constraint any
 // operative value has to meet.
-const DEFAULT_IDLE_MS = 15 * 60_000
+export const DEFAULT_IDLE_MS = 15 * 60_000
+
+// The daemon's LANDER_IDLE_TIMEOUT_MS override, or the fallback.
+//
+// Anything that is not a finite positive number takes the fallback, which is the
+// whole reason this is a function rather than a `Number(...)` at the daemon's
+// module scope. `Number('')` is 0 and `Number('abc')` is NaN, and both reach
+// `setTimeout` through `msg.idleTimeoutMs || defaultIdleMs` as a window that
+// fires immediately — a mistyped environment variable that kills every run the
+// moment it starts, rather than one that is ignored.
+//
+// Nothing reads this today: `idleTimeoutMs` is required on StartRunMessage and
+// the server sends a literal on every run, so `defaultIdleMs` is unreachable in
+// production. It is a guard on the path that would carry an override if one were
+// ever honored, and it lives here rather than in daemon/index.ts because that
+// module scrubs the process environment at import and so cannot be imported by a
+// test at all.
+export function idleFallbackMs(env: {
+  LANDER_IDLE_TIMEOUT_MS?: string | undefined
+}): number {
+  const raw = env.LANDER_IDLE_TIMEOUT_MS
+  if (raw === undefined) return DEFAULT_IDLE_MS
+  const value = Number(raw)
+  return Number.isFinite(value) && value > 0 ? value : DEFAULT_IDLE_MS
+}
 const DEFAULT_RUN_BUFFER_TTL_MS = 120_000
 
 export function createRunManager({

@@ -39,7 +39,7 @@ import { gitExec, resolveHooks } from './hooks'
 import { createHookRuns, runHook } from './hook-run'
 import { statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { createRunManager, type RunManagerMessage } from './run'
+import { createRunManager, idleFallbackMs, type RunManagerMessage } from './run'
 import { createDrain } from './drain'
 import {
   materializeAttachments,
@@ -85,7 +85,7 @@ const TOKEN = process.env.LANDER_DAEMON_TOKEN?.trim() || ''
 // handoff. Here rather than at the spawn sites: a new spawn site can forget a
 // filter, but it cannot un-inherit what is no longer in the environment.
 scrubProcessEnv()
-const DEFAULT_IDLE_MS = Number(process.env.LANDER_IDLE_TIMEOUT_MS ?? 15 * 60_000)
+const DEFAULT_IDLE_MS = idleFallbackMs(process.env)
 const ADAPTERS = buildAdapters({ root: ROOT, env: process.env })
 // What the daemon needs to know about each provider before a host exists —
 // answered by its flow once it has cut over, by its compiled adapter until then.

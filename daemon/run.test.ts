@@ -7,6 +7,8 @@ import type { StartRunMessage } from '../server/protocol'
 import type { HostEvent, HostInput } from './run-agent'
 import {
   createRunManager,
+  DEFAULT_IDLE_MS,
+  idleFallbackMs,
   type RunManagerMessage,
   type RunManagerOptions,
 } from './run'
@@ -90,6 +92,24 @@ function push(host: FakeHost, event: HostEvent): void {
 function hostInputOf(host: FakeHost): HostInput {
   return JSON.parse(host.stdin.writes.join('').trim()) as HostInput
 }
+
+describe('idle fallback', () => {
+  it('takes the daemon default when nothing overrides it', () => {
+    expect(idleFallbackMs({})).toBe(DEFAULT_IDLE_MS)
+  })
+
+  it('honors a positive override', () => {
+    expect(idleFallbackMs({ LANDER_IDLE_TIMEOUT_MS: '90000' })).toBe(90_000)
+  })
+
+  it('ignores a value that is not a positive number', () => {
+    // Each of these reaches setTimeout as an immediate fire through
+    // `msg.idleTimeoutMs || defaultIdleMs`, so a typo would kill every run the
+    // moment it started rather than being ignored.
+    for (const raw of ['', '   ', 'abc', '0', '-1', 'Infinity'])
+      expect(idleFallbackMs({ LANDER_IDLE_TIMEOUT_MS: raw })).toBe(DEFAULT_IDLE_MS)
+  })
+})
 
 describe('daemon run manager', () => {
   it('assigns seq and relays host events as run-manager messages', () => {
