@@ -887,6 +887,217 @@ describe('the land', () => {
   })
 })
 
+// A hook may launch a task, for judgment that has to explore rather than reason
+// over inputs the body already holds. It shares the create route, so the branch
+// has to answer for everything that route computes — and the response is part of
+// that: the host reads `ok`, not a task projection.
+describe('the launch', () => {
+  const HOOK = '.lander/hooks/landed/agent/review.js'
+  const ID = 'tsk-launcher'
+  const file = () => path.join(tasksDir, `${ID}.json`)
+
+  afterEach(() => clearHookRunState())
+
+  const seed = async (over: Record<string, unknown> = {}): Promise<void> => {
+    await writeFile(
+      file(),
+      JSON.stringify({
+        id: ID,
+        title: 'Reviewed',
+        status: 'landed',
+        createdAt: AT,
+        updatedAt: AT,
+        allowEdits: false,
+        token: `token-${ID}`,
+        shape: 2,
+        rides: [],
+        pendingHooks: [{ id: 'fire-1-abc', trigger: 'landed', by: 'agent', at: AT }],
+        items: [{ id: 'u0', at: AT, kind: 'message', role: 'user', text: 'go' }],
+        ...over,
+      }),
+    )
+  }
+
+  const cred = (over: Record<string, unknown> = {}) =>
+    mintHookCredential({
+      project: slug,
+      target: ID,
+      fireId: 'fire-1-abc',
+      path: HOOK,
+      blob: 'b10b',
+      name: 'review',
+      ...over,
+    })
+
+  const launch = (token: string, body: Record<string, unknown> = {}) =>
+    app.request(`/api/${slug}/tasks`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-lander-hook-token': token,
+      },
+      body: JSON.stringify({ message: 'review this', key: 'launch#0', ...body }),
+    })
+
+  const raw = async (): Promise<Record<string, any>> =>
+    JSON.parse(await readFile(file(), 'utf8'))
+  const created = async (id: string): Promise<Record<string, any>> =>
+    JSON.parse(await readFile(path.join(tasksDir, `${id}.json`), 'utf8'))
+
+  it('creates a task carrying its origin, the backlink, and the grants asked for', async () => {
+    await seed()
+    const res = await launch(cred().token, { allowEdits: true })
+    expect(res.status).toBe(201)
+    // `ok` and an id, NOT a task projection: the host gates success on this
+    // field and advances its dedupe ordinal only when it sees it.
+    const body = (await res.json()) as { ok: boolean; id: string }
+    expect(body.ok).toBe(true)
+
+    const t = await created(body.id)
+    expect(t.hookOrigin).toEqual({
+      path: HOOK,
+      name: 'review',
+      fireId: 'fire-1-abc',
+      target: ID,
+    })
+    // No spawnedBy: there is no spawning task, which is also why no task can
+    // land this one.
+    expect(t.spawnedBy).toBeUndefined()
+    expect(t.allowEdits).toBe(true)
+    // Composed from the credential, so a body cannot attribute its launch to a
+    // hook that is not itself.
+    expect(t.items[1].text).toBe(`Launched by hook review on ${ID}:\n\nreview this`)
+    // Recorded against the TARGET, carrying the id, so a retry can answer with it.
+    expect((await raw()).hookActions).toMatchObject([
+      { hook: HOOK, kind: 'launch', key: 'launch#0', taskId: body.id },
+    ])
+  })
+
+  // The neutrality rule: a Codex task is reviewed by Codex. Through `taskFlow`,
+  // so the pre-flow population — which carries `agent` and no `flow` — resolves
+  // to its own provider rather than to the instance default.
+  it.each([
+    ['flow', { flow: 'codex' }, 'codex'],
+    ['legacy agent only', { agent: 'codex' }, 'codex'],
+  ])('inherits the target’s provider (%s)', async (_name, over, expected) => {
+    await seed(over)
+    const body = (await (await launch(cred().token)).json()) as { id: string }
+    expect((await created(body.id)).flow).toBe(expected)
+  })
+
+  it('lets the body name a flow explicitly', async () => {
+    await seed({ flow: 'codex' })
+    const body = (await (await launch(cred().token, { flow: 'claude' })).json()) as {
+      id: string
+    }
+    expect((await created(body.id)).flow).toBe('claude')
+  })
+
+  // Unlike the nudge and the land, a launch does not act on the target — so the
+  // states those refuse are not this one's business. Refusing here would decline
+  // to review a task because its human happens to be holding a question.
+  it.each([
+    ['wedged', { status: 'wedged' }],
+    ['riding', { queued: ['more'], status: 'riding' }],
+    ['resting on a wakeup', { scheduledFor: '2099-01-01T00:00:00.000Z' }],
+  ])('launches for a %s target', async (_name, over) => {
+    await seed(over)
+    expect((await launch(cred().token)).status).toBe(201)
+  })
+
+  // But a fire the target has moved past is refused: the finding is about a
+  // state it has left, so a review of it is noise.
+  it('refuses a stale fire', async () => {
+    await seed({ pendingHooks: [] })
+    const res = await launch(cred().token)
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({ ok: false, reason: 'stale' })
+  })
+
+  it('is bounded by the same record as the nudge and the land', async () => {
+    await seed({
+      hookActions: [
+        { hook: HOOK, fireId: 'f0', key: 'nudge#0', kind: 'nudge', at: AT },
+        { hook: HOOK, fireId: 'f1', key: 'land#0', kind: 'land', at: AT },
+        { hook: HOOK, fireId: 'f2', key: 'launch#0', kind: 'launch', at: AT },
+      ],
+    })
+    const res = await launch(cred().token)
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({ ok: false, reason: 'bound' })
+  })
+
+  // The retry guarantee: an interrupted run is re-dispatched, and the body
+  // re-presents the same key. One task, not two — and the answer names it, so
+  // the body still has a handle on what its earlier attempt created.
+  it('dedupes a retry and answers with the task the first attempt created', async () => {
+    await seed()
+    const first = (await (await launch(cred().token)).json()) as { id: string }
+    const before = (await readdir(tasksDir)).length
+
+    // A retry composes a different message — a body is not required to be
+    // deterministic, which is why the key is platform-owned rather than a hash.
+    const again = await launch(cred().token, { message: 'review this (again)' })
+    expect(await again.json()).toEqual({ ok: true, deduped: true, id: first.id })
+    expect((await readdir(tasksDir)).length).toBe(before)
+    expect((await raw()).hookActions).toHaveLength(1)
+  })
+
+  it('lets two deliberately different launches in one fire both through', async () => {
+    await seed()
+    const a = (await (await launch(cred().token, { key: 'launch#0' })).json()) as {
+      id: string
+    }
+    const b = (await (await launch(cred().token, { key: 'launch#1' })).json()) as {
+      id: string
+    }
+    expect(b.id).not.toBe(a.id)
+    expect((await raw()).hookActions).toHaveLength(2)
+  })
+
+  it('refuses a launch with no message rather than spending a turn on the backlink', async () => {
+    await seed()
+    const res = await launch(cred().token, { message: '', title: 'Review' })
+    expect(res.status).toBe(400)
+    expect(await res.json()).toMatchObject({ ok: false })
+    expect((await raw()).hookActions ?? []).toHaveLength(0)
+  })
+
+  it('answers an unknown token rather than falling through to an anonymous create', async () => {
+    await seed()
+    const before = (await readdir(tasksDir)).length
+    const res = await launch('not-a-real-token')
+    expect(res.status).toBe(401)
+    expect(await res.json()).toMatchObject({ reason: 'credential-unknown' })
+    expect((await readdir(tasksDir)).length).toBe(before)
+  })
+
+  // The exemption has to cover the chain, not just its head: a review task that
+  // spawns a helper must not have that helper's landing wake the hook that
+  // started the whole thing.
+  it('is inherited by a task the launched task spawns', async () => {
+    await seed()
+    const first = (await (await launch(cred().token)).json()) as { id: string }
+
+    const res = await app.request(`/api/${slug}/tasks`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-lander-task': first.id,
+        'x-lander-project': slug,
+        'x-lander-token': (await created(first.id)).token,
+      },
+      body: JSON.stringify({ message: 'help with this' }),
+    })
+    expect(res.status).toBe(201)
+    const child = await created(((await res.json()) as { id: string }).id)
+    expect(child.hookOrigin).toMatchObject({ path: HOOK })
+    // And it still records its real spawner, which the hook-launched task above
+    // has none of.
+    expect(child.spawnedBy).toBe(first.id)
+  })
+})
+
 // Approval gates MATERIALIZATION, not only dispatch: a hook host asks again,
 // after it has been spawned and before it imports anything, and a human who
 // revoked in that window must be obeyed.

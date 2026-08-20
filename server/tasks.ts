@@ -235,8 +235,12 @@ export type HookAction = {
   // twice — and hooks.md §8 states retry-safety as a PLATFORM guarantee, which a
   // body-derived key can only deliver for bodies that happen to be deterministic.
   key: string
-  kind: 'nudge' | 'land'
+  kind: 'nudge' | 'land' | 'launch'
   at: string
+  // What a launch produced, so a retry that is deduped can answer the body with
+  // the task the original created rather than with nothing. Absent for the verbs
+  // that act on the target itself, which produce no id.
+  taskId?: string
 }
 
 // How many actions one hook may take against one target between human contacts.
@@ -306,6 +310,28 @@ export function acceptHookAction(
   if (actions.length > MAX_HOOK_ACTIONS)
     actions.splice(0, actions.length - MAX_HOOK_ACTIONS)
   return { ok: true, entry }
+}
+
+// Undo an accepted action, for the one caller that can find out afterwards that
+// it did not happen: a launch whose task file failed to write.
+//
+// Without it the record names a task that does not exist, and `hookActionTaken`
+// runs ahead of every refusal — so every retry of that fire is answered "already
+// done" with an id that resolves to nothing, permanently. Deleting also refunds
+// the bounded slot, which is right: the bound exists to stop a hook acting
+// repeatedly ON A TARGET, and an action that created nothing is not an action to
+// bound. A body looping on failed creates is bounded by its own timeout and
+// produces no effect while it does.
+export function dropHookAction(
+  task: { hookActions?: HookAction[] },
+  action: Pick<HookAction, 'hook' | 'fireId' | 'key'>,
+): void {
+  const actions = task.hookActions
+  if (!actions) return
+  const at = actions.findIndex(
+    (a) => a.hook === action.hook && a.fireId === action.fireId && a.key === action.key,
+  )
+  if (at >= 0) actions.splice(at, 1)
 }
 
 // The fire an action is being taken for, if it is still the fire that was

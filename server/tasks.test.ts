@@ -32,6 +32,7 @@ import {
   recordAssistantError,
   recordRideEnded,
   acceptHookAction,
+  dropHookAction,
   HOOK_ACTION_BOUND,
   MAX_HOOK_ACTIONS,
   MAX_PENDING_HOOKS,
@@ -468,6 +469,37 @@ describe('acceptHookAction', () => {
       })
     expect(t.hookActions).toHaveLength(MAX_HOOK_ACTIONS)
     expect(t.hookActions!.at(-1)!.hook).toBe(`${PATH}${MAX_HOOK_ACTIONS + 4}`)
+  })
+
+  // A launch is recorded before the task it names is written, so the one caller
+  // that can find out afterwards that its action did not happen has to be able
+  // to take it back. Left in place, the record is answered "already launched"
+  // to every retry, with an id that resolves to nothing.
+  describe('dropHookAction', () => {
+    const seeded = () => {
+      const t: { hookActions?: HookAction[] } = {}
+      acceptHookAction(t, act({ fireId: 'f1', key: 'launch#0', kind: 'launch' }))
+      acceptHookAction(t, act({ fireId: 'f1', key: 'launch#1', kind: 'launch' }))
+      return t
+    }
+
+    it('removes exactly the one action, and refunds its bounded slot', () => {
+      const t = seeded()
+      dropHookAction(t, { hook: PATH, fireId: 'f1', key: 'launch#0' })
+      expect(t.hookActions).toMatchObject([{ key: 'launch#1' }])
+      // The slot is free again: an action that created nothing is not an action
+      // to bound, and the next launch takes the key rather than being deduped
+      // against one that never happened.
+      expect(acceptHookAction(t, act({ fireId: 'f1', key: 'launch#0' })).ok).toBe(true)
+    })
+
+    it('is a no-op for an action that was never recorded', () => {
+      const t = seeded()
+      dropHookAction(t, { hook: PATH, fireId: 'f1', key: 'launch#7' })
+      dropHookAction(t, { hook: 'other', fireId: 'f1', key: 'launch#0' })
+      dropHookAction({}, { hook: PATH, fireId: 'f1', key: 'launch#0' })
+      expect(t.hookActions).toHaveLength(2)
+    })
   })
 })
 

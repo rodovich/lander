@@ -75,6 +75,7 @@ import {
   type Item,
   pushHookMessageItem,
   acceptHookAction,
+  dropHookAction,
   hookActionTaken,
   freshHookFire,
   type PendingHook,
@@ -253,6 +254,15 @@ type Task = {
   // wind down only the tasks it launched, not arbitrary ones. Absent on tasks
   // saved before this field existed (treated as "no known spawner").
   spawnedBy?: string
+  // The hook that caused this task to exist, and the fire it acted on. Carried
+  // ALONGSIDE spawnedBy rather than instead of it: they answer different
+  // questions, and a hook-launched task has no spawning task at all — which is
+  // why no task can `lander land` it.
+  //
+  // Its job is the exemption: dispatch skips a hook whose path matches, so the
+  // work a hook caused never wakes that hook again. Inherited by anything this
+  // task spawns, so the whole chain is exempt rather than only its head.
+  hookOrigin?: { path: string; name: string; fireId: string; target: string }
   // Per-task secret minted at creation and injected into the agent's process as
   // LANDER_TOKEN. The `lander` CLI sends it back as the X-Lander-Token header so
   // the server can authenticate which task made a request — used to cap the
@@ -2083,16 +2093,78 @@ app.post('/api/:project/tasks', async (c) => {
       flowConfig?: unknown
       allowEdits?: unknown
       attachments?: unknown
+      key?: unknown
     }>()
     const title = typeof body.title === 'string' ? body.title.trim() : ''
     const rawMessage = typeof body.message === 'string' ? body.message : ''
+
+    // `ctx.launch`: a hook creating a task for judgment that has to explore.
+    //
+    // A branch in this route rather than a route of its own — it wants the whole
+    // of what creation does (flow resolution, the opening item, the title, the
+    // first turn), and a parallel copy of 180 lines is how two paths drift. The
+    // credential is read here and NOT through resolvePrincipal, because that is
+    // the shared front door for every route and several gate only on `anon`: a
+    // fourth principal kind would hand a body capabilities nobody enumerated.
+    //
+    // A present-but-unknown token never falls through to an anonymous create.
+    // The server restarts on every `server/**` edit, taking the credential map
+    // with it, so this is a routine answer and not an accusation.
+    const hookToken = c.req.header('x-lander-hook-token')
+    const cred = hookToken ? hookCredentialFor(hookToken, project.slug) : undefined
+    if (hookToken !== undefined && !cred)
+      return c.json(
+        {
+          ok: false,
+          reason: 'credential-unknown',
+          error: 'unknown or expired hook credential',
+        },
+        401,
+      )
+    const hookKey = typeof body.key === 'string' ? body.key : ''
+    if (cred && !hookKey)
+      return c.json({ ok: false, reason: 'error', error: 'key is required' }, 400)
+    // A body with nothing to say has nothing to launch. Refused rather than
+    // created, because `status` and `queued` below are computed from the message
+    // AFTER the backlink is prepended — so an empty one would produce a riding
+    // task whose entire prompt is "Launched by hook …", and spend a turn on it.
+    if (cred && !rawMessage.trim())
+      return c.json(
+        { ok: false, reason: 'error', error: 'a hook launch needs a message' },
+        400,
+      )
+    // The target, read once, here: the flow default below needs it ~80 lines
+    // before the action record does.
+    const hookTarget = cred ? await readTask(project.dataDir, cred.target) : undefined
+    // What a deduped launch answers with: the task the original created.
+    let existingTaskId: string | undefined
+    if (cred && !hookTarget)
+      return c.json(
+        { ok: false, reason: 'error', error: 'the target task no longer exists' },
+        404,
+      )
 
     // An explicitly-named flow must exist. 400 rather than a silent default:
     // inheriting the `isAgentKind(...) ? … : DEFAULT` shape would make
     // `lander launch --flow open-pr` against a daemon lacking it quietly
     // produce a CLAUDE task that runs the prompt — strictly worse than failing.
-    const flowResolution = resolveNewTaskFlow(project.slug, body.flow)
-    if ('error' in flowResolution) return c.json({ error: flowResolution.error }, 400)
+    //
+    // A hook launch with no flow of its own inherits the TARGET's, so a Codex
+    // task is reviewed by Codex — the same rule that takes ctx.assist's provider
+    // from the target. Through `taskFlow`, not `target.flow`: that field is
+    // optional and the pre-flow population carries only `agent`, so reading it
+    // directly would resolve the instance default for exactly those tasks.
+    const flowResolution = resolveNewTaskFlow(
+      project.slug,
+      body.flow ?? (hookTarget ? taskFlow(hookTarget) : undefined),
+    )
+    if ('error' in flowResolution)
+      return c.json(
+        cred
+          ? { ok: false, reason: 'error', error: flowResolution.error }
+          : { error: flowResolution.error },
+        400,
+      )
     const flow = flowResolution.flow
     // `agent` is stored only for a legacy flow, so backfillAgents and any
     // pre-flow daemon still see what they expect. Never stored otherwise.
@@ -2135,7 +2207,15 @@ app.post('/api/:project/tasks', async (c) => {
     // human (UI token) may grant it freely; an authenticated task may only pass
     // on edit access it has itself — so a task can't spawn a child more
     // privileged than itself; an unidentified caller may grant nothing.
-    if (allowEdits) {
+    //
+    // A hook grants whatever it asks for, and there is no ceiling to declare: a
+    // body runs with daemon privileges and can spawn a provider CLI with no
+    // sandbox at all, so bounding this one route would constrain a path out of
+    // several to the same place while reading like a control. What routing
+    // through here buys is that the result is durable and visible — a recorded
+    // grant, a transcript, a human who can reply — which a body's own child has
+    // none of. That is the reason to prefer it, not a restriction.
+    if (allowEdits && !cred) {
       if (principal.kind === 'task') {
         if (!principal.task.allowEdits)
           return c.json(
@@ -2155,8 +2235,12 @@ app.post('/api/:project/tasks', async (c) => {
     // Emitting the bare spawner id (not a markdown link) lets the client's
     // task-mention linking render it as a status-tinted chip like any other task
     // reference. The title is generated from rawMessage so the backlink can't skew it.
-    const message =
-      principal.kind === 'task'
+    // A hook's backlink names the hook and the task it fired on, and is composed
+    // from the credential rather than from anything the body sent, so a body
+    // cannot attribute its launch to a hook that is not itself.
+    const message = cred
+      ? `Launched by hook ${cred.name} on ${cred.target}:\n\n${rawMessage}`
+      : principal.kind === 'task'
         ? `Launched by ${principal.id}:\n\n${rawMessage}`
         : rawMessage
 
@@ -2199,6 +2283,22 @@ app.post('/api/:project/tasks', async (c) => {
       ...(principal.kind === 'task'
         ? { spawnedBy: principal.id }
         : {}),
+      // The hook that caused this task, or the one inherited from the task that
+      // spawned it — so the exemption covers a chain and not just its head. A
+      // hook-launched task has no spawnedBy, which is why these are separate
+      // fields rather than one.
+      ...(cred
+        ? {
+            hookOrigin: {
+              path: cred.path,
+              name: cred.name,
+              fireId: cred.fireId,
+              target: cred.target,
+            },
+          }
+        : principal.kind === 'task' && principal.task.hookOrigin
+          ? { hookOrigin: principal.task.hookOrigin }
+          : {}),
       // Authenticates this task's own callbacks (see Task.token).
       token: randomUUID(),
       // A fresh record is born at the current shape.
@@ -2233,11 +2333,82 @@ app.post('/api/:project/tasks', async (c) => {
     )
     pushUserItem(task, message, now, attachments ? { attachments } : {})
 
-    await mkdir(project.dataDir, { recursive: true })
-    await writeFile(
-      path.join(project.dataDir, `${id}.json`),
-      JSON.stringify(task, null, 2),
-    )
+    // A hook's launch is recorded against the TARGET before the new task is
+    // written, carrying the id this route has already minted. Two writes, in
+    // this order, because the other order duplicates work: a crash after the
+    // create and before the record leaves the retry no evidence, and it launches
+    // a second reviewer. This order fails the other way — a record naming a task
+    // that does not exist — which the catch below undoes.
+    if (cred) {
+      let deduped = false
+      try {
+        await mutateTask(path.join(project.dataDir, `${cred.target}.json`), (t) => {
+          // A replay of an action already delivered, ahead of every refusal: the
+          // launch happened, and the honest answer is the task it produced.
+          const already = hookActionTaken(t, {
+            hook: cred.path,
+            fireId: cred.fireId,
+            key: hookKey,
+          })
+          if (already) {
+            deduped = true
+            existingTaskId = already.taskId
+            return
+          }
+          // Freshness, and nothing else. The nudge and the land refuse a wedged
+          // or riding or scheduled target because they ACT on it; a launch
+          // touches nothing but this record, so refusing to review a task whose
+          // human happens to be holding a question would decline for a reason
+          // that has nothing to do with the work.
+          if (!freshHookFire(t, cred.fireId)) throw new HookRefusal('stale')
+          // The bound last, so a refusal above never spends a slot.
+          const accepted = acceptHookAction(t, {
+            hook: cred.path,
+            fireId: cred.fireId,
+            key: hookKey,
+            kind: 'launch',
+            at: now,
+            taskId: id,
+          })
+          if (!accepted.ok) throw new HookRefusal(accepted.reason)
+          if (accepted.deduped) {
+            deduped = true
+            existingTaskId = accepted.entry.taskId
+          }
+        })
+      } catch (e) {
+        // Nested inside the route's own catch, which answers `{error}` at 500
+        // with no `reason` — and the host reports neither a `bound` nor a
+        // `stale` refusal it cannot name. Without this, the one verb that
+        // creates tasks would stand itself down in silence.
+        if (e instanceof HookRefusal)
+          return c.json({ ok: false, reason: e.reason, error: e.message }, 403)
+        throw e
+      }
+      if (deduped) return c.json({ ok: true, deduped: true, id: existingTaskId })
+    }
+
+    try {
+      // Both, not just the write: a failing `mkdir` reaches this route's outer
+      // catch exactly as a failing `writeFile` does, and leaves the same record
+      // naming a task that was never created.
+      await mkdir(project.dataDir, { recursive: true })
+      await writeFile(
+        path.join(project.dataDir, `${id}.json`),
+        JSON.stringify(task, null, 2),
+      )
+    } catch (e) {
+      // The task was recorded and then not created. Undo the record, or every
+      // retry of this fire is answered "already launched" with an id that
+      // resolves to nothing — `hookActionTaken` runs ahead of every refusal, so
+      // nothing downstream would ever look again.
+      if (cred)
+        await mutateTask(
+          path.join(project.dataDir, `${cred.target}.json`),
+          (t) => dropHookAction(t, { hook: cred.path, fireId: cred.fireId, key: hookKey }),
+        ).catch(() => {})
+      throw e
+    }
 
     // Fire-and-forget the title generation; the UI polls and picks it up. If it
     // fails, ensureTitle flags the task so the next wakeup retries.
@@ -2247,6 +2418,11 @@ app.post('/api/:project/tasks', async (c) => {
     // when it finishes. A deferred task waits for the scheduler instead.
     if (message.trim() && !deferred) void driveTask(project, id)
 
+    // A hook reads `ok`, not a task projection: `act()` in the host gates
+    // success on that field and advances its dedupe ordinal only when it sees
+    // it, so answering with the record would report every accepted launch as a
+    // refusal and fold a fire's second launch into its first.
+    if (cred) return c.json({ ok: true, id }, 201)
     return c.json(publicTask(task), 201)
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
