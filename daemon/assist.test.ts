@@ -42,9 +42,32 @@ function harness(over: Partial<Parameters<typeof runAssist>[0]> = {}) {
 
 describe('assistArgv', () => {
   it('passes the prompt after `--`, so one starting with a hyphen is a prompt', () => {
-    const { command, args } = assistArgv('claude', '--not-a-flag', {})
-    expect(command).toBe('claude')
-    expect(args).toEqual(['-p', '--', '--not-a-flag'])
+    const { args } = assistArgv('claude', '--not-a-flag', {})
+    expect(args.slice(-3)).toEqual(['-p', '--', '--not-a-flag'])
+  })
+
+  // Probed on both providers against a scratch repo holding an uncommitted edit:
+  // unclamped, a Claude judge asked to run `git checkout -- .` DESTROYED it,
+  // because this project grants `Bash(git:*)` and the one-shot inherits it. The
+  // clamp has to cover both or it has only moved the hazard.
+  it.each([
+    ['claude', ['--disallowedTools', 'Bash', 'Edit', 'Write', 'NotebookEdit']],
+    ['codex', ['--sandbox', 'read-only']],
+  ] as const)('clamps %s so a judge cannot write to the target', (provider, clamp) => {
+    const { args } = assistArgv(provider, 'judge this', {})
+    const at = args.indexOf(clamp[0])
+    expect(at).toBeGreaterThanOrEqual(0)
+    expect(args.slice(at, at + clamp.length)).toEqual([...clamp])
+  })
+
+  // A deployment profile must not be able to widen a judge back out. Probed:
+  // `--sandbox` overrides a profile requesting `workspace-write`, so the clamp
+  // is placed ahead of the profile arguments and wins.
+  it('keeps the Codex clamp ahead of any deployment profile', () => {
+    const { args } = assistArgv('codex', 'x', {
+      LANDER_CODEX_PROFILE: 'lander-edit',
+    })
+    expect(args.indexOf('--sandbox')).toBeLessThan(args.indexOf('--profile'))
   })
 
   // Without these an instance whose Codex model or credentials live in a lander

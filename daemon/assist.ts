@@ -68,23 +68,13 @@ export function assistArgv(
       command: 'codex',
       args: [
         'exec',
-        // Not a restraint on what a judge may reach — the body holds daemon
-        // privileges either way — but the two providers do not mean the same
-        // thing by default, and a provider-neutral verb has to.
-        //
-        // Probed: at a project root `codex exec` defaults to `workspace-write
-        // [workdir, /tmp, $TMPDIR]` and reports WRITE=yes, while the same call
-        // outside a project defaults to read-only. Claude grants no write in a
-        // one-shot. So without this a Codex judge could modify the target's
-        // repository as a side effect of being asked a question, and an
-        // identical hook would behave differently under the two providers —
-        // which is the one thing this verb promises not to do. `read-only`
-        // still permits shell, matching what Claude allows.
-        '--sandbox',
-        'read-only',
+        ...WRITE_CLAMP.codex,
         // A project need not be a git repository, and Codex refuses one that is
         // not unless told otherwise.
         '--skip-git-repo-check',
+        // AFTER the clamp deliberately: probed, `--sandbox` overrides a profile
+        // that asks for `workspace-write`, so a deployment profile cannot widen
+        // a judge back out.
         ...codexConfigArgs(profile, configOverrides),
         '--',
         prompt,
@@ -93,8 +83,36 @@ export function assistArgv(
   }
   // `--` so a prompt beginning with a hyphen is taken as the prompt rather than
   // parsed as an option.
-  return { command: 'claude', args: ['-p', '--', prompt] }
+  return { command: 'claude', args: [...WRITE_CLAMP.claude, '-p', '--', prompt] }
 }
+
+// No judge writes to the target's checkout.
+//
+// The argument that a body holds daemon privileges anyway covers *capability*
+// and fails for *agency*: a body author writes a prompt, and the model decides
+// what to run. Read inheritance is worth documenting; write access to the
+// target's working tree, reachable by a model that was only asked a question, is
+// not. Probed on both providers, with a scratch repo holding an uncommitted
+// edit and a judge asked to run `git checkout -- .`:
+//
+//   claude, unclamped, in this repository  →  the edit was DESTROYED
+//   codex --sandbox read-only              →  blocked
+//   claude + this clamp                    →  blocked
+//   codex profile=workspace-write, no flag →  destroyed
+//   codex same profile + --sandbox         →  blocked (the flag wins)
+//
+// Reads and plain inference are unaffected under both, which is the point: this
+// removes a way to damage the target, not the judge's ability to answer.
+//
+// The two are asymmetric in KIND and that is inherent: Codex takes a sandbox
+// mode, Claude an enumeration. Denying `Bash` is what carries most of it, since
+// it reaches everything else; the file-writing tools are named because they do
+// not go through a shell. A new write-capable Claude tool would have to be added
+// here — the maintenance edge a mode would not have.
+const WRITE_CLAMP = {
+  claude: ['--disallowedTools', 'Bash', 'Edit', 'Write', 'NotebookEdit'],
+  codex: ['--sandbox', 'read-only'],
+} as const
 
 // Run the one-shot. Never throws and never exits: a body must be able to report
 // that judgment was unavailable, which is a finding rather than a crash.
