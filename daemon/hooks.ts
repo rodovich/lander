@@ -89,6 +89,13 @@ export const gitExec: GitExec = (cwd, args, input) =>
     )
     // Always closed, including when there is no input: `cat-file --batch-check`
     // reads until EOF, and an open stdin would hang it forever.
+    //
+    // Listened first, because closing races git's own exit: a git that has
+    // already finished has already dropped the read end, and the write then
+    // fails EPIPE. This runs in the daemon, which installs no
+    // `uncaughtException` handler, so an unlistened one would take down the
+    // owner of every in-flight agent run.
+    child.stdin?.on('error', () => {})
     child.stdin?.end(input ?? '')
   })
 

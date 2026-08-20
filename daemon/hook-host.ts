@@ -95,6 +95,14 @@ function git(cwd: string, args: string[]): Promise<{ ok: boolean; stdout: string
       { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 },
       (err, stdout) => resolve({ ok: !err, stdout: stdout ?? '' }),
     )
+    // The write below races git's own exit: if the parent is descheduled long
+    // enough for git to finish, the read end of that pipe is gone and the write
+    // fails EPIPE. Unlistened, that becomes an uncaughtException — which the
+    // `fatal` handler reports as a hook that errored, for a blob it read fine.
+    // Ignoring it is the right answer rather than a suppression: the close is
+    // only here so git cannot block on stdin, and a read end already gone is
+    // that same guarantee arriving early.
+    child.stdin?.on('error', () => {})
     child.stdin?.end('')
   })
 }
