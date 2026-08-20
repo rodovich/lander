@@ -75,6 +75,7 @@ import {
   type Item,
   pushHookMessageItem,
   acceptHookAction,
+  freshHookFire,
   type PendingHook,
   type HookAction,
 } from './tasks'
@@ -2289,6 +2290,9 @@ async function landFromHook(
   try {
     await mutateTask(file, (t) => {
       // Every refusal before the bound, so a refusal never spends a slot.
+      // Freshness first: a fire that has been overtaken should not have been
+      // acted on at all, whatever the target's current state happens to be.
+      if (!freshHookFire(t, cred.fireId)) throw new HookRefusal('stale')
       if (t.status === 'wedged') throw new HookRefusal('wedged')
       // "Not riding" is not what publicTask derives: that reads an open ride or
       // a runId, and neither is set in the window after /messages queues a
@@ -2989,6 +2993,9 @@ async function nudgeFromHook(
       // would withdraw it. Refusing is not the loss it looks like: hooks.md §2
       // already excludes retry-after-usage-limit from hooks, and a nudge there
       // would orphan the `task.retry` stash that the retry exists to re-send.
+      // A held fire can outlive the state it was recorded against; nudging then
+      // carries a finding about work the target has already moved past.
+      if (!freshHookFire(t, cred.fireId)) throw new HookRefusal('stale')
       if (t.status === 'wedged') throw new HookRefusal('wedged')
 
       const accepted = acceptHookAction(t, {

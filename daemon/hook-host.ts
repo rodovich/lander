@@ -171,6 +171,7 @@ export type HookActionResult =
         | 'wedged'
         | 'riding'
         | 'scheduled'
+        | 'stale'
         | 'credential-unknown'
         | 'error'
       error?: string
@@ -228,6 +229,7 @@ function buildCtx(input: HookHostInput, reports: string[]) {
       body.reason === 'wedged' ||
       body.reason === 'riding' ||
       body.reason === 'scheduled' ||
+      body.reason === 'stale' ||
       body.reason === 'credential-unknown'
         ? body.reason
         : 'error'

@@ -291,6 +291,51 @@ export function acceptHookAction(
   return { ok: true, entry }
 }
 
+// The fire an action is being taken for, if it is still the fire that was
+// recorded — otherwise undefined, and the action must be refused.
+//
+// A fire can be held: by a daemon drain, by the concurrency cap, by a dispatch
+// timeout that leaves the body alive. It can therefore outlive the state it was
+// recorded against, and acting then is how a supervision nudge becomes an
+// accidental reopen of a task that landed in the meantime, carrying a finding
+// about work two segments old.
+//
+// Three ways a fire goes stale, and the first is the cheapest signal there is:
+//
+//   1. **It is no longer pending.** Entries are cleared only when every hook has
+//      reported, so a fire that has left the list is a fire that finished — and
+//      this presentation is a straggler.
+//   2. **The target crossed a notable status since.** Landing is the dangerous
+//      one (the nudge would reopen it), but every crossing means the task moved
+//      somewhere the finding did not anticipate.
+//   3. **A human said something since.** A user message opens a new segment, so
+//      the target is working on a newer instruction and a finding about the
+//      previous one is exactly the "two segments old" case.
+//
+// Checked here rather than in each body's own guards: a body that forgets is the
+// failure mode this exists to prevent, and the platform holds the fire.
+export function freshHookFire(
+  task: { pendingHooks?: PendingHook[]; items?: Item[] },
+  fireId: string,
+): PendingHook | undefined {
+  const entry = (task.pendingHooks ?? []).find((f) => f.id === fireId)
+  if (!entry) return undefined
+  const since = entry.at
+  for (const it of task.items ?? []) {
+    if (it.at <= since) continue
+    if (it.kind === 'event' && CROSSINGS.has(it.eventKind)) return undefined
+    if (it.kind === 'message' && it.role === 'user') return undefined
+  }
+  return entry
+}
+
+const CROSSINGS = new Set<TaskEvent['kind']>([
+  'landed',
+  'unlanded',
+  'wedged',
+  'unwedged',
+])
+
 // Record that a ride ended, for the `ride-ended` trigger.
 //
 // Called where a ride actually TRANSITIONS TO CLOSED with an outcome — a rule,

@@ -325,6 +325,13 @@ describe('the nudge', () => {
         token: `token-${ID}`,
         shape: 2,
         rides: [],
+        // An action must find its own fire still pending and the target still
+        // where the fire left it, so every fixture that expects to act carries
+        // one. A test that omits it is testing the staleness refusal.
+        pendingHooks: [
+          { id: 'fire-1-abc', trigger: 'ride-ended', by: 'agent', at: AT },
+          { id: 'fire-9', trigger: 'ride-ended', by: 'agent', at: AT },
+        ],
         items: [{ id: 'u0', at: AT, kind: 'message', role: 'user', text: 'go' }],
         ...over,
       }),
@@ -528,6 +535,93 @@ describe('the nudge', () => {
     expect(t.items.some((i: any) => i.text?.includes('sneak'))).toBe(false)
   })
 
+  // A fire can be held — a drain, the concurrency cap, a dispatch timeout that
+  // leaves the body alive — and outlive the state it was recorded against.
+  describe('staleness', () => {
+    const LATER = '2026-01-02T00:00:00.000Z'
+
+    // The cheapest signal: entries clear only when every hook has reported, so a
+    // fire that has left the list already finished.
+    it('refuses a fire that is no longer pending', async () => {
+      await seed({ pendingHooks: [] })
+      const res = await nudge(cred().token, { message: 'late', key: 'nudge#0' })
+      expect(res.status).toBe(403)
+      expect((await res.json()).reason).toBe('stale')
+    })
+
+    // The scenario the guarantee is written for: the target landed while the
+    // fire was held, so nudging it would be an accidental reopen.
+    it('refuses once the target has crossed a status since the fire', async () => {
+      await seed({
+        items: [
+          { id: 'u0', at: AT, kind: 'message', role: 'user', text: 'go' },
+          { id: 'e1', at: LATER, kind: 'event', eventKind: 'landed', title: 'T' },
+        ],
+      })
+      const res = await nudge(cred().token, { message: 'late', key: 'nudge#0' })
+      expect(res.status).toBe(403)
+      expect((await res.json()).reason).toBe('stale')
+      // And nothing was written: no reopen, no queued prompt.
+      const t = JSON.parse(await readFile(path.join(tasksDir, `${ID}.json`), 'utf8'))
+      expect(t.items.some((i: any) => i.role === 'hook')).toBe(false)
+    })
+
+    // A user message opens a new segment, so the finding is about the previous
+    // instruction — the "two segments old" case.
+    it('refuses once a human has said something since the fire', async () => {
+      await seed({
+        items: [
+          { id: 'u0', at: AT, kind: 'message', role: 'user', text: 'go' },
+          { id: 'u1', at: LATER, kind: 'message', role: 'user', text: 'actually, do this' },
+        ],
+      })
+      const res = await nudge(cred().token, { message: 'late', key: 'nudge#0' })
+      expect(res.status).toBe(403)
+      expect((await res.json()).reason).toBe('stale')
+    })
+
+    // The control: a fire whose target has only produced assistant output since
+    // is still fresh, or the check would refuse every ordinary supervision fire.
+    it('permits a fire whose target has only ridden since', async () => {
+      await seed({
+        items: [
+          { id: 'u0', at: AT, kind: 'message', role: 'user', text: 'go' },
+          { id: 'f1', at: LATER, rideId: 'r1', kind: 'message', role: 'flow', text: 'done' },
+        ],
+      })
+      const res = await nudge(cred().token, { message: 'really?', key: 'nudge#0' })
+      expect(res.status).toBe(200)
+    })
+
+    it('refuses a stale land too', async () => {
+      await writeFile(
+        path.join(tasksDir, `${ID}.json`),
+        JSON.stringify({
+          id: ID,
+          title: 'Supervised',
+          status: 'riding',
+          createdAt: AT,
+          updatedAt: AT,
+          token: `token-${ID}`,
+          shape: 2,
+          rides: [],
+          pendingHooks: [],
+          items: [{ id: 'u0', at: AT, kind: 'message', role: 'user', text: 'go' }],
+        }),
+      )
+      const res = await app.request(`/api/${slug}/tasks/${ID}`, {
+        method: 'PATCH',
+        headers: {
+          'content-type': 'application/json',
+          'x-lander-hook-token': cred().token,
+        },
+        body: JSON.stringify({ status: 'landed', key: 'land#0' }),
+      })
+      expect(res.status).toBe(403)
+      expect((await res.json()).reason).toBe('stale')
+    })
+  })
+
   it('refuses a credential minted for another target', async () => {
     await seed()
     const res = await nudge(cred({ target: 'tsk-somebody-else' }).token, {
@@ -570,6 +664,13 @@ describe('the land', () => {
         token: `token-${ID}`,
         shape: 2,
         rides: [],
+        // An action must find its own fire still pending and the target still
+        // where the fire left it, so every fixture that expects to act carries
+        // one. A test that omits it is testing the staleness refusal.
+        pendingHooks: [
+          { id: 'fire-1-abc', trigger: 'ride-ended', by: 'agent', at: AT },
+          { id: 'fire-9', trigger: 'ride-ended', by: 'agent', at: AT },
+        ],
         items: [{ id: 'u0', at: AT, kind: 'message', role: 'user', text: 'go' }],
         ...over,
       }),

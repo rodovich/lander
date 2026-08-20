@@ -144,7 +144,12 @@ export function hookCredentialFor(
 // changed nothing. Throwing is the abort. It has to be a distinguishable type
 // because a missing or corrupt task file rejects from the same call, and a
 // corrupt file reported to a hook body as `bound` would be a lie.
-export type HookRefusalReason = 'bound' | 'wedged' | 'riding' | 'scheduled'
+export type HookRefusalReason =
+  | 'bound'
+  | 'wedged'
+  | 'riding'
+  | 'scheduled'
+  | 'stale'
 
 // The prose lives here rather than in the host, which reports it verbatim: the
 // host is spawned fresh for every fire, so anything it must know is an import it
@@ -154,6 +159,8 @@ const REFUSALS: Record<HookRefusalReason, string> = {
   wedged: 'the task is wedged, holding a question for its human',
   riding: 'the task is working again',
   scheduled: 'the task is resting on a wakeup, which landing would delete',
+  stale:
+    'the task has moved on since this fire was recorded, so the finding is out of date',
 }
 
 export class HookRefusal extends Error {
