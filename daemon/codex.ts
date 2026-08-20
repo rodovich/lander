@@ -4,6 +4,11 @@ import type { AgentAdapter, AgentLineUpdate, AgentTaskView } from './agent'
 import type { Usage } from '../server/stream'
 import { fullToolInput, summarizeToolInput, summarizeToolResult, toolRule } from '../server/stream'
 import { promptWithTaskManagement } from './task-management'
+import { codexConfigArgs, codexOptionsFromEnv } from './codex-config'
+
+// Re-exported so existing importers (adapters.ts, the flow host) keep their one
+// entry point for Codex configuration.
+export { codexOptionsFromEnv }
 
 export type CodexAdapterOptions = {
   taskPromptTemplate: string
@@ -184,31 +189,6 @@ function resolveGitCommonDirWithGit(cwd: string): string | undefined {
   } catch {
     return undefined
   }
-}
-
-export function codexOptionsFromEnv(env: {
-  LANDER_CODEX_PROFILE?: string | undefined
-  LANDER_CODEX_CONFIG?: string | undefined
-}): Pick<CodexAdapterOptions, 'profile' | 'configOverrides'> {
-  const profile = env.LANDER_CODEX_PROFILE?.trim() || undefined
-  const configOverrides =
-    env.LANDER_CODEX_CONFIG?.split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean) ?? []
-  return {
-    ...(profile ? { profile } : {}),
-    ...(configOverrides.length ? { configOverrides } : {}),
-  }
-}
-
-function codexConfigArgs(
-  profile: string | undefined,
-  configOverrides: string[],
-): string[] {
-  return [
-    ...(profile ? ['--profile', profile] : []),
-    ...configOverrides.flatMap((entry) => ['--config', entry]),
-  ]
 }
 
 function codexShellEnvConfigOverrides(): string[] {
