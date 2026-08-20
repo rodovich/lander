@@ -885,21 +885,74 @@ async function askTask(args) {
 // on, so `lander assist "summarize:" "$(cat notes)"` sends the prompt then the
 // notes. A non-zero exit from the provider aborts. Shared by the `lander assist` CLI
 // command and the `lander.assist()` flow API.
+//
+// THE PROVIDER IS THE TASK'S, not the environment's. LANDER_ASSIST_PROVIDER is
+// put on every turn's environment by the server, already resolved from the
+// task's own flow. LANDER_AGENT — which this used to read — is the server's
+// default for NEW tasks and reaches every shell because all three processes
+// descend from one `npm run dev`, so a Codex task's one-shot reasoned with
+// Claude. It stays as the fallback for a call made outside a task turn.
+//
+// No error when it is absent: the CLI cannot tell "this task rides an announced
+// flow with no one-shot provider" from "this turn's environment predates the
+// variable", and refusing on a case it cannot identify is worse than the
+// fallback. A hook body's ctx.assist DOES error there, because it has the flow.
 function assistAgentFromEnv(env) {
-  const value = env.LANDER_AGENT?.trim().toLowerCase()
+  const value = (env.LANDER_ASSIST_PROVIDER ?? env.LANDER_AGENT)
+    ?.trim()
+    .toLowerCase()
   return value === 'codex' ? 'codex' : 'claude'
 }
 
-function assistLaunch(agent, text) {
-  if (agent === 'codex') return { command: 'codex', args: ['exec', text] }
-  // `--` so a prompt starting with a hyphen is taken as the positional prompt
-  // rather than parsed as an option by claude's CLI.
-  return { command: 'claude', args: ['-p', '--', text] }
+// The argv, kept in step with daemon/assist.ts's `assistArgv` — which is the
+// source of truth, and which this cannot import: bin/ is plain JS outside
+// tsconfig's include. bin/lander-assist.test.ts asserts the two agree by running
+// this CLI and comparing against that function, so the copy cannot drift
+// silently.
+//
+// The clamp is the point. Unclamped, a one-shot inherits the project's own
+// pre-approved tool rules — and this repository grants Bash(git:*), which
+// reaches `git reset --hard`. A judge asked a question should not be able to
+// destroy the uncommitted work of whoever asked it.
+function assistLaunch(agent, text, env) {
+  if (agent === 'codex') {
+    const profile = env.LANDER_CODEX_PROFILE?.trim() || undefined
+    const overrides =
+      env.LANDER_CODEX_CONFIG?.split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean) ?? []
+    return {
+      command: 'codex',
+      args: [
+        'exec',
+        '--sandbox',
+        'read-only',
+        // A project need not be a git repository, and Codex refuses one that is
+        // not unless told otherwise.
+        '--skip-git-repo-check',
+        // After the clamp deliberately: --sandbox overrides a profile asking for
+        // workspace-write, so a deployment profile cannot widen a judge back out.
+        ...(profile ? ['--profile', profile] : []),
+        ...overrides.flatMap((entry) => ['--config', entry]),
+        // `--` so a prompt starting with a hyphen is the prompt, not an option.
+        '--',
+        text,
+      ],
+    }
+  }
+  return {
+    command: 'claude',
+    args: ['--disallowedTools', 'Bash', 'Edit', 'Write', 'NotebookEdit', '-p', '--', text],
+  }
 }
 
 function runAssist(prompt, args) {
   const text = args.length ? `${prompt}\n${args.join('')}` : prompt
-  const launch = assistLaunch(assistAgentFromEnv(process.env), text)
+  const launch = assistLaunch(
+    assistAgentFromEnv(process.env),
+    text,
+    process.env,
+  )
   const r = spawnSync(launch.command, launch.args, { encoding: 'utf8' })
   if (r.error) die(`assist: ${r.error.message}`)
   if (r.status !== 0)

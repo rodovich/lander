@@ -136,7 +136,7 @@ The server only **resolves** the script's path (`GET /api/:project/flows/:name`,
 | `lander.land()` / `lander.wedge({ options })` / `lander.ask({ options })` / `await lander.rest({ date, time, await })` | act on the current task — bare `wedge()` just sets status, or pass `{ options: [{ id, label }] }` to raise a choice ask whose chosen label arrives as the next user message; `ask({ options })` is the same but advisory (no wedge, nothing in the list) |
 | `await lander.rest({ clear: true })` | drop the current task's pending wakeup triggers; returns whether any were armed |
 | `await lander.artifacts.put(pathOrBytes, { name, mime })` / `.list()` / `.cat(name)` | publish the current task's named output (returns the ref), list its slots, or fetch a slot's current bytes |
-| `lander.assist(prompt, …text)` | a one-shot `claude` or `codex` run, returning its trimmed reply |
+| `lander.assist(prompt, …text)` | a one-shot run of **this task's own provider**, returning its trimmed reply. Read-only: the one-shot cannot run shell commands or write files, so a model asked a question can't alter the checkout it was asked about |
 | `lander.shell(command, …args)` | run `command` under `sh` with args as `$1`, `$2`, …; returns trimmed stdout |
 | `await lander.flow(name, inputs)` | run another flow (flows nest) |
 

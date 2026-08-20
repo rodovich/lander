@@ -64,8 +64,15 @@ copy rather than a suppressed one, which is why the gate also fires whenever no
 thread id is recorded.
 
 `lander assist` and the flow API are provider-aware one-shot helpers. They use
-`claude -p` for Claude and `codex exec` for Codex based on the same provider
-default.
+`claude -p` for Claude and `codex exec` for Codex, taking the provider from **the
+calling task**, which the server puts on the turn's environment already resolved.
+The instance default is only the fallback for a call made outside a task turn.
+
+Both are clamped read-only — `--disallowedTools Bash,Edit,Write,NotebookEdit` for
+Claude, `--sandbox read-only` for Codex. The clamp is asymmetric in kind because
+the harnesses are: Codex takes a sandbox mode and Claude an enumeration. It is
+symmetric in effect, which is what matters — neither can alter the checkout it
+was asked a question about.
 
 ## Current Codex coverage
 

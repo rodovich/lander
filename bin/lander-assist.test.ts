@@ -4,6 +4,7 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { assistArgv } from '../daemon/assist'
 
 const BIN_DIR = path.dirname(fileURLToPath(import.meta.url))
 const LANDER_BIN = path.join(BIN_DIR, 'lander')
@@ -87,61 +88,115 @@ async function readCalls(log: string) {
     .map((line) => JSON.parse(line))
 }
 
+// The argv `bin/lander` builds is a copy of daemon/assist.ts's, because bin/ is
+// plain JS outside tsconfig's include and cannot import it. These tests are what
+// keeps the copy honest: every one compares the CLI's OBSERVED argv against
+// `assistArgv`'s answer for the same provider, prompt and environment. A change
+// to the clamp on one side and not the other fails here rather than shipping a
+// judge that can write to the target's checkout.
+const PROMPT = 'summarize:\nnotes'
+
 describe('lander assist', () => {
-  it('defaults to claude one-shot execution', async () => {
+  it('runs a clamped claude one-shot, with the argv daemon/assist.ts builds', async () => {
     const h = await makeHarness()
     try {
-      const { stdout } = await execLander(
-        ['assist', 'summarize:', 'notes'],
-        h.env,
-      )
+      const { stdout } = await execLander(['assist', 'summarize:', 'notes'], h.env)
 
       expect(stdout).toBe('claude reply\n')
       expect(await readCalls(h.log)).toEqual([
-        {
-          command: 'claude',
-          args: ['-p', '--', 'summarize:\nnotes'],
-        },
+        { command: 'claude', args: assistArgv('claude', PROMPT, {}).args },
+      ])
+      // Stated here too, so a reader sees what the shared function returns
+      // rather than only that the two agree.
+      expect(assistArgv('claude', PROMPT, {}).args).toEqual([
+        '--disallowedTools',
+        'Bash',
+        'Edit',
+        'Write',
+        'NotebookEdit',
+        '-p',
+        '--',
+        PROMPT,
       ])
     } finally {
       await h.cleanup()
     }
   })
 
-  it('uses codex exec when LANDER_AGENT defaults new tasks to codex', async () => {
+  it('takes the provider from the task, not from the instance default', async () => {
     const h = await makeHarness()
     try {
-      const { stdout } = await execLander(
-        ['assist', 'summarize:', 'notes'],
-        { ...h.env, LANDER_AGENT: ' CODEX ' },
-      )
+      // LANDER_AGENT says claude — it is the server's default for NEW tasks and
+      // reaches every shell. The task's own provider must win.
+      const { stdout } = await execLander(['assist', 'summarize:', 'notes'], {
+        ...h.env,
+        LANDER_AGENT: 'claude',
+        LANDER_ASSIST_PROVIDER: ' CODEX ',
+      })
 
       expect(stdout).toBe('codex reply\n')
       expect(await readCalls(h.log)).toEqual([
-        {
-          command: 'codex',
-          args: ['exec', 'summarize:\nnotes'],
-        },
+        { command: 'codex', args: assistArgv('codex', PROMPT, {}).args },
       ])
     } finally {
       await h.cleanup()
     }
   })
 
-  it('falls back to claude for unsupported LANDER_AGENT values', async () => {
+  it('carries the deployment’s codex profile and config overrides', async () => {
+    const h = await makeHarness()
+    const env = {
+      LANDER_CODEX_PROFILE: 'lander',
+      LANDER_CODEX_CONFIG: 'model="o4"\n\nsandbox_workspace_write.network_access=false',
+    }
+    try {
+      await execLander(['assist', 'summarize:', 'notes'], {
+        ...h.env,
+        ...env,
+        LANDER_ASSIST_PROVIDER: 'codex',
+      })
+
+      const argv = assistArgv('codex', PROMPT, env).args
+      expect(await readCalls(h.log)).toEqual([{ command: 'codex', args: argv }])
+      // The clamp precedes the profile, so a profile asking for
+      // workspace-write cannot widen the judge back out.
+      expect(argv.indexOf('--sandbox')).toBeLessThan(argv.indexOf('--profile'))
+    } finally {
+      await h.cleanup()
+    }
+  })
+
+  it('falls back to the instance default outside a task turn', async () => {
     const h = await makeHarness()
     try {
-      const { stdout } = await execLander(
-        ['assist', 'summarize:', 'notes'],
-        { ...h.env, LANDER_AGENT: 'other' },
-      )
+      // No LANDER_ASSIST_PROVIDER: either this call is not inside a turn, or the
+      // turn predates the variable. Either way the old behaviour, not an error —
+      // the CLI cannot tell those apart from an announced flow.
+      const { stdout } = await execLander(['assist', 'summarize:', 'notes'], {
+        ...h.env,
+        LANDER_AGENT: 'codex',
+      })
+
+      expect(stdout).toBe('codex reply\n')
+      expect(await readCalls(h.log)).toEqual([
+        { command: 'codex', args: assistArgv('codex', PROMPT, {}).args },
+      ])
+    } finally {
+      await h.cleanup()
+    }
+  })
+
+  it('falls back to claude for an unsupported provider value', async () => {
+    const h = await makeHarness()
+    try {
+      const { stdout } = await execLander(['assist', 'summarize:', 'notes'], {
+        ...h.env,
+        LANDER_ASSIST_PROVIDER: 'other',
+      })
 
       expect(stdout).toBe('claude reply\n')
       expect(await readCalls(h.log)).toEqual([
-        {
-          command: 'claude',
-          args: ['-p', '--', 'summarize:\nnotes'],
-        },
+        { command: 'claude', args: assistArgv('claude', PROMPT, {}).args },
       ])
     } finally {
       await h.cleanup()

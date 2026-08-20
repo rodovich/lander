@@ -565,6 +565,19 @@ async function runTurn(
     LANDER_PROJECT: project.slug,
     LANDER_TASK: id,
     LANDER_TOKEN: token,
+    // Which provider a one-shot run from inside this task should use — the
+    // TASK's, resolved here rather than guessed there.
+    //
+    // `lander assist` otherwise reads LANDER_AGENT, which is this server's
+    // default for NEW tasks and reaches every task's shell because all three
+    // processes descend from one `npm run dev` — so a Codex task's one-shot
+    // reasoned with Claude. It has to arrive already resolved and it has to
+    // arrive in the environment: `lander.assist()` is synchronous and documented
+    // without `await` (README), so the CLI cannot go and ask.
+    //
+    // Omitted for an announced flow, which declares no one-shot provider — the
+    // same `agent` the start-run carries for exactly that reason.
+    ...(agent ? { LANDER_ASSIST_PROVIDER: agent } : {}),
   }
 
   // Wait briefly for a daemon serving this project to be connected (dev launches
