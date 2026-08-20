@@ -2881,7 +2881,17 @@ app.post('/api/:project/tasks/:id/archive', async (c) => {
     // Only a task with a *live* run can't be archived (the reducer must keep
     // writing to it). Key on the run, not stored status — under the collapse an
     // idle "resting" task stores `riding` too, and it must stay archivable.
-    if (archived && (task.runId || openRide(task)))
+    //
+    // `running` is part of that test and not a belt-and-braces addition: a drive
+    // records its runId only after `awaitDaemonServing` returns, which is up to
+    // 30s of a task that is riding with nothing on the record to say so. Archived
+    // in that window, the turn goes on to write its run pointer to a path that has
+    // moved to archived/ — an ENOENT with no handler (deliberately: a pointer that
+    // failed to land must not dispatch a run nothing can reattach to), which takes
+    // the whole server down. The window is widest exactly when a user is most
+    // likely to give up and archive, because a daemon that is down is what holds
+    // the drive there.
+    if (archived && (running.has(id) || task.runId || openRide(task)))
       return c.json({ error: 'cannot archive a task while it is riding' }, 409)
     await mkdir(toDir, { recursive: true })
     await rename(path.join(fromDir, `${id}.json`), path.join(toDir, `${id}.json`))

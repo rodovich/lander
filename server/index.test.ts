@@ -1136,7 +1136,23 @@ describe('server task provider behavior', () => {
     const active = await createTask('Summary of an active task')
     await post(`/api/${slug}/tasks/${active.id}/messages`, { message: 'hello summary' })
     const gone = await createTask('Summary of an archived task')
-    await post(`/api/${slug}/tasks/${gone.id}/messages`, { message: 'archived prose' })
+    // The prose goes onto the record directly rather than through POST
+    // /messages. A posted message starts a drive, and a task with one in flight
+    // is riding and so cannot be archived — which is the endpoint behaving
+    // correctly, and nothing this test is about: the subject is the summary
+    // projection over the archived pool.
+    const file = path.join(tasksDir, `${gone.id}.json`)
+    const record = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
+    record.items = [
+      {
+        id: 'u1',
+        at: record.createdAt,
+        kind: 'message',
+        role: 'user',
+        text: 'archived prose',
+      },
+    ]
+    await writeFile(file, JSON.stringify(record))
     expect((await post(`/api/${slug}/tasks/${gone.id}/archive`, {})).status).toBe(200)
 
     for (const [query, id] of [
@@ -1173,6 +1189,30 @@ describe('server task provider behavior', () => {
     const res = await app.request(`/api/${slug}/tasks/${task.id}`)
     expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({ id: task.id, archived: true })
+  })
+
+  // A drive records its runId only once a daemon is serving, so between the
+  // message and that write the task is riding with nothing on the record saying
+  // so. Archiving there used to be allowed, and the turn then wrote its run
+  // pointer to a path that had moved to archived/ — an unhandled ENOENT, which
+  // ends the server process. No daemon is connected in this suite, which is
+  // exactly the window: the drive sits in the daemon wait for the whole test.
+  it('refuses to archive a task whose turn is still being dispatched', async () => {
+    const task = await createTask('Archived mid-dispatch')
+    expect(
+      (await post(`/api/${slug}/tasks/${task.id}/messages`, { message: 'go' }))
+        .status,
+    ).toBe(200)
+
+    const res = await post(`/api/${slug}/tasks/${task.id}/archive`, {})
+    expect(res.status).toBe(409)
+    expect(await res.json()).toMatchObject({
+      error: 'cannot archive a task while it is riding',
+    })
+    // And it stayed put, so the turn still has a record to write to.
+    expect(await readFile(path.join(tasksDir, `${task.id}.json`), 'utf8')).toContain(
+      task.id,
+    )
   })
 
   it('serves the persisted provider instead of re-resolving the environment', async () => {
