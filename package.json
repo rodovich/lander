@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "bench:markdown": "tsx bench/markdown-bench.tsx"
+    "bench:markdown": "tsx bench/markdown-bench.tsx",
+    "replay": "tsx replay/cli.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",

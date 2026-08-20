@@ -10,7 +10,10 @@ export default defineConfig({
     environment: 'node',
     // Server/UI suites live next to their code; the root-level *.test.ts covers
     // the dev tooling (e.g. the daemon supervisor in daemon-supervisor.mjs).
-    include: ['{server,src,bin,daemon,flow}/**/*.test.{ts,tsx}', '*.test.{ts,tsx}'],
+    include: [
+      '{server,src,bin,daemon,flow,replay}/**/*.test.{ts,tsx}',
+      '*.test.{ts,tsx}',
+    ],
     // Keep `npm test` green at the bootstrap commit, before any suites exist.
     passWithNoTests: true,
   },
