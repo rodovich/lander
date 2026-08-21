@@ -21,11 +21,17 @@ async function makeHarness(): Promise<Harness> {
   const log = path.join(dir, 'calls.jsonl')
   await writeFakeAgent(dir, 'claude')
   await writeFakeAgent(dir, 'codex')
+  // Every variable this suite is about is REMOVED from the inherited
+  // environment, so each test states what it is testing rather than inheriting
+  // it. These tests run inside a lander task, whose turn now carries
+  // LANDER_ASSIST_PROVIDER — so a base of `process.env` made the fallback case
+  // pass or fail depending on which provider happened to be running it.
+  const { LANDER_ASSIST_PROVIDER: _p, LANDER_AGENT: _a, ...rest } = process.env
   return {
     dir,
     log,
     env: {
-      ...process.env,
+      ...rest,
       PATH: `${dir}${path.delimiter}${process.env.PATH ?? ''}`,
       CALL_LOG: log,
     },
