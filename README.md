@@ -108,6 +108,7 @@ Every request to the local API is unauthenticated by default, so the server dist
 Concretely, the server enforces:
 
 - `POST /tasks` with `allowEdits` — the human may grant it; a task may grant it only if it holds edits itself (else `403`); an unidentified caller may not. The UI always launches human-started tasks with `allowEdits: true`.
+- `POST /tasks` with `allowEdits` **from an approved hook** (`ctx.launch`, authenticated by a per-fire credential rather than by a principal) — granted freely. There is no ceiling to place: a hook body runs with daemon privileges and can spawn a provider CLI with no sandbox at all, so restricting this route would constrain one path out of several to the same destination while reading like a control. Approval of the hook is the gate; nothing downstream of it is. What the route buys is that the result is durable and visible — a recorded grant, a transcript, a human who can reply — where a body's own child leaves none of that.
 - `PATCH /tasks/:id` of `allowEdits` — human only (a task `403`s, so it can't self-escalate). Status/title stay open so the CLI's `land`/`status` keep working.
 - `POST /tasks/:id/allow` — human only.
 
