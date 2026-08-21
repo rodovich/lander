@@ -156,3 +156,82 @@ describe('ctx.nudge', () => {
     })
   })
 })
+
+describe('ctx.launch', () => {
+  // This verb creates a task, so its answer has to carry the id — and the id has
+  // to survive a dedupe, or a retry leaves the body with no handle on what its
+  // earlier attempt built.
+  it('returns the created task id, and the same id on a deduped retry', async () => {
+    stubFetch([{ status: 201, body: { ok: true, id: 'tsk-new' } }])
+    expect(await buildCtx(input(), []).launch('review this')).toEqual({
+      ok: true,
+      id: 'tsk-new',
+    })
+
+    vi.unstubAllGlobals()
+    stubFetch([{ status: 200, body: { ok: true, deduped: true, id: 'tsk-new' } }])
+    expect(await buildCtx(input(), []).launch('review this')).toEqual({
+      ok: true,
+      deduped: true,
+      id: 'tsk-new',
+    })
+  })
+
+  // Its own ordinal series, so a fire that nudges and launches does not have one
+  // verb's count consume the other's keys.
+  it('counts its ordinals separately from the other verbs', async () => {
+    const keys = stubFetch([{ status: 201, body: { ok: true, id: 'a' } }])
+    const ctx = buildCtx(input(), [])
+    await ctx.nudge('one')
+    await ctx.launch('two')
+    await ctx.launch('three')
+    expect(keys).toEqual(['nudge#0', 'launch#0', 'launch#1'])
+  })
+
+  it('does not advance the ordinal on an attempt the server never recorded', async () => {
+    const keys = stubFetch([
+      { status: 401, body: { ok: false, reason: 'credential-unknown' } },
+      { status: 201, body: { ok: true, id: 'a' } },
+    ])
+    const ctx = buildCtx(input(), [])
+    await ctx.launch('one')
+    await ctx.launch('two')
+    expect(keys).toEqual(['launch#0', 'launch#0'])
+  })
+
+  it('sends the grants and the flow the body asked for, and omits what it did not', async () => {
+    const bodies: Record<string, unknown>[] = []
+    vi.stubGlobal('fetch', async (_url: string, init: { body: string }) => {
+      bodies.push(JSON.parse(init.body) as Record<string, unknown>)
+      return {
+        ok: true,
+        status: 201,
+        json: async () => ({ ok: true, id: 'a' }),
+      } as unknown as Response
+    })
+    const ctx = buildCtx(input(), [])
+    await ctx.launch('plain')
+    await ctx.launch('rich', { edits: true, title: 'Review', flow: 'codex' })
+    expect(bodies[0]).toEqual({ message: 'plain', key: 'launch#0' })
+    expect(bodies[1]).toEqual({
+      message: 'rich',
+      key: 'launch#1',
+      allowEdits: true,
+      title: 'Review',
+      flow: 'codex',
+    })
+  })
+
+  it('reports a refusal it can name, so the bound stays visible', async () => {
+    const reports: string[] = []
+    stubFetch([
+      {
+        status: 403,
+        body: { ok: false, reason: 'bound', error: 'already acted 3 times' },
+      },
+    ])
+    const res = await buildCtx(input(), reports).launch('x')
+    expect(res).toMatchObject({ ok: false, reason: 'bound' })
+    expect(reports.join('\n')).toContain('already acted 3 times')
+  })
+})

@@ -156,10 +156,9 @@ async function checkApproval(
 // ── The context ────────────────────────────────────────────────────────────
 //
 // Deliberately small: a body needs far less than a driver flow. No `emit`
-// (there is no ride), no `state`, no `artifacts`, and no
-// ask/wedge/rest/relaunch/land — absent from the surface rather than denied at
-// each route, which is why this shape needs no deny floor across every mutating
-// path.
+// (there is no ride), no `state`, no `artifacts`, and no ask/wedge/rest/relaunch
+// — absent from the surface rather than denied at each route, which is why this
+// shape needs no deny floor across every mutating path.
 //
 // Absent is not prevented. A body holds daemon privileges and runs as the same
 // OS user as lander; a determined one reaches the API by other means. The narrow
@@ -172,7 +171,14 @@ type HookCtx = ReturnType<typeof buildCtx>
 // "the hook stopped itself" has to be distinguishable from "the hook found
 // nothing", and a credential this server no longer holds is nobody's fault.
 export type HookActionResult =
-  | { ok: true; deduped?: true }
+  | {
+      ok: true
+      deduped?: true
+      // What a launch created. A deduped launch answers with the task the
+      // original attempt produced, so a retry leaves the body holding the same
+      // handle its first run did.
+      id?: string
+    }
   | {
       ok: false
       reason:
@@ -203,10 +209,10 @@ function buildCtx(input: HookHostInput, reports: string[]) {
   // action at the same ordinal, where a retry will meet it. Advancing at
   // composition time instead would offset the retry by one and deliver the
   // action twice.
-  const ordinals: Record<string, number> = { nudge: 0, land: 0 }
+  const ordinals: Record<string, number> = { nudge: 0, land: 0, launch: 0 }
 
   async function act(
-    kind: 'nudge' | 'land',
+    kind: 'nudge' | 'land' | 'launch',
     explicitKey: string | undefined,
     send: (key: string) => Promise<Response>,
   ): Promise<HookActionResult> {
@@ -224,6 +230,7 @@ function buildCtx(input: HookHostInput, reports: string[]) {
     const body = (await res.json().catch(() => ({}))) as {
       ok?: boolean
       deduped?: boolean
+      id?: string
       reason?: string
       error?: string
     }
@@ -231,7 +238,11 @@ function buildCtx(input: HookHostInput, reports: string[]) {
       // A deduped action still occupies its ordinal: it IS the action the
       // original took, so the next one belongs at the next slot.
       if (!explicitKey) ordinals[kind]++
-      return { ok: true, ...(body.deduped ? { deduped: true as const } : {}) }
+      return {
+        ok: true,
+        ...(body.deduped ? { deduped: true as const } : {}),
+        ...(typeof body.id === 'string' ? { id: body.id } : {}),
+      }
     }
     const reason =
       body.reason === 'bound' ||
@@ -396,6 +407,44 @@ function buildCtx(input: HookHostInput, reports: string[]) {
         cwd: input.projectRoot,
         ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
       })
+    },
+    // Create a task, for judgment that has to explore.
+    //
+    // The other half of hooks.md §9's split: reasoning over inputs the body
+    // already holds is `assist`, and deciding which of a project's conventions
+    // apply — which depends on what changed — cannot enumerate its inputs in
+    // advance and needs an agent with a real tool envelope and a transcript.
+    //
+    // WHATEVER GRANTS THE BODY ASKS FOR, and there is no ceiling to declare: a
+    // body runs with daemon privileges and can spawn a provider CLI with no
+    // sandbox at all, so a limit here would constrain one path out of several to
+    // the same place while reading like a control. What this path buys is that
+    // the result is durable and visible — a recorded grant, a transcript, a
+    // human who can reply — which a body's own child has none of.
+    //
+    // The new task inherits the TARGET's provider unless the body names one, and
+    // carries the hook's origin, so neither its own landing nor its descendants'
+    // wake the hook that started it.
+    launch(
+      message: string,
+      opts: { edits?: boolean; title?: string; flow?: string; key?: string } = {},
+    ): Promise<HookActionResult> {
+      return act('launch', opts.key, (key) =>
+        fetch(`${run.callback.api}/api/${encodeURIComponent(run.callback.project)}/tasks`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-lander-hook-token': run.callback.token,
+          },
+          body: JSON.stringify({
+            message: String(message),
+            key,
+            ...(opts.edits ? { allowEdits: true } : {}),
+            ...(opts.title ? { title: String(opts.title) } : {}),
+            ...(opts.flow ? { flow: String(opts.flow) } : {}),
+          }),
+        }),
+      )
     },
     // End the target, when the judgment is that it is finished.
     //
