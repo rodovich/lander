@@ -10,6 +10,7 @@ import { MessageText } from './messageText'
 import { tick, timed } from './perf'
 import { RideTurn } from './rideTurn'
 import { StatusTransition } from './statusTransition'
+import { TaskActionTransition } from './taskActionTransition'
 import { taskAgentModelName } from './taskMeta'
 import { taskKeyOf } from './taskRef'
 import { buildTimeline } from './timeline'
@@ -311,6 +312,15 @@ export const Conversation = memo(function Conversation({
                 key={`e-${entry.event.id}`}
                 event={entry.event}
                 slug={task.projectSlug}
+                linkTask={linkTask}
+              />
+            )
+          }
+          if (entry.kind === 'task-action') {
+            return (
+              <TaskActionTransition
+                key={`ta-${entry.action.id}`}
+                item={entry.action}
                 linkTask={linkTask}
               />
             )

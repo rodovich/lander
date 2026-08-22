@@ -21,6 +21,7 @@ import {
   pushUserItem,
   pushFlowItem,
   pushEventItem,
+  pushTaskActionItem,
   lastFlowItem,
   userItems,
   eventItems,
@@ -42,6 +43,7 @@ import {
   type PendingHook,
   type ScheduledMessage,
   type Ride,
+  type TaskActionItem,
 } from './tasks'
 import { askItems, createAsk } from './asks'
 import type { RevivedMarker } from './protocol'
@@ -89,6 +91,47 @@ describe('item builders', () => {
     expect(t.items!.map((i) => i.kind)).toEqual(['message', 'message', 'event'])
     expect((t.items![0] as MessageItem).attachments).toHaveLength(1)
     expect((t.items![1] as MessageItem).rideId).toBe('r1')
+  })
+
+  it('pushTaskActionItem appends each structurally valid action variant', () => {
+    const t: { items?: Item[] } = {}
+    const target = { id: 'child', projectSlug: 'proj', title: 'Child' }
+    pushTaskActionItem(t, { action: 'launch', target }, AT)
+    pushTaskActionItem(
+      t,
+      {
+        action: 'message',
+        target,
+        trigger: {
+          kind: 'awaiting',
+          tasks: [{ id: 'gate', projectSlug: 'proj' }],
+          scheduledFor: later(2),
+        },
+      },
+      later(1),
+    )
+    pushTaskActionItem(
+      t,
+      { action: 'status', target, toStatus: 'landed' },
+      later(2),
+    )
+    expect(t.items!.map((item) => item.kind)).toEqual([
+      'task-action',
+      'task-action',
+      'task-action',
+    ])
+    expect(
+      (t.items![1] as Extract<TaskActionItem, { action: 'message' }>).trigger,
+    ).toEqual({
+      kind: 'awaiting',
+      tasks: [{ id: 'gate', projectSlug: 'proj' }],
+      scheduledFor: later(2),
+    })
+    expect(t.items!.map((item) => item.id)).toEqual([
+      expect.stringMatching(/-0$/),
+      expect.stringMatching(/-1$/),
+      expect.stringMatching(/-2$/),
+    ])
   })
 
   it('lastFlowItem returns the last main-agent flow item, optionally scoped to a ride', () => {

@@ -9,7 +9,8 @@ import { blockedRequests } from './permissions'
 import { taskAgentModelName } from './taskMeta'
 import { Collapsible, ToolStep } from './toolStep'
 import { planTurnCollapse } from './turnCollapse'
-import type { AskItem, Item, Ride, Task } from './types'
+import type { RideItem } from './timeline'
+import type { AskItem, Ride, Task } from './types'
 
 // One assistant turn in the conversation: a ride and its items, rendered as
 // nested tool chips and prose grouped by inference, with settled turns folded
@@ -34,7 +35,7 @@ export const RideTurn = memo(function RideTurn({
   onAllow,
 }: {
   ride: Ride
-  items: Item[]
+  items: RideItem[]
   // The flow name (task.flow ?? task.agent), for display only.
   agent: string | undefined
   taskId: string

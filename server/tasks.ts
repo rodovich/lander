@@ -523,6 +523,39 @@ export type EventItem = ItemCommon & {
   awaiting?: { id: string; title: string }[]
 }
 
+// A task-management action attributed to another task. Unlike EventItem, this
+// describes what the containing task did to a project-qualified target, not a
+// lifecycle transition of the containing task itself.
+export type TaskActionRef = {
+  id: string
+  projectSlug: string
+  title?: string
+}
+
+export type TaskActionTrigger =
+  | { kind: 'scheduled'; scheduledFor: string }
+  | {
+      kind: 'awaiting'
+      tasks: TaskActionRef[]
+      scheduledFor?: string
+    }
+
+export type TaskActionInput =
+  | { action: 'launch'; target: TaskActionRef; trigger?: TaskActionTrigger }
+  | {
+      action: 'message'
+      target: TaskActionRef
+      trigger?: TaskActionTrigger
+      // What was sent, so the actor's own timeline reads as an account of the
+      // exchange rather than a bare "messaged task". A clamped echo — the
+      // delivered text lives in full on the recipient.
+      text?: string
+    }
+  | { action: 'status'; target: TaskActionRef; toStatus: string }
+
+export type TaskActionItem = ItemCommon &
+  { kind: 'task-action' } & TaskActionInput
+
 export type AskItem = ItemCommon & {
   kind: 'ask'
   // Today's Ask payload minus `createdAt` (the item's `at` carries it).
@@ -568,7 +601,13 @@ export type HookItem = ItemCommon & {
   durationMs?: number
 }
 
-export type Item = MessageItem | ToolItem | EventItem | AskItem | HookItem
+export type Item =
+  | MessageItem
+  | ToolItem
+  | EventItem
+  | TaskActionItem
+  | AskItem
+  | HookItem
 
 // ── Item-log builders (v2 storage) ──────────────────────────────────────────
 
@@ -642,6 +681,24 @@ export function pushEventItem(
     ...(ev.scheduledFor !== undefined ? { scheduledFor: ev.scheduledFor } : {}),
     ...(ev.awaiting !== undefined ? { awaiting: ev.awaiting } : {}),
   }
+  ;(task.items ??= []).push(item)
+  return item
+}
+
+// Append an attributed task-management action outside any ride. The caller
+// deliberately decides whether the mutation warrants updatedAt/unread changes;
+// this builder only adds the semantic timeline row.
+export function pushTaskActionItem(
+  task: { items?: Item[] },
+  action: TaskActionInput,
+  at: string,
+): TaskActionItem {
+  const item = {
+    id: nextItemId(task, at),
+    at,
+    kind: 'task-action',
+    ...action,
+  } as TaskActionItem
   ;(task.items ??= []).push(item)
   return item
 }

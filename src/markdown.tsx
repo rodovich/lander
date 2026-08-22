@@ -14,6 +14,7 @@ import { timed } from './perf'
 // sent to the model.
 export type TaskLinkResolver = (
   id: string,
+  projectSlug?: string,
 ) => { href: string; title: string; status: string } | undefined
 
 // Only allow link schemes that can't execute script.

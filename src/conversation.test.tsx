@@ -2,7 +2,15 @@ import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { ComponentProps } from 'react'
 import { Conversation } from './conversation'
-import type { AskItem, EventItem, Item, MessageItem, Ride, TaskWithProject } from './types'
+import type {
+  AskItem,
+  EventItem,
+  Item,
+  MessageItem,
+  Ride,
+  TaskActionItem,
+  TaskWithProject,
+} from './types'
 
 // Static markup covers what this suite is after: the header states and the
 // timeline's entry-kind dispatch (which component each entry renders as).
@@ -42,6 +50,13 @@ const ask = (id: string, over: Partial<AskItem> = {}): AskItem => ({
   blocking: 'task',
   state: 'open',
   ...over,
+})
+const taskAction = (id: string): TaskActionItem => ({
+  id,
+  at: AT,
+  kind: 'task-action',
+  action: 'launch',
+  target: { id: 'child', projectSlug: 'other', title: 'Child task' },
 })
 const ride = (id: string, over: Partial<Ride> = {}): Ride => ({
   id,
@@ -113,6 +128,7 @@ describe('Conversation timeline dispatch', () => {
           user('u1', 'user-question'),
           flow('f1', 'r1', 'assistant-answer'),
           ev('e1', 'landed'),
+          taskAction('ta1'),
         ],
         rides: [ride('r1')],
       }),
@@ -121,7 +137,11 @@ describe('Conversation timeline dispatch', () => {
     expect(html).toContain('user-question')
     expect(html).toContain('message-assistant')
     expect(html).toContain('assistant-answer')
-    expect(html).toContain('status-transition')
+    // A lifecycle transition and a task action share one row component, so they
+    // are told apart by what they say, not by a class of their own.
+    expect(html).toContain('timeline-note')
+    expect(html).toContain('>landed<')
+    expect(html).toContain('launched task')
   })
 
   // A hook's nudge sits in the same slot as a typed message — it was queued and

@@ -160,6 +160,36 @@ export type EventItem = ItemCommon & {
   awaiting?: { id: string; title: string }[]
 }
 
+// An action this task took on another project-qualified task. Kept distinct
+// from EventItem, whose subject is always the containing task itself.
+export type TaskActionRef = {
+  id: string
+  projectSlug: string
+  title?: string
+}
+
+export type TaskActionTrigger =
+  | { kind: 'scheduled'; scheduledFor: string }
+  | {
+      kind: 'awaiting'
+      tasks: TaskActionRef[]
+      scheduledFor?: string
+    }
+
+export type TaskActionItem = ItemCommon &
+  { kind: 'task-action' } &
+  (
+    | { action: 'launch'; target: TaskActionRef; trigger?: TaskActionTrigger }
+    | {
+        action: 'message'
+        target: TaskActionRef
+        trigger?: TaskActionTrigger
+        // A clamped echo of what was sent, revealed under the row.
+        text?: string
+      }
+    | { action: 'status'; target: TaskActionRef; toStatus: string }
+  )
+
 export type AskItem = ItemCommon & {
   kind: 'ask'
   // Today's Ask payload minus `createdAt` (the item's `at` carries it).
@@ -193,7 +223,13 @@ export type HookItem = ItemCommon & {
   durationMs?: number
 }
 
-export type Item = MessageItem | ToolItem | EventItem | AskItem | HookItem
+export type Item =
+  | MessageItem
+  | ToolItem
+  | EventItem
+  | TaskActionItem
+  | AskItem
+  | HookItem
 
 export type Task = {
   // The task's own short id (a nanoid; legacy tasks carry the uuid they were

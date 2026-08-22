@@ -140,6 +140,8 @@ export function useTaskData(
     () =>
       taskLinks.map((t) => ({
         id: (t.id ?? '').toLowerCase(),
+        rawId: t.id,
+        projectSlug: t.projectSlug,
         link: {
           href: taskHref(t.projectSlug, t.id),
           title: t.title,
@@ -168,11 +170,17 @@ export function useTaskData(
   // resolution could change — including the first-load transition from an empty
   // list, without which ids would stay literal forever.
   const resolveTaskLink = useCallback<TaskLinkResolver>(
-    (id) => {
+    (id, projectSlug) => {
       // A legacy/garbled reference can hand us an empty id (e.g. an old
       // "awaiting" event saved under the pre-rename shape); resolve it to no link
       // rather than throwing and taking down the whole task view.
       if (!id) return undefined
+      if (projectSlug) {
+        const matches = linkIndex.filter(
+          (e) => e.rawId === id && e.projectSlug === projectSlug,
+        )
+        return matches.length === 1 ? matches[0].link : undefined
+      }
       const needle = id.toLowerCase()
       const matches =
         needle.length >= 36

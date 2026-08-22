@@ -30,7 +30,15 @@
 //   - `now` anchors an open ride's entry so the in-flight turn sorts by the wall
 //     clock, not the timestamp of whatever it happens to have streamed first.
 
-import type { Item, MessageItem, EventItem, AskItem, HookItem, Ride } from './types'
+import type {
+  Item,
+  MessageItem,
+  EventItem,
+  TaskActionItem,
+  AskItem,
+  HookItem,
+  Ride,
+} from './types'
 
 export type TimelineEntry =
   // A standalone message bubble (out of any ride) — the slot a prompt occupies,
@@ -41,9 +49,11 @@ export type TimelineEntry =
   // One ride — an assistant turn — carrying all its items (flow messages and
   // tools, main-thread and subagent-nested); the renderer does the nesting and
   // collapse. `ride` is the header (open when it has no `endedAt`).
-  | { kind: 'ride'; at: string; ride: Ride; items: Item[] }
+  | { kind: 'ride'; at: string; ride: Ride; items: RideItem[] }
   // A lifecycle event (launch, wedge, schedule, …).
   | { kind: 'event'; at: string; event: EventItem }
+  // An attributed task-management action by the containing task.
+  | { kind: 'task-action'; at: string; action: TaskActionItem }
   // An unanchored (platform) ask, standing on its own where it was raised. Its
   // prompt is the entry's substance; the form renders only while it's open.
   | { kind: 'ask'; at: string; ask: AskItem }
@@ -52,6 +62,8 @@ export type TimelineEntry =
   // trigger, and this stream trusts array order rather than sorting by `at`.
   // The item's `ride` is the join back to the turn it is about.
   | { kind: 'hook'; at: string; hook: HookItem }
+
+export type RideItem = Exclude<Item, TaskActionItem>
 
 export function buildTimeline(
   task: { items?: Item[]; rides?: Ride[] },
@@ -63,7 +75,11 @@ export function buildTimeline(
   // render). An ask anchored to one hangs there as the turn's footer; an ask
   // whose ride streamed nothing else falls back to standing alone.
   const ridesWithItems = new Set(
-    all.flatMap((it) => (it.kind !== 'ask' && it.rideId ? [it.rideId] : [])),
+    all.flatMap((it) =>
+      it.kind !== 'ask' && it.kind !== 'task-action' && it.rideId
+        ? [it.rideId]
+        : [],
+    ),
   )
 
   // Hold aside the queued follow-ups (trailing user items the server flagged) so
@@ -84,8 +100,15 @@ export function buildTimeline(
   const out: TimelineEntry[] = []
   // Each ride gets one entry, created (and positioned) at its first item and
   // reused for later items so an interleaving event can't split the bubble.
-  const rideEntry = new Map<string, { kind: 'ride'; at: string; ride: Ride; items: Item[] }>()
+  const rideEntry = new Map<
+    string,
+    { kind: 'ride'; at: string; ride: Ride; items: RideItem[] }
+  >()
   for (const it of kept) {
+    if (it.kind === 'task-action') {
+      out.push({ kind: 'task-action', at: it.at, action: it })
+      continue
+    }
     if (it.kind === 'ask') {
       // An ask anchored to a ride whose turn is in the stream is that turn's
       // footer (the App renders it there), so it takes no slot of its own. Every

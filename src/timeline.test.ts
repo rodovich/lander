@@ -1,6 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import { buildTimeline } from './timeline'
-import type { AskItem, EventItem, Item, MessageItem, Ride, ToolItem } from './types'
+import type {
+  AskItem,
+  EventItem,
+  Item,
+  MessageItem,
+  Ride,
+  TaskActionItem,
+  ToolItem,
+} from './types'
 
 // Pick clearly-ordered ISO timestamps without hand-writing the date each time.
 const T = (clock: string) => `2026-06-26T${clock}.000Z`
@@ -37,6 +45,13 @@ const ev = (eventKind: EventItem['eventKind'], at: string): EventItem => ({
   kind: 'event',
   eventKind,
 })
+const action = (id: string, at: string): TaskActionItem => ({
+  id,
+  at,
+  kind: 'task-action',
+  action: 'launch',
+  target: { id: 'child', projectSlug: 'proj' },
+})
 const ride = (id: string, startedAt: string, endedAt?: string): Ride => ({
   id,
   startedAt,
@@ -68,8 +83,10 @@ const seq = (items: ReturnType<typeof buildTimeline>['items']) =>
         ? `user:${it.item.id}`
         : it.kind === 'ask'
           ? `ask:${it.ask.id}`
-          : it.kind === 'hook'
+      : it.kind === 'hook'
             ? `hook:${it.hook.id}`
+            : it.kind === 'task-action'
+              ? `action:${it.action.id}`
             : `asst:${it.ride.id}`,
   )
 
@@ -154,6 +171,38 @@ describe('buildTimeline events in place', () => {
     const rides = [ride('r1', T('10:00:05'), T('10:00:06'))]
     const { items: out } = build({ items, rides })
     expect(seq(out)).toEqual(['event:launched', 'user:p1', 'asst:r1', 'event:landed'])
+  })
+})
+
+describe('buildTimeline task actions in place', () => {
+  it('keeps a split ride whole and preserves action order after it', () => {
+    const items = [
+      user('p1', T('10:00:00')),
+      flow('r1a', 'r1', T('10:00:05')),
+      action('a1', T('10:00:06')),
+      action('a2', T('10:00:07')),
+      flow('r1b', 'r1', T('10:00:08')),
+    ]
+    const rides = [ride('r1', T('10:00:05'), T('10:00:09'))]
+    const { items: out } = build({ items, rides })
+    expect(seq(out)).toEqual([
+      'user:p1',
+      'asst:r1',
+      'action:a1',
+      'action:a2',
+    ])
+  })
+
+  it('leaves an action before a ride when it was stored first', () => {
+    const items = [
+      action('a1', T('10:00:00')),
+      flow('r1a', 'r1', T('10:00:01')),
+    ]
+    const rides = [ride('r1', T('10:00:01'), T('10:00:02'))]
+    expect(seq(build({ items, rides }).items)).toEqual([
+      'action:a1',
+      'asst:r1',
+    ])
   })
 })
 

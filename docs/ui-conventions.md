@@ -25,7 +25,7 @@ rendered markdown.
 
 Class names are kebab-case and read as `block-element`: `.meter`, `.meter-head`,
 `.meter-label`, `.meter-track`, `.meter-fill`. Variants are a **second class**,
-not a suffix — `.meter-fill.warn`, `.status-transition-label.wedged`,
+not a suffix — `.meter-fill.warn`, `.timeline-note-label.wedged`,
 `.message-user.message-queued` — so a component composes them by appending a
 token to the `className` string, and the base rule keeps applying.
 

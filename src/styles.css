@@ -1498,72 +1498,76 @@ body {
   }
 }
 
-/* A status transition in the conversation timeline: unbubbled and muted like
-   the working-spinner row, but without the spinner since the change is done.
-   Shares the user turn's tint and the messages' 28px inset for alignment. */
-.status-transition {
+/* A note in the conversation timeline — a lifecycle transition of this task, or
+   an action it took on another. Unbubbled and muted like the working-spinner
+   row, but without the spinner since the thing it reports is done. Shares the
+   user turn's tint and the messages' 28px inset for alignment. A column: the
+   prose row, then whatever stacks beneath it (a list of awaited tasks, a
+   disclosure's revealed body). */
+.timeline-note {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 4px;
   color: var(--muted);
   padding: 8px 28px;
   background: var(--bg-tinted);
 }
 
-/* Name + verb travel together, more tightly spaced than the row's own gap. */
-.status-transition-event {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+/* The prose is one item on its row, so the timestamp trails the whole sentence
+   rather than each word becoming an item of its own. `min-width` lets a long
+   line wrap inside the row instead of pushing the timestamp out of it. The row
+   itself is a `.collapsible-row` whether or not the note has revealable detail,
+   so the two forms share one geometry rather than two copies of it. */
+.timeline-note-text {
+  min-width: 0;
 }
 
-.status-transition-label {
+/* The word the note turns on — a lifecycle verb, or the status an action set —
+   set apart from the prose by weight, and colored when it names a status. */
+.timeline-note-label {
   font-weight: 600;
 }
 
 /* Same color as the "riding" status pill — a (re)launch starts a turn. */
-.status-transition-label.launched,
-.status-transition-label.relaunched {
+.timeline-note-label.launched,
+.timeline-note-label.relaunched,
+.timeline-note-label.riding {
   color: var(--riding);
 }
 
 /* Same color as the "wedged" status pill. */
-.status-transition-label.wedged {
+.timeline-note-label.wedged {
   color: var(--wedged);
 }
 
 /* Same color as the "landed" status pill. */
-.status-transition-label.landed {
+.timeline-note-label.landed {
   color: var(--landed);
 }
 
 /* Same muted tone as the "resting" status pill — a scheduled task rests. */
-.status-transition-label.scheduled,
-.status-transition-label.awaiting {
+.timeline-note-label.scheduled,
+.timeline-note-label.awaiting,
+.timeline-note-label.resting {
   color: var(--muted);
 }
 
-/* An "awaiting" event stacks its row above the list of awaited tasks (when
-   there's more than one); a single awaited task sits inline on the row. The
-   element also carries `.status-transition`, so the box's padding and tint wrap
-   the list too — this just turns that row into a column with a small gap. */
-.status-transition-awaiting {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 4px;
+/* A time riding inside a label — when a scheduled event will fire, when a
+   deferred action comes due — reads as a quiet timestamp, not part of the verb. */
+.timeline-note-when {
+  font-weight: 400;
 }
 
-/* The event + timestamp share the first line as their own row inside the
-   awaiting column. */
-.status-transition-await-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* When the note happened, trailing its prose. Never squeezed by a long line. */
+.timeline-note-time {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--muted);
 }
 
-/* The awaited-task links wear the same status-tinted chips as task mentions,
-   colored by each awaited task's current status. */
-.status-transition-await-link {
+/* A linked task — one awaited by an event, or the subject of an action — wears
+   the same status-tinted chip as a task mention, colored by its current status. */
+.timeline-note-link {
   padding: 1px 6px;
   border-radius: 4px;
   text-decoration: none;
@@ -1572,55 +1576,61 @@ body {
   color: var(--riding);
 }
 
-.status-transition-await-link:hover {
+.timeline-note-link:hover {
   background: color-mix(in srgb, var(--riding) 20%, transparent);
 }
 
-.status-transition-await-link.wedged {
+.timeline-note-link.wedged {
   background: color-mix(in srgb, var(--wedged) 12%, transparent);
   color: var(--wedged);
 }
 
-.status-transition-await-link.wedged:hover {
+.timeline-note-link.wedged:hover {
   background: color-mix(in srgb, var(--wedged) 20%, transparent);
 }
 
-.status-transition-await-link.landed {
+.timeline-note-link.landed {
   background: color-mix(in srgb, var(--landed) 12%, transparent);
   color: var(--landed);
 }
 
-.status-transition-await-link.landed:hover {
+.timeline-note-link.landed:hover {
   background: color-mix(in srgb, var(--landed) 20%, transparent);
 }
 
-.status-transition-await-link.resting {
+.timeline-note-link.resting {
   background: color-mix(in srgb, var(--muted) 14%, transparent);
   color: var(--muted);
 }
 
-.status-transition-await-link.resting:hover {
+.timeline-note-link.resting:hover {
   background: color-mix(in srgb, var(--muted) 22%, transparent);
 }
 
-.status-transition-await-list {
+/* The tasks a note can't name on one line, stacked beneath it. */
+.timeline-note-list {
   margin: 0;
   padding-left: 16px;
   color: var(--muted);
 }
 
-.status-transition-await-list li {
+.timeline-note-list li {
   margin: 0.25em 0;
 }
 
-/* The launch time trailing a "scheduled" event reads as a quiet timestamp. */
-.status-transition-when {
-  font-weight: 400;
+/* The disclosure triangle hangs in the row's left gutter — 12px of caret plus
+   the row's own 8px gap — so a note with revealable detail still starts its
+   prose on the timeline's 28px inset, level with the notes that have none. */
+.timeline-note .collapsible-toggle {
+  width: 12px;
+  margin-left: -20px;
 }
 
-.status-transition-time {
-  font-size: 12px;
-  color: var(--muted);
+/* The revealed detail — a sent message's text — reads like a tool call's
+   captured output: quiet, wrapped, and preserving the newlines it was sent with. */
+.timeline-note-detail {
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* ---- streamed activity trace ---- */

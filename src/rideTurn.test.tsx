@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { ComponentProps } from 'react'
 import { RideTurn } from './rideTurn'
-import type { AskItem, Item, MessageItem, Ride, ToolItem } from './types'
+import type { RideItem } from './timeline'
+import type { AskItem, MessageItem, Ride, ToolItem } from './types'
 
 // renderToStaticMarkup gives the initial (effect-free) markup, which is all a
 // turn needs: nesting, grouping, folding, and the footers are all pure renders
@@ -51,7 +52,7 @@ const openAsk = (over: Partial<AskItem> = {}): AskItem => ({
 })
 
 const render = (
-  items: Item[],
+  items: RideItem[],
   over: Partial<ComponentProps<typeof RideTurn>> = {},
 ) =>
   renderToStaticMarkup(
@@ -79,7 +80,7 @@ const count = (html: string, needle: string) =>
   html.split(needle).length - 1
 
 describe('RideTurn subagent nesting', () => {
-  const trace: Item[] = [
+  const trace: RideItem[] = [
     tool('sp', { name: 'Agent', input: 'spawn a searcher' }),
     tool('child', { name: 'Read', input: 'read a file', parentId: 'sp' }),
     flow('reply', 'subagent-final-reply', { parentId: 'sp' }),
@@ -125,7 +126,7 @@ describe('RideTurn turn-collapse folding', () => {
   // Opening prose, then a middle stretch (tool, short prose, tool) that folds,
   // then the long closing prose: planTurnCollapse keeps the opening and the
   // longest/last sequence, hiding positions 1–3 as one segment (key "r1:1").
-  const folding: Item[] = [
+  const folding: RideItem[] = [
     flow('open', 'opening-prose', { groupId: 'g1' }),
     tool('t1', { groupId: 'g2' }),
     flow('mid', 'hidden-middle-prose', { groupId: 'g3' }),
