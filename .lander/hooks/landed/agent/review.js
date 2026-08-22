@@ -37,6 +37,27 @@ const MAX_INSTRUCTION = 6_000
 
 const isUser = (it) => it.kind === 'message' && it.role === 'user'
 
+// Did this tool call commit?
+//
+// Two shapes, because the record faithfully preserves two different
+// invocations. Claude's `Bash` tool reports the command itself — `git commit -m
+// …` — since its harness supplies the shell. Codex runs everything through a
+// login shell and reports what it ran: `/bin/zsh -lc 'git commit -m …'`. So a
+// pattern anchored on a command boundary sees the quote rather than the `git`,
+// and every Codex commit goes uncounted.
+//
+// Unwrapping first rather than loosening the anchor: the anchor is what keeps
+// `git log | grep commit` and `# the commit before` from counting, and both
+// shapes appear in this corpus — some older Codex records carry the bare
+// command — so neither pattern alone covers it.
+const SHELL_WRAPPER = /^\s*(?:\S+\/)?[a-z]*sh\s+-[a-z]*c\s+(['"])([\s\S]*)\1\s*$/
+const GIT_COMMIT = /(^|[;&|]\s*|\(\s*)git\s+(-\S+\s+|--\S+(=\S+)?\s+)*commit\b/
+
+function isCommit(cmd) {
+  const inner = SHELL_WRAPPER.exec(cmd)
+  return GIT_COMMIT.test(inner ? inner[2] : cmd)
+}
+
 // The span this landing closes: from the human message that opened it, to the
 // landing itself. The unit is the instruction, not the ride — several rides can
 // serve one instruction, and judging per ride would ask the same question of the
@@ -101,11 +122,7 @@ function describeWork(body) {
     lines,
     dropped: tools.length - kept.length,
     hunksShown,
-    commits: tools.filter((it) =>
-      /(^|[;&|]\s*|\(\s*)git\s+(-\S+\s+|--\S+(=\S+)?\s+)*commit\b/.test(
-        String(it.inputFull ?? it.input ?? ''),
-      ),
-    ).length,
+    commits: tools.filter((it) => isCommit(String(it.inputFull ?? it.input ?? ''))).length,
   }
 }
 
