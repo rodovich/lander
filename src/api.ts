@@ -2,6 +2,7 @@ import type {
   FlowMeta,
   ProjectHooks,
   Task,
+  TaskLink,
   TaskWithProject,
   TelemetryItem,
 } from './types'
@@ -9,6 +10,29 @@ import type {
 // The per-flow status telemetry map (agent → items) the tasks poll carries. Global,
 // so every project's response repeats it; an agent with no items is simply absent.
 export type FlowTelemetry = Record<string, TelemetryItem[]>
+
+export type TaskLinkResponse =
+  | { notModified: true; etag: string | null }
+  | { notModified: false; etag: string | null; links: TaskLink[] }
+
+// One installation-wide link projection, conditionally fetched. After the
+// first response an unchanged poll is a bodyless 304; the server serves it from
+// memory, so this neither repeats task conversations over the wire nor scans
+// task files on disk.
+export async function loadTaskLinks(etag?: string): Promise<TaskLinkResponse> {
+  const r = await fetch('/api/task-links', {
+    headers: etag ? { 'if-none-match': etag } : undefined,
+  })
+  if (r.status === 304)
+    return { notModified: true, etag: r.headers.get('etag') ?? etag ?? null }
+  const body = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(body.error ?? r.statusText)
+  return {
+    notModified: false,
+    etag: r.headers.get('etag'),
+    links: (body.links ?? []) as TaskLink[],
+  }
+}
 
 // Request headers that mark a call as coming from the human's browser. Two jobs
 // now, and the second is why routes that gate on nothing still send it:

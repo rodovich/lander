@@ -69,7 +69,7 @@ describe('TaskList roving tabindex', () => {
   it('makes only the selected row Tab-reachable', () => {
     const html = render(
       [task({ id: 'a' }), task({ id: 'b' }), task({ id: 'c' })],
-      { selected: 'b' },
+      { selected: 'proj/b' },
     )
     expect(html.split('tabindex="0"').length - 1).toBe(1)
     expect(html.split('tabindex="-1"').length - 1).toBe(2)

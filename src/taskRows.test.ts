@@ -161,9 +161,18 @@ describe('buildTaskRows', () => {
       task({ id: 'held', seenAt: at(0) }),
     ]
     expect(
-      build(tasks, { view: 'unread', stickyUnread: new Set(['held']) })
+      build(tasks, { view: 'unread', stickyUnread: new Set(['proj/held']) })
         .orderedTasks.map((t) => t.id),
     ).toEqual(['unread', 'held'])
+  })
+
+  it('keeps equal ids from different projects as distinct rows', () => {
+    const tasks = [
+      task({ id: 'same', projectSlug: 'one' }),
+      task({ id: 'same', projectSlug: 'two' }),
+    ]
+    const rows = build(tasks).taskRows.filter((row) => row.kind === 'task')
+    expect(rows.map((row) => row.key)).toEqual(['one/same', 'two/same'])
   })
 
   it('counts statuses in reverse list order', () => {

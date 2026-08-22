@@ -8,7 +8,8 @@ running lander needs; this file is the level a person changing it needs.
 ## HTTP API (`server/index.ts`)
 
 - `GET /api/projects` — list the configured projects (`{ path, slug }`); the first is the default.
-- `GET /api/:project/tasks` — list a project's tasks (sorted newest-first). `?archived=1` also merges in archived tasks, each tagged `archived: true`. `?view=summary` serves each task without its conversation — no `items`/`rides`, and `scheduledMessages` reduced to `deliverAt`/`relaunch`/`repeat` — which is ~99% of the bytes off a list response; everything else, including the ride-derived `status`, is unchanged. Opt-in on purpose: with no `view` param the response is exactly what it has always been, so an old client or a third-party caller never has to know the parameter exists. Callers that read only metadata should ask for it (the client's link-resolution poll and `lander list` do); anything that reads message text must not.
+- `GET /api/task-links` — installation-wide `{ id, projectSlug, title, status, archived }` projection used to resolve task references across projects. The first request lazily scans every configured active/archive pool; normal task writes and archive moves then update the index synchronously in memory. Responses carry an ETag, so an unchanged client poll is a bodyless `304` and performs no task-file reads. A failed or ambiguous bootstrap fails closed rather than publishing a partial index.
+- `GET /api/:project/tasks` — list a project's tasks (sorted newest-first). `?archived=1` lists archived tasks instead, each tagged `archived: true`. `?view=summary` serves each task without its conversation — no `items`/`rides`, and `scheduledMessages` reduced to `deliverAt`/`relaunch`/`repeat` — which is ~99% of the bytes off a list response; everything else, including the ride-derived `status`, is unchanged. Opt-in on purpose: with no `view` param the response is exactly what it has always been, so an old client or a third-party caller never has to know the parameter exists. Callers that read only metadata should ask for it (`lander list` does); anything that reads message text must not.
 - `POST /api/:project/tasks` — create a task, store its chosen agent, and queue the first turn on the daemon.
 - `POST /api/:project/tasks/:id/messages` — append a user message; the daemon resumes the task's stored provider session. Both this and `POST .../tasks` accept `attachments: id[]` to associate uploaded files with the message.
 - `POST /api/:project/attachments` — upload one or more files (multipart) to the project's durable blob store, returning their refs (`{id, name, mime, size}`). `GET /api/:project/attachments/:id` streams a stored file's bytes. Both require an identified caller (the browser's UI token or a task's `LANDER_TOKEN`).
@@ -26,6 +27,13 @@ alphabet — minted by the server and used as the filename stem, the URL segment
 the `LANDER_TASK` env var, and the `X-Lander-Task` header. Tasks refer to each
 other by it. Legacy tasks are still keyed by the uuid they were created with,
 backfilled from their filename.
+
+Ids are unique only within a project. Server run guards, mutation locks,
+provenance, and client selection/draft state therefore key a task by
+`(projectSlug, id)`. Bare ids in conversation text still link when they resolve
+to exactly one global match; ambiguous ids remain plain text. Persisted records
+are also checked against their exact, case-sensitive filename spelling and, when
+present, their body `id` before a scoped lookup accepts them.
 
 Any id arriving from an untrusted source (URL segment, header, await list) is
 validated against `/^[A-Za-z0-9_-]{1,64}$/` before it is used to build a

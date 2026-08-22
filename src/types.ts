@@ -268,6 +268,17 @@ export type Task = {
 // cross-project list knows which project's API to hit for each task.
 export type TaskWithProject = Task & { projectSlug: string }
 
+// The compact global projection used only for resolving task references. It is
+// deliberately independent of Task: the link poll never carries conversations,
+// permissions, telemetry, or timestamps.
+export type TaskLink = {
+  id: string
+  projectSlug: string
+  title: string
+  status: string
+  archived: boolean
+}
+
 export type Project = {
   path: string
   slug: string

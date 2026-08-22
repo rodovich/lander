@@ -1,21 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { loadShownTasks, type FlowTelemetry } from './api'
+import { loadShownTasks, loadTaskLinks, type FlowTelemetry } from './api'
 import { useSessionState } from './hooks'
 import type { TaskLinkResolver } from './markdown'
-import type { Project, TaskView, TaskWithProject } from './types'
+import { taskHref } from './taskRef'
+import type { Project, TaskLink, TaskView, TaskWithProject } from './types'
 
 // The client's task data: the displayed task list and its polling, the
-// cross-view union used for link resolution, per-flow telemetry, and the
+// installation-wide compact index used for link resolution, per-flow telemetry, and the
 // project list with the session's project filter. Owns no view state beyond
 // `shown` — the view/time/search filters stay with the caller.
-export function useTaskData(view: TaskView, onError: (message: string) => void) {
+export function useTaskData(
+  view: TaskView,
+  onError: (message: string) => void,
+  initialProjectSlug = '',
+) {
   const [tasks, setTasks] = useState<TaskWithProject[]>([])
-  // Active + archived tasks across shown projects, used only to resolve
-  // task-id mentions to links. The displayed `tasks` list holds just the
-  // current view's set (active OR archived — they come from separate
-  // endpoints), so without this an archived id referenced from an inbox
-  // message — or vice versa — wouldn't link.
-  const [linkTasks, setLinkTasks] = useState<TaskWithProject[]>([])
+  // Active + archived links across every configured project, independent of
+  // the displayed project filter and carrying no conversation data.
+  const [taskLinks, setTaskLinks] = useState<TaskLink[]>([])
+  const [taskLinksLoaded, setTaskLinksLoaded] = useState(false)
   // Per-flow status telemetry (agent → items), carried on every tasks poll. The
   // producing flow decides when to refresh; the client just renders the latest
   // snapshot it was handed for whichever flow is in view.
@@ -48,7 +51,10 @@ export function useTaskData(view: TaskView, onError: (message: string) => void) 
         setProjects(list)
         const all = list.map((p) => p.slug)
         setShown((prev) => {
-          const valid = prev.filter((s) => all.includes(s))
+          const routed = all.includes(initialProjectSlug)
+            ? [initialProjectSlug]
+            : []
+          const valid = routed.length ? routed : prev.filter((s) => all.includes(s))
           return valid.length > 0 ? valid : all
         })
       })
@@ -90,38 +96,33 @@ export function useTaskData(view: TaskView, onError: (message: string) => void) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refresh])
 
-  // Maintain the union of active and archived tasks for link resolution,
-  // independent of the current view. Archived state changes rarely, so this
-  // polls less often than the displayed list.
-  //
-  // Summaries: resolution reads id/projectSlug/title/status (see linkIndex
-  // below) and nothing else, so this poll asks the server to leave the
-  // conversation out — two requests per project against both pools, held in
-  // state, is otherwise tens of megabytes every ten seconds. `items`/`rides`
-  // are optional on `Task`, so a summary is still a `TaskWithProject`.
+  // Maintain the installation-wide compact projection for task references.
+  // The ETag makes unchanged 2s polls bodyless, while polling at the displayed
+  // list cadence keeps mention colors and archive routing current.
   useEffect(() => {
-    if (shown.length === 0) return
     let cancelled = false
-    const refreshLinks = () =>
-      Promise.all([
-        loadShownTasks(shown, false, { summary: true }),
-        loadShownTasks(shown, true, { summary: true }),
-      ])
-        .then(([active, archived]) => {
-          if (!cancelled) setLinkTasks([...active.tasks, ...archived.tasks])
-        })
-        .catch(() => {})
+    let etag: string | undefined
+    const refreshLinks = async () => {
+      try {
+        const response = await loadTaskLinks(etag)
+        if (cancelled) return
+        if (response.etag) etag = response.etag
+        if (!response.notModified) setTaskLinks(response.links)
+        setTaskLinksLoaded(true)
+      } catch {
+        // Link resolution is presentational; keep the last good projection.
+      }
+    }
     refreshLinks()
-    const timer = setInterval(refreshLinks, 10000)
+    const timer = setInterval(refreshLinks, 2000)
     return () => {
       cancelled = true
       clearInterval(timer)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shownKey])
+  }, [])
 
-  // A content-stable index for mention resolution. linkTasks gets a fresh array
-  // every 10s poll even when nothing relevant changed, and each open message
+  // A content-stable index for mention resolution. The feed gets a fresh array
+  // only after a changed ETag, and each open message
   // calls the resolver once per id-shaped token (thousands, on a pasted log). So
   // we depend on a *signature* of only the fields resolution reads (id, slug,
   // title, status) rather than the array reference: `linkIndex` — and therefore
@@ -129,14 +130,21 @@ export function useTaskData(view: TaskView, onError: (message: string) => void) 
   // only when a mention could actually resolve differently, not on every poll.
   // The precomputed lowercased ids and link objects also keep each resolver call
   // cheap.
-  const linkSig = linkTasks
-    .map((t) => `${t.id}\t${t.projectSlug}\t${t.title}\t${t.status}`)
+  const linkSig = taskLinks
+    .map(
+      (t) =>
+        `${t.id}\t${t.projectSlug}\t${t.title}\t${t.status}\t${t.archived}`,
+    )
     .join('\n')
   const linkIndex = useMemo(
     () =>
-      linkTasks.map((t) => ({
+      taskLinks.map((t) => ({
         id: (t.id ?? '').toLowerCase(),
-        link: { href: `/${t.projectSlug}/${t.id}`, title: t.title, status: t.status },
+        link: {
+          href: taskHref(t.projectSlug, t.id),
+          title: t.title,
+          status: t.status,
+        },
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [linkSig],
@@ -145,7 +153,7 @@ export function useTaskData(view: TaskView, onError: (message: string) => void) 
   // Resolve a bare task id found in a message to an internal link to that task,
   // used to turn such references into clickable links with the task's title as
   // the text. A uuid (>= 36 chars) is matched exactly; anything shorter matches
-  // by prefix and links only when it uniquely identifies one loaded task.
+  // by prefix and links only when it uniquely identifies one global task.
   //
   // That prefix fallback is deliberately kept even though the CLI now requires
   // whole ids. Stored messages are immutable, and for months the task prompt
@@ -186,5 +194,7 @@ export function useTaskData(view: TaskView, onError: (message: string) => void) 
     refresh,
     hasLoadedRef,
     resolveTaskLink,
+    taskLinks,
+    taskLinksLoaded,
   }
 }

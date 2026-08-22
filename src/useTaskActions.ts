@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { uiHeaders } from './api'
 import { latestUpdateAt } from './taskMeta'
+import { taskKeyOf } from './taskRef'
 import type { TaskWithProject } from './types'
 
 // The fetch-and-reconcile task actions: optimistic local updates, the API
@@ -22,7 +23,7 @@ export function useTaskActions(opts: {
 }) {
   const { currentRef, tasksRef, setTasks, refresh, setError } = opts
 
-  // Tasks with an ask answer in flight, keyed by task id, mirroring the send
+  // Tasks with an ask answer in flight, keyed by project + task id, mirroring the send
   // path's per-task disabling.
   const [answeringBy, setAnsweringBy] = useState<Record<string, boolean>>({})
   // The task whose title is being regenerated, if any.
@@ -34,13 +35,14 @@ export function useTaskActions(opts: {
   // stores the marker monotonically, so a stale/older value never moves it back.
   // Reads tasksRef so a delayed (dwell-timer) call sees the freshest data.
   const markSeen = useCallback(
-    async (id: string) => {
-      const task = tasksRef.current.find((t) => t.id === id)
+    async (key: string) => {
+      const task = tasksRef.current.find((t) => taskKeyOf(t) === key)
       if (!task) return
+      const id = task.id
       const at = latestUpdateAt(task)
       if (!at || (task.seenAt && task.seenAt >= at)) return
       setTasks((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, seenAt: at } : t)),
+        prev.map((t) => (taskKeyOf(t) === key ? { ...t, seenAt: at } : t)),
       )
       try {
         await fetch(`/api/${task.projectSlug}/tasks/${id}/seen`, {
@@ -61,11 +63,12 @@ export function useTaskActions(opts: {
   // next time the viewer reads the task, markSeen advances the marker forward
   // again.
   const markUnread = useCallback(
-    async (id: string) => {
-      const task = tasksRef.current.find((t) => t.id === id)
+    async (key: string) => {
+      const task = tasksRef.current.find((t) => taskKeyOf(t) === key)
       if (!task) return
+      const id = task.id
       setTasks((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, seenAt: '' } : t)),
+        prev.map((t) => (taskKeyOf(t) === key ? { ...t, seenAt: '' } : t)),
       )
       try {
         await fetch(`/api/${task.projectSlug}/tasks/${id}/unread`, {
@@ -82,10 +85,11 @@ export function useTaskActions(opts: {
     async (task: TaskWithProject, status: string) => {
       const id = task.id
       const proj = task.projectSlug
+      const key = taskKeyOf(task)
       setError(null)
       // Optimistic; the PATCH persists it and polling will reconcile.
       setTasks((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, status } : t)),
+        prev.map((t) => (taskKeyOf(t) === key ? { ...t, status } : t)),
       )
       try {
         const r = await fetch(`/api/${proj}/tasks/${id}`, {
@@ -112,8 +116,9 @@ export function useTaskActions(opts: {
     async (task: TaskWithProject, archived: boolean) => {
       const id = task.id
       const proj = task.projectSlug
+      const key = taskKeyOf(task)
       setError(null)
-      setTasks((prev) => prev.filter((t) => t.id !== id))
+      setTasks((prev) => prev.filter((t) => taskKeyOf(t) !== key))
       try {
         const r = await fetch(`/api/${proj}/tasks/${id}/archive`, {
           method: 'POST',
@@ -142,9 +147,9 @@ export function useTaskActions(opts: {
   const archiveSection = useCallback(
     async (targets: TaskWithProject[]) => {
       if (targets.length === 0) return
-      const ids = new Set(targets.map((t) => t.id))
+      const keys = new Set(targets.map(taskKeyOf))
       setError(null)
-      setTasks((prev) => prev.filter((t) => !ids.has(t.id)))
+      setTasks((prev) => prev.filter((t) => !keys.has(taskKeyOf(t))))
       try {
         await Promise.all(
           targets.map(async (t) => {
@@ -174,12 +179,13 @@ export function useTaskActions(opts: {
     async (task: TaskWithProject) => {
       const id = task.id
       const proj = task.projectSlug
+      const key = taskKeyOf(task)
       setError(null)
       // Optimistic: drop the schedule and flip to riding so the button clears at
       // once and the launch button gives way to the resting one.
       setTasks((prev) =>
         prev.map((t) =>
-          t.id === id
+          taskKeyOf(t) === key
             ? { ...t, status: 'riding', scheduledFor: undefined }
             : t,
         ),
@@ -239,9 +245,12 @@ export function useTaskActions(opts: {
       if (!current) return
       const id = current.id
       const proj = current.projectSlug
+      const key = taskKeyOf(current)
       // Optimistic; the PATCH persists it and polling will reconcile.
       setTasks((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, allowEdits: checked } : t)),
+        prev.map((t) =>
+          taskKeyOf(t) === key ? { ...t, allowEdits: checked } : t,
+        ),
       )
       try {
         const r = await fetch(`/api/${proj}/tasks/${id}`, {
@@ -268,11 +277,14 @@ export function useTaskActions(opts: {
       if (!current) return
       const id = current.id
       const proj = current.projectSlug
+      const key = taskKeyOf(current)
       const next = draft.trim()
       if (!next || next === current.title) return
       // Optimistic; the PATCH persists it and polling will reconcile.
       setTasks((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, title: next } : t)),
+        prev.map((t) =>
+          taskKeyOf(t) === key ? { ...t, title: next } : t,
+        ),
       )
       try {
         const r = await fetch(`/api/${proj}/tasks/${id}`, {
@@ -294,10 +306,11 @@ export function useTaskActions(opts: {
   // Ask haiku (server-side) to name the task from its conversation.
   const generateTitle = useCallback(async () => {
     const current = currentRef.current
-    if (!current || retitling === current.id) return
+    if (!current || retitling === taskKeyOf(current)) return
     const id = current.id
     const proj = current.projectSlug
-    setRetitling(id)
+    const key = taskKeyOf(current)
+    setRetitling(key)
     setError(null)
     try {
       const r = await fetch(`/api/${proj}/tasks/${id}/retitle`, {
@@ -307,12 +320,14 @@ export function useTaskActions(opts: {
       if (!r.ok) throw new Error(body.error ?? r.statusText)
       const updated = body as TaskWithProject
       setTasks((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, title: updated.title } : t)),
+        prev.map((t) =>
+          taskKeyOf(t) === key ? { ...t, title: updated.title } : t,
+        ),
       )
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
-      setRetitling((prev) => (prev === id ? null : prev))
+      setRetitling((prev) => (prev === key ? null : prev))
     }
   }, [currentRef, retitling, setError, setTasks])
 
@@ -326,8 +341,9 @@ export function useTaskActions(opts: {
       if (!current) return
       const id = current.id
       const proj = current.projectSlug
-      if (answeringBy[id]) return
-      setAnsweringBy((prev) => ({ ...prev, [id]: true }))
+      const key = taskKeyOf(current)
+      if (answeringBy[key]) return
+      setAnsweringBy((prev) => ({ ...prev, [key]: true }))
       setError(null)
       try {
         const r = await fetch(`/api/${proj}/tasks/${id}/asks/${askId}/answer`, {
@@ -341,7 +357,7 @@ export function useTaskActions(opts: {
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
       } finally {
-        setAnsweringBy((prev) => ({ ...prev, [id]: false }))
+        setAnsweringBy((prev) => ({ ...prev, [key]: false }))
       }
     },
     [currentRef, answeringBy, setError, refresh],

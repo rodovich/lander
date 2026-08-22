@@ -90,6 +90,38 @@ describe('TaskLinkIndex', () => {
     expect((await index.snapshot()).etag).toBe(second.etag)
   })
 
+  it('does not return to task files after the index is warm', async () => {
+    await write(project.dataDir, 'task', {
+      title: 'Durable snapshot',
+      status: 'landed',
+      rides: [],
+    })
+    const index = new TaskLinkIndex([project])
+    const first = await index.snapshot()
+    await rm(project.dataDir, { recursive: true })
+    expect(await index.snapshot()).toEqual(first)
+  })
+
+  it('overlays writes that commit during the lazy bootstrap', async () => {
+    await write(project.dataDir, 'task', {
+      title: 'Before',
+      status: 'riding',
+      rides: [],
+    })
+    const index = new TaskLinkIndex([project])
+    const booting = index.snapshot()
+    index.observeWrite(path.join(project.dataDir, 'task.json'), {
+      id: 'task',
+      title: 'During',
+      status: 'landed',
+      rides: [],
+    })
+    expect((await booting).links[0]).toMatchObject({
+      title: 'During',
+      status: 'landed',
+    })
+  })
+
   it('moves a link between pools as one projection update', async () => {
     await write(project.dataDir, 'task', {
       title: 'Task',

@@ -11,6 +11,7 @@ import { tick, timed } from './perf'
 import { RideTurn } from './rideTurn'
 import { StatusTransition } from './statusTransition'
 import { taskAgentModelName } from './taskMeta'
+import { taskKeyOf } from './taskRef'
 import { buildTimeline } from './timeline'
 import type { AskItem, Ride, TaskWithProject } from './types'
 
@@ -113,7 +114,7 @@ export const Conversation = memo(function Conversation({
     setEditingTitle(false)
     setOpenDetails(new Set())
     setExpandedTurns(new Set())
-  }, [task.id])
+  }, [task.id, task.projectSlug])
 
   // Focus and select the title when entering edit mode.
   useEffect(() => {
@@ -216,8 +217,9 @@ export const Conversation = memo(function Conversation({
   useEffect(() => {
     const el = messagesRef.current
     if (!el) return
-    const switched = prevTaskIdRef.current !== task.id
-    prevTaskIdRef.current = task.id
+    const key = taskKeyOf(task)
+    const switched = prevTaskIdRef.current !== key
+    prevTaskIdRef.current = key
     if (switched) atBottomRef.current = true
     if (switched || atBottomRef.current) {
       el.scrollTop = el.scrollHeight
@@ -226,7 +228,7 @@ export const Conversation = memo(function Conversation({
       onAtBottomChange(true)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task.id, itemCount, streamSignal])
+  }, [task.id, task.projectSlug, itemCount, streamSignal])
 
   return (
     <>
@@ -254,7 +256,7 @@ export const Conversation = memo(function Conversation({
               className="edit-title-button"
               title="Regenerate title"
               aria-label="Regenerate title"
-              disabled={retitling === task.id}
+              disabled={retitling === taskKeyOf(task)}
               onClick={() => void generateTitle()}
             >
               <svg

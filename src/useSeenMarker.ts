@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { isUnread, latestUpdateAt } from './taskMeta'
+import { taskKeyOf } from './taskRef'
 import type { TaskView, TaskWithProject } from './types'
 
 // The seen-marker machinery, in two hooks because it straddles the list
@@ -58,9 +59,10 @@ export function useViewingState(view: TaskView, tasks: TaskWithProject[]) {
     setStickyUnread((prev) => {
       let next = prev
       for (const t of tasks) {
-        if (isUnread(t) && !prev.has(t.id)) {
+        const key = taskKeyOf(t)
+        if (isUnread(t) && !prev.has(key)) {
           if (next === prev) next = new Set(prev)
-          next.add(t.id)
+          next.add(key)
         }
       }
       return next
@@ -143,7 +145,7 @@ export function useSeenMarker(opts: {
   const dwellTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     const { state, action } = stepSeenDwell(dwellStateRef.current, {
-      taskId: current?.id ?? null,
+      taskId: current ? taskKeyOf(current) : null,
       activelyViewing,
       latest: currentLatest,
     })
@@ -164,7 +166,7 @@ export function useSeenMarker(opts: {
       void markSeen(state.taskId!)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activelyViewing, currentLatest, current?.id])
+  }, [activelyViewing, currentLatest, current?.id, current?.projectSlug])
 
   return { activelyViewing }
 }

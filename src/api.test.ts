@@ -8,7 +8,7 @@
 // fails to typecheck — the dots just stop appearing. Hence a test on the URL.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { loadShownTasks } from './api'
+import { loadShownTasks, loadTaskLinks } from './api'
 
 let seen: string[]
 
@@ -46,10 +46,8 @@ describe('loadShownTasks request composition', () => {
   })
 
   it('composes both params with one ? and one &', async () => {
-    // The link poll's archived half sends both on every ten-second cycle. A
-    // second `?` would leave the server reading neither param: it would answer
-    // with the full *active* list, so mentions of archived tasks would stop
-    // resolving to titles and the saving would silently disappear.
+    // Summary remains a supported metadata-only caller even though task-link
+    // resolution now uses the smaller installation-wide endpoint.
     await loadShownTasks(['p'], true, { summary: true })
     expect(seen).toEqual(['/api/p/tasks?archived=1&view=summary'])
   })
@@ -60,5 +58,47 @@ describe('loadShownTasks request composition', () => {
       '/api/a/tasks?archived=1&view=summary',
       '/api/b/tasks?archived=1&view=summary',
     ])
+  })
+})
+
+describe('loadTaskLinks conditional requests', () => {
+  it('reads the compact global projection and its validator', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            links: [
+              {
+                id: 'same',
+                projectSlug: 'other',
+                title: 'Elsewhere',
+                status: 'resting',
+                archived: false,
+              },
+            ],
+          }),
+          { status: 200, headers: { etag: '"epoch-1"' } },
+        ),
+      ),
+    )
+    const response = await loadTaskLinks()
+    expect(response).toMatchObject({
+      notModified: false,
+      etag: '"epoch-1"',
+      links: [{ projectSlug: 'other', id: 'same' }],
+    })
+  })
+
+  it('sends If-None-Match and accepts a bodyless 304', async () => {
+    const fetcher = vi.fn(async () => new Response(null, { status: 304 }))
+    vi.stubGlobal('fetch', fetcher)
+    expect(await loadTaskLinks('"epoch-1"')).toEqual({
+      notModified: true,
+      etag: '"epoch-1"',
+    })
+    expect(fetcher).toHaveBeenCalledWith('/api/task-links', {
+      headers: { 'if-none-match': '"epoch-1"' },
+    })
   })
 })

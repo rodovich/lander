@@ -1,5 +1,6 @@
 import { dateCategory } from './format'
 import { isUnread } from './taskMeta'
+import { taskKeyOf } from './taskRef'
 import type {
   DateCategory,
   TaskView,
@@ -90,7 +91,7 @@ export function buildTaskRows(
           return false
       }
     }
-    if (view === 'unread' && !isUnread(t) && !stickyUnread.has(t.id))
+    if (view === 'unread' && !isUnread(t) && !stickyUnread.has(taskKeyOf(t)))
       return false
     return query ? t.title.toLowerCase().includes(query) : true
   })
@@ -161,7 +162,7 @@ export function buildTaskRows(
       })
       rowCategory = category
     }
-    taskRows.push({ kind: 'task', key: task.id, task, index })
+    taskRows.push({ kind: 'task', key: taskKeyOf(task), task, index })
   })
 
   const statusCounts = (() => {

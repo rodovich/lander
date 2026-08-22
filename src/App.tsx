@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Composer } from './composer'
 import { Conversation } from './conversation'
 import { dataTransferHasFiles } from './fileDrop'
-import { lastPathComponent, taskIdFromPath, worktreeName } from './format'
+import { lastPathComponent, worktreeName } from './format'
 import { usePersistentState, useSessionState } from './hooks'
 import { HooksPanel } from './hooksPanel'
 import type { TaskAction } from './menus'
@@ -16,6 +16,14 @@ import { TelemetryPanel } from './telemetry'
 import { useSeenMarker, useViewingState } from './useSeenMarker'
 import { useTaskActions } from './useTaskActions'
 import { useTaskData } from './useTaskData'
+import {
+  taskHref,
+  taskKey,
+  taskKeyOf,
+  migrateLegacyTaskValues,
+  taskRefFromPath,
+  type TaskRef,
+} from './taskRef'
 import type { Task, TaskView, TaskWithProject, TimeFilter } from './types'
 
 export function App() {
@@ -34,6 +42,7 @@ export function App() {
     'any',
   )
   const [error, setError] = useState<string | null>(null)
+  const initialTaskRef = useRef<TaskRef | null>(taskRefFromPath())
   // The task data proper: the displayed list and its polls, per-flow telemetry,
   // projects and the session's project filter, and mention-link resolution.
   const {
@@ -47,7 +56,9 @@ export function App() {
     refresh,
     hasLoadedRef,
     resolveTaskLink,
-  } = useTaskData(view, setError)
+    taskLinks,
+    taskLinksLoaded,
+  } = useTaskData(view, setError, initialTaskRef.current?.projectSlug)
   // The open task, readable by the actions at call time. Assigned below, once
   // the effective selection is derived from the shaped list.
   const currentRef = useRef<TaskWithProject | null>(null)
@@ -68,8 +79,14 @@ export function App() {
   } = useTaskActions({ currentRef, tasksRef, setTasks, refresh, setError })
   // The user's explicit task pick. The effective selection (`selected`, below)
   // falls back to the first visible task when this one is filtered away.
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(
-    () => taskIdFromPath() || null,
+  const initialTaskKey = initialTaskRef.current
+    ? taskKey(initialTaskRef.current.projectSlug, initialTaskRef.current.id)
+    : null
+  const [selectedTaskKey, setSelectedTaskKey] = useState<string | null>(
+    initialTaskKey,
+  )
+  const [pendingRouteKey, setPendingRouteKey] = useState<string | null>(
+    initialTaskKey,
   )
   // The list search box, session-scoped alongside the other list filters.
   const [filter, setFilter] = useSessionState('lander:filter', '')
@@ -77,6 +94,16 @@ export function App() {
   // ordinary conversation view. Not persisted: it is a place you go, not a mode
   // the app should still be in tomorrow.
   const [hooksProject, setHooksProject] = useState<string | null>(null)
+
+  // Reply ownership stays above the conditionally-mounted composer. Keys are
+  // project-qualified, so equal task ids in different projects never share a
+  // draft, attachment set, or in-flight send flag.
+  const [replies, setReplies] = useSessionState<Record<string, string>>(
+    'lander:draft:replies',
+    {},
+  )
+  const [sendingBy, setSendingBy] = useState<Record<string, boolean>>({})
+  const [replyFiles, setReplyFiles] = useState<Record<string, File[]>>({})
 
   // The new-task form's agent/project picks. Session-scoped like the form's
   // draft message (which lives in the form): two tabs keep independent picks,
@@ -131,6 +158,19 @@ export function App() {
     () => new Map(projects.map((p) => [p.slug, p.path])),
     [projects],
   )
+  const taskLinkByKey = useMemo(
+    () => new Map(taskLinks.map((link) => [taskKey(link.projectSlug, link.id), link])),
+    [taskLinks],
+  )
+
+  // Drafts saved by an older client were keyed only by id. Migrate one only
+  // when the global projection proves that id belongs to exactly one project;
+  // an ambiguous legacy draft is left untouched rather than guessed onto the
+  // wrong task.
+  useEffect(() => {
+    if (!taskLinksLoaded) return
+    setReplies((prev) => migrateLegacyTaskValues(prev, taskLinks))
+  }, [taskLinks, taskLinksLoaded, setReplies])
   // Tag each task row with its project's leaf only when more than one project's
   // tasks can be intermixed; with a single project shown it's just noise.
   const showProjectLabels = shown.length > 1
@@ -157,10 +197,13 @@ export function App() {
   // The effective selection: the user's pick if it's still visible, otherwise
   // the first task in the list (e.g. after filtering hides the prior pick).
   const selected =
-    selectedTaskId && tasks.some((t) => t.id === selectedTaskId)
-      ? selectedTaskId
-      : orderedTasks[0]?.id ?? null
-  const current = tasks.find((t) => t.id === selected) ?? null
+    selectedTaskKey &&
+    (pendingRouteKey || tasks.some((t) => taskKeyOf(t) === selectedTaskKey))
+      ? selectedTaskKey
+      : orderedTasks[0]
+        ? taskKeyOf(orderedTasks[0])
+        : null
+  const current = tasks.find((t) => taskKeyOf(t) === selected) ?? null
   currentRef.current = current
 
   // Advance the open task's seen marker per the viewing rules (the 2s dwell,
@@ -180,10 +223,11 @@ export function App() {
   // Stable identities so the memoized panes receiving these don't re-render
   // on unrelated App state (the underlying setters and actions are stable).
   const selectTask = useCallback((id: string, projectSlug: string) => {
-    setSelectedTaskId(id)
+    setSelectedTaskKey(taskKey(projectSlug, id))
+    setPendingRouteKey(null)
     // Picking a task is how you leave the hooks panel; it shares the pane.
     setHooksProject(null)
-    window.history.pushState(null, '', `/${projectSlug}/${id}`)
+    window.history.pushState(null, '', taskHref(projectSlug, id))
   }, [])
 
   // The kebab-menu actions, shared by the list rows and the detail header.
@@ -195,33 +239,113 @@ export function App() {
       else if (action === 'land') void setStatus(task, 'landed')
       else if (action === 'copyId')
         void navigator.clipboard.writeText(task.id).catch(() => {})
-      else if (action === 'markUnread') void markUnread(task.id)
+      else if (action === 'markUnread') void markUnread(taskKeyOf(task))
       else if (action === 'archive') void archiveTask(task, true)
       else if (action === 'restore') void archiveTask(task, false)
     },
     [launchNow, setStatus, markUnread, archiveTask],
   )
 
+  const routeToTask = useCallback(
+    (ref: TaskRef, push: boolean) => {
+      const key = taskKey(ref.projectSlug, ref.id)
+      const link = taskLinkByKey.get(key)
+      setSelectedTaskKey(key)
+      setPendingRouteKey(key)
+      setHooksProject(null)
+      setShown((prev) =>
+        prev.includes(ref.projectSlug) ? prev : [ref.projectSlug],
+      )
+      if (link)
+        setView((prev) =>
+          link.archived ? 'archived' : prev === 'archived' ? 'inbox' : prev,
+        )
+      if (push)
+        window.history.pushState(null, '', taskHref(ref.projectSlug, ref.id))
+    },
+    [setShown, setView, taskLinkByKey],
+  )
+
+  // A route intent holds the URL steady while its project/pool reloads. Once
+  // the compact global index resolves it, select the right project and active
+  // vs archived pool; an unknown route falls back only after that index loaded.
+  useEffect(() => {
+    if (!pendingRouteKey) return
+    if (tasks.some((task) => taskKeyOf(task) === pendingRouteKey)) {
+      setPendingRouteKey(null)
+      return
+    }
+    const link = taskLinkByKey.get(pendingRouteKey)
+    if (!link) {
+      if (taskLinksLoaded) {
+        setPendingRouteKey(null)
+        setSelectedTaskKey((prev) => (prev === pendingRouteKey ? null : prev))
+      }
+      return
+    }
+    setShown((prev) =>
+      prev.includes(link.projectSlug) ? prev : [link.projectSlug],
+    )
+    setView((prev) =>
+      link.archived ? 'archived' : prev === 'archived' ? 'inbox' : prev,
+    )
+  }, [pendingRouteKey, setShown, setView, taskLinkByKey, taskLinksLoaded, tasks])
+
+  // Task links are ordinary anchors for copy/open-in-new-tab semantics. Plain
+  // clicks stay in-process so browser history, drafts, and file attachments all
+  // survive a cross-project hop.
+  useEffect(() => {
+    const onClick = (event: MouseEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      )
+        return
+      const target = event.target
+      if (!(target instanceof Element)) return
+      const anchor = target.closest<HTMLAnchorElement>('a[href]')
+      if (!anchor || (anchor.target && anchor.target !== '_self')) return
+      const url = new URL(anchor.href, window.location.href)
+      if (url.origin !== window.location.origin) return
+      const ref = taskRefFromPath(url.pathname)
+      if (!ref || !taskLinkByKey.has(taskKey(ref.projectSlug, ref.id))) return
+      event.preventDefault()
+      routeToTask(ref, true)
+    }
+    document.addEventListener('click', onClick)
+    return () => document.removeEventListener('click', onClick)
+  }, [routeToTask, taskLinkByKey])
+
   // Keep the selection in sync when navigating with the browser back/forward
   // buttons.
   useEffect(() => {
-    const onPop = () => setSelectedTaskId(taskIdFromPath() || null)
+    const onPop = () => {
+      const ref = taskRefFromPath()
+      if (ref) routeToTask(ref, false)
+      else {
+        setSelectedTaskKey(null)
+        setPendingRouteKey(null)
+      }
+    }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
-  }, [])
+  }, [routeToTask])
 
   // Mirror the effective selection into the URL as /<project>/<id>. Held
   // off until tasks have loaded so a deep-linked task isn't clobbered before
   // its project's tasks arrive. replaceState (not push) corrects the URL in
   // place without adding spurious history entries.
   useEffect(() => {
-    if (!hasLoadedRef.current) return
-    const cur = tasks.find((t) => t.id === selected)
-    const desired = cur ? `/${cur.projectSlug}/${cur.id}` : '/'
+    if (!hasLoadedRef.current || pendingRouteKey) return
+    const desired = current ? taskHref(current.projectSlug, current.id) : '/'
     if (window.location.pathname !== desired) {
       window.history.replaceState(null, '', desired)
     }
-  }, [selected, tasks])
+  }, [current, hasLoadedRef, pendingRouteKey])
 
   // Keep the page title in sync with the project-select label text.
   const labelParts = filterLabelParts(projects, shown, timeFilter, view)
@@ -311,7 +435,7 @@ export function App() {
               projectLabel={projectLabel}
               linkTask={resolveTaskLink}
               retitling={retitling}
-              answering={answeringBy[current.id] ?? false}
+              answering={answeringBy[taskKeyOf(current)] ?? false}
               onAtBottomChange={setAtBottom}
               onTaskAction={onTaskAction}
               saveTitle={saveTitle}
@@ -332,6 +456,12 @@ export function App() {
               height={composerHeight}
               setError={setError}
               refresh={refresh}
+              replies={replies}
+              setReplies={setReplies}
+              sendingBy={sendingBy}
+              setSendingBy={setSendingBy}
+              replyFiles={replyFiles}
+              setReplyFiles={setReplyFiles}
             />
           </>
         ) : (

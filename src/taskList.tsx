@@ -10,6 +10,7 @@ import { SectionActionsMenu, TaskActionsMenu } from './menus'
 import type { TaskAction } from './menus'
 import { tick } from './perf'
 import { isUnread } from './taskMeta'
+import { taskKeyOf } from './taskRef'
 import type { TaskListShape } from './taskRows'
 import type { DateCategory, TaskView, TaskWithProject } from './types'
 
@@ -100,7 +101,7 @@ export const TaskList = memo(function TaskList({
       anchor.getBoundingClientRect().top - list.getBoundingClientRect().top
     list.scrollTo({ top: list.scrollTop + delta, behavior: 'smooth' })
   }
-  const selectedIndex = orderedTasks.findIndex((t) => t.id === selected)
+  const selectedIndex = orderedTasks.findIndex((t) => taskKeyOf(t) === selected)
   const rovingIndex = selectedIndex >= 0 ? selectedIndex : 0
 
   function focusTaskAt(index: number) {
@@ -318,11 +319,11 @@ export const TaskList = memo(function TaskList({
               taskItemRefs.current[index] = el
             }}
             role="option"
-            aria-selected={task.id === selected}
+            aria-selected={taskKeyOf(task) === selected}
             tabIndex={index === rovingIndex ? 0 : -1}
             className={
               'task-item' +
-              (task.id === selected ? ' selected' : '') +
+              (taskKeyOf(task) === selected ? ' selected' : '') +
               ' ' +
               task.status +
               (task.archived ? ' archived' : '') +
