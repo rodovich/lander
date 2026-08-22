@@ -82,7 +82,9 @@ import {
   freshHookFire,
   type PendingHook,
   type HookAction,
+  type TaskActionInput,
 } from './tasks'
+import { actionText, recordTaskAction } from './task-actions'
 import { TASK_ID, taskKey } from './task-identity'
 import { TaskLinkIndex, etagMatches } from './task-links'
 import {
@@ -1385,6 +1387,27 @@ function isSelfPrincipal(principal: Principal, project: Project, id: string): bo
   return principal.kind === 'task' && principal.slug === project.slug && principal.id === id
 }
 
+async function recordPrincipalTaskAction(
+  principal: Principal,
+  targetProject: Project,
+  action: TaskActionInput,
+  at: string,
+): Promise<void> {
+  if (
+    principal.kind !== 'task' ||
+    isSelfPrincipal(principal, targetProject, action.target.id)
+  )
+    return
+  const actorProject = PROJECT_BY_SLUG.get(principal.slug)
+  if (!actorProject) return
+  await recordTaskAction(
+    path.join(actorProject.dataDir, `${principal.id}.json`),
+    action,
+    at,
+    mutateTask,
+  )
+}
+
 function hookBy(principal: Principal, projectSlug: string, taskId: string): string {
   if (principal.kind === 'ui') return 'human'
   if (principal.kind === 'task')
@@ -2508,6 +2531,39 @@ app.post('/api/:project/tasks', async (c) => {
     // when it finishes. A deferred task waits for the scheduler instead.
     if (creationClaimed) void driveClaimedTask(project, id)
 
+    // The target exists and any immediate drive has been claimed. Record the
+    // task principal's successful launch intent on the actor; a hook launch is
+    // accounted for on its target instead and must never be attributed from any
+    // task headers a hook body happened to send.
+    if (!cred) {
+      const trigger = deferred && waitingFor
+        ? {
+            kind: 'awaiting' as const,
+            tasks: waitingFor.map((waitId) => ({
+              id: waitId,
+              projectSlug: project.slug,
+            })),
+            ...(scheduledFor ? { scheduledFor } : {}),
+          }
+        : deferred && scheduledFor
+          ? { kind: 'scheduled' as const, scheduledFor }
+          : undefined
+      await recordPrincipalTaskAction(
+        principal,
+        project,
+        {
+          action: 'launch',
+          target: {
+            id,
+            projectSlug: project.slug,
+            ...(title ? { title } : {}),
+          },
+          ...(trigger ? { trigger } : {}),
+        },
+        now,
+      )
+    }
+
     // A hook reads `ok`, not a task projection: `act()` in the host gates
     // success on that field and advances its dedupe ordinal only when it sees
     // it, so answering with the record would report every accepted launch as a
@@ -2695,6 +2751,9 @@ app.patch('/api/:project/tasks/:id', async (c) => {
       task.status === 'riding' &&
       !!runId
 
+    let changedStatusAt: string | undefined
+    let changedStatusTitle: string | undefined
+
     // Route the write through mutateTask — a fresh read immediately before the
     // atomic rename — so it can't clobber the streaming reducer's concurrent
     // writes. The same reason `rest` does, and load-bearing now that a wedge
@@ -2726,11 +2785,36 @@ app.patch('/api/:project/tasks/:id', async (c) => {
         // Both fall out of the crossing itself — recordStatusTransition settles
         // open asks on every crossing but the one into `wedged`.
         recordStatusTransition(t, next, at, hookBy(principal, project.slug, id))
-        if (next !== t.status) t.updatedAt = at
+        if (next !== t.status) {
+          t.updatedAt = at
+          changedStatusAt = at
+          changedStatusTitle = t.title
+        }
         t.status = next
       }
       noteHumanContact(t, principal, new Date().toISOString())
     })
+
+    if (changedStatusAt && typeof body.status === 'string') {
+      const sameProjectActor =
+        principal.kind === 'task' && principal.slug === project.slug
+      await recordPrincipalTaskAction(
+        principal,
+        project,
+        {
+          action: 'status',
+          target: {
+            id,
+            projectSlug: project.slug,
+            ...(sameProjectActor && changedStatusTitle && changedStatusTitle !== '…'
+              ? { title: changedStatusTitle }
+              : {}),
+          },
+          toStatus: body.status,
+        },
+        changedStatusAt,
+      )
+    }
 
     if (interrupt && runId) await interruptRun(project, runId)
 
@@ -3433,6 +3517,10 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
         ? `From ${principal.id}:\n\n${rawMessage}`
         : rawMessage
 
+    // What an action record echoes back on the sender: their own words, not the
+    // backlink-prefixed copy above — the actor's timeline already knows who it is.
+    const sentText = actionText(rawMessage)
+
     // A `--date`/`--time` and/or `--await` send defers delivery; absent all,
     // deliver now.
     const sched = resolveSchedule(body)
@@ -3453,7 +3541,9 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
       // first). Don't touch status or queue now — the recipient may be resting
       // (or even landed) until then. mutateTask avoids clobbering a concurrent
       // run. Any attachments ride along until delivery (see applyDueMessages).
+      let targetTitle = task.title
       await mutateTask(file, (t) => {
+        targetTitle = t.title
         ;(t.scheduledMessages ??= []).push({
           text: message,
           deliverAt,
@@ -3461,6 +3551,32 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
           ...(attachments ? { attachments } : {}),
         })
       })
+      const actionAt = new Date().toISOString()
+      const trigger = waitFor
+        ? {
+            kind: 'awaiting' as const,
+            tasks: waitFor.map((waitId) => ({
+              id: waitId,
+              projectSlug: project.slug,
+            })),
+            ...(deliverAt ? { scheduledFor: deliverAt } : {}),
+          }
+        : { kind: 'scheduled' as const, scheduledFor: deliverAt! }
+      await recordPrincipalTaskAction(
+        principal,
+        project,
+        {
+          action: 'message',
+          target: {
+            id,
+            projectSlug: project.slug,
+            ...(targetTitle && targetTitle !== '…' ? { title: targetTitle } : {}),
+          },
+          trigger,
+          ...(sentText ? { text: sentText } : {}),
+        },
+        actionAt,
+      )
       const updated = await readTask(project.dataDir, id)
       return c.json(publicTask(updated ?? task))
     }
@@ -3470,7 +3586,9 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
     // message can't clobber a run that's streaming into the same task — the
     // comment below notes a run may already be in flight.
     let claimed = false
+    let targetTitle = task.title
     await mutateTask(file, (t) => {
+      targetTitle = t.title
       // Sending revives a wedged or landed (terminal) task — record the
       // "un-wedged"/"un-landed" transition a hair before the message's own
       // timestamp so the timeline shows it ahead of the message that caused it.
@@ -3523,6 +3641,21 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
     // If a run is already in flight it will drain this message when it
     // finishes; otherwise start a drainer to resume the session now.
     if (claimed) void driveClaimedTask(project, id)
+
+    await recordPrincipalTaskAction(
+      principal,
+      project,
+      {
+        action: 'message',
+        target: {
+          id,
+          projectSlug: project.slug,
+          ...(targetTitle && targetTitle !== '…' ? { title: targetTitle } : {}),
+        },
+        ...(sentText ? { text: sentText } : {}),
+      },
+      now,
+    )
 
     const updated = await readTask(project.dataDir, id)
     return c.json(publicTask(updated ?? task))

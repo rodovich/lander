@@ -13,6 +13,7 @@ import {
 } from './daemon'
 import { normalizeProjectPath, projectSlug } from './projects'
 import { clearHookRunState, mintHookCredential } from './hook-runs'
+import { MAX_ACTION_TEXT } from './task-actions'
 import type { RevivedMarker } from './protocol'
 
 const UI_TOKEN = 'test-ui-token'
@@ -20,10 +21,14 @@ const AT = '2026-01-01T00:00:00.000Z'
 
 let app: (typeof import('./index'))['app']
 let projectDir: string
+let secondProjectDir: string
 let dataDirRoot: string
 let dataRoot: string
+let secondDataRoot: string
 let tasksDir: string
+let secondTasksDir: string
 let slug: string
+let secondSlug: string
 let originalEnv: NodeJS.ProcessEnv
 
 async function post(pathname: string, body: unknown): Promise<Response> {
@@ -37,9 +42,13 @@ async function post(pathname: string, body: unknown): Promise<Response> {
   })
 }
 
-async function readTaskField(id: string, field: string): Promise<unknown> {
+async function readTaskField(
+  id: string,
+  field: string,
+  taskDirectory = tasksDir,
+): Promise<unknown> {
   const raw = JSON.parse(
-    await readFile(path.join(tasksDir, `${id}.json`), 'utf8'),
+    await readFile(path.join(taskDirectory, `${id}.json`), 'utf8'),
   )
   return raw[field]
 }
@@ -49,8 +58,12 @@ async function readTaskField(id: string, field: string): Promise<unknown> {
 // by failing), and each stage of that rewrites the file. Two identical reads in
 // a row is the settle; the content is returned so a caller can amend it without
 // re-reading.
-async function settled(id: string, ms = 2000): Promise<string> {
-  const file = path.join(tasksDir, `${id}.json`)
+async function settled(
+  id: string,
+  ms = 2000,
+  taskDirectory = tasksDir,
+): Promise<string> {
+  const file = path.join(taskDirectory, `${id}.json`)
   const start = Date.now()
   let last = ''
   while (Date.now() - start < ms) {
@@ -62,8 +75,11 @@ async function settled(id: string, ms = 2000): Promise<string> {
   return last
 }
 
-async function createTask(title: string): Promise<{ id: string; agent: string }> {
-  const res = await post(`/api/${slug}/tasks`, { title })
+async function createTask(
+  title: string,
+  projectSlug = slug,
+): Promise<{ id: string; agent: string }> {
+  const res = await post(`/api/${projectSlug}/tasks`, { title })
   expect(res.status).toBe(201)
   return (await res.json()) as { id: string; agent: string }
 }
@@ -71,18 +87,27 @@ async function createTask(title: string): Promise<{ id: string; agent: string }>
 beforeAll(async () => {
   originalEnv = { ...process.env }
   projectDir = await mkdtemp(path.join(tmpdir(), 'lander-server-project-'))
+  secondProjectDir = await mkdtemp(
+    path.join(tmpdir(), 'lander-server-second-project-'),
+  )
   slug = projectSlug(projectDir)
+  secondSlug = projectSlug(secondProjectDir)
   // Point the server's data root at a temp dir rather than letting it default
   // to ./data in the checkout: the suite creates, lands and deletes tasks, and
   // a run that dies before afterAll would otherwise strand a project dir inside
   // the developer's live data — as one interrupted run in fact did.
   dataDirRoot = await mkdtemp(path.join(tmpdir(), 'lander-server-data-'))
   dataRoot = path.join(dataDirRoot, normalizeProjectPath(projectDir))
+  secondDataRoot = path.join(
+    dataDirRoot,
+    normalizeProjectPath(secondProjectDir),
+  )
   tasksDir = path.join(dataRoot, 'tasks')
+  secondTasksDir = path.join(secondDataRoot, 'tasks')
 
   process.env.NODE_ENV = 'test'
   process.env.LANDER_DATA_ROOT = dataDirRoot
-  process.env.PROJECT_DIRS = projectDir
+  process.env.PROJECT_DIRS = `${projectDir}\n${secondProjectDir}`
   process.env.LANDER_UI_TOKEN = UI_TOKEN
   process.env.LANDER_AGENT = 'codex'
 
@@ -91,6 +116,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await rm(projectDir, { recursive: true, force: true })
+  await rm(secondProjectDir, { recursive: true, force: true })
   await rm(dataDirRoot, { recursive: true, force: true })
   process.env = originalEnv
 })
@@ -1659,6 +1685,383 @@ describe('server task provider behavior', () => {
     expect(await res.json()).toEqual({
       error: 'no daemon connected for this project',
     })
+  })
+})
+
+describe('acting task coordination history', () => {
+  type Raw = Record<string, unknown>
+  type Action = Raw & {
+    action: 'launch' | 'message' | 'status'
+    target: { id: string; projectSlug: string; title?: string }
+    trigger?:
+      | { kind: 'scheduled'; scheduledFor: string }
+      | {
+          kind: 'awaiting'
+          tasks: { id: string; projectSlug: string; title?: string }[]
+          scheduledFor?: string
+        }
+    toStatus?: string
+    text?: string
+  }
+
+  const rawTask = async (
+    id: string,
+    taskDirectory = tasksDir,
+  ): Promise<Raw> =>
+    JSON.parse(await readFile(path.join(taskDirectory, `${id}.json`), 'utf8'))
+
+  const actions = async (
+    id: string,
+    taskDirectory = tasksDir,
+  ): Promise<Action[]> => {
+    const raw = await rawTask(id, taskDirectory)
+    return ((raw.items as Raw[]) ?? []).filter(
+      (item): item is Action => item.kind === 'task-action',
+    )
+  }
+
+  const asTask = async (
+    actorId: string,
+    pathname: string,
+    method: 'POST' | 'PATCH',
+    body: unknown,
+  ): Promise<Response> => {
+    const actor = await rawTask(actorId)
+    return app.request(pathname, {
+      method,
+      headers: {
+        'content-type': 'application/json',
+        'x-lander-task': actorId,
+        'x-lander-project': slug,
+        'x-lander-token': String(actor.token),
+      },
+      body: JSON.stringify(body),
+    })
+  }
+
+  const launchAs = (
+    actorId: string,
+    project: string,
+    body: unknown,
+  ): Promise<Response> =>
+    asTask(actorId, `/api/${project}/tasks`, 'POST', body)
+
+  it('records immediate, scheduled, and awaiting launches exactly once', async () => {
+    const actor = await createTask('Launch action actor')
+    const waiter = await createTask('Launch action condition')
+    const before = await rawTask(actor.id)
+
+    const immediate = await launchAs(actor.id, slug, {
+      title: 'Immediate child',
+    })
+    const scheduled = await launchAs(actor.id, slug, {
+      title: 'Scheduled child',
+      message: 'Acknowledge and land.',
+      time: 60,
+    })
+    const awaiting = await launchAs(actor.id, slug, {
+      title: 'Awaiting child',
+      message: 'Acknowledge and land.',
+      await: [waiter.id],
+    })
+    const titleOnly = await launchAs(actor.id, slug, {
+      title: 'Title-only child',
+      time: 60,
+    })
+
+    expect([
+      immediate.status,
+      scheduled.status,
+      awaiting.status,
+      titleOnly.status,
+    ]).toEqual([201, 201, 201, 201])
+
+    const rows = await actions(actor.id)
+    expect(rows).toHaveLength(4)
+    expect(rows[0]).toMatchObject({
+      action: 'launch',
+      target: {
+        id: ((await immediate.json()) as { id: string }).id,
+        projectSlug: slug,
+        title: 'Immediate child',
+      },
+    })
+    expect(rows[0].trigger).toBeUndefined()
+    expect(rows[1]).toMatchObject({
+      action: 'launch',
+      target: { projectSlug: slug, title: 'Scheduled child' },
+      trigger: { kind: 'scheduled' },
+    })
+    expect(rows[2]).toMatchObject({
+      action: 'launch',
+      target: { projectSlug: slug, title: 'Awaiting child' },
+      trigger: {
+        kind: 'awaiting',
+        tasks: [{ id: waiter.id, projectSlug: slug }],
+      },
+    })
+    expect(rows[2].trigger).not.toHaveProperty('tasks.0.title')
+    expect(rows[3]).toMatchObject({
+      action: 'launch',
+      target: { projectSlug: slug, title: 'Title-only child' },
+    })
+    expect(rows[3].trigger).toBeUndefined()
+    expect((await rawTask(actor.id)).updatedAt).toBe(before.updatedAt)
+  })
+
+  it('records both deferred message forms, echoing what the sender wrote', async () => {
+    const actor = await createTask('Message action actor')
+    const immediate = await createTask('Immediate recipient')
+    const scheduled = await createTask('Scheduled recipient')
+    const awaiting = await createTask('Awaiting recipient')
+    const waiter = await createTask('Message action condition')
+    const before = await rawTask(actor.id)
+
+    expect(
+      (
+        await asTask(
+          actor.id,
+          `/api/${slug}/tasks/${immediate.id}/messages`,
+          'POST',
+          { message: 'Immediate secret body' },
+        )
+      ).status,
+    ).toBe(200)
+    expect(
+      (
+        await asTask(
+          actor.id,
+          `/api/${slug}/tasks/${scheduled.id}/messages`,
+          'POST',
+          { message: 'Scheduled secret body', time: 60 },
+        )
+      ).status,
+    ).toBe(200)
+    expect(
+      (
+        await asTask(
+          actor.id,
+          `/api/${slug}/tasks/${awaiting.id}/messages`,
+          'POST',
+          { message: 'Awaiting secret body', await: [waiter.id] },
+        )
+      ).status,
+    ).toBe(200)
+
+    const rows = await actions(actor.id)
+    expect(rows).toHaveLength(3)
+    expect(rows[0]).toMatchObject({
+      action: 'message',
+      target: {
+        id: immediate.id,
+        projectSlug: slug,
+        title: 'Immediate recipient',
+      },
+      text: 'Immediate secret body',
+    })
+    expect(rows[0].trigger).toBeUndefined()
+    expect(rows[1]).toMatchObject({
+      action: 'message',
+      target: { id: scheduled.id, projectSlug: slug },
+      trigger: { kind: 'scheduled' },
+      text: 'Scheduled secret body',
+    })
+    expect(rows[2]).toMatchObject({
+      action: 'message',
+      target: { id: awaiting.id, projectSlug: slug },
+      trigger: {
+        kind: 'awaiting',
+        tasks: [{ id: waiter.id, projectSlug: slug }],
+      },
+      text: 'Awaiting secret body',
+    })
+    expect((await rawTask(actor.id)).updatedAt).toBe(before.updatedAt)
+  })
+
+  it('echoes the sender’s own words, clamped, not the delivered copy', async () => {
+    const actor = await createTask('Message echo actor')
+    const recipient = await createTask('Message echo recipient')
+
+    const long = 'x'.repeat(MAX_ACTION_TEXT + 500)
+    expect(
+      (
+        await asTask(
+          actor.id,
+          `/api/${slug}/tasks/${recipient.id}/messages`,
+          'POST',
+          { message: `  ${long}  ` },
+        )
+      ).status,
+    ).toBe(200)
+
+    const [row] = await actions(actor.id)
+    // The recipient is told who sent it; the sender's own record is not, so the
+    // echo is the words they typed — trimmed, and clamped with an ellipsis.
+    expect(row.text).toBe('x'.repeat(MAX_ACTION_TEXT) + '\n…')
+    expect(row.text).not.toContain(`From ${actor.id}:`)
+    const delivered = ((await rawTask(recipient.id)).items as Raw[]).at(-1) as {
+      text: string
+    }
+    expect(delivered.text.startsWith(`From ${actor.id}:`)).toBe(true)
+  })
+
+  it('uses project-qualified identity and minimizes cross-project snapshots', async () => {
+    const actor = await createTask('Cross-project action actor')
+    const waiter = await createTask('Remote condition title', secondSlug)
+
+    const launched = await launchAs(actor.id, secondSlug, {
+      title: 'Explicit remote title',
+      message: 'Acknowledge and land.',
+      await: [waiter.id],
+    })
+    expect(launched.status).toBe(201)
+
+    // The same id in another project is not self. A task principal is the pair
+    // (project slug, id), so this remote status change must still be recorded.
+    await mkdir(secondTasksDir, { recursive: true })
+    await writeFile(
+      path.join(secondTasksDir, `${actor.id}.json`),
+      JSON.stringify({
+        id: actor.id,
+        title: 'Remote same-id title',
+        status: 'wedged',
+        createdAt: AT,
+        updatedAt: AT,
+        allowEdits: false,
+        token: 'remote-same-id-token',
+        shape: 2,
+        items: [],
+        rides: [],
+      }),
+    )
+    const changed = await asTask(
+      actor.id,
+      `/api/${secondSlug}/tasks/${actor.id}`,
+      'PATCH',
+      { status: 'riding' },
+    )
+    expect(changed.status).toBe(200)
+
+    const forbiddenSend = await asTask(
+      actor.id,
+      `/api/${secondSlug}/tasks/${waiter.id}/messages`,
+      'POST',
+      { message: 'not permitted', time: 60 },
+    )
+    expect(forbiddenSend.status).toBe(403)
+
+    const rows = await actions(actor.id)
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toMatchObject({
+      action: 'launch',
+      target: { projectSlug: secondSlug, title: 'Explicit remote title' },
+      trigger: {
+        kind: 'awaiting',
+        tasks: [{ id: waiter.id, projectSlug: secondSlug }],
+      },
+    })
+    expect(rows[0].trigger).not.toHaveProperty('tasks.0.title')
+    expect(rows[1]).toMatchObject({
+      action: 'status',
+      target: { id: actor.id, projectSlug: secondSlug },
+      toStatus: 'riding',
+    })
+    expect(rows[1].target.title).toBeUndefined()
+  })
+
+  it('omits self, anonymous, failed, rejected, and no-op actions', async () => {
+    const actor = await createTask('Excluded action actor')
+    const unrelated = await createTask('Unrelated status target')
+
+    const childResponse = await launchAs(actor.id, slug, {
+      title: 'Landable child',
+    })
+    const child = (await childResponse.json()) as { id: string }
+    expect(
+      (
+        await asTask(
+          actor.id,
+          `/api/${slug}/tasks/${child.id}`,
+          'PATCH',
+          { status: 'landed' },
+        )
+      ).status,
+    ).toBe(200)
+    const afterSuccess = await actions(actor.id)
+    expect(afterSuccess).toHaveLength(2)
+    expect(afterSuccess[1]).toMatchObject({
+      action: 'status',
+      target: { id: child.id, projectSlug: slug, title: 'Landable child' },
+      toStatus: 'landed',
+    })
+
+    // Repeating the same stored status is a no-op; messaging and status changes
+    // to the actor itself are successful target writes, but not outbound acts.
+    expect(
+      (
+        await asTask(
+          actor.id,
+          `/api/${slug}/tasks/${child.id}`,
+          'PATCH',
+          { status: 'landed' },
+        )
+      ).status,
+    ).toBe(200)
+    expect(
+      (
+        await asTask(
+          actor.id,
+          `/api/${slug}/tasks/${actor.id}/messages`,
+          'POST',
+          { message: 'self note', time: 60 },
+        )
+      ).status,
+    ).toBe(200)
+    expect(
+      (
+        await asTask(
+          actor.id,
+          `/api/${slug}/tasks/${actor.id}`,
+          'PATCH',
+          { status: 'riding' },
+        )
+      ).status,
+    ).toBe(200)
+
+    // A non-child land, a missing target, and an invalid launch all fail before
+    // attribution. An anonymous deferred message has no actor to receive a row.
+    expect(
+      (
+        await asTask(
+          actor.id,
+          `/api/${slug}/tasks/${unrelated.id}`,
+          'PATCH',
+          { status: 'landed' },
+        )
+      ).status,
+    ).toBe(403)
+    expect(
+      (
+        await asTask(
+          actor.id,
+          `/api/${slug}/tasks/no-such-task/messages`,
+          'POST',
+          { message: 'missing' },
+        )
+      ).status,
+    ).toBe(404)
+    expect((await launchAs(actor.id, slug, {})).status).toBe(400)
+    expect(
+      (
+        await app.request(`/api/${slug}/tasks/${unrelated.id}/messages`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ message: 'anonymous', time: 60 }),
+        })
+      ).status,
+    ).toBe(200)
+
+    expect(await actions(actor.id)).toEqual(afterSuccess)
   })
 })
 
