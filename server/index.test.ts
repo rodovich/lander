@@ -970,6 +970,27 @@ describe('the launch', () => {
   const created = async (id: string): Promise<Record<string, any>> =>
     JSON.parse(await readFile(path.join(tasksDir, `${id}.json`), 'utf8'))
 
+  // "Did this request launch a task" asked as a set difference over the task
+  // directory, filtered to hook-launched records.
+  //
+  // NOT a count of the directory. This suite shares `tasksDir` with every other
+  // test in the file, so an unrelated create landing between the two reads made
+  // a count-based assertion fail about one run in ten — a flake that says
+  // nothing about the launch route. The set difference also states the property
+  // the test is for, which a count only stood in for.
+  const taskFiles = async (): Promise<Set<string>> => new Set(await readdir(tasksDir))
+  const hookLaunchesSince = async (before: Set<string>): Promise<string[]> => {
+    const out: string[] = []
+    for (const f of (await readdir(tasksDir)).filter((f) => !before.has(f))) {
+      const t = JSON.parse(await readFile(path.join(tasksDir, f), 'utf8')) as {
+        id: string
+        hookOrigin?: unknown
+      }
+      if (t.hookOrigin) out.push(t.id)
+    }
+    return out
+  }
+
   it('creates a task carrying its origin, the backlink, and the grants asked for', async () => {
     await seed()
     const res = await launch(cred().token, { allowEdits: true })
@@ -1060,13 +1081,13 @@ describe('the launch', () => {
   it('dedupes a retry and answers with the task the first attempt created', async () => {
     await seed()
     const first = (await (await launch(cred().token)).json()) as { id: string }
-    const before = (await readdir(tasksDir)).length
+    const before = await taskFiles()
 
     // A retry composes a different message — a body is not required to be
     // deterministic, which is why the key is platform-owned rather than a hash.
     const again = await launch(cred().token, { message: 'review this (again)' })
     expect(await again.json()).toEqual({ ok: true, deduped: true, id: first.id })
-    expect((await readdir(tasksDir)).length).toBe(before)
+    expect(await hookLaunchesSince(before)).toEqual([])
     expect((await raw()).hookActions).toHaveLength(1)
   })
 
@@ -1092,11 +1113,11 @@ describe('the launch', () => {
 
   it('answers an unknown token rather than falling through to an anonymous create', async () => {
     await seed()
-    const before = (await readdir(tasksDir)).length
+    const before = await taskFiles()
     const res = await launch('not-a-real-token')
     expect(res.status).toBe(401)
     expect(await res.json()).toMatchObject({ reason: 'credential-unknown' })
-    expect((await readdir(tasksDir)).length).toBe(before)
+    expect(await hookLaunchesSince(before)).toEqual([])
   })
 
   // The exemption has to cover the chain, not just its head: a review task that
