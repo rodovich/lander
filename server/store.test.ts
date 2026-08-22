@@ -10,7 +10,14 @@ import {
 } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { readTasks, readTask, writeTask, mutateTask } from './store'
+import {
+  readTasks,
+  readTask,
+  writeTask,
+  mutateTask,
+  observeWrites,
+  withMutationLock,
+} from './store'
 
 type Rec = {
   id: string
@@ -173,6 +180,11 @@ describe('readTask', () => {
     await writeFile(file('broken'), '{ not json')
     expect(await readTask<Rec>(dir, 'broken')).toBeNull()
   })
+
+  it('rejects a filename/body identity mismatch', async () => {
+    await writeFile(file('wanted'), JSON.stringify(rec({ id: 'other' })))
+    expect(await readTask<Rec>(dir, 'wanted')).toBeNull()
+  })
 })
 
 describe('writeTask', () => {
@@ -204,6 +216,21 @@ describe('writeTask', () => {
     const tasks = await readTasks<Rec>(dir)
     expect(tasks.map((t) => t.id).sort()).toEqual(['one', 'three', 'two'])
     expect((await readdir(dir)).some((e) => e.endsWith('.tmp'))).toBe(false)
+  })
+
+  it('notifies observers only after the committed file is readable', async () => {
+    let observed: Rec | undefined
+    const stop = observeWrites((written, value) => {
+      if (written === file('observed')) observed = value as Rec
+    })
+    try {
+      const value = rec({ id: 'observed', title: 'ready' })
+      await writeTask(file('observed'), value)
+      expect(observed).toEqual(value)
+      expect(await readTask<Rec>(dir, 'observed')).toEqual(value)
+    } finally {
+      stop()
+    }
   })
 })
 
@@ -278,5 +305,27 @@ describe('mutateTask', () => {
     await expect(mutateTask<Rec>(file('bad'), () => {})).rejects.toThrow()
     // The bad file is left untouched (no partial write).
     expect(await readFile(file('bad'), 'utf8')).toBe('not json')
+  })
+
+
+  it('serializes different files that share a logical key', async () => {
+    const order: string[] = []
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const first = withMutationLock('project/task', async () => {
+      order.push('first-start')
+      await held
+      order.push('first-end')
+    })
+    const second = withMutationLock('project/task', async () => {
+      order.push('second')
+    })
+    await Promise.resolve()
+    expect(order).toEqual(['first-start'])
+    release()
+    await Promise.all([first, second])
+    expect(order).toEqual(['first-start', 'first-end', 'second'])
   })
 })

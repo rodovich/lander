@@ -34,10 +34,12 @@ import type {
   TelemetryItem,
 } from './protocol'
 import {
-  readTasks as readTasksStore,
+  readTaskEntries,
   readTask as readTaskStore,
   writeTask as writeTaskStore,
   mutateTask as mutateTaskStore,
+  observeWrites,
+  withMutationLock,
 } from './store'
 import { parseProjects, type Project } from './projects'
 import {
@@ -81,6 +83,8 @@ import {
   type PendingHook,
   type HookAction,
 } from './tasks'
+import { TASK_ID, taskKey } from './task-identity'
+import { TaskLinkIndex, etagMatches } from './task-links'
 import {
   saveAttachment,
   readAttachmentMeta,
@@ -193,8 +197,6 @@ function newTaskId(): string {
 // await list) before it's used to build a filesystem path. Matches both the
 // nanoid alphabet above and the uuids that legacy tasks are still keyed by; the
 // length bound and the closed character class (no `/` or `.`) keep it path-safe.
-const TASK_ID = /^[A-Za-z0-9_-]{1,64}$/
-
 type Task = {
   // The task's own id (a short nanoid; legacy tasks carry the uuid they were
   // keyed by — backfilled from the filename, see backfillIds). Always equals the
@@ -254,6 +256,7 @@ type Task = {
   // wind down only the tasks it launched, not arbitrary ones. Absent on tasks
   // saved before this field existed (treated as "no known spawner").
   spawnedBy?: string
+  spawnedByProject?: string
   // The hook that caused this task to exist, and the fire it acted on. Carried
   // ALONGSIDE spawnedBy rather than instead of it: they answer different
   // questions, and a hook-launched task has no spawning task at all — which is
@@ -262,7 +265,13 @@ type Task = {
   // Its job is the exemption: dispatch skips a hook whose path matches, so the
   // work a hook caused never wakes that hook again. Inherited by anything this
   // task spawns, so the whole chain is exempt rather than only its head.
-  hookOrigin?: { path: string; name: string; fireId: string; target: string }
+  hookOrigin?: {
+    path: string
+    name: string
+    fireId: string
+    target: string
+    projectSlug?: string
+  }
   // Per-task secret minted at creation and injected into the agent's process as
   // LANDER_TOKEN. The `lander` CLI sends it back as the X-Lander-Token header so
   // the server can authenticate which task made a request — used to cap the
@@ -440,11 +449,52 @@ type Task = {
 
 // Bind the generic task store (server/store.ts) to the concrete Task type, so
 // the rest of the server keeps the same typed call sites.
-const readTasks = (dataDir: string) => readTasksStore<Task>(dataDir)
+const readTasks = async (dataDir: string) =>
+  (await readTaskEntries<Task>(dataDir))
+    .filter(({ id, record }) => TASK_ID.test(id) && (record.id === undefined || record.id === id))
+    .map(({ id, record }) => ({ ...record, id }))
 const readTask = (dataDir: string, id: string) => readTaskStore<Task>(dataDir, id)
 const writeTask = (file: string, task: Task) => writeTaskStore(file, task)
-const mutateTask = (file: string, fn: (task: Task) => void) =>
-  mutateTaskStore(file, fn)
+const taskLocation = (file: string) => {
+  const dir = path.dirname(file)
+  const project = PROJECTS.find((p) => dir === p.dataDir || dir === p.archiveDir)
+  return project ? { project, id: path.basename(file, '.json') } : null
+}
+const mutateTask = (
+  file: string,
+  fn: (task: Task) => void,
+  afterCommit?: (task: Task) => void,
+) => {
+  const loc = taskLocation(file)
+  return mutateTaskStore(file, fn, {
+    ...(loc ? { key: taskKey(loc.project.slug, loc.id) } : {}),
+    ...(afterCommit ? { afterCommit } : {}),
+  })
+}
+
+async function mutateTaskInPools(
+  project: Project,
+  id: string,
+  fn: (task: Task) => void,
+): Promise<Task | null> {
+  return withMutationLock(taskKey(project.slug, id), async () => {
+    const active = await readTask(project.dataDir, id)
+    const archived = await readTask(project.archiveDir, id)
+    if (active && archived)
+      throw new Error(`task exists in both active and archive pools: ${id}`)
+    const task = active ?? archived
+    if (!task) return null
+    fn(task)
+    await writeTask(
+      path.join(active ? project.dataDir : project.archiveDir, `${id}.json`),
+      task,
+    )
+    return { ...task, ...(archived ? { archived: true } : {}) }
+  })
+}
+
+const taskLinkIndex = new TaskLinkIndex(PROJECTS)
+observeWrites((file, value) => taskLinkIndex.observeWrite(file, value))
 
 async function setTitle(
   dataDir: string,
@@ -884,11 +934,18 @@ async function reduceRunWs(
   }
 }
 
-// Tasks with an agent run (and its queue drain) in flight, keyed by task id.
+// Tasks with an agent run (and its queue drain) in flight, keyed by project+id.
 // Guards against spawning a second concurrent process on the same session: a
 // follow-up that arrives while this is set is appended to the task's `queued`
 // array and picked up by the active drainer instead.
 const running = new Set<string>()
+
+function claimTaskRun(project: Project, id: string): boolean {
+  const key = taskKey(project.slug, id)
+  if (running.has(key)) return false
+  running.add(key)
+  return true
+}
 
 // Drive a task's turns to completion: run the given opening turn, then drain
 // any messages queued onto the task while it ran — the whole queue joins into
@@ -897,9 +954,14 @@ const running = new Set<string>()
 // is empty, unless the agent set its own status mid-run (e.g. `lander wedge` to
 // ask for input, or `lander land`), which we must not clobber.
 async function driveTask(project: Project, id: string): Promise<void> {
-  if (running.has(id)) return
-  running.add(id)
+  if (!claimTaskRun(project, id)) return
+  return driveClaimedTask(project, id)
+}
+
+async function driveClaimedTask(project: Project, id: string): Promise<void> {
+  const key = taskKey(project.slug, id)
   const file = path.join(project.dataDir, `${id}.json`)
+  let continueDriving = false
   try {
     // Reattach first: if a previous turn's run is still tracked (its runner
     // outlived a server restart, or finished while we were down), finish
@@ -960,26 +1022,27 @@ async function driveTask(project: Project, id: string): Promise<void> {
       await runTurn(project, id, batch.join('\n\n'), runId, atts, revived)
     }
   } finally {
-    running.delete(id)
     // Under the status collapse there's no riding→resting demotion to do — a
     // closed ride *is* the demotion (publicTask serves `resting` when no ride is
     // open). We only tidy a stray open ride: if no run is tracked yet one is still
     // open (a run abandoned without a paired close), stamp it interrupted so it
     // doesn't linger as a live ride. A runId here belongs to a *newer* drainer
     // that re-rode after we left the running set, so leave its ride alone.
-    await mutateTask(file, (t) => {
-      if (!t.runId) closeRide(t, 'interrupted', new Date().toISOString())
-    }).catch(() => {})
+    await withMutationLock(key, async () => {
+      const task = await readTask(project.dataDir, id)
+      if (!task) {
+        running.delete(key)
+        return
+      }
+      if (!task.runId) closeRide(task, 'interrupted', new Date().toISOString())
+      continueDriving = !!task.queued?.length
+      if (!continueDriving) running.delete(key)
+      await writeTask(file, task)
+    }).catch(() => {
+      running.delete(key)
+    })
   }
-
-  // A follow-up can land after our final drain read but before we left the
-  // running set, with the sender seeing us as still active and so not starting
-  // its own drainer. Re-check once and pick it back up if so.
-  let leftover = false
-  await mutateTask(file, (t) => {
-    leftover = !!(t.queued && t.queued.length)
-  }).catch(() => {})
-  if (leftover) void driveTask(project, id)
+  if (continueDriving) void driveClaimedTask(project, id)
 }
 
 // Launch a deferred (scheduled) task now: clear its scheduledFor, record the
@@ -1000,11 +1063,12 @@ async function launchTask(
   const file = path.join(project.dataDir, `${id}.json`)
   let go = false
   let everRan = false
+  let claimed = false
   await mutateTask(file, (t) => {
     // Launch on either pending trigger (a scheduled time or an await condition);
     // the scheduler only calls us once one has fired. Clear both so the OR
     // fallback doesn't re-fire the task after it's running.
-    if ((!t.scheduledFor && !t.waitingFor) || running.has(id)) return
+    if ((!t.scheduledFor && !t.waitingFor) || running.has(taskKey(project.slug, id))) return
     // "Ever ran" = has driven at least one ride (established a session), so a
     // rested task gets the synthetic resume prompt while a deferred new task drives
     // its still-queued opening message instead.
@@ -1035,8 +1099,10 @@ async function launchTask(
       ;(t.queued ??= []).push(text)
     }
     go = true
+  }, () => {
+    if (go) claimed = claimTaskRun(project, id)
   }).catch(() => {})
-  if (go) void driveTask(project, id)
+  if (claimed) void driveClaimedTask(project, id)
   return go
 }
 
@@ -1068,6 +1134,7 @@ async function deliverScheduledMessages(
     ((m.waitFor?.length ?? 0) > 0 && m.waitFor!.every((w) => landed.get(w)))
 
   let drive = false
+  let claimed = false
   await mutateTask(file, (t) => {
     // Hold delivery while the recipient hasn't launched yet — it's itself
     // awaiting a future time or an await condition; the message waits for it.
@@ -1102,10 +1169,12 @@ async function deliverScheduledMessages(
     t.status = 'riding'
     t.updatedAt = at
     drive = true
+  }, () => {
+    if (drive) claimed = claimTaskRun(project, id)
   }).catch(() => {})
   // Mirror the /messages endpoint: a run already in flight drains the queue when
   // it finishes; otherwise start a drainer now.
-  if (drive && !running.has(id)) void driveTask(project, id)
+  if (claimed) void driveClaimedTask(project, id)
 }
 
 // Scan every project for scheduled tasks whose launch time has arrived and run
@@ -1216,7 +1285,7 @@ async function sweepOnce(): Promise<void> {
         void dispatchPendingHooks(project, id, { api })
       }
       // Then launch a deferred task whose trigger has fired.
-      if (running.has(id)) continue
+      if (running.has(taskKey(project.slug, id))) continue
       const timeDue =
         task.scheduledFor != null && Date.parse(task.scheduledFor) <= now
       const awaitDue =
@@ -1312,10 +1381,14 @@ async function resolvePrincipal(req: {
 // and a hook under `human/` must not fire for one. That is also why the browser
 // now sends its token on every mutating call, gated or not — without it a human
 // landing a task from the kebab arrives here as `anon`.
-function hookBy(principal: Principal, taskId: string): string {
+function isSelfPrincipal(principal: Principal, project: Project, id: string): boolean {
+  return principal.kind === 'task' && principal.slug === project.slug && principal.id === id
+}
+
+function hookBy(principal: Principal, projectSlug: string, taskId: string): string {
   if (principal.kind === 'ui') return 'human'
   if (principal.kind === 'task')
-    return principal.id === taskId ? 'agent' : 'task'
+    return principal.slug === projectSlug && principal.id === taskId ? 'agent' : 'task'
   return 'system'
 }
 
@@ -1348,6 +1421,19 @@ app.get('/api/telemetry', (c) =>
 app.get('/api/projects', (c) =>
   c.json(PROJECTS.map((p) => ({ path: p.path, slug: p.slug }))),
 )
+
+app.get('/api/task-links', async (c) => {
+  try {
+    const snapshot = await taskLinkIndex.snapshot()
+    c.header('ETag', snapshot.etag)
+    c.header('Cache-Control', 'no-cache')
+    if (etagMatches(c.req.header('if-none-match'), snapshot.etag))
+      return c.body(null, 304)
+    return c.json({ links: snapshot.links })
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : String(error) }, 500)
+  }
+})
 
 app.get('/api/:project/tasks', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
@@ -1395,14 +1481,15 @@ app.get('/api/:project/tasks/:id', async (c) => {
   if (!project) return c.json({ error: 'unknown project' }, 404)
   const id = c.req.param('id')
   if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
-  const task = await readTask(project.dataDir, id)
-  if (task) return c.json(publicTask(task))
-  // Fall back to the archive so `lander view` can read a task after it's been
-  // archived — the id resolves against both pools, so the view endpoint must too.
-  // Tagged `archived` (like the list's `?archived=1` rows) so the caller can mark it.
-  const archived = await readTask(project.archiveDir, id)
-  if (archived) return c.json(publicTask({ ...archived, archived: true }))
-  return c.json({ error: 'task not found' }, 404)
+  return withMutationLock(taskKey(project.slug, id), async () => {
+    const task = await readTask(project.dataDir, id)
+    if (task) return c.json(publicTask(task))
+    // Fall back to the archive under the same lock as pool moves, so restore
+    // cannot slip between the two probes and manufacture a false 404.
+    const archived = await readTask(project.archiveDir, id)
+    if (archived) return c.json(publicTask({ ...archived, archived: true }))
+    return c.json({ error: 'task not found' }, 404)
+  })
 })
 
 // The driver flows this project can launch a task with, as the new-task picker
@@ -1733,7 +1820,7 @@ app.post('/api/:project/tasks/:id/artifacts', async (c) => {
     const principal = await resolvePrincipal(c.req)
     if (
       principal.kind !== 'ui' &&
-      !(principal.kind === 'task' && principal.id === id)
+      !isSelfPrincipal(principal, project, id)
     )
       return c.json(
         { error: 'only the task itself may publish its artifacts' },
@@ -2281,7 +2368,7 @@ app.post('/api/:project/tasks', async (c) => {
       // later land what it launched (see the PATCH land gate). A UI-started task
       // has no spawner.
       ...(principal.kind === 'task'
-        ? { spawnedBy: principal.id }
+        ? { spawnedBy: principal.id, spawnedByProject: principal.slug }
         : {}),
       // The hook that caused this task, or the one inherited from the task that
       // spawned it — so the exemption covers a chain and not just its head. A
@@ -2294,6 +2381,7 @@ app.post('/api/:project/tasks', async (c) => {
               name: cred.name,
               fireId: cred.fireId,
               target: cred.target,
+              projectSlug: project.slug,
             },
           }
         : principal.kind === 'task' && principal.task.hookOrigin
@@ -2388,15 +2476,17 @@ app.post('/api/:project/tasks', async (c) => {
       if (deduped) return c.json({ ok: true, deduped: true, id: existingTaskId })
     }
 
+    let creationClaimed = false
     try {
       // Both, not just the write: a failing `mkdir` reaches this route's outer
       // catch exactly as a failing `writeFile` does, and leaves the same record
       // naming a task that was never created.
       await mkdir(project.dataDir, { recursive: true })
-      await writeFile(
-        path.join(project.dataDir, `${id}.json`),
-        JSON.stringify(task, null, 2),
-      )
+      await withMutationLock(taskKey(project.slug, id), async () => {
+        await writeTask(path.join(project.dataDir, `${id}.json`), task)
+        if (message.trim() && !deferred)
+          creationClaimed = claimTaskRun(project, id)
+      })
     } catch (e) {
       // The task was recorded and then not created. Undo the record, or every
       // retry of this fire is answered "already launched" with an id that
@@ -2416,7 +2506,7 @@ app.post('/api/:project/tasks', async (c) => {
 
     // Kick off the turn (driveTask hands it to the daemon); reply is appended
     // when it finishes. A deferred task waits for the scheduler instead.
-    if (message.trim() && !deferred) void driveTask(project, id)
+    if (creationClaimed) void driveClaimedTask(project, id)
 
     // A hook reads `ok`, not a task projection: `act()` in the host gates
     // success on that field and advances its dedupe ordinal only when it sees
@@ -2489,7 +2579,7 @@ async function landFromHook(
       // a runId, and neither is set in the window after /messages queues a
       // prompt and before driveTask opens the ride. Landing there would leave a
       // turn riding on a landed task, since the crossing never touches `queued`.
-      if (openRide(t) || t.runId || t.queued?.length || running.has(id))
+      if (openRide(t) || t.runId || t.queued?.length || running.has(taskKey(project.slug, id)))
         throw new HookRefusal('riding')
       // The wakeup the crossing would silently delete.
       if (t.scheduledFor || t.waitingFor?.length) throw new HookRefusal('scheduled')
@@ -2574,13 +2664,21 @@ app.patch('/api/:project/tasks/:id', async (c) => {
     // unrelated one. Self-land (a task landing itself, the no-id `lander land`)
     // and any UI-initiated land stay unrestricted. Other status changes keep
     // their existing openness — this gate is specifically the land-by-id path.
-    if (
-      body.status === 'landed' &&
-      principal.kind === 'task' &&
-      principal.id !== id &&
-      task.spawnedBy !== principal.id
-    )
-      return c.json({ error: 'a task may only land tasks it launched' }, 403)
+    if (body.status === 'landed' && principal.kind === 'task' && !isSelfPrincipal(principal, project, id)) {
+      let spawnedByPrincipal =
+        task.spawnedBy === principal.id && task.spawnedByProject === principal.slug
+      if (task.spawnedBy === principal.id && task.spawnedByProject === undefined) {
+        try {
+          const matches = await taskLinkIndex.linksForId(principal.id)
+          spawnedByPrincipal =
+            matches.length === 1 && matches[0].projectSlug === principal.slug
+        } catch {
+          spawnedByPrincipal = false
+        }
+      }
+      if (!spawnedByPrincipal)
+        return c.json({ error: 'a task may only land tasks it launched' }, 403)
+    }
 
     // Wedging or landing a riding task from anyone but the task's own CLI stops
     // its in-flight run: the run is being pulled out from under the agent — the
@@ -2589,8 +2687,7 @@ app.patch('/api/:project/tasks/:id', async (c) => {
     // The interrupt fires after the status write below; the run's reducer folds
     // in the partial reply and (applyDone only wedges a still-riding task on a
     // non-deliberate exit) leaves the new non-riding status as-is.
-    const selfInitiated =
-      principal.kind === 'task' && principal.id === id
+    const selfInitiated = isSelfPrincipal(principal, project, id)
     const runId = task.runId
     const interrupt =
       (body.status === 'wedged' || body.status === 'landed') &&
@@ -2628,7 +2725,7 @@ app.patch('/api/:project/tasks/:id', async (c) => {
         // A manual land/resume supersedes any open ask; a fresh wedge keeps it.
         // Both fall out of the crossing itself — recordStatusTransition settles
         // open asks on every crossing but the one into `wedged`.
-        recordStatusTransition(t, next, at, hookBy(principal, id))
+        recordStatusTransition(t, next, at, hookBy(principal, project.slug, id))
         if (next !== t.status) t.updatedAt = at
         t.status = next
       }
@@ -2655,7 +2752,7 @@ app.post('/api/:project/tasks/:id/launch', async (c) => {
     const id = c.req.param('id')
     if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
     const principal = await resolvePrincipal(c.req)
-    const launched = await launchTask(project, id, hookBy(principal, id))
+    const launched = await launchTask(project, id, hookBy(principal, project.slug, id))
     if (!launched)
       return c.json({ error: 'task is not scheduled' }, 409)
     // Pressing Launch is human contact, so it resets the hook action bound.
@@ -2748,7 +2845,7 @@ app.post('/api/:project/tasks/:id/rest', async (c) => {
     await mutateTask(file, (t) => {
       // Record leaving any notable status (wedged/landed); resting is a derived,
       // quiet presentation, so for the common riding→rest this is a no-op.
-      recordStatusTransition(t, 'riding', at, hookBy(principal, id))
+      recordStatusTransition(t, 'riding', at, hookBy(principal, project.slug, id))
       noteHumanContact(t, principal, at)
       // Replace any prior triggers so re-resting doesn't leave a stale one armed.
       if (scheduledFor) t.scheduledFor = scheduledFor
@@ -2820,7 +2917,7 @@ app.post('/api/:project/tasks/:id/relaunch', async (c) => {
     const principal = await resolvePrincipal(c.req)
     if (
       principal.kind !== 'ui' &&
-      !(principal.kind === 'task' && principal.id === id)
+      !isSelfPrincipal(principal, project, id)
     )
       return c.json({ error: 'only the task itself may relaunch its session' }, 403)
 
@@ -2894,19 +2991,22 @@ app.post('/api/:project/tasks/:id/relaunch', async (c) => {
 
     // Immediate (A): seal now and queue the message for the fresh session. A
     // repeat spec arms the first successor off this delivery.
+    let relaunchClaimed = false
     await mutateTask(file, (t) => {
-      applyRelaunch(t, rawMessage, at, hookBy(principal, id), repeat)
+      applyRelaunch(t, rawMessage, at, hookBy(principal, project.slug, id), repeat)
       noteHumanContact(t, principal, at)
       // Same as /messages: the crossing inside applyRelaunch covers a
       // wedged/landed task, and this covers the advisory ask on a task that was
       // riding all along, where there's no crossing to carry the rule.
       withdrawOpenAsks(t)
+    }, () => {
+      relaunchClaimed = claimTaskRun(project, id)
     })
-    // The normal path is a mid-turn call, where running.has(id) is already true:
+    // The normal path is a mid-turn call, where the pair-keyed running claim exists:
     // the in-flight drainer picks up the queued message and the sealed session
     // mints a fresh one. If nothing is running (e.g. relaunching a rested/landed
     // task), start a drainer now.
-    if (!running.has(id)) void driveTask(project, id)
+    if (relaunchClaimed) void driveClaimedTask(project, id)
 
     const updated = await readTask(project.dataDir, id)
     if (!updated) return c.json({ error: 'task not found' }, 404)
@@ -2943,7 +3043,7 @@ app.post('/api/:project/tasks/:id/cwd', async (c) => {
     const principal = await resolvePrincipal(c.req)
     if (
       principal.kind !== 'ui' &&
-      !(principal.kind === 'task' && principal.id === id)
+      !isSelfPrincipal(principal, project, id)
     )
       return c.json({ error: 'only the task itself may record its cwd' }, 403)
 
@@ -2996,7 +3096,7 @@ app.post('/api/:project/tasks/:id/worktree', async (c) => {
     const principal = await resolvePrincipal(c.req)
     if (
       principal.kind !== 'ui' &&
-      !(principal.kind === 'task' && principal.id === id)
+      !isSelfPrincipal(principal, project, id)
     )
       return c.json({ error: 'only the task itself may record its worktree' }, 403)
 
@@ -3030,7 +3130,7 @@ app.delete('/api/:project/tasks/:id/worktree', async (c) => {
     const principal = await resolvePrincipal(c.req)
     if (
       principal.kind !== 'ui' &&
-      !(principal.kind === 'task' && principal.id === id)
+      !isSelfPrincipal(principal, project, id)
     )
       return c.json({ error: 'only the task itself may clear its worktree' }, 403)
 
@@ -3063,30 +3163,50 @@ app.post('/api/:project/tasks/:id/archive', async (c) => {
     const archived = body.archived !== false // default: archive
     const fromDir = archived ? project.dataDir : project.archiveDir
     const toDir = archived ? project.archiveDir : project.dataDir
-    const task = await readTask(fromDir, id)
-    if (!task)
+    let task: Task | null = null
+    let missing = false
+    let conflict = false
+    let riding = false
+    await withMutationLock(taskKey(project.slug, id), async () => {
+      task = await readTask(fromDir, id)
+      if (!task) {
+        missing = true
+        return
+      }
+      await mkdir(toDir, { recursive: true })
+      if ((await readdir(toDir)).includes(`${id}.json`)) {
+        conflict = true
+        return
+      }
+      // Only a task with a *live* run can't be archived (the reducer must keep
+      // writing to it). Key on the run, not stored status — under the collapse an
+      // idle "resting" task stores `riding` too, and it must stay archivable.
+      // `running` closes the pre-runId window while the daemon connection waits.
+      if (
+        archived &&
+        (running.has(taskKey(project.slug, id)) ||
+          task.runId ||
+          openRide(task))
+      ) {
+        riding = true
+        return
+      }
+      await rename(
+        path.join(fromDir, `${id}.json`),
+        path.join(toDir, `${id}.json`),
+      )
+      taskLinkIndex.observeMove(project, id, task, archived)
+    })
+    if (missing)
       return c.json(
         { error: archived ? 'task not found' : 'archived task not found' },
         404,
       )
-    // Only a task with a *live* run can't be archived (the reducer must keep
-    // writing to it). Key on the run, not stored status — under the collapse an
-    // idle "resting" task stores `riding` too, and it must stay archivable.
-    //
-    // `running` is part of that test and not a belt-and-braces addition: a drive
-    // records its runId only after `awaitDaemonServing` returns, which is up to
-    // 30s of a task that is riding with nothing on the record to say so. Archived
-    // in that window, the turn goes on to write its run pointer to a path that has
-    // moved to archived/ — an ENOENT with no handler (deliberately: a pointer that
-    // failed to land must not dispatch a run nothing can reattach to), which takes
-    // the whole server down. The window is widest exactly when a user is most
-    // likely to give up and archive, because a daemon that is down is what holds
-    // the drive there.
-    if (archived && (running.has(id) || task.runId || openRide(task)))
+    if (conflict)
+      return c.json({ error: 'task already exists in destination pool' }, 409)
+    if (riding)
       return c.json({ error: 'cannot archive a task while it is riding' }, 409)
-    await mkdir(toDir, { recursive: true })
-    await rename(path.join(fromDir, `${id}.json`), path.join(toDir, `${id}.json`))
-    return c.json(publicTask({ ...task, archived }))
+    return c.json(publicTask({ ...task!, archived }))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
@@ -3182,6 +3302,7 @@ async function nudgeFromHook(
   const message = `From hook ${cred.name}:\n\n${rawMessage}`
 
   let deduped = false
+  let claimed = false
   try {
     await mutateTask(file, (t) => {
       // Every refusal BEFORE the bound, so a refused action never spends one of
@@ -3241,6 +3362,8 @@ async function nudgeFromHook(
       // a nudged landed task would ride while stored `landed`, be served
       // `landed`, and cross `unlanded` again on the next nudge.
       t.status = 'riding'
+    }, () => {
+      if (!deduped) claimed = claimTaskRun(project, id)
     })
   } catch (e) {
     // Only a refusal is an answer; anything else — a missing or corrupt task
@@ -3254,7 +3377,7 @@ async function nudgeFromHook(
     throw e
   }
 
-  if (!deduped && !running.has(id)) void driveTask(project, id)
+  if (claimed) void driveClaimedTask(project, id)
   return c.json({ ok: true, ...(deduped ? { deduped: true } : {}) })
 }
 
@@ -3266,12 +3389,8 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
     if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
     const file = path.join(project.dataDir, `${id}.json`)
 
-    let task: Task
-    try {
-      task = JSON.parse(await readFile(file, 'utf8')) as Task
-    } catch {
-      return c.json({ error: 'task not found' }, 404)
-    }
+    const task = await readTask(project.dataDir, id)
+    if (!task) return c.json({ error: 'task not found' }, 404)
 
     const body = await c.req.json<{
       message?: unknown
@@ -3350,6 +3469,7 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
     // Through mutateTask (fresh read under the per-file lock) so queueing the
     // message can't clobber a run that's streaming into the same task — the
     // comment below notes a run may already be in flight.
+    let claimed = false
     await mutateTask(file, (t) => {
       // Sending revives a wedged or landed (terminal) task — record the
       // "un-wedged"/"un-landed" transition a hair before the message's own
@@ -3358,7 +3478,7 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
         t,
         'riding',
         new Date(Date.parse(now) - 1).toISOString(),
-        hookBy(principal, id),
+        hookBy(principal, project.slug, id),
       )
       noteHumanContact(t, principal, now)
       // An out-of-band wake supersedes a *timer*: the task is riding now, so the
@@ -3396,13 +3516,16 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
       // `lander ask` left a question open on a task that never stopped riding,
       // and answering it by just typing instead is the documented way out.
       withdrawOpenAsks(t)
+    }, () => {
+      claimed = claimTaskRun(project, id)
     })
 
     // If a run is already in flight it will drain this message when it
     // finishes; otherwise start a drainer to resume the session now.
-    if (!running.has(id)) void driveTask(project, id)
+    if (claimed) void driveClaimedTask(project, id)
 
-    return c.json(publicTask(task))
+    const updated = await readTask(project.dataDir, id)
+    return c.json(publicTask(updated ?? task))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
@@ -3428,7 +3551,7 @@ app.post('/api/:project/tasks/:id/asks', async (c) => {
     const principal = await resolvePrincipal(c.req)
     if (
       principal.kind !== 'ui' &&
-      !(principal.kind === 'task' && principal.id === id)
+      !isSelfPrincipal(principal, project, id)
     )
       return c.json({ error: 'only the task itself may raise its asks' }, 403)
 
@@ -3469,7 +3592,7 @@ app.post('/api/:project/tasks/:id/asks', async (c) => {
       // `none` ask leaves the status untouched — the task rests, nothing in the
       // list — and only the create endpoint ever wedges, never un-wedges.
       if (blocking === 'task') {
-        recordStatusTransition(t, 'wedged', at, hookBy(principal, id))
+        recordStatusTransition(t, 'wedged', at, hookBy(principal, project.slug, id))
         t.status = 'wedged'
       }
       t.updatedAt = at
@@ -3523,6 +3646,7 @@ app.post('/api/:project/tasks/:id/asks/:askId/answer', async (c) => {
     const before = new Date(Date.parse(now) - 1).toISOString()
     let fail: { error: string; status: 404 | 409 | 400 } | undefined
     let defer = false
+    let claimed = false
     await mutateTask(file, (t) => {
       const res = answerAsk(t, askId, { optionId, text, at: now })
       if (!res.ok) {
@@ -3567,9 +3691,11 @@ app.post('/api/:project/tasks/:id/asks/:askId/answer', async (c) => {
         t.status = 'riding'
       }
       t.updatedAt = now
+    }, () => {
+      if (!fail && !defer) claimed = claimTaskRun(project, id)
     })
     if (fail) return c.json({ error: fail.error }, fail.status)
-    if (!defer && !running.has(id)) void driveTask(project, id)
+    if (claimed) void driveClaimedTask(project, id)
 
     const updated = await readTask(project.dataDir, id)
     return c.json(publicTask(updated ?? (await readTask(project.dataDir, id))!))
@@ -3670,27 +3796,11 @@ app.post('/api/:project/tasks/:id/seen', async (c) => {
     const at = typeof body.at === 'string' ? body.at : ''
     if (!at) return c.json({ error: 'at is required' }, 400)
 
-    // The task lives in tasks/ while active and in archived/ once archived; an
-    // archived row can still show an unseen dot, so look in both. Without the
-    // fallback the mark silently 404s for archived tasks: the dot clears
-    // optimistically in the UI, then the next poll restores the stale marker and
-    // it flickers back.
-    const file = (await readTask(project.dataDir, id))
-      ? path.join(project.dataDir, `${id}.json`)
-      : path.join(project.archiveDir, `${id}.json`)
-
-    // Read-modify-write under mutateTask so a concurrent streaming update (which
-    // rewrites the same file) can't clobber, or be clobbered by, this marker.
-    let updated: Task | null = null
-    try {
-      await mutateTask(file, (t) => {
+    const updated = await mutateTaskInPools(project, id, (t) => {
         if (!t.seenAt || at > t.seenAt) t.seenAt = at
-        updated = t
       })
-    } catch {
-      return c.json({ error: 'task not found' }, 404)
-    }
-    return c.json(publicTask(updated!))
+    if (!updated) return c.json({ error: 'task not found' }, 404)
+    return c.json(publicTask(updated))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
@@ -3708,24 +3818,11 @@ app.post('/api/:project/tasks/:id/unread', async (c) => {
     const id = c.req.param('id')
     if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
 
-    // Look in both tasks/ and archived/, mirroring /seen: an archived row can
-    // carry an unseen dot too, and either should be markable unread.
-    const file = (await readTask(project.dataDir, id))
-      ? path.join(project.dataDir, `${id}.json`)
-      : path.join(project.archiveDir, `${id}.json`)
-
-    // Read-modify-write under mutateTask so a concurrent streaming update can't
-    // clobber, or be clobbered by, this marker.
-    let updated: Task | null = null
-    try {
-      await mutateTask(file, (t) => {
+    const updated = await mutateTaskInPools(project, id, (t) => {
         t.seenAt = ''
-        updated = t
       })
-    } catch {
-      return c.json({ error: 'task not found' }, 404)
-    }
-    return c.json(publicTask(updated!))
+    if (!updated) return c.json({ error: 'task not found' }, 404)
+    return c.json(publicTask(updated))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
@@ -3955,6 +4052,15 @@ async function backfillIds(): Promise<void> {
 
 const port = Number(process.env.PORT ?? 6181)
 if (process.env.NODE_ENV !== 'test' && process.env.VITEST !== 'true') {
+  // Finish durable migrations and claim every recoverable active task before
+  // accepting archive or mutation requests. driveTask takes its in-memory claim
+  // synchronously before its first await, so recoverQueues may return while the
+  // daemon reattachment proceeds without leaving an unguarded move window.
+  await backfillIds()
+  await backfillAgents()
+  await backfillSeen()
+  await recoverQueues()
+
   const server = serve({ fetch: app.fetch, port })
   console.log(`api listening on http://localhost:${port}`)
 
@@ -3995,10 +4101,6 @@ if (process.env.NODE_ENV !== 'test' && process.env.VITEST !== 'true') {
   console.log(`daemon WS endpoint at ws://localhost:${port}/daemon`)
   console.log('projects:')
   for (const p of PROJECTS) console.log(`  ${p.slug}  ${p.path}`)
-  void backfillIds()
-  void backfillAgents()
-  void backfillSeen()
-  void recoverQueues()
   // Launch due scheduled tasks on boot (catching any whose time passed while the
   // server was down), then sweep every 15s to launch each as it comes due.
   void launchScheduled()

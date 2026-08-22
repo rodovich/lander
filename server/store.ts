@@ -9,6 +9,7 @@ import path from 'node:path'
 
 // The minimal shape readTasks needs to order a project's records newest-first.
 export type StoredRecord = { createdAt: string; updatedAt?: string }
+export type StoredEntry<T> = { id: string; record: T }
 
 // A parse retained from an earlier readTasks, with the stat it was valid for.
 type Cached = { mtimeMs: number; size: number; task: unknown }
@@ -49,9 +50,9 @@ const retained = new Map<string, Map<string, Cached>>()
 // per call. Callers must treat them as read-only — both of today's copy before
 // serving (publicTask spreads; the archived branch spreads to add `archived`).
 // A caller that mutates one in place would corrupt every later response.
-export async function readTasks<T extends StoredRecord>(
+export async function readTaskEntries<T extends StoredRecord>(
   dataDir: string,
-): Promise<T[]> {
+): Promise<StoredEntry<T>[]> {
   let names: string[]
   try {
     names = await readdir(dataDir)
@@ -76,28 +77,36 @@ export async function readTasks<T extends StoredRecord>(
         }
       }),
   )
-  const tasks: T[] = []
+  const tasks: StoredEntry<T>[] = []
   for (const s of stats) {
     if (!s) continue
     const hit = prior?.get(s.file)
     if (hit && hit.mtimeMs === s.mtimeMs && hit.size === s.size) {
       next.set(s.file, hit)
-      tasks.push(hit.task as T)
+      tasks.push({ id: path.basename(s.file, '.json'), record: hit.task as T })
       continue
     }
     try {
       const task = JSON.parse(await readFile(s.file, 'utf8')) as T
       next.set(s.file, { mtimeMs: s.mtimeMs, size: s.size, task })
-      tasks.push(task)
+      tasks.push({ id: path.basename(s.file, '.json'), record: task })
     } catch {
       // skip unreadable/invalid files
     }
   }
   retained.set(dataDir, next)
   tasks.sort((a, b) =>
-    (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt),
+    (b.record.updatedAt ?? b.record.createdAt).localeCompare(
+      a.record.updatedAt ?? a.record.createdAt,
+    ),
   )
   return tasks
+}
+
+export async function readTasks<T extends StoredRecord>(
+  dataDir: string,
+): Promise<T[]> {
+  return (await readTaskEntries<T>(dataDir)).map((entry) => entry.record)
 }
 
 // Read a single record by id, or null if it's missing/unreadable. The
@@ -108,11 +117,26 @@ export async function readTask<T>(
   id: string,
 ): Promise<T | null> {
   try {
+    // Opening `id.json` is not an exact-name check on case-insensitive filesystems.
+    // Verify directory membership byte-for-byte first, then verify the body's id
+    // when present. Legacy pre-backfill records may omit it.
+    const filename = `${id}.json`
+    if (!(await readdir(dataDir)).includes(filename)) return null
     const raw = await readFile(path.join(dataDir, `${id}.json`), 'utf8')
-    return JSON.parse(raw) as T
+    const value = JSON.parse(raw) as T & { id?: unknown }
+    if (value.id !== undefined && value.id !== id) return null
+    return value as T
   } catch {
     return null
   }
+}
+
+export type WriteObserver = (file: string, value: unknown) => void
+const writeObservers = new Set<WriteObserver>()
+
+export function observeWrites(observer: WriteObserver): () => void {
+  writeObservers.add(observer)
+  return () => writeObservers.delete(observer)
 }
 
 // Write a record atomically: serialize to a unique temp file, then rename over
@@ -123,6 +147,13 @@ export async function writeTask<T>(file: string, task: T): Promise<void> {
   const tmp = `${file}.${randomUUID()}.tmp`
   await writeFile(tmp, JSON.stringify(task, null, 2))
   await rename(tmp, file)
+  for (const observer of writeObservers) {
+    try {
+      observer(file, task)
+    } catch (error) {
+      console.error('task store write observer failed:', error)
+    }
+  }
 }
 
 // Per-file queue of in-flight mutations, keyed by file path. All task-JSON
@@ -142,13 +173,15 @@ const chains = new Map<string, Promise<unknown>>()
 export function mutateTask<T>(
   file: string,
   fn: (task: T) => void,
+  opts?: { key?: string; afterCommit?: (task: T) => void },
 ): Promise<void> {
-  const prior = chains.get(file) ?? Promise.resolve()
+  const key = opts?.key ?? file
+  const prior = chains.get(key) ?? Promise.resolve()
   // Sequence after the prior op whether it resolved or rejected, so one failed
   // mutation doesn't wedge the file's queue.
   const run = prior.then(
-    () => applyMutation<T>(file, fn),
-    () => applyMutation<T>(file, fn),
+    () => applyMutation<T>(file, fn, opts?.afterCommit),
+    () => applyMutation<T>(file, fn, opts?.afterCommit),
   )
   // The tail swallows outcomes so the next waiter only sequences on it; the
   // caller still observes this op's real result/error via `run`. Drop the map
@@ -157,9 +190,26 @@ export function mutateTask<T>(
     () => {},
     () => {},
   )
-  chains.set(file, tail)
+  chains.set(key, tail)
   void tail.then(() => {
-    if (chains.get(file) === tail) chains.delete(file)
+    if (chains.get(key) === tail) chains.delete(key)
+  })
+  return run
+}
+
+export function withMutationLock<T>(
+  key: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const prior = chains.get(key) ?? Promise.resolve()
+  const run = prior.then(fn, fn)
+  const tail = run.then(
+    () => {},
+    () => {},
+  )
+  chains.set(key, tail)
+  void tail.then(() => {
+    if (chains.get(key) === tail) chains.delete(key)
   })
   return run
 }
@@ -215,8 +265,10 @@ async function applyJsonMutation<T>(
 async function applyMutation<T>(
   file: string,
   fn: (task: T) => void,
+  afterCommit?: (task: T) => void,
 ): Promise<void> {
   const task = JSON.parse(await readFile(file, 'utf8')) as T
   fn(task)
   await writeTask(file, task)
+  afterCommit?.(task)
 }

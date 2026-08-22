@@ -959,6 +959,7 @@ describe('the launch', () => {
       name: 'review',
       fireId: 'fire-1-abc',
       target: ID,
+      projectSlug: slug,
     })
     // No spawnedBy: there is no spawning task, which is also why no task can
     // land this one.
@@ -1095,6 +1096,7 @@ describe('the launch', () => {
     // And it still records its real spawner, which the hook-launched task above
     // has none of.
     expect(child.spawnedBy).toBe(first.id)
+    expect(child.spawnedByProject).toBe(slug)
   })
 })
 
@@ -1494,6 +1496,42 @@ describe('server task provider behavior', () => {
     const res = await app.request(`/api/${slug}/tasks/${task.id}`)
     expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({ id: task.id, archived: true })
+  })
+
+  it('serves a cache-validated global task-link projection', async () => {
+    const active = await createTask('Link feed active')
+    const archived = await createTask('Link feed archived')
+    expect(
+      (await post(`/api/${slug}/tasks/${archived.id}/archive`, {})).status,
+    ).toBe(200)
+
+    const first = await app.request('/api/task-links')
+    expect(first.status).toBe(200)
+    const etag = first.headers.get('etag')
+    expect(etag).toBeTruthy()
+    const body = (await first.json()) as {
+      links: { id: string; projectSlug: string; archived: boolean }[]
+    }
+    expect(body.links).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: active.id,
+          projectSlug: slug,
+          archived: false,
+        }),
+        expect.objectContaining({
+          id: archived.id,
+          projectSlug: slug,
+          archived: true,
+        }),
+      ]),
+    )
+
+    const unchanged = await app.request('/api/task-links', {
+      headers: { 'if-none-match': etag! },
+    })
+    expect(unchanged.status).toBe(304)
+    expect(await unchanged.text()).toBe('')
   })
 
   // A drive records its runId only once a daemon is serving, so between the

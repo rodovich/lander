@@ -20,6 +20,7 @@
 import path from 'node:path'
 import type { Project } from './projects'
 import { mutateTask, readTask } from './store'
+import { taskKey } from './task-identity'
 import {
   pushHookItem,
   type HookItem,
@@ -89,20 +90,21 @@ type HookTask = { items?: Item[]; pendingHooks?: PendingHook[] }
 
 async function updateFire(
   file: string,
+  lockKey: string,
   fireId: string,
   fn: (entry: PendingHook, task: HookTask) => void,
 ): Promise<void> {
   await mutateTask<HookTask>(file, (t) => {
     const entry = (t.pendingHooks ?? []).find((f) => f.id === fireId)
     if (entry) fn(entry, t)
-  }).catch(() => {})
+  }, { key: lockKey }).catch(() => {})
 }
 
-async function clearFire(file: string, fireId: string): Promise<void> {
+async function clearFire(file: string, lockKey: string, fireId: string): Promise<void> {
   await mutateTask<HookTask>(file, (t) => {
     if (t.pendingHooks) t.pendingHooks = t.pendingHooks.filter((f) => f.id !== fireId)
     if (t.pendingHooks?.length === 0) delete t.pendingHooks
-  }).catch(() => {})
+  }, { key: lockKey }).catch(() => {})
 }
 
 // Record a run's account of itself on the target's timeline. Through mutateTask,
@@ -111,6 +113,7 @@ async function clearFire(file: string, fireId: string): Promise<void> {
 // read-modify-write outside the lock would drop the streamed items of a live run.
 async function report(
   file: string,
+  lockKey: string,
   entry: PendingHook,
   hook: { path: string; name: string },
   outcome: string,
@@ -132,7 +135,7 @@ async function report(
       },
       at,
     )
-  }).catch(() => {})
+  }, { key: lockKey }).catch(() => {})
 }
 
 // Dispatch every hook a task's pending fires select. Never throws: it is called
@@ -174,20 +177,22 @@ async function dispatchTask(
   const resolve = deps.resolve ?? resolveProjectHooks
   const run = deps.run ?? requestHookRun
   const file = path.join(project.dataDir, `${id}.json`)
+  const lockKey = taskKey(project.slug, id)
 
   const task = await readTask<{
     pendingHooks?: PendingHook[]
-    hookOrigin?: { path?: string }
+    hookOrigin?: { path?: string; projectSlug?: string }
+    spawnedBy?: string
   }>(project.dataDir, id)
   if (!task?.pendingHooks?.length) return
 
   for (const entry of [...task.pendingHooks]) {
     const at = now()
     if (Date.parse(at) - Date.parse(entry.at) > MAX_FIRE_AGE_MS) {
-      await report(file, entry, { path: '', name: entry.trigger }, 'dispatch-failed', at, {
+      await report(file, lockKey, entry, { path: '', name: entry.trigger }, 'dispatch-failed', at, {
         error: 'gave up: nothing could resolve this fire within 24 hours',
       })
-      await clearFire(file, entry.id)
+      await clearFire(file, lockKey, entry.id)
       continue
     }
 
@@ -215,7 +220,12 @@ async function dispatchTask(
     // the single fire its own action caused — so a hook-initiated landing still
     // reaches every OTHER hook, which is what lets one chain into cleanup or
     // self-review while not waking the hook that landed the target.
-    const exempt = new Set([task.hookOrigin?.path, entry.byHook].filter(Boolean))
+    const originApplies =
+      task.hookOrigin?.projectSlug === project.slug ||
+      (task.hookOrigin?.projectSlug === undefined && task.spawnedBy === undefined)
+    const exempt = new Set(
+      [originApplies ? task.hookOrigin?.path : undefined, entry.byHook].filter(Boolean),
+    )
     const eligible = (h: HookOutcome): boolean => !exempt.has(h.path)
     const done = new Set(entry.done ?? [])
     // Both selection axes are path segments, so a hook that does not apply to
@@ -245,7 +255,7 @@ async function dispatchTask(
       if (outcome === 'done') done.add(hook.path)
     }
 
-    await updateFire(file, entry.id, (e) => {
+    await updateFire(file, lockKey, entry.id, (e) => {
       if (done.size) e.done = [...done]
     })
     // Every applicable hook has reported terminally (or there were none to
@@ -256,7 +266,7 @@ async function dispatchTask(
     const remaining = resolved.hooks.hooks.filter(
       (h) => eligible(h) && !done.has(h.path),
     )
-    if (!remaining.length) await clearFire(file, entry.id)
+    if (!remaining.length) await clearFire(file, lockKey, entry.id)
   }
 }
 
@@ -274,6 +284,7 @@ async function dispatchOne(
     now: () => string
   },
 ): Promise<'done' | 'hold'> {
+  const lockKey = taskKey(project.slug, id)
   // Read the checkout BEFORE claiming anything: `readTask` can reject on an
   // unreadable file, and a throw between the claim and the try below would leak
   // a live credential and one of only four instance-wide concurrency slots.
@@ -364,7 +375,7 @@ async function dispatchOne(
   // finding, not the fire. Everything that went wrong is always recorded.
   const worthSaying = reports.length > 0 || outcome !== 'ran'
   if (worthSaying)
-    await report(file, entry, hook, outcome, at, {
+    await report(file, lockKey, entry, hook, outcome, at, {
       ...(reports.length ? { text: reports.join('\n\n') } : {}),
       ...(output ? { output } : {}),
       ...(error ? { error } : {}),
@@ -375,13 +386,13 @@ async function dispatchOne(
 
   if (ATTEMPT_WORTHY.has(outcome)) {
     let exhausted = false
-    await updateFire(file, entry.id, (e) => {
+    await updateFire(file, lockKey, entry.id, (e) => {
       const attempts = (e.attempts ??= {})
       attempts[hook.path] = (attempts[hook.path] ?? 0) + 1
       exhausted = attempts[hook.path] >= MAX_HOOK_DISPATCH_ATTEMPTS
     })
     if (exhausted) {
-      await report(file, entry, hook, 'dispatch-failed', deps.now(), {
+      await report(file, lockKey, entry, hook, 'dispatch-failed', deps.now(), {
         error: `gave up after ${MAX_HOOK_DISPATCH_ATTEMPTS} failed runs`,
       })
       return 'done'

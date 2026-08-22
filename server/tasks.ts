@@ -836,6 +836,16 @@ export function taskFlow(task: { flow?: string; agent?: string }): string {
 // against describe its own capabilities.
 export type GrantCaps = { task: boolean; project: boolean }
 
+export function publicTaskStatus(task: {
+  status?: string
+  rides?: Ride[]
+  runId?: unknown
+}): string | undefined {
+  if (typeof task.status !== 'string') return undefined
+  if (task.status !== 'riding') return task.status
+  return openRide(task) || task.runId != null ? 'riding' : 'resting'
+}
+
 // Flag the trailing-N user entries (N = queue length) as `queued`, cloning only
 // the flagged ones. The unread follow-ups are the trailing user messages, one
 // queue entry each, in order — so the client can dim what the agent hasn't read
@@ -935,12 +945,11 @@ export function publicTask<T extends object>(
   // while a run is live — an open ride, or (belt for a pre-ride task) a `runId`;
   // with no live run it is idle, served as `resting`, which the UI decorates with
   // any `scheduledFor`/`waitingFor`. `wedged`/`landed` serve as stored.
-  const storedStatus = (task as { status?: string }).status
-  if (typeof storedStatus === 'string') {
-    const hasLiveRun = !!openRide(task as { rides?: Ride[] }) || _r != null
-    restT.status =
-      storedStatus === 'riding' ? (hasLiveRun ? 'riding' : 'resting') : storedStatus
-  }
+  const status = publicTaskStatus({
+    ...(task as { status?: string; rides?: Ride[] }),
+    runId: _r,
+  })
+  if (status !== undefined) restT.status = status
 
   // Attach the capability flags from the flow's ANNOUNCED meta, so the client
   // reads capabilities and never the agent name.
