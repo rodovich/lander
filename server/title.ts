@@ -29,8 +29,10 @@ export type TitleExec = (
 // The child gets a SCRUBBED environment. It inherits the API server's otherwise,
 // and the server legitimately holds the UI and daemon tokens; this child does
 // not need them, and its prompt is task text an untrusted caller supplied.
-// Note what this does not address: it still runs with cwd inside the project, so
-// it picks up that project's own agent settings.
+// It runs with cwd inside the project, so it still picks up that project's own
+// agent settings — but not its MCP servers, which `--strict-mcp-config` leaves
+// unloaded. Naming is a labeling call over untrusted text and needs no tools;
+// the easel project was handing it 53-117 of them, a browser among them.
 export async function generateTitle(
   projectDir: string,
   message: string,
@@ -45,7 +47,15 @@ export async function generateTitle(
   try {
     const { stdout } = await exec(
       'claude',
-      ['--model', 'haiku', '--system-prompt', system, '-p', prompt],
+      [
+        '--model',
+        'haiku',
+        '--strict-mcp-config',
+        '--system-prompt',
+        system,
+        '-p',
+        prompt,
+      ],
       {
         cwd: projectDir,
         maxBuffer: 1024 * 1024,

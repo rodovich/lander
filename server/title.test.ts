@@ -59,6 +59,15 @@ describe('generateTitle', () => {
     expect(opts.cwd).toBe('/proj')
   })
 
+  it('loads none of the project’s MCP servers', async () => {
+    // The cwd above is what would otherwise pull them in: naming a task must not
+    // start a browser, and the model labeling untrusted text must not be handed
+    // that browser's tools.
+    const { calls, exec } = recorder()
+    await generateTitle('/proj', 'x', exec)
+    expect(calls[0].args).toContain('--strict-mcp-config')
+  })
+
   it('strips surrounding quotes and trailing punctuation', async () => {
     const { exec } = recorder('"Fix the parser."')
     expect(await generateTitle('/proj', 'x', exec)).toBe('Fix the parser')
