@@ -213,8 +213,8 @@ async function onTurn(ctx: Ctx): Promise<TurnResult> {
         current = 'push'
         continue
       }
-      if (decision === 'cancelled') {
-        ctx.emit.message('Cancelled — no branch was pushed and no PR opened.')
+      if (decision === 'canceled') {
+        ctx.emit.message('Canceled — no branch was pushed and no PR opened.')
         return { exitCode: 0 }
       }
       // Superseded: the ask was withdrawn, is still open, was never found, or
@@ -322,7 +322,7 @@ async function collect(
 
 async function readApproval(
   ctx: Ctx,
-): Promise<'approved' | 'cancelled' | 'superseded'> {
+): Promise<'approved' | 'canceled' | 'superseded'> {
   // Exact, from data the server already serves — not by matching the user's
   // message text against option labels, which is unreliable twice over: a
   // prompted ask delivers `Answer to "<first line>": <value>` rather than the
@@ -330,7 +330,7 @@ async function readApproval(
   const ask = findOwnAsk(await ctx.view(), 'task')
   if (!ask || ask.state !== 'answered') return 'superseded'
   if (ask.answer?.optionId === APPROVE) return 'approved'
-  if (ask.answer?.optionId === CANCEL) return 'cancelled'
+  if (ask.answer?.optionId === CANCEL) return 'canceled'
   // An optionId this flow never authored — treat as superseded rather than as
   // an unhandled case, which is what makes the branch set total.
   return 'superseded'

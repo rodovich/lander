@@ -80,7 +80,7 @@ const patches = (events: HostEvent[]) =>
 // which is right in production (a driver that throws must not take the host with
 // it) and silently fatal in a test: every `expect` in these callbacks would be
 // swallowed, so an assertion could not fail. Catch what the body threw and
-// re-raise it here, leaving the runtime's own behaviour untouched.
+// re-raise it here, leaving the runtime's own behavior untouched.
 // `tolerateThrow` is for the handful of tests whose subject IS a flow throwing;
 // everywhere else a throw is an assertion that wanted to fail.
 async function runFlow(

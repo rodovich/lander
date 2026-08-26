@@ -240,7 +240,7 @@ describe('open-pr — awaiting-approval', () => {
       flowState: { phase: 'awaiting-approval', branch: 'feature-x' },
       view: { items: [ask({ answer: { optionId: 'cancel' } })] },
     })
-    expect(r.text).toContain('Cancelled')
+    expect(r.text).toContain('Canceled')
     expect(r.spawned).toHaveLength(0)
   })
 

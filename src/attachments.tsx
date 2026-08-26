@@ -166,15 +166,15 @@ function FileChip({ file, url }: { file: Attachment; url: string }) {
   useEffect(() => {
     if (!isImage) return
     let obj: string | null = null
-    let cancelled = false
+    let canceled = false
     void fetchBlob().then((b) => {
-      if (b && !cancelled) {
+      if (b && !canceled) {
         obj = URL.createObjectURL(b)
         setThumb(obj)
       }
     })
     return () => {
-      cancelled = true
+      canceled = true
       if (obj) URL.revokeObjectURL(obj)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

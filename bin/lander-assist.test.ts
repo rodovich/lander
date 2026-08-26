@@ -176,7 +176,7 @@ describe('lander assist', () => {
     const h = await makeHarness()
     try {
       // No LANDER_ASSIST_PROVIDER: either this call is not inside a turn, or the
-      // turn predates the variable. Either way the old behaviour, not an error —
+      // turn predates the variable. Either way the old behavior, not an error —
       // the CLI cannot tell those apart from an announced flow.
       const { stdout } = await execLander(['assist', 'summarize:', 'notes'], {
         ...h.env,

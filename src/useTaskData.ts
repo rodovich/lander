@@ -70,7 +70,7 @@ export function useTaskData(
   // after a mutation — so both halves of the payload land everywhere. The epoch
   // guard drops a stale in-flight load once the scope it was issued under
   // (shown set, archived flag) has changed: the moral equivalent of the old
-  // poll effect's `cancelled` flag, extended to the action-path refreshes.
+  // poll effect's `canceled` flag, extended to the action-path refreshes.
   const epochRef = useRef(0)
   const refresh = useCallback(async () => {
     const epoch = epochRef.current
@@ -100,12 +100,12 @@ export function useTaskData(
   // The ETag makes unchanged 2s polls bodyless, while polling at the displayed
   // list cadence keeps mention colors and archive routing current.
   useEffect(() => {
-    let cancelled = false
+    let canceled = false
     let etag: string | undefined
     const refreshLinks = async () => {
       try {
         const response = await loadTaskLinks(etag)
-        if (cancelled) return
+        if (canceled) return
         if (response.etag) etag = response.etag
         if (!response.notModified) setTaskLinks(response.links)
         setTaskLinksLoaded(true)
@@ -116,7 +116,7 @@ export function useTaskData(
     refreshLinks()
     const timer = setInterval(refreshLinks, 2000)
     return () => {
-      cancelled = true
+      canceled = true
       clearInterval(timer)
     }
   }, [])

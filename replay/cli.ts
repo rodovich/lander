@@ -1,4 +1,4 @@
-// Score a candidate hook against the labelled corpus.
+// Score a candidate hook against the labeled corpus.
 //
 //   npm run replay -- --hook .lander/hooks/landed/agent/review.js \
 //                     --labels docs/tmp/corpus/labels-source.json \
@@ -12,7 +12,7 @@
 //                 so a judging-off run says the body runs over every real record
 //                 without throwing, and what it skips. It is not a score, and
 //                 the report says so at the top.
-//   --judge live  the measurement. Real verdicts on labelled landings, which is
+//   --judge live  the measurement. Real verdicts on labeled landings, which is
 //                 what hooks.md §8 asks for before a judge is armed, supplied
 //                 offline against history instead of waiting months for live
 //                 verdicts to accrue at two a day.
@@ -192,7 +192,7 @@ async function main(): Promise<void> {
       `  false positives ${report.falsePositives}/${report.negatives} (${report.falsePositiveRate})` +
       `  precision floor ${report.precisionFloor}`,
   )
-  console.log('\nlabelled positives:')
+  console.log('\nlabeled positives:')
   for (const p of report.positives)
     console.log(
       `  ${p.fired ? 'HIT ' : 'MISS'} ${p.class.padEnd(12)} ${p.task.slice(0, 12).padEnd(13)} ${p.title.slice(0, 40)}`,

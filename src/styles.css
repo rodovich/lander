@@ -1244,7 +1244,7 @@ body {
 }
 
 /* A platform notice (a kill, a daemon outage) is the app speaking, not the
-   assistant — it gets the attention colour it wedged the task with, and keeps it
+   assistant — it gets the attention color it wedged the task with, and keeps it
    once the form is answered/withdrawn and only the record remains. */
 .message-platform .message-role {
   color: var(--wedged);
@@ -1252,7 +1252,7 @@ body {
 
 /* A hook's nudge occupies the same slot as a typed message and drove a turn the
    same way, so it keeps the prompt tint — but it is the platform speaking, not
-   the user, so the role takes the platform's colour rather than the muted one. */
+   the user, so the role takes the platform's color rather than the muted one. */
 .message-hook {
   background: var(--bg-tinted);
 }
@@ -1888,7 +1888,7 @@ body {
   font-size: 13px;
 }
 
-/* The grant control's popup label, naming the otherwise-unlabelled empty row. */
+/* The grant control's popup label, naming the otherwise-unlabeled empty row. */
 .rule-popup-head {
   padding: 2px 6px 4px;
   color: var(--muted);

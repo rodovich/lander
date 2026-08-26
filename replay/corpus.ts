@@ -1,4 +1,4 @@
-// The labelled corpus, as cases a hook body can be run against.
+// The labeled corpus, as cases a hook body can be run against.
 //
 // hooks.md §10 names three things that make replay harder than reading the task
 // JSON, and each is answered here rather than in the body or the scorer:

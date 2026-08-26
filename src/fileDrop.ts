@@ -1,6 +1,6 @@
 // Browsers do not expose file drags uniformly before the drop. Chromium makes
 // the item kind available, while other engines may expose only the conventional
-// "Files" type. Check both so dragover can always be cancelled before the
+// "Files" type. Check both so dragover can always be canceled before the
 // browser falls back to navigating to the local file.
 export function dataTransferHasFiles(
   transfer: Pick<DataTransfer, 'files' | 'items' | 'types'>,

@@ -154,7 +154,7 @@ export type PendingHook = {
   // It covers the status crossings only. `ride-ended` fires are minted by
   // recordRideEnded from applyDone and the crashed branch, where no route and no
   // principal are in scope, so a nudge → ride → ride-ended cycle cannot be
-  // labelled here; that loop is bounded by the action bound instead, which is
+  // labeled here; that loop is bounded by the action bound instead, which is
   // what hooks.md §8 says bounds it.
   byHook?: string
 }

@@ -92,7 +92,7 @@ describe('RuleRow', () => {
 })
 
 describe('GrantControl', () => {
-  it('renders a labelled stamp trigger (popup opens on click, not in SSR)', () => {
+  it('renders a labeled stamp trigger (popup opens on click, not in SSR)', () => {
     const html = renderToStaticMarkup(
       <GrantControl grants={{ task: true, project: true }} onAllow={noop} />,
     )

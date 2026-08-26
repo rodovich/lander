@@ -5,7 +5,7 @@
 // got wrong once before it was got right:
 //
 //   - it is minted PER INVOCATION, so a retry (a fresh host process) presents the
-//     same keys the original did, which is what lets the server recognise a
+//     same keys the original did, which is what lets the server recognize a
 //     repeat. Derived from the target's stored actions instead, it would never
 //     collide — the original's entries push the count past them.
 //   - it advances ONLY on acceptance, so an attempt the server never recorded

@@ -201,7 +201,7 @@ function buildCtx(input: HookHostInput, reports: string[]) {
   //
   // Both halves are load-bearing. Minted per invocation, a retry (which is a
   // fresh host process) restarts at zero and so presents the same keys as the
-  // original, which is what lets the server recognise a repeat; derived instead
+  // original, which is what lets the server recognize a repeat; derived instead
   // from the target's stored actions it would never collide, because the
   // original's entries push the count past them. Advanced only on acceptance,
   // an attempt the server never recorded — a transport failure, or the

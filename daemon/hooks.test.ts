@@ -440,7 +440,7 @@ describe('resolveHooks across a merge', () => {
       git(repo, 'commit', '-m', 'v3 on main')
       const v3 = git(repo, 'rev-parse', `HEAD:${hook}`)
 
-      // Resolved in the side branch's favour, so the merge's tree does not carry
+      // Resolved in the side branch's favor, so the merge's tree does not carry
       // v3 — but v3 is still an ancestor, and a human who approved it expects it
       // to keep running rather than to vanish.
       git(repo, 'merge', '-q', '--no-edit', '-X', 'theirs', 'side')

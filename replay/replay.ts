@@ -226,7 +226,7 @@ export async function runCase(
 export type Report = {
   cases: number
   judgeMode: JudgeMode
-  // Every labelled positive, individually. NOT a rate: inside a gate the classes
+  // Every labeled positive, individually. NOT a rate: inside a gate the classes
   // run to four or five cases each, and a percentage over four cases is
   // decoration. What a reader needs is which ones were missed and why.
   positives: { task: string; title: string; class: string; fired: boolean; why: string }[]

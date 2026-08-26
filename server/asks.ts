@@ -131,7 +131,7 @@ export function createAsk(
 // Build the platform ask a wedge raises alongside its retry stash (origin:
 // 'retry', task-blocking). A usage-limit wedge (resetsAt present) offers two
 // options — retry now, or retry when the limit resets (carrying `at` so
-// answering schedules the wakeup); a generic error offers one, labelled by
+// answering schedules the wakeup); a generic error offers one, labeled by
 // whether the failed turn committed ("Try again" vs "Resend"). The single place
 // the retry ask's shape is defined, so applyDone, the daemon-outage wedge, and
 // the platform-kill wedge agree. `prompt` overrides the default text so a wedge
