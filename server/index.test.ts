@@ -1296,6 +1296,36 @@ describe('permission grants by principal', () => {
   })
 })
 
+// The naming child outlives nothing: it belongs to this process, and a
+// `server/**` edit restarts the server on every save. So the record has to say
+// "still needs a name" from the moment it is written, not once generation has
+// come back and failed.
+describe('a task born without a name', () => {
+  const record = async (id: string): Promise<Record<string, unknown>> =>
+    JSON.parse(await readFile(path.join(tasksDir, `${id}.json`), 'utf8'))
+
+  // Read straight after the 201, before the naming child (seconds) can answer:
+  // this is the state a process death during generation would leave behind.
+  const launched = async (body: Record<string, unknown>) => {
+    const res = await post(`/api/${slug}/tasks`, body)
+    expect(res.status).toBe(201)
+    const { id } = (await res.json()) as { id: string }
+    return await record(id)
+  }
+
+  it('is flagged for a retry by the write that creates it', async () => {
+    const task = await launched({ message: 'name me later' })
+    expect(task.title).toBe('…')
+    expect(task.titlePending).toBe(true)
+  })
+
+  it('is not flagged when the caller supplied the name', async () => {
+    const task = await launched({ title: 'Named on arrival', message: 'go' })
+    expect(task.title).toBe('Named on arrival')
+    expect(task.titlePending).toBeUndefined()
+  })
+})
+
 // Approval gates MATERIALIZATION, not only dispatch: a hook host asks again,
 // after it has been spawned and before it imports anything, and a human who
 // revoked in that window must be obeyed.

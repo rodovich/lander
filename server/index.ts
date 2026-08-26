@@ -507,14 +507,16 @@ async function setTitle(
   // Through mutateTask so the title write serializes with (and can't clobber)
   // the streaming reducer running on the opening turn.
   await mutateTask(file, (task) => {
+    // Naming is settled either way, so the retry flag goes before the guard
+    // below and not after it: the task has a name now, and a flag left set on
+    // the rename path would re-name it on every later wakeup only for this same
+    // guard to throw each result away.
+    delete task.titlePending
     // A manual rename (which records a 'renamed' event) wins over a late-arriving
     // generated name — the user's choice stands. Guards the narrow window between
     // a rename and a generation that was already in flight.
     if (eventItems(task).some((e) => e.eventKind === 'renamed')) return
     task.title = title
-    // Naming succeeded, so a prior failure no longer needs retrying on the next
-    // wakeup (see ensureTitle / driveTask).
-    delete task.titlePending
     // This is the first generated name for a task created untitled: fill it into
     // the creation event (a launch, or a "scheduled" event for a deferred task)
     // rather than recording it as a rename.
@@ -526,9 +528,9 @@ async function setTitle(
 }
 
 // Generate a name for a still-untitled task in the background and record it via
-// setTitle. On failure, flag the task `titlePending` so its next wakeup retries
-// (driveTask), unless the user has meanwhile named it themselves (a 'renamed'
-// event) — in which case the flag is left off and their name stands. Naming must
+// setTitle. A failure needs no bookkeeping of its own: `titlePending` is written
+// when the task is created and stays set until a name lands (setTitle) or the
+// user supplies one, so the task's next wakeup retries (driveTask). Naming must
 // never hold up a turn, so callers fire-and-forget this.
 async function ensureTitle(
   project: Project,
@@ -536,14 +538,7 @@ async function ensureTitle(
   source: string,
 ): Promise<void> {
   const next = await generateTitle(project.path, source)
-  if (next) {
-    await setTitle(project.dataDir, id, next)
-    return
-  }
-  const file = path.join(project.dataDir, `${id}.json`)
-  await mutateTask(file, (t) => {
-    if (!eventItems(t).some((e) => e.eventKind === 'renamed')) t.titlePending = true
-  }).catch(() => {})
+  if (next) await setTitle(project.dataDir, id, next)
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -2372,6 +2367,13 @@ app.post('/api/:project/tasks', async (c) => {
       flow,
       ...(flowConfig.config ? { flowConfig: flowConfig.config } : {}),
       title: title || '…',
+      // An unnamed task is born needing a name, so the flag that drives the retry
+      // is written with the record rather than when generation fails. The naming
+      // child belongs to this process (see title.ts) and takes seconds to answer;
+      // a `server/**` edit restarting us inside that window orphans it, and a flag
+      // written only in ensureTitle's failure branch would never be written at
+      // all — leaving a task called "…" with nothing left to name it.
+      ...(title ? {} : { titlePending: true }),
       // Stored status is the collapsed vocabulary (`riding | wedged | landed`). A
       // deferred task stores `riding` with no open ride, so publicTask serves it
       // as `resting` (decorated with scheduledFor) until the scheduler launches
