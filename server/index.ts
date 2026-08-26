@@ -3983,7 +3983,7 @@ app.post('/api/:project/tasks/:id/unread', async (c) => {
 // opening run died before any reply — the original opening message replayed (no
 // session exists yet, so it starts fresh). A task with no assistant turn yet
 // never established its session — start it; otherwise resume.
-async function recoverQueues(): Promise<void> {
+export async function recoverQueues(): Promise<void> {
   for (const project of PROJECTS) {
     let names: string[]
     try {
@@ -4000,9 +4000,15 @@ async function recoverQueues(): Promise<void> {
       // the rest of the backlog separately).
       const task = await readTask(project.dataDir, id)
       if (!task) continue
-      // A scheduled task waits for its launch time — launchScheduled owns it,
-      // not the queue recovery (it carries a queued opening message too).
-      if (task.scheduledFor) continue
+      // A deferred task waits for its trigger — launchScheduled owns both kinds,
+      // not the queue recovery (it carries a queued opening message too, which is
+      // exactly what would otherwise draw the sweep in). The await arm matters as
+      // much as the time arm: a task awaiting a sibling sits with a full queue for
+      // as long as that sibling runs, so any restart in that window would launch it
+      // early — and, because this path never clears `waitingFor`, launchScheduled
+      // would later fire again and push a spurious "Resumed at …" into a task that
+      // had already run.
+      if (task.scheduledFor || task.waitingFor?.length) continue
       const everRan = (task.rides?.length ?? 0) > 0
 
       // A tracked run: hand it to driveTask, whose reattach asks the daemon to
