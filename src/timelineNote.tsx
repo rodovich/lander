@@ -38,18 +38,25 @@ export function TaskChip({
   )
 }
 
-// One quiet, unbubbled row in the conversation timeline: prose about something
-// that happened, with the moment it happened trailing it. A lifecycle
-// transition and an attributed task action are the same row — they differ only
-// in what the prose says and in what, if anything, they stack beneath it — so
-// both render through this and cannot drift apart.
+// One quiet, unbubbled row: prose about something that happened, with the
+// moment it happened trailing it. A lifecycle transition and an attributed task
+// action say different things, and now stand in different places — the first on
+// the timeline, the second inside the turn that took it — but they are the same
+// sentence with the same chips in it, so both render through this and their
+// wording cannot drift apart.
 export function TimelineNote({
   at,
+  inTurn,
   list,
   detail,
   children,
 }: {
   at: string
+  // Rendered inside an assistant turn rather than on the timeline rail. The
+  // turn already says when it ran and the notes group at one point in it, so
+  // the row drops its timestamp (kept as the row's tooltip, where the exact
+  // moment is still there for anyone who wants it) and its rail tint.
+  inTurn?: boolean
   // Stacked beneath the row as a bulleted list: the several awaited tasks one
   // line can't name. Pre-built `<li>`s, since only the caller knows what links
   // where.
@@ -64,11 +71,16 @@ export function TimelineNote({
   const head = (
     <>
       <span className="timeline-note-text">{children}</span>
-      <span className="timeline-note-time">{formatTimestamp(at)}</span>
+      {!inTurn && (
+        <span className="timeline-note-time">{formatTimestamp(at)}</span>
+      )}
     </>
   )
   return (
-    <div className="timeline-note">
+    <div
+      className={`timeline-note${inTurn ? ' in-turn' : ''}`}
+      title={inTurn ? formatTimestamp(at) : undefined}
+    >
       {detail ? (
         <Collapsible
           open={open}

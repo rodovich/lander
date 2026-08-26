@@ -3,7 +3,13 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import type { ComponentProps } from 'react'
 import { RideTurn } from './rideTurn'
 import type { RideItem } from './timeline'
-import type { AskItem, MessageItem, Ride, ToolItem } from './types'
+import type {
+  AskItem,
+  MessageItem,
+  Ride,
+  TaskActionItem,
+  ToolItem,
+} from './types'
 
 // renderToStaticMarkup gives the initial (effect-free) markup, which is all a
 // turn needs: nesting, grouping, folding, and the footers are all pure renders
@@ -59,6 +65,7 @@ const render = (
     <RideTurn
       ride={settledRide()}
       items={items}
+      actions={[]}
       agent="claude"
       taskId="task1"
       slug="proj"
@@ -152,6 +159,117 @@ describe('RideTurn turn-collapse folding', () => {
     const html = render(folding, { ride: settledRide({ endedAt: undefined }) })
     expect(html).toContain('hidden-middle-prose')
     expect(html).not.toContain('steps, 2 tools')
+  })
+})
+
+describe('RideTurn cross-task actions', () => {
+  const taskAction = (id: string, at: string): TaskActionItem => ({
+    id,
+    at,
+    kind: 'task-action',
+    ride: 'r1',
+    action: 'launch',
+    target: { id: 'child', projectSlug: 'proj', title: `child-of-${id}` },
+  })
+
+  it('leads the next inference, ruled off from it and with no timestamp', () => {
+    const html = render(
+      [
+        flow('open', 'opening-prose', { at: T('10:00:01'), groupId: 'g1' }),
+        tool('t1', { at: T('10:00:02'), groupId: 'g1' }),
+        flow('end', 'closing-prose', { at: T('10:00:09'), groupId: 'g2' }),
+      ],
+      { actions: [taskAction('a1', T('10:00:03'))] },
+    )
+    expect(html).toContain('timeline-note in-turn')
+    expect(html).toContain('child-of-a1')
+    // Between the tool it followed and the paragraph it leads.
+    expect(html.indexOf('child-of-a1')).toBeGreaterThan(html.indexOf('t1'))
+    expect(html.indexOf('child-of-a1')).toBeLessThan(html.indexOf('closing-prose'))
+    // Its own block above the inference, ruled apart from it — not a step
+    // inside the group whose prose it precedes.
+    expect(html).toMatch(
+      /<div class="turn-notes">.*<\/div><hr class="turn-sep"\/><div class="inference">/,
+    )
+    // The turn already says when it ran; the moment stays as the row's title.
+    expect(html).not.toContain('timeline-note-time')
+  })
+
+  it('renders against the item itself when its prose opens no inference', () => {
+    // An inference that streamed a tool before its text, so the prose the note
+    // anchors to isn't the group's opening item and there's no boundary to
+    // lead. Nothing observed does this — the branch is here so a trace that
+    // did would still put the note against the item it belongs to.
+    const html = render(
+      [
+        tool('t1', { at: T('10:00:01'), groupId: 'g1' }),
+        flow('end', 'closing-prose', { at: T('10:00:09'), groupId: 'g1' }),
+      ],
+      {
+        actions: [taskAction('a1', T('10:00:03'))],
+        ride: settledRide({ endedAt: undefined }),
+      },
+    )
+    expect(count(html, 'class="inference"')).toBe(1)
+    expect(html.indexOf('child-of-a1')).toBeGreaterThan(html.indexOf('t1'))
+    expect(html.indexOf('child-of-a1')).toBeLessThan(html.indexOf('closing-prose'))
+    // Inside the inference, against its prose — not hoisted above the group.
+    expect(html).not.toMatch(/turn-notes.*<hr class="turn-sep"\/><div class="inference">/)
+  })
+
+  it('surfaces below a folded stretch rather than inside it', () => {
+    const folding: RideItem[] = [
+      flow('open', 'opening-prose', { at: T('10:00:01'), groupId: 'g1' }),
+      tool('t1', { at: T('10:00:02'), groupId: 'g2' }),
+      flow('mid', 'hidden-middle-prose', { at: T('10:00:04'), groupId: 'g3' }),
+      tool('t2', { at: T('10:00:05'), groupId: 'g4' }),
+      flow('end', 'closing-'.repeat(10), { at: T('10:00:09'), groupId: 'g5' }),
+    ]
+    // Taken during the stretch that folds away — its `lander launch` chip is
+    // behind the summary, but the note is not.
+    const html = render(folding, { actions: [taskAction('a1', T('10:00:03'))] })
+    expect(html).toContain('3 steps, 2 tools')
+    expect(html).not.toContain('hidden-middle-prose')
+    expect(html).toContain('child-of-a1')
+    expect(html.indexOf('child-of-a1')).toBeGreaterThan(html.indexOf('3 steps'))
+  })
+
+  it('stacks everything done in one stretch as a single block', () => {
+    const html = render(
+      [
+        tool('t1', { at: T('10:00:01') }),
+        flow('end', 'closing-prose', { at: T('10:00:09') }),
+      ],
+      {
+        actions: [
+          taskAction('a1', T('10:00:02')),
+          taskAction('a2', T('10:00:03')),
+        ],
+      },
+    )
+    expect(count(html, 'turn-notes')).toBe(1)
+    expect(html.indexOf('child-of-a1')).toBeLessThan(html.indexOf('child-of-a2'))
+  })
+
+  it('closes out the trace when no prose follows the action', () => {
+    const html = render(
+      [
+        flow('open', 'opening-prose', { at: T('10:00:01') }),
+        tool('t1', { at: T('10:00:02') }),
+      ],
+      {
+        actions: [taskAction('a1', T('10:00:03'))],
+        ride: settledRide({ endedAt: undefined }),
+      },
+    )
+    expect(html.indexOf('child-of-a1')).toBeGreaterThan(
+      html.indexOf('opening-prose'),
+    )
+    // Ruled off from the trace it closes, like a lead block.
+    expect(html).toMatch(/<hr class="turn-sep"\/><div class="turn-notes">/)
+    // Inside the trace, so a still-working turn reads "…launched X" and then
+    // goes on working, rather than announcing it after the spinner.
+    expect(html.indexOf('child-of-a1')).toBeLessThan(html.indexOf('is working…'))
   })
 })
 

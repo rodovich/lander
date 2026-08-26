@@ -177,7 +177,15 @@ export type TaskActionTrigger =
     }
 
 export type TaskActionItem = ItemCommon &
-  { kind: 'task-action' } &
+  {
+    kind: 'task-action'
+    // The ride this task was on when it acted. buildTimeline hands the action
+    // to that turn, which anchors it before its next prose; an action with no
+    // ride (or one that streamed nothing) stands on its own in the timeline.
+    // Never `rideId` — that would route it into the ride's item log, and this
+    // is an account of what the turn did, not a step of it.
+    ride?: string
+  } &
   (
     | { action: 'launch'; target: TaskActionRef; trigger?: TaskActionTrigger }
     | {

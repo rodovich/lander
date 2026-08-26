@@ -6,20 +6,48 @@ import { BlockedSummary } from './grants'
 import type { TaskLinkResolver } from './markdown'
 import { MessageText } from './messageText'
 import { blockedRequests } from './permissions'
+import { TaskActionTransition } from './taskActionTransition'
 import { taskAgentModelName } from './taskMeta'
 import { Collapsible, ToolStep } from './toolStep'
+import { planTurnActions } from './turnActions'
 import { planTurnCollapse } from './turnCollapse'
 import type { RideItem } from './timeline'
-import type { AskItem, Ride, Task } from './types'
+import type { AskItem, Ride, TaskActionItem, Task } from './types'
+
+// The cross-task actions anchored at one point in the trace, as one block. They
+// stack unruled: what a turn did to other tasks in one stretch of work reads as
+// a single aside, not as a row per action.
+function TurnActions({
+  actions,
+  linkTask,
+}: {
+  actions: TaskActionItem[]
+  linkTask: TaskLinkResolver
+}) {
+  return (
+    <div className="turn-notes">
+      {actions.map((action) => (
+        <TaskActionTransition
+          key={`ta-${action.id}`}
+          item={action}
+          inTurn
+          linkTask={linkTask}
+        />
+      ))}
+    </div>
+  )
+}
 
 // One assistant turn in the conversation: a ride and its items, rendered as
 // nested tool chips and prose grouped by inference, with settled turns folded
-// down (planTurnCollapse), the turn's confirmed denials, the in-flight
+// down (planTurnCollapse), the cross-task actions the turn took anchored into
+// that trace (planTurnActions), the turn's confirmed denials, the in-flight
 // working spinner, published artifacts, and — when this turn raised the open
 // ask — the ask's form as the turn's footer.
 export const RideTurn = memo(function RideTurn({
   ride,
   items,
+  actions,
   agent,
   taskId,
   slug,
@@ -36,6 +64,10 @@ export const RideTurn = memo(function RideTurn({
 }: {
   ride: Ride
   items: RideItem[]
+  // What this turn did to other tasks, in record order. Anchored into the trace
+  // rather than folded into `items`, so the collapse plan and the tool counts
+  // keep describing only what the turn itself streamed.
+  actions: TaskActionItem[]
   // The flow name (task.flow ?? task.agent), for display only.
   agent: string | undefined
   taskId: string
@@ -117,7 +149,18 @@ export const RideTurn = memo(function RideTurn({
             }
             return gs
           }
-          const renderItem = (j: number) => {
+          // Settled turns fold down by their flow messages, independent of
+          // group boundaries: keep the opening prose before the first tool, the
+          // longest text sequence, and the last, collapsing the ranges between
+          // (see planTurnCollapse). An open ride renders in full (its shape
+          // isn't settled yet), as does any turn too short to have a gap.
+          const collapse = planTurnCollapse(items, mainIdxs)
+          // Where this turn's cross-task actions land: each before the next
+          // prose section the fold keeps, so a note whose `lander launch` is
+          // inside a folded stretch surfaces under that stretch's summary
+          // instead of hiding behind it.
+          const anchored = planTurnActions(items, mainIdxs, actions, collapse)
+          const renderBody = (j: number) => {
             const it = items[j]
             if (it.kind === 'tool') {
               // A subagent spawner (Agent/Explore) carries its
@@ -150,27 +193,67 @@ export const RideTurn = memo(function RideTurn({
             }
             return null
           }
-          const renderItemList = (idxs: number[], keyPrefix = 'items') =>
-            groupByGroup(idxs).map((groupIdxs, k) => (
-              <Fragment key={`${keyPrefix}-${k}-${groupIdxs[0] ?? 'empty'}`}>
-                {k > 0 && <hr className="turn-sep" />}
-                <div className="inference">{groupIdxs.map(renderItem)}</div>
+          // An item, preceded by whatever this turn did to other tasks in the
+          // stretch of work that led to it. `posInGroup` comes from the map
+          // below: a note anchored on the group's opening item is hoisted out
+          // and ruled off above the group instead of rendering here. Prose
+          // opens an inference, so an anchor deeper in a group is the rare case
+          // — the branch exists so an out-of-order trace still places its note
+          // against the item it belongs to.
+          const renderItem = (j: number, posInGroup: number) => {
+            const notes = posInGroup > 0 ? anchored.before.get(j) : undefined
+            if (!notes) return renderBody(j)
+            return (
+              <Fragment key={`anchored-${j}`}>
+                <TurnActions actions={notes} linkTask={linkTask} />
+                {renderBody(j)}
               </Fragment>
-            ))
+            )
+          }
+          const renderItemList = (idxs: number[], keyPrefix = 'items') =>
+            groupByGroup(idxs).map((groupIdxs, k) => {
+              // What the turn did to other tasks before this inference: its own
+              // block, above the inference and ruled off from it, because it is
+              // an aside about elsewhere rather than a step of the thinking that
+              // follows.
+              const lead = anchored.before.get(groupIdxs[0])
+              return (
+                <Fragment key={`${keyPrefix}-${k}-${groupIdxs[0] ?? 'empty'}`}>
+                  {k > 0 && <hr className="turn-sep" />}
+                  {lead && (
+                    <>
+                      <TurnActions actions={lead} linkTask={linkTask} />
+                      <hr className="turn-sep" />
+                    </>
+                  )}
+                  <div className="inference">{groupIdxs.map(renderItem)}</div>
+                </Fragment>
+              )
+            })
           // A subagent's folded trace, grouped into its own turns the
           // same way the main thread is. Mutually recursive with
           // renderItem (a nested subagent nests in turn).
           const renderSubItems = (childIdxs: number[]) =>
             renderItemList(childIdxs, `sub-${childIdxs[0] ?? 'empty'}`)
-          // Settled turns fold down by their flow messages, independent
-          // of group boundaries: keep the opening prose before the first
-          // tool, the longest text sequence, and the last, collapsing
-          // the ranges between (see planTurnCollapse). An open ride
-          // renders in full (its shape isn't settled yet), as does any
-          // turn too short to have a gap.
-          const collapse = planTurnCollapse(items, mainIdxs)
+          // Actions with no prose left to precede close the trace out — the
+          // same slot they occupied when these stood below the whole turn, and
+          // ruled off from it the same way a lead block is. The rule needs
+          // something above it, which a turn whose every item is nested under a
+          // subagent chip doesn't have.
+          const tail = anchored.tail.length > 0 && (
+            <>
+              {mainIdxs.length > 0 && <hr className="turn-sep" />}
+              <TurnActions actions={anchored.tail} linkTask={linkTask} />
+            </>
+          )
           const folds = settled && collapse.segments.some((seg) => seg.hidden)
-          if (!folds) return renderItemList(mainIdxs)
+          if (!folds)
+            return (
+              <>
+                {renderItemList(mainIdxs)}
+                {tail}
+              </>
+            )
           return (
             <>
               {collapse.segments.map((seg, si) => {
@@ -214,6 +297,7 @@ export const RideTurn = memo(function RideTurn({
                   </Fragment>
                 )
               })}
+              {tail}
             </>
           )
         })()}

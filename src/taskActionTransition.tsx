@@ -98,15 +98,18 @@ function actionCopy(
   )
 }
 
-// An action this task took on another one, shown inline in the conversation.
-// The same timeline note a lifecycle transition uses, differing only in that a
+// An action this task took on another one. It renders inside the turn that took
+// it (`inTurn`), falling back to a row of its own when there was no turn to
+// anchor to. The same note a lifecycle transition uses, differing only in that a
 // sent message hangs its text off the row as revealable detail — so the row
 // reads as an account of the exchange, not just that one happened.
 export function TaskActionTransition({
   item,
+  inTurn,
   linkTask,
 }: {
   item: TaskActionItem
+  inTurn?: boolean
   linkTask: TaskLinkResolver
 }) {
   const target = <RefLink task={item.target} linkTask={linkTask} />
@@ -116,6 +119,7 @@ export function TaskActionTransition({
   return (
     <TimelineNote
       at={item.at}
+      inTurn={inTurn}
       list={
         awaiting &&
         awaiting.tasks.length > 1 &&

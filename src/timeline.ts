@@ -15,7 +15,7 @@
 // delivery, the drain moves it to the tail so array order matches its delivery
 // point (see driveTask in server/index.ts) — so a delivered message can carry an
 // `at` earlier than items stored before it. This code never sorts by `at`; it
-// trusts array order. So this reduces to three things:
+// trusts array order. So this reduces to four things:
 //
 //   - Gather each ride into ONE bubble by its id. A ride's items are usually
 //     contiguous, but not always — an event recorded mid-turn (e.g. `lander
@@ -29,6 +29,11 @@
 //     rather than at its enqueue position, so it's held aside and appended last.
 //   - `now` anchors an open ride's entry so the in-flight turn sorts by the wall
 //     clock, not the timestamp of whatever it happens to have streamed first.
+//   - A cross-task action goes to the turn that took it, named by the action's
+//     `ride`, rather than taking a slot in the stream. It is a thing this task
+//     did to another one, not something that happened to this task, and the
+//     stream is this task's own story — so the turn carries it and the rail
+//     doesn't. Where inside the turn is the turn's business.
 
 import type {
   Item,
@@ -49,10 +54,24 @@ export type TimelineEntry =
   // One ride — an assistant turn — carrying all its items (flow messages and
   // tools, main-thread and subagent-nested); the renderer does the nesting and
   // collapse. `ride` is the header (open when it has no `endedAt`).
-  | { kind: 'ride'; at: string; ride: Ride; items: RideItem[] }
+  //
+  // `actions` are the cross-task actions the turn took, in record order. They
+  // ride ALONGSIDE `items` rather than in them: the turn anchors each one into
+  // its trace at render time, and keeping them out means the collapse plan, the
+  // tool counts, and the denial summary all keep reading only what the turn
+  // itself streamed.
+  | {
+      kind: 'ride'
+      at: string
+      ride: Ride
+      items: RideItem[]
+      actions: TaskActionItem[]
+    }
   // A lifecycle event (launch, wedge, schedule, …).
   | { kind: 'event'; at: string; event: EventItem }
-  // An attributed task-management action by the containing task.
+  // An attributed task-management action with no turn to sit in — the actor had
+  // no ride open, or the ride streamed nothing to anchor against. Everything
+  // else reaches the reader inside its ride entry's `actions`.
   | { kind: 'task-action'; at: string; action: TaskActionItem }
   // An unanchored (platform) ask, standing on its own where it was raised. Its
   // prompt is the entry's substance; the form renders only while it's open.
@@ -102,11 +121,19 @@ export function buildTimeline(
   // reused for later items so an interleaving event can't split the bubble.
   const rideEntry = new Map<
     string,
-    { kind: 'ride'; at: string; ride: Ride; items: RideItem[] }
+    Extract<TimelineEntry, { kind: 'ride' }>
   >()
+  // Task actions, each with the standalone slot it would take if its ride
+  // turns out not to be in the stream. Resolved after the pass, because an
+  // action can be recorded before the ride it was taken on has streamed
+  // anything — the CLI reaches the server while the turn's first batch is
+  // still in flight.
+  const actions: { entry: TimelineEntry; item: TaskActionItem }[] = []
   for (const it of kept) {
     if (it.kind === 'task-action') {
-      out.push({ kind: 'task-action', at: it.at, action: it })
+      const entry: TimelineEntry = { kind: 'task-action', at: it.at, action: it }
+      actions.push({ entry, item: it })
+      out.push(entry)
       continue
     }
     if (it.kind === 'ask') {
@@ -131,7 +158,13 @@ export function buildTimeline(
           id: it.rideId,
           startedAt: it.at,
         }
-        entry = { kind: 'ride', at: ride.endedAt ? it.at : now, ride, items: [] }
+        entry = {
+          kind: 'ride',
+          at: ride.endedAt ? it.at : now,
+          ride,
+          items: [],
+          actions: [],
+        }
         rideEntry.set(it.rideId, entry)
         out.push(entry)
       }
@@ -146,5 +179,16 @@ export function buildTimeline(
 
   for (const it of sunk) out.push({ kind: 'user', at: it.at, item: it })
 
-  return { items: out }
+  // Hand each action to the turn it was taken on, and drop the standalone slot
+  // it was holding. One that names no ride — or one whose ride never made it
+  // into the stream — keeps that slot and stands where it was recorded.
+  const claimed = new Set<TimelineEntry>()
+  for (const { entry, item } of actions) {
+    const turn = item.ride ? rideEntry.get(item.ride) : undefined
+    if (!turn) continue
+    turn.actions.push(item)
+    claimed.add(entry)
+  }
+
+  return { items: claimed.size ? out.filter((e) => !claimed.has(e)) : out }
 }

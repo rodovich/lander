@@ -32,6 +32,19 @@ describe('TimelineNote', () => {
     expect(html).toContain('Show message')
     expect(html).not.toContain('the body')
   })
+
+  it('drops the timestamp into the row’s title when it sits inside a turn', () => {
+    const html = renderToStaticMarkup(
+      <TimelineNote at={AT} inTurn>
+        launched something
+      </TimelineNote>,
+    )
+    expect(html).toContain('class="timeline-note in-turn"')
+    expect(html).not.toContain('timeline-note-text">launched something</span><span')
+    expect(html).not.toContain('timeline-note-time')
+    // Not lost, just not spent on a row inside a turn that is already stamped.
+    expect(html).toMatch(/<div class="timeline-note in-turn" title="[^"]+">/)
+  })
 })
 
 describe('TaskChip', () => {

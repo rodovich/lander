@@ -45,10 +45,11 @@ const ev = (eventKind: EventItem['eventKind'], at: string): EventItem => ({
   kind: 'event',
   eventKind,
 })
-const action = (id: string, at: string): TaskActionItem => ({
+const action = (id: string, at: string, ride?: string): TaskActionItem => ({
   id,
   at,
   kind: 'task-action',
+  ...(ride ? { ride } : {}),
   action: 'launch',
   target: { id: 'child', projectSlug: 'proj' },
 })
@@ -174,7 +175,50 @@ describe('buildTimeline events in place', () => {
   })
 })
 
-describe('buildTimeline task actions in place', () => {
+describe('buildTimeline task actions on their turn', () => {
+  const actionsOf = (out: ReturnType<typeof buildTimeline>['items']) => {
+    const asst = out.find((e) => e.kind === 'ride')
+    return asst?.kind === 'ride' ? asst.actions.map((a) => a.id) : undefined
+  }
+
+  it('hands an action to the turn that took it, taking no slot of its own', () => {
+    const items = [
+      user('p1', T('10:00:00')),
+      flow('r1a', 'r1', T('10:00:05')),
+      action('a1', T('10:00:06'), 'r1'),
+      action('a2', T('10:00:07'), 'r1'),
+      flow('r1b', 'r1', T('10:00:08')),
+    ]
+    const rides = [ride('r1', T('10:00:05'), T('10:00:09'))]
+    const { items: out } = build({ items, rides })
+    expect(seq(out)).toEqual(['user:p1', 'asst:r1'])
+    // In record order — the turn decides where they land, not this.
+    expect(actionsOf(out)).toEqual(['a1', 'a2'])
+  })
+
+  it('finds the turn for an action recorded before it had streamed anything', () => {
+    // The CLI reaches the server while the turn's first batch is still in
+    // flight, so the action is stored ahead of every item of its own ride.
+    const items = [
+      action('a1', T('10:00:00'), 'r1'),
+      flow('r1a', 'r1', T('10:00:01')),
+    ]
+    const rides = [ride('r1', T('10:00:01'), T('10:00:02'))]
+    const { items: out } = build({ items, rides })
+    expect(seq(out)).toEqual(['asst:r1'])
+    expect(actionsOf(out)).toEqual(['a1'])
+  })
+
+  it('leaves an action standing when its ride never reached the stream', () => {
+    // A ride that streamed nothing gets no turn entry, so there is nothing to
+    // anchor into and the note keeps the slot it was recorded in.
+    const items = [user('p1', T('10:00:00')), action('a1', T('10:00:01'), 'r9')]
+    const { items: out } = build({ items, rides: [ride('r9', T('10:00:00'))] })
+    expect(seq(out)).toEqual(['user:p1', 'action:a1'])
+  })
+})
+
+describe('buildTimeline task actions with no turn', () => {
   it('keeps a split ride whole and preserves action order after it', () => {
     const items = [
       user('p1', T('10:00:00')),

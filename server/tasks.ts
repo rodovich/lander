@@ -554,7 +554,18 @@ export type TaskActionInput =
   | { action: 'status'; target: TaskActionRef; toStatus: string }
 
 export type TaskActionItem = ItemCommon &
-  { kind: 'task-action' } & TaskActionInput
+  { kind: 'task-action'
+    // The actor's ride at the moment it acted — the turn this was done during.
+    // Absent when nothing was in flight (a detached child outliving the turn
+    // that spawned it), which is what leaves the note standing on its own.
+    //
+    // It carries `ride`, never `rideId`, for the same reason HookItem does:
+    // buildTimeline routes anything with a `rideId` into the ride's item log
+    // before it looks at the kind, and this is an account of what the turn did
+    // to another task, not a step of the turn. The client anchors it into the
+    // turn at render time and the ride's own items stay untouched.
+    ride?: string
+  } & TaskActionInput
 
 export type AskItem = ItemCommon & {
   kind: 'ask'
@@ -685,18 +696,22 @@ export function pushEventItem(
   return item
 }
 
-// Append an attributed task-management action outside any ride. The caller
+// Append an attributed task-management action, stamped with the actor's open
+// ride so the client can anchor it inside the turn that took it. Stored outside
+// the ride's item log either way (see TaskActionItem's `ride`). The caller
 // deliberately decides whether the mutation warrants updatedAt/unread changes;
 // this builder only adds the semantic timeline row.
 export function pushTaskActionItem(
-  task: { items?: Item[] },
+  task: { items?: Item[]; rides?: Ride[] },
   action: TaskActionInput,
   at: string,
 ): TaskActionItem {
+  const ride = openRide(task)
   const item = {
     id: nextItemId(task, at),
     at,
     kind: 'task-action',
+    ...(ride ? { ride: ride.id } : {}),
     ...action,
   } as TaskActionItem
   ;(task.items ??= []).push(item)

@@ -321,6 +321,9 @@ export const Conversation = memo(function Conversation({
             )
           }
           if (entry.kind === 'task-action') {
+            // An action with no turn to sit in — the task had no ride open when
+            // it acted, or that ride streamed nothing. Everything else reaches
+            // the reader inside its RideTurn.
             return (
               <TaskActionTransition
                 key={`ta-${entry.action.id}`}
@@ -410,6 +413,7 @@ export const Conversation = memo(function Conversation({
               key={`r-${entry.ride.id}`}
               ride={entry.ride}
               items={entry.items}
+              actions={entry.actions}
               agent={task.flow ?? task.agent}
               taskId={task.id}
               slug={task.projectSlug}

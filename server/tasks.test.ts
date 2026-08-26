@@ -132,6 +132,22 @@ describe('item builders', () => {
       expect.stringMatching(/-1$/),
       expect.stringMatching(/-2$/),
     ])
+    // Nothing was in flight, so nothing names a turn: these stand on their own.
+    expect(t.items!.every((item) => !('ride' in item && item.ride))).toBe(true)
+  })
+
+  it('pushTaskActionItem stamps the turn the task was acting from', () => {
+    const target = { id: 'child', projectSlug: 'proj' }
+    const t: { items?: Item[]; rides?: Ride[] } = {}
+    startRide(t, 'r1', AT)
+    pushTaskActionItem(t, { action: 'launch', target }, later(1))
+    expect((t.items![0] as TaskActionItem).ride).toBe('r1')
+
+    // The ride closes and the task acts again — a detached child outliving the
+    // turn that spawned it. With nothing open there is no turn to anchor to.
+    closeRide(t, 'done', later(2))
+    pushTaskActionItem(t, { action: 'launch', target }, later(3))
+    expect((t.items![1] as TaskActionItem).ride).toBeUndefined()
   })
 
   it('lastFlowItem returns the last main-agent flow item, optionally scoped to a ride', () => {

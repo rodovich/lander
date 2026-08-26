@@ -1499,11 +1499,11 @@ body {
 }
 
 /* A note in the conversation timeline — a lifecycle transition of this task, or
-   an action it took on another. Unbubbled and muted like the working-spinner
-   row, but without the spinner since the thing it reports is done. Shares the
-   user turn's tint and the messages' 28px inset for alignment. A column: the
-   prose row, then whatever stacks beneath it (a list of awaited tasks, a
-   disclosure's revealed body). */
+   (where there was no turn to carry it) an action it took on another. Unbubbled
+   and muted like the working-spinner row, but without the spinner since the
+   thing it reports is done. Shares the user turn's tint and the messages' 28px
+   inset for alignment. A column: the prose row, then whatever stacks beneath it
+   (a list of awaited tasks, a disclosure's revealed body). */
 .timeline-note {
   display: flex;
   flex-direction: column;
@@ -1631,6 +1631,37 @@ body {
 .timeline-note-detail {
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* The same note, standing inside the turn that took the action rather than on
+   the timeline. The rail's tint and inset are what say "this is the task's own
+   story", so a note about another task drops both: the turn's bubble is already
+   the surface, and the muted color still sets it apart from the turn's prose. At
+   the size of a fold's summary, which is what it sits among — an account of the
+   turn, not part of what the turn said. */
+.timeline-note.in-turn {
+  padding: 0;
+  background: none;
+  font-size: 12px;
+}
+
+/* No gutter to hang into here: the triangle takes its place at the head of the
+   row, level with the one on a fold summary above it. */
+.timeline-note.in-turn .collapsible-toggle {
+  margin-left: 0;
+}
+
+/* The actions anchored at one point in a turn, as one block, ruled off from the
+   inference below it. Unruled between themselves — several launches out of one
+   stretch of work are one aside, and a rule per action was what made a fan-out
+   read as noise — and spaced like the steps around them so the block sits in
+   the turn's rhythm rather than in one of its own. No inset: the triangle on a
+   note with revealed detail hangs into the bubble's padding (see `.timeline-note
+   .collapsible-toggle`), which leaves every note's prose flush with the turn's. */
+.turn-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 /* ---- streamed activity trace ---- */
