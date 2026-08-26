@@ -1147,6 +1147,155 @@ describe('the launch', () => {
   })
 })
 
+// The privilege-granting paths, sorted by who is asking (resolvePrincipal).
+// Edit access is inherit-only for a task — it may pass on what it holds and
+// nothing more — while raising a grant from nothing is the human's call. Each
+// case is stated as the refusal rather than the permission, because the
+// refusals are what keep a task inside the sandbox it was given: a gate that
+// silently stopped denying would still pass every test written from the
+// allowed side.
+describe('permission grants by principal', () => {
+  const seedTask = (id: string, over: Record<string, unknown> = {}) =>
+    writeFile(
+      path.join(tasksDir, `${id}.json`),
+      JSON.stringify({
+        id,
+        title: 'Spawner',
+        status: 'riding',
+        createdAt: AT,
+        updatedAt: AT,
+        allowEdits: false,
+        token: `token-${id}`,
+        shape: 2,
+        rides: [],
+        items: [{ id: 'u0', at: AT, kind: 'message', role: 'user', text: 'go' }],
+        ...over,
+      }),
+    )
+
+  const taskAuth = (id: string, token = `token-${id}`) => ({
+    'x-lander-task': id,
+    'x-lander-project': slug,
+    'x-lander-token': token,
+  })
+
+  const create = (
+    headers: Record<string, string>,
+    body: Record<string, unknown> = {},
+  ) =>
+    app.request(`/api/${slug}/tasks`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify({ title: 'Child', ...body }),
+    })
+
+  const patch = (
+    id: string,
+    headers: Record<string, string>,
+    body: Record<string, unknown>,
+  ) =>
+    app.request(`/api/${slug}/tasks/${id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify(body),
+    })
+
+  it('never serves a task’s token over HTTP', async () => {
+    const res = await create({ 'x-lander-ui-token': UI_TOKEN }, { allowEdits: true })
+    expect(res.status).toBe(201)
+    const body = (await res.json()) as Record<string, unknown>
+    expect(body.allowEdits).toBe(true)
+    // publicTask strips it. Every task can reach this route, so a token served
+    // here would let one task impersonate another for the whole check below.
+    expect(body.token).toBeUndefined()
+    expect(JSON.parse(await settled(body.id as string)).token).toEqual(
+      expect.any(String),
+    )
+  })
+
+  it('refuses an anonymous caller the edit grant but not the task', async () => {
+    expect((await create({}, { allowEdits: true })).status).toBe(403)
+    expect((await create({}, {})).status).toBe(201)
+  })
+
+  it('lets a task pass on edit access it holds', async () => {
+    await seedTask('tsk-grantor', { allowEdits: true })
+    const res = await create(taskAuth('tsk-grantor'), { allowEdits: true })
+    expect(res.status).toBe(201)
+    const { id } = (await res.json()) as { id: string }
+    expect(JSON.parse(await settled(id)).allowEdits).toBe(true)
+  })
+
+  it('refuses a task the edit access it lacks', async () => {
+    await seedTask('tsk-readonly')
+    const res = await create(taskAuth('tsk-readonly'), { allowEdits: true })
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({
+      error: 'spawning task lacks edit permission to pass on',
+    })
+  })
+
+  // Identity is the (id, token) pair, so knowing a privileged task's id buys
+  // nothing on its own — ids travel in plain sight, in prompts and in the CLI.
+  // A wrong token demotes the caller to anon rather than matching.
+  it('treats a real task id carrying the wrong token as anonymous', async () => {
+    await seedTask('tsk-privileged', { allowEdits: true })
+    const res = await create(taskAuth('tsk-privileged', 'not-the-token'), {
+      allowEdits: true,
+    })
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({
+      error: 'not authorized to grant edit permission',
+    })
+  })
+
+  it('lets only the UI change an existing task’s edit grant', async () => {
+    await seedTask('tsk-escalate')
+    const self = await patch('tsk-escalate', taskAuth('tsk-escalate'), {
+      allowEdits: true,
+    })
+    expect(self.status).toBe(403)
+    // The refusal is the write not happening, not just the status code.
+    expect(await readTaskField('tsk-escalate', 'allowEdits')).toBe(false)
+
+    const ui = await patch(
+      'tsk-escalate',
+      { 'x-lander-ui-token': UI_TOKEN },
+      { allowEdits: true },
+    )
+    expect(ui.status).toBe(200)
+    expect(await readTaskField('tsk-escalate', 'allowEdits')).toBe(true)
+  })
+
+  // Same route, and the reason to check it here: the escalation gate must turn
+  // away allowEdits without closing the status path, which is how `lander land`
+  // and `lander wedge` report in on every ride.
+  it('still lets a task set its own status', async () => {
+    await seedTask('tsk-selfland')
+    const res = await patch('tsk-selfland', taskAuth('tsk-selfland'), {
+      status: 'landed',
+    })
+    expect(res.status).toBe(200)
+    expect(await readTaskField('tsk-selfland', 'status')).toBe('landed')
+  })
+
+  // Gated ahead of the daemon lookup, so the refusal holds even with no daemon
+  // connected — there is none in this suite, and a task must not be able to
+  // widen its own tool sandbox in that window either.
+  it('refuses a task a tool-permission grant', async () => {
+    await seedTask('tsk-allow')
+    const res = await app.request(`/api/${slug}/tasks/tsk-allow/allow`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...taskAuth('tsk-allow') },
+      body: JSON.stringify({ rule: 'Bash(rm:*)', scope: 'task' }),
+    })
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({
+      error: 'not authorized to grant tool permissions',
+    })
+  })
+})
+
 // Approval gates MATERIALIZATION, not only dispatch: a hook host asks again,
 // after it has been spawned and before it imports anything, and a human who
 // revoked in that window must be obeyed.
