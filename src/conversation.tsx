@@ -276,7 +276,11 @@ export const Conversation = memo(function Conversation({
             </button>
             <CopyIdButton id={task.id} />
             {!task.archived && (
-              <GrantControl grants={task.grants} onAllow={allowTool} />
+              <GrantControl
+                grants={task.grants}
+                allow={task.allow}
+                onAllow={allowTool}
+              />
             )}
             {!task.allowEdits && !task.archived && (
               <ReadOnlyMenu onAllowEdits={() => void setAllowEdits(true)} />

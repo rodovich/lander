@@ -299,18 +299,51 @@ function StampIcon() {
   )
 }
 
+// The rules already on the task (`task.allow`), listed above the authoring row so
+// the popup answers "what does this task already have?" before it offers to widen
+// it. Read-only: a rule's text is the grant, so editing it here would misrepresent
+// what the agent actually runs under — revoking isn't a surface yet. Project-scope
+// grants live in the project's settings file, outside any one task, so they aren't
+// listed. When the flow doesn't honor task rules (codex) these were saved for
+// parity only, and the label says so rather than claiming they are in force.
+export function GrantedRules({
+  rules,
+  honored,
+}: {
+  rules: string[]
+  honored: boolean
+}) {
+  if (rules.length === 0) return null
+  return (
+    <>
+      <div className="rule-popup-head">
+        {honored ? 'Allowed in this task' : 'Saved on this task (not honored)'}
+      </div>
+      {rules.map((rule) => (
+        <div className="rule-row" key={rule}>
+          <span className="rule-row-rule readonly">{rule}</span>
+        </div>
+      ))}
+    </>
+  )
+}
+
 // The always-available grant control in the task header: a rubber-stamp button
-// that opens a one-row rule-authoring popup — the same RuleRow the blocked
-// summary uses, a single empty editable row with the same task/project kebab — so
-// a rule can be granted proactively, no archaeology through denied chips. The
-// doc's primary permission surface; permission asks will later deep-link into it
-// with a prefill. Fixed-anchored like the other header popups so it can't be
-// clipped.
+// that opens the task's permission popup — the rules already granted on the task,
+// above a one-row rule-authoring row (the same RuleRow the blocked summary uses,
+// empty, with the same task/project kebab) — so a rule can be granted proactively,
+// no archaeology through denied chips. The doc's primary permission surface;
+// permission asks will later deep-link into it with a prefill. Fixed-anchored like
+// the other header popups so it can't be clipped.
 export function GrantControl({
   grants,
+  allow,
   onAllow,
 }: {
   grants: Task['grants']
+  // The task's own granted rules, listed above the authoring row. Absent on a
+  // task that has never been granted one (and on a pre-`allow` payload).
+  allow: Task['allow']
   onAllow: (rule: string, scope: 'task' | 'project') => Promise<boolean>
 }) {
   const { open, setOpen, containerRef, triggerRef, popupRef, popupStyle } =
@@ -334,15 +367,18 @@ export function GrantControl({
         className="edit-title-button"
         aria-haspopup="dialog"
         aria-expanded={open}
-        title="Grant a permission rule"
-        aria-label="Grant a permission rule"
+        title="Permissions"
+        aria-label="Permissions"
         onClick={() => setOpen((o) => !o)}
       >
         <StampIcon />
       </button>
       {open && (
         <div ref={popupRef} className="blocked-popup" style={popupStyle}>
-          <div className="rule-popup-head">Grant a permission rule</div>
+          <GrantedRules rules={allow ?? []} honored={grants?.task ?? true} />
+          <div className={'rule-popup-head' + (allow?.length ? ' divided' : '')}>
+            Grant a permission rule
+          </div>
           {/* One empty row, remounted fresh each time the popup reopens (the
               popup unmounts on close), so authoring another rule is one reopen. */}
           <RuleRow

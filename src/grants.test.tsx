@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { BlockedSummary, GrantControl, RuleRow } from './grants'
+import { BlockedSummary, GrantControl, GrantedRules, RuleRow } from './grants'
 
 const noop = async () => true
 
@@ -94,10 +94,41 @@ describe('RuleRow', () => {
 describe('GrantControl', () => {
   it('renders a labeled stamp trigger (popup opens on click, not in SSR)', () => {
     const html = renderToStaticMarkup(
-      <GrantControl grants={{ task: true, project: true }} onAllow={noop} />,
+      <GrantControl
+        grants={{ task: true, project: true }}
+        allow={['Bash(git:*)']}
+        onAllow={noop}
+      />,
     )
-    expect(html).toContain('aria-label="Grant a permission rule"')
-    // Closed by default: no popup/rule row in the initial markup.
+    expect(html).toContain('aria-label="Permissions"')
+    // Closed by default: no popup, rule row, or granted rule in the markup.
     expect(html).not.toContain('rule-row')
+    expect(html).not.toContain('Bash(git:*)')
+  })
+})
+
+describe('GrantedRules', () => {
+  it('lists the task’s granted rules read-only', () => {
+    const html = renderToStaticMarkup(
+      <GrantedRules rules={['Bash(git:*)', 'WebFetch(https://x)']} honored />,
+    )
+    expect(html).toContain('Allowed in this task')
+    expect(html).toContain('Bash(git:*)')
+    expect(html).toContain('WebFetch(https://x)')
+    // Read-only: no click-to-edit, no kebab to grant them again.
+    expect(html).toContain('rule-row-rule readonly')
+    expect(html).not.toContain('rule-row-kebab')
+  })
+
+  it('says so when the flow does not honor task rules (codex)', () => {
+    const html = renderToStaticMarkup(
+      <GrantedRules rules={['Bash(git:*)']} honored={false} />,
+    )
+    expect(html).toContain('not honored')
+    expect(html).not.toContain('Allowed in this task')
+  })
+
+  it('renders nothing when the task has no rules', () => {
+    expect(renderToStaticMarkup(<GrantedRules rules={[]} honored />)).toBe('')
   })
 })

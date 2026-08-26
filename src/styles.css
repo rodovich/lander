@@ -1888,12 +1888,20 @@ body {
   font-size: 13px;
 }
 
-/* The grant control's popup label, naming the otherwise-unlabeled empty row. */
+/* The grant control's popup labels — one over the rules already granted on the
+   task, one naming the otherwise-unlabeled empty authoring row. */
 .rule-popup-head {
   padding: 2px 6px 4px;
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
+}
+
+/* The authoring label when granted rules are listed above it: a rule separates
+   what the task already has from what this row would add. */
+.rule-popup-head.divided {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
 }
 
 /* One rule + its kebab. The rule flexes to fill; the kebab sits at the right. */
