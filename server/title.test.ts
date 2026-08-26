@@ -68,6 +68,27 @@ describe('generateTitle', () => {
     expect(calls[0].args).toContain('--strict-mcp-config')
   })
 
+  it('ends the child’s stdin rather than leaving it open', async () => {
+    // Left open, the CLI spends its first 3 seconds waiting for input that is
+    // never coming — inside the window a server restart can orphan the child.
+    let ended = false
+    const exec: TitleExec = () => {
+      const running = Promise.resolve({ stdout: 'A short title' }) as Promise<{
+        stdout: string
+      }> & { child?: unknown }
+      running.child = {
+        stdin: {
+          end: () => {
+            ended = true
+          },
+        },
+      }
+      return running
+    }
+    expect(await generateTitle('/proj', 'x', exec)).toBe('A short title')
+    expect(ended).toBe(true)
+  })
+
   it('strips surrounding quotes and trailing punctuation', async () => {
     const { exec } = recorder('"Fix the parser."')
     expect(await generateTitle('/proj', 'x', exec)).toBe('Fix the parser')

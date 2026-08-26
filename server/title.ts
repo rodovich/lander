@@ -45,7 +45,7 @@ export async function generateTitle(
     'quotes and no trailing punctuation.'
   const prompt = `Title this task:\n\n<task>\n${message}\n</task>`
   try {
-    const { stdout } = await exec(
+    const running = exec(
       'claude',
       [
         '--model',
@@ -63,6 +63,15 @@ export async function generateTitle(
         env: scrubbedEnv(),
       },
     )
+    // execFile gives the child a stdin pipe and never ends it, so the CLI waits
+    // out its "no stdin data received" grace — 3s of a call that takes about 8,
+    // spent inside the window in which a restart orphans this child and loses
+    // the name. Ending the stream says what `< /dev/null` would. A test double
+    // returns a bare promise with no child, and skips it.
+    const child = (running as unknown as { child?: { stdin?: { end: () => void } } })
+      .child
+    child?.stdin?.end()
+    const { stdout } = await running
     const title = stdout.trim().replace(/^["']+|["'.]+$/g, '').trim()
     return title || null
   } catch {
