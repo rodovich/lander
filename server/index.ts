@@ -3986,6 +3986,12 @@ app.post('/api/:project/tasks/:id/unread', async (c) => {
 // session exists yet, so it starts fresh). A task with no assistant turn yet
 // never established its session — start it; otherwise resume.
 export async function recoverQueues(): Promise<void> {
+  // Naming that a restart cut short, retried one at a time and off the boot
+  // path: the naming child dies with the process that spawned it, and a restart
+  // is exactly the event that leaves several tasks flagged at once — so they
+  // queue behind each other rather than arriving as a herd of model calls while
+  // the server is still coming up.
+  let naming: Promise<unknown> = Promise.resolve()
   for (const project of PROJECTS) {
     let names: string[]
     try {
@@ -4002,6 +4008,16 @@ export async function recoverQueues(): Promise<void> {
       // the rest of the backlog separately).
       const task = await readTask(project.dataDir, id)
       if (!task) continue
+      // Ahead of every skip below, because a task that never rides again still
+      // shows up in the list and still needs a name: the wakeup retry
+      // (driveTask) only reaches a task that gets another turn, which a deferred
+      // one has not had yet and a task the user simply stopped replying to never
+      // gets. This sweep is the only retry those two ever see.
+      if (task.titlePending) {
+        const opening = userItems(task)[0]?.text
+        if (opening)
+          naming = naming.then(() => ensureTitle(project, id, opening)).catch(() => {})
+      }
       // A deferred task waits for its trigger — launchScheduled owns both kinds,
       // not the queue recovery (it carries a queued opening message too, which is
       // exactly what would otherwise draw the sweep in). The await arm matters as

@@ -1,8 +1,14 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { normalizeProjectPath } from './projects'
+
+// The naming child is a real `claude` process; stubbing it is what makes the
+// retry observable as a name landing on the record rather than as a spawn.
+vi.mock('./title', () => ({
+  generateTitle: vi.fn(async () => 'Named by the stub'),
+}))
 
 // The boot sweep drives anything carrying a queued message, and a deferred task
 // carries its opening message in that queue for the whole wait. So without a
@@ -101,5 +107,46 @@ describe('boot recovery leaves a deferred task to the scheduler', () => {
     // recovery drives it and driveTask takes the queue before running the turn.
     const plain = await readRaw('boot-plain')
     expect(plain.queued ?? []).not.toEqual(['opening'])
+  })
+})
+
+// A restart is what strands a name in the first place — the naming child belongs
+// to the process it killed — so the boot that follows is the natural place to
+// try again.
+describe('boot recovery retries a name a restart cut short', () => {
+  it('names a flagged task, including one still waiting for its trigger', async () => {
+    // Wedged with an empty queue: the shape of a task whose user stopped
+    // replying. The sweep passes over it and driveTask — where the only other
+    // retry lives — is never called for it. This is the live record that has sat
+    // called "…" since 2026-06-30.
+    await seed('boot-unnamed', {
+      title: '…',
+      titlePending: true,
+      status: 'wedged',
+      queued: [],
+    })
+    await seed('boot-unnamed-deferred', {
+      title: '…',
+      titlePending: true,
+      scheduledFor: '2099-01-01T00:00:00.000Z',
+    })
+    await seed('boot-keeps-its-name', {})
+
+    await recoverQueues()
+
+    // Fire-and-forget, so the sweep returns before the names land.
+    await vi.waitFor(async () => {
+      expect((await readRaw('boot-unnamed')).title).toBe('Named by the stub')
+      // The deferred one matters most: the sweep skips it for every other
+      // purpose, and it has had no turn for the wakeup retry to ride in on.
+      expect((await readRaw('boot-unnamed-deferred')).title).toBe(
+        'Named by the stub',
+      )
+    })
+    // Flag cleared, or the next boot names it all over again.
+    expect((await readRaw('boot-unnamed')).titlePending).toBeUndefined()
+    // The negative control: an unflagged task is left alone, so the retry cannot
+    // pass by renaming everything it sweeps.
+    expect((await readRaw('boot-keeps-its-name')).title).toBe('boot-keeps-its-name')
   })
 })
