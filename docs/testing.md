@@ -116,18 +116,16 @@ receives. And when a change rests on a claim about how the agent CLI or the
 harness behaves, check that premise against the corpus (`data/`, or the harness's
 own record) or a probe before building on it.
 
-## Probes and scratch files
+## Probes
 
-For anything the shell guard blocks — inline `node -e`, `python3`, pipelines with
-expansions, `$VAR` in a path — write a throwaway script instead. The established
-convention is `daemon/<name>-throwaway.mjs`, run as `node
-daemon/<name>-throwaway.mjs`. Use literal paths in probes rather than variables,
-both because the guard rejects expansions and because a literal path is what the
-result is actually about.
+Some claims about the running stack cannot be settled by reading code or running
+the suite: what the API returns for a task mid-ride, what the daemon actually
+wrote to a task record, how a hook behaves under a real turn. A probe is a small
+standalone script that goes and looks. It turns a step that would otherwise be
+inferred into one that is observed, and probing the live system end-to-end is
+usually stronger evidence than the log line a plan asked someone to watch for.
 
-Delete throwaway probes when the task concludes. They are untracked, so every
-one left behind shows up in the git-status block of every future task in the
-repo.
+The convention is `probe/<name>.mjs`, run as `node probe/<name>.mjs`.
 
 ## Cleanup and reporting
 
