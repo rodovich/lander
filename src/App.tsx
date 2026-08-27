@@ -54,6 +54,8 @@ export function App() {
     shown,
     setShown,
     refresh,
+    beginTaskMutation,
+    finishTaskMutation,
     hasLoadedRef,
     resolveTaskLink,
     taskLinks,
@@ -76,7 +78,15 @@ export function App() {
     retitling,
     answerAsk,
     answeringBy,
-  } = useTaskActions({ currentRef, tasksRef, setTasks, refresh, setError })
+  } = useTaskActions({
+    currentRef,
+    tasksRef,
+    setTasks,
+    refresh,
+    beginTaskMutation,
+    finishTaskMutation,
+    setError,
+  })
   // The user's explicit task pick. The effective selection (`selected`, below)
   // falls back to the first visible task when this one is filtered away.
   const initialTaskKey = initialTaskRef.current

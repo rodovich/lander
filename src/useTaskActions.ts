@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react'
 import { uiHeaders } from './api'
 import { latestUpdateAt } from './taskMeta'
 import { taskKeyOf } from './taskRef'
+import type { TaskMutationHandle, TaskPatch } from './taskMutationFence'
 import type { TaskWithProject } from './types'
 
 // The fetch-and-reconcile task actions: optimistic local updates, the API
@@ -19,9 +20,25 @@ export function useTaskActions(opts: {
   tasksRef: { current: TaskWithProject[] }
   setTasks: React.Dispatch<React.SetStateAction<TaskWithProject[]>>
   refresh: () => Promise<void>
+  beginTaskMutation: (
+    task: TaskWithProject,
+    patch: TaskPatch,
+  ) => TaskMutationHandle
+  finishTaskMutation: (
+    handle: TaskMutationHandle,
+    updated?: TaskWithProject,
+  ) => void
   setError: (message: string | null) => void
 }) {
-  const { currentRef, tasksRef, setTasks, refresh, setError } = opts
+  const {
+    currentRef,
+    tasksRef,
+    setTasks,
+    refresh,
+    beginTaskMutation,
+    finishTaskMutation,
+    setError,
+  } = opts
 
   // Tasks with an ask answer in flight, keyed by project + task id, mirroring the send
   // path's per-task disabling.
@@ -85,27 +102,26 @@ export function useTaskActions(opts: {
     async (task: TaskWithProject, status: string) => {
       const id = task.id
       const proj = task.projectSlug
-      const key = taskKeyOf(task)
       setError(null)
-      // Optimistic; the PATCH persists it and polling will reconcile.
-      setTasks((prev) =>
-        prev.map((t) => (taskKeyOf(t) === key ? { ...t, status } : t)),
-      )
+      const mutation = beginTaskMutation(task, { status })
       try {
         const r = await fetch(`/api/${proj}/tasks/${id}`, {
           method: 'PATCH',
           headers: uiHeaders(),
           body: JSON.stringify({ status }),
         })
-        if (!r.ok) {
-          const body = await r.json()
-          throw new Error(body.error ?? r.statusText)
-        }
+        const body = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(body.error ?? r.statusText)
+        finishTaskMutation(mutation, {
+          ...(body as TaskWithProject),
+          projectSlug: proj,
+        })
       } catch (err) {
+        finishTaskMutation(mutation)
         setError(err instanceof Error ? err.message : String(err))
       }
     },
-    [setError, setTasks],
+    [setError, beginTaskMutation, finishTaskMutation],
   )
 
   // Archive (or restore) a task by moving it between the project's tasks/ and

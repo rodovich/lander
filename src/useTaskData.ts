@@ -3,6 +3,16 @@ import { loadShownTasks, loadTaskLinks, type FlowTelemetry } from './api'
 import { useSessionState } from './hooks'
 import type { TaskLinkResolver } from './markdown'
 import { taskHref } from './taskRef'
+import {
+  beginTaskPatch,
+  createTaskMutationFence,
+  mergeTaskRefresh,
+  patchTask,
+  replaceTask,
+  settleTaskPatch,
+  type TaskMutationHandle,
+  type TaskPatch,
+} from './taskMutationFence'
 import type { Project, TaskLink, TaskView, TaskWithProject } from './types'
 
 // The client's task data: the displayed task list and its polling, the
@@ -40,6 +50,31 @@ export function useTaskData(
   // until then (the URL sync, which would otherwise clobber a deep link).
   const hasLoadedRef = useRef(false)
 
+  // Status writes are optimistic while the displayed-list poll runs
+  // independently. Fence only the task being written: stale snapshots cannot
+  // roll it back, while changes to every other task still land normally.
+  const taskMutationFenceRef = useRef(createTaskMutationFence())
+  const beginTaskMutation = useCallback(
+    (task: TaskWithProject, patch: TaskPatch): TaskMutationHandle => {
+      const handle = beginTaskPatch(taskMutationFenceRef.current, task, patch)
+      setTasks((prev) => patchTask(prev, handle.key, patch))
+      return handle
+    },
+    [],
+  )
+  const finishTaskMutation = useCallback(
+    (handle: TaskMutationHandle, updated?: TaskWithProject) => {
+      const replacement = settleTaskPatch(
+        taskMutationFenceRef.current,
+        handle,
+        updated,
+      )
+      if (replacement)
+        setTasks((prev) => replaceTask(prev, handle.key, replacement))
+    },
+    [],
+  )
+
   // Load the project list once. Reconcile the session-restored project filter
   // against it — keeping the picked slugs that still exist, and falling back to
   // "show all" only when nothing valid was restored (first visit, or every
@@ -74,9 +109,13 @@ export function useTaskData(
   const epochRef = useRef(0)
   const refresh = useCallback(async () => {
     const epoch = epochRef.current
+    const mutationFence = taskMutationFenceRef.current
+    const issuedAt = mutationFence.clock
     const { tasks, telemetry } = await loadShownTasks(shown, archived)
     if (epoch !== epochRef.current) return
-    setTasks(tasks)
+    setTasks((current) =>
+      mergeTaskRefresh(mutationFence, issuedAt, current, tasks),
+    )
     setTelemetry(telemetry)
     hasLoadedRef.current = true
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -200,6 +239,8 @@ export function useTaskData(
     shown,
     setShown,
     refresh,
+    beginTaskMutation,
+    finishTaskMutation,
     hasLoadedRef,
     resolveTaskLink,
     taskLinks,
