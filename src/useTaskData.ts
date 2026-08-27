@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { loadShownTasks, loadTaskLinks, type FlowTelemetry } from './api'
 import { useSessionState } from './hooks'
 import type { TaskLinkResolver } from './markdown'
+import { MonotonicRequestGate } from './requestOrder'
 import { taskHref } from './taskRef'
 import {
   beginTaskPatch,
@@ -99,6 +100,9 @@ export function useTaskData(
 
   const shownKey = shown.join(',')
   const archived = view === 'archived'
+  const refreshScope = `${shownKey}\n${archived}`
+  const refreshScopeRef = useRef(refreshScope)
+  refreshScopeRef.current = refreshScope
 
   // Load the shown tasks (and the telemetry snapshot that rides along) and
   // commit them. Shared by the 2s poll and the action paths that reconcile
@@ -107,17 +111,36 @@ export function useTaskData(
   // (shown set, archived flag) has changed: the moral equivalent of the old
   // poll effect's `canceled` flag, extended to the action-path refreshes.
   const epochRef = useRef(0)
+  const refreshOrderRef = useRef(new MonotonicRequestGate())
   const refresh = useCallback(async () => {
     const epoch = epochRef.current
+    const requestOrder = refreshOrderRef.current
+    const request = requestOrder.begin()
     const mutationFence = taskMutationFenceRef.current
     const issuedAt = mutationFence.clock
-    const { tasks, telemetry } = await loadShownTasks(shown, archived)
-    if (epoch !== epochRef.current) return
-    setTasks((current) =>
-      mergeTaskRefresh(mutationFence, issuedAt, current, tasks),
-    )
-    setTelemetry(telemetry)
-    hasLoadedRef.current = true
+    try {
+      const { tasks, telemetry } = await loadShownTasks(shown, archived)
+      if (
+        refreshScope !== refreshScopeRef.current ||
+        epoch !== epochRef.current ||
+        !requestOrder.settle(request)
+      )
+        return
+      setTasks((current) =>
+        mergeTaskRefresh(mutationFence, issuedAt, current, tasks),
+      )
+      setTelemetry(telemetry)
+      hasLoadedRef.current = true
+    } catch (error) {
+      // A stale failure must not paint an error over a newer successful poll.
+      if (
+        refreshScope !== refreshScopeRef.current ||
+        epoch !== epochRef.current ||
+        !requestOrder.settle(request)
+      )
+        return
+      throw error
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shownKey, archived])
 
@@ -130,6 +153,7 @@ export function useTaskData(
     const timer = setInterval(tick, 2000)
     return () => {
       epochRef.current++
+      refreshOrderRef.current.invalidate()
       clearInterval(timer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -141,14 +165,17 @@ export function useTaskData(
   useEffect(() => {
     let canceled = false
     let etag: string | undefined
+    const requestOrder = new MonotonicRequestGate()
     const refreshLinks = async () => {
+      const request = requestOrder.begin()
       try {
         const response = await loadTaskLinks(etag)
-        if (canceled) return
+        if (canceled || !requestOrder.settle(request)) return
         if (response.etag) etag = response.etag
         if (!response.notModified) setTaskLinks(response.links)
         setTaskLinksLoaded(true)
       } catch {
+        if (!canceled) requestOrder.settle(request)
         // Link resolution is presentational; keep the last good projection.
       }
     }
@@ -156,6 +183,7 @@ export function useTaskData(
     const timer = setInterval(refreshLinks, 2000)
     return () => {
       canceled = true
+      requestOrder.invalidate()
       clearInterval(timer)
     }
   }, [])

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { loadHooks, setHookApproval, setTrustedBranch } from './api'
 import { lastPathComponent } from './format'
+import { MonotonicRequestGate } from './requestOrder'
 import type { Hook, Project, ProjectHooks } from './types'
 
 // A project's hooks: the modules its tree declares under `.lander/hooks/`, and
@@ -200,12 +201,22 @@ export function HooksPanel({
   const [hooks, setHooks] = useState<ProjectHooks | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const reloadOrderRef = useRef(new MonotonicRequestGate())
+  const slugRef = useRef(slug)
+  slugRef.current = slug
 
   const reload = useCallback(async () => {
+    const requestOrder = reloadOrderRef.current
+    const request = requestOrder.begin()
     try {
-      setHooks(await loadHooks(slug))
+      const loaded = await loadHooks(slug)
+      if (slug !== slugRef.current) return
+      if (!requestOrder.settle(request)) return
+      setHooks(loaded)
       setError(null)
     } catch (e) {
+      if (slug !== slugRef.current) return
+      if (!requestOrder.settle(request)) return
       setHooks(null)
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -213,6 +224,7 @@ export function HooksPanel({
 
   useEffect(() => {
     void reload()
+    return () => reloadOrderRef.current.invalidate()
   }, [reload])
 
   const act = async (run: () => Promise<unknown>) => {
