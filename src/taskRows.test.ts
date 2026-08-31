@@ -175,6 +175,35 @@ describe('buildTaskRows', () => {
     expect(rows.map((row) => row.key)).toEqual(['one/same', 'two/same'])
   })
 
+  it('re-sorts a list left out of recency order, so no date bucket reopens', () => {
+    // A settled status write puts the server's task — its updatedAt bumped to
+    // now — back in the slot it held while older. Grouped in that order, the
+    // landed group would close `today`, open `older`, then reopen `today`,
+    // giving two subheaders the same row key.
+    const shape = build([
+      task({ id: 'newest', status: 'landed', updatedAt: at(0) }),
+      task({ id: 'stale-slot', status: 'landed', updatedAt: at(9) }),
+      task({ id: 'just-landed', status: 'landed', updatedAt: at(0, 10) }),
+    ])
+    expect(tags(shape)).toEqual([
+      's:landed',
+      'd:today', 'just-landed', 'newest',
+      'd:older', 'stale-slot',
+    ])
+    const keys = shape.taskRows.map((r) => r.key)
+    expect(new Set(keys).size).toBe(keys.length)
+  })
+
+  it('sorts an unparseable time to the back, with the bucket it falls in', () => {
+    const shape = build([
+      task({ id: 'garbled', status: 'landed', createdAt: 'not-a-date' }),
+      task({ id: 'today', status: 'landed', updatedAt: at(0) }),
+    ])
+    expect(tags(shape)).toEqual([
+      's:landed', 'd:today', 'today', 'd:older', 'garbled',
+    ])
+  })
+
   it('counts statuses in reverse list order', () => {
     const shape = build([
       task({ id: 'a', status: 'wedged' }),

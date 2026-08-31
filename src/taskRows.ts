@@ -56,6 +56,17 @@ const STATUS_RANK: Record<string, number> = {
   landed: 4,
 }
 
+// Newest first, on the same timestamp the date bucketing reads. An unparseable
+// one buckets as 'older', so it sorts to the back rather than wherever string
+// comparison would drop it.
+function byRecency(a: TaskWithProject, b: TaskWithProject): number {
+  const left = Date.parse(a.updatedAt ?? a.createdAt)
+  const right = Date.parse(b.updatedAt ?? b.createdAt)
+  const l = Number.isNaN(left) ? -Infinity : left
+  const r = Number.isNaN(right) ? -Infinity : right
+  return l === r ? 0 : r - l
+}
+
 export function buildTaskRows(
   tasks: TaskWithProject[],
   opts: {
@@ -96,10 +107,16 @@ export function buildTaskRows(
     return query ? t.title.toLowerCase().includes(query) : true
   })
 
-  // Sort into status groups, preserving each group's recency order within it
-  // (matchedTasks is already sorted by updatedAt, and sort is stable).
+  // Sort into status groups, most recent first within each. The order is
+  // established here rather than inherited from the caller: the displayed list
+  // arrives sorted (see loadShownTasks) but a settled local mutation puts a
+  // freshly-updated task back in its old slot, and the date bucketing below
+  // depends on recency order. Out of order, a status can reopen a bucket it
+  // already closed and emit a second subheader carrying the same row key.
   const orderedTasks = [...matchedTasks].sort(
-    (a, b) => (STATUS_RANK[a.status] ?? 3) - (STATUS_RANK[b.status] ?? 3),
+    (a, b) =>
+      (STATUS_RANK[a.status] ?? 3) - (STATUS_RANK[b.status] ?? 3) ||
+      byRecency(a, b),
   )
 
   const todayStart = new Date(
