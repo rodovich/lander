@@ -52,17 +52,25 @@ export function lastPathComponent(p: string): string {
   return p.split('/').filter(Boolean).pop() ?? p
 }
 
-// The name of the git worktree a task's cwd sits in, or null when it's not in
-// one. Claude Code's `--worktree` flag roots worktrees at `.claude/worktrees/
-// <name>`, so the name is the path segment right after that marker (the cwd may
-// be a deeper subdirectory of the worktree, hence the index lookup rather than
-// a plain last component).
-export function worktreeName(cwd: string | undefined): string | null {
-  if (!cwd) return null
-  const parts = cwd.split('/').filter(Boolean)
-  const i = parts.lastIndexOf('worktrees')
-  if (i < 1 || parts[i - 1] !== '.claude') return null
-  return parts[i + 1] ?? null
+// The "project • worktree" line above the detail header's title, or null when it
+// would be noise: a single project and no worktree.
+//
+// `worktree` is the task's recorded worktree name — what its flow's worktree
+// hooks stored — and is never derived from the task's cwd. A cwd under
+// `.claude/worktrees/` records only where the shell stood when the last turn
+// ended; a flow that launches at the project root will not be there next turn,
+// so a badge derived from it named a worktree the task had already left.
+export function detailHeaderLabel({
+  project,
+  projectCount,
+  worktree,
+}: {
+  project: string
+  projectCount: number
+  worktree?: string
+}): string | null {
+  if (projectCount <= 1 && !worktree) return null
+  return lastPathComponent(project) + (worktree ? ` • ${worktree}` : '')
 }
 
 // Abbreviate a token count for the compact corner readout: exact below 1,000,

@@ -45,8 +45,9 @@ export type TelemetryItem =
 // booleans. Two of them are advisory at step 4 and deliberately have no
 // consumer — see docs/flow-inversion.md's step-4 as-built notes:
 //   - `worktrees` documents whether a flow can launch into a worktree, but the
-//     mechanics live in the flow's own resolveLaunchDir and the UI derives the
-//     worktree name from cwd, so there is no affordance to gate.
+//     mechanics live in the flow's own resolveLaunchDir and the header badge now
+//     gates on the *datum* (`task.worktree` present), which only such a flow's
+//     worktree hooks produce — so there is no affordance to gate.
 //   - `rateLimitRetry` documents whether a flow can supply a reset timestamp,
 //     but the scheduled-retry option already gates on the *datum* (`resetsAt`
 //     present), which only such a flow can produce.

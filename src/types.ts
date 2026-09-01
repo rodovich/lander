@@ -307,10 +307,21 @@ export type Task = {
   items?: Item[]
   rides?: Ride[]
   // The working directory the previous turn ended in, recorded by the Stop hook
-  // (see the server's Task.cwd). When it's a git worktree the agent entered, its
-  // name shows beside the project in the detail header. Absent until the first
-  // turn completes, or when the task never left the project root.
+  // (see the server's Task.cwd). Absent until the first turn completes, or when
+  // the task never left the project root.
+  //
+  // NOT where the next turn starts, and not evidence of a worktree: a flow that
+  // launches at the project root ignores this entirely, so a `cd` recorded here
+  // is a place the agent visited, not a place it will be again. Read `worktree`
+  // for that.
   cwd?: string
+  // The git worktree this task is in, by name under `.claude/worktrees/`, as the
+  // flow's worktree hooks recorded it. This is the datum the detail header badges
+  // beside the project — set only while the task is really bound to a worktree
+  // the next turn will land in, cleared on exit. Absent for a task at the project
+  // root, and for a flow whose capabilities.worktrees is false (it can never
+  // produce one).
+  worktree?: string
 }
 
 // A task tagged with the slug of the project it came from, so the merged

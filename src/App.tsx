@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Composer } from './composer'
 import { Conversation } from './conversation'
 import { dataTransferHasFiles } from './fileDrop'
-import { lastPathComponent, worktreeName } from './format'
+import { detailHeaderLabel } from './format'
 import { usePersistentState, useSessionState } from './hooks'
 import { HooksPanel } from './hooksPanel'
 import type { TaskAction } from './menus'
@@ -220,15 +220,15 @@ export function App() {
   // immediate marking while actively viewing).
   useSeenMarker({ current, atBottom, tabActive, markSeen })
 
-  // "project • worktree" over the detail header's title; omitted with a single
-  // project and no worktree, when it's just noise.
-  const worktree = current ? worktreeName(current.cwd) : null
-  const projectLabel =
-    current && (projects.length > 1 || worktree)
-      ? lastPathComponent(
-          pathBySlug.get(current.projectSlug) ?? current.projectSlug,
-        ) + (worktree ? ` • ${worktree}` : '')
-      : null
+  // "project • worktree" over the detail header's title. The worktree half reads
+  // the task's recorded `worktree`, never its cwd — see detailHeaderLabel.
+  const projectLabel = current
+    ? detailHeaderLabel({
+        project: pathBySlug.get(current.projectSlug) ?? current.projectSlug,
+        projectCount: projects.length,
+        worktree: current.worktree,
+      })
+    : null
 
   // Stable identities so the memoized panes receiving these don't re-render
   // on unrelated App state (the underlying setters and actions are stable).
