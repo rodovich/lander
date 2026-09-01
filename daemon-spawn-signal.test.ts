@@ -102,8 +102,14 @@ describe('daemon spawn + drain signal delivery', () => {
     const tsxBin = path.join(ROOT, 'node_modules', '.bin', 'tsx')
     const wrapper = spawn(tsxBin, [fixture], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] })
     children.push(wrapper)
-    const seen = waitForStdout(wrapper, 'drain-signal-received', 1_200)
     await waitForStdout(wrapper, 'probe-ready')
+    // Arm the window here, not before the wait above: it measures how long a
+    // relayed signal gets to arrive, so it starts at the kill. Armed earlier it
+    // also races the wrapper's own startup, and a `tsx` boot slower than the
+    // window (seen at 1.8s under a loaded machine, against ~250ms idle) rejects
+    // this promise while nothing is awaiting it yet — an unhandled rejection
+    // that fails the run with every test still reporting as passed.
+    const seen = waitForStdout(wrapper, 'drain-signal-received', 1_200)
     wrapper.kill('SIGUSR1')
     let exited = false
     wrapper.on('exit', () => {
