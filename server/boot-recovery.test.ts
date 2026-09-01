@@ -105,8 +105,12 @@ describe('boot recovery leaves a deferred task to the scheduler', () => {
 
     // The control, which proves the sweep ran at all: nothing defers this one, so
     // recovery drives it and driveTask takes the queue before running the turn.
-    const plain = await readRaw('boot-plain')
-    expect(plain.queued ?? []).not.toEqual(['opening'])
+    // Polled, because the sweep fire-and-forgets driveTask — a boot must not
+    // block on every recovered task's turn — so the drain lands a read and a
+    // locked write after recoverQueues has already returned.
+    await vi.waitFor(async () => {
+      expect((await readRaw('boot-plain')).queued ?? []).not.toEqual(['opening'])
+    })
   })
 })
 
