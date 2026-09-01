@@ -96,7 +96,7 @@ export function createClaudeAdapter({
       // EnterWorktree re-entry lands back in the recorded worktree, so it stays
       // silent.
       if (recordedCwd && recordedCwd !== landed)
-        parts.push(manualCdHint(root, recordedCwd, landed))
+        parts.push(manualCdHint(root, recordedCwd, landed, task.worktree))
       return [
         '<task-context>',
         'Task state as of this message — background context from lander, not ' +
@@ -260,16 +260,42 @@ function buildClaudeArgs(
   ]
 }
 
+// Whether a path sits inside `<root>/.claude/worktrees/`, where EnterWorktree
+// roots the worktrees it creates — so a recorded cwd there is one the agent
+// walked into itself, by name or by hand.
+function insideWorktreesDir(root: string, p: string): boolean {
+  const rel = path.relative(path.join(root, '.claude', 'worktrees'), p)
+  return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel)
+}
+
 // The manual-cd note for the task-context block: the previous turn's shell ended
 // somewhere this turn's launch won't restore (a plain `cd` into a subdir or /tmp,
 // recorded as task.cwd), so tell the agent its shell moved back and it can cd
 // again if it still needs to. Paths are shown relative to root for brevity.
-function manualCdHint(root: string, recordedCwd: string, landed: string): string {
+//
+// When that dir was inside a worktree and the task has none recorded, the note
+// also names the tool that makes the return automatic. A `cd` lives only in the
+// turn's own shell, while an EnterWorktree binding outlives it — so an agent
+// working a worktree over several turns re-walks in every time, and lander (with
+// nothing recorded) cannot show where it is.
+function manualCdHint(
+  root: string,
+  recordedCwd: string,
+  landed: string,
+  worktree: string | undefined,
+): string {
   const rel = (p: string) => path.relative(root, p) || 'the project root'
-  return (
+  const note =
     `Note: your previous turn's shell ended in ${rel(recordedCwd)}, but this ` +
     `turn starts at ${rel(landed)} (a manual cd isn't carried across turns) — ` +
     `cd back if you still need to work there.`
+  if (worktree || !insideWorktreesDir(root, recordedCwd)) return note
+  return (
+    `${note} That is a git worktree you entered by hand. To keep working there ` +
+    `across turns, enter it with EnterWorktree instead, passing the worktree's ` +
+    "`path` — later turns then start inside it, and it shows against this task. " +
+    'Entering by path borrows the worktree rather than owning it, so exiting ' +
+    'will not remove it.'
   )
 }
 

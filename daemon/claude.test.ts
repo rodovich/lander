@@ -252,6 +252,53 @@ describe('Claude adapter', () => {
       })
       expect(context).not.toContain("previous turn's shell ended")
     })
+
+    it('points a hand-entered worktree at EnterWorktree', () => {
+      const context = adapter.buildTurnContext?.({
+        task: { allowEdits: false },
+        root: '/repo',
+        cwd: '/repo',
+        recordedCwd: '/repo/.claude/worktrees/feature',
+      })
+      expect(context).toContain('git worktree you entered by hand')
+      expect(context).toContain('enter it with EnterWorktree')
+      expect(context).toContain('borrows the worktree rather than owning it')
+    })
+
+    it('points a subdirectory of a hand-entered worktree there too', () => {
+      const context = adapter.buildTurnContext?.({
+        task: { allowEdits: false },
+        root: '/repo',
+        cwd: '/repo',
+        recordedCwd: '/repo/.claude/worktrees/feature/app/models',
+      })
+      expect(context).toContain('enter it with EnterWorktree')
+    })
+
+    it('does not suggest EnterWorktree for a plain subdirectory cd', () => {
+      const context = adapter.buildTurnContext?.({
+        task: { allowEdits: false },
+        root: '/repo',
+        cwd: '/repo',
+        recordedCwd: '/repo/sub',
+      })
+      expect(context).toContain("previous turn's shell ended in sub")
+      expect(context).not.toContain('EnterWorktree')
+    })
+
+    // The task is already bound: the shell wandering within its worktree is an
+    // ordinary cd, and telling it to enter the worktree it is in would be noise.
+    it('does not suggest EnterWorktree when a worktree is already recorded', () => {
+      const context = adapter.buildTurnContext?.({
+        task: { allowEdits: false, worktree: 'feature' },
+        root: '/repo',
+        cwd: '/repo',
+        effectiveCwd: '/repo/.claude/worktrees/feature',
+        recordedCwd: '/repo/.claude/worktrees/feature/app',
+      })
+      expect(context).toContain("previous turn's shell ended")
+      expect(context).not.toContain('EnterWorktree')
+    })
   })
 
   it('builds Claude start and resume session arguments', () => {

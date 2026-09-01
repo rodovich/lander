@@ -322,6 +322,13 @@ export const CLAUDE_GOLDENS: Golden[] = [
     start: { recordedCwd: '/repo/sub/dir' },
   },
   {
+    // The same hint, but the recorded dir is a worktree with nothing recorded
+    // against the task — so it also points at EnterWorktree.
+    name: 'manual cd hint from a hand-entered worktree names EnterWorktree',
+    chunks: [[init(), assistantText('ok')], [result()]],
+    start: { recordedCwd: '/repo/.claude/worktrees/feature' },
+  },
+  {
     name: 'attachment manifest rides the prompt with an --add-dir',
     chunks: [[init(), assistantText('ok')], [result()]],
     start: {
