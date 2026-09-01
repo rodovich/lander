@@ -1246,12 +1246,22 @@ async function recordCwd() {
 // Wired in by the server as PostToolUse hooks on EnterWorktree / ExitWorktree
 // (see ClaudeAdapter). claude pipes the tool call and its result as JSON on
 // stdin. On EnterWorktree we forward the new worktree's root path (the result's
-// `worktreePath`, falling back to the post-entry `cwd`) so the server tracks it
-// and relaunches later turns with `--worktree <name>` — what makes the agent's
-// own ExitWorktree work, since claude's worktree session doesn't survive
-// `--resume`. On ExitWorktree we clear it, so the flag stops and turns return to
-// the project root. Best-effort like record-cwd: swallow every error and never
-// exit non-zero, so a hook blip can't wedge a turn or undo the tool that ran.
+// `worktreePath`, falling back to the post-entry `cwd`) so the server tracks it;
+// on ExitWorktree we clear it.
+//
+// What the record buys is lander's own knowledge of where the task works: the
+// turn-context block snapshots that checkout's git state instead of the root's,
+// and the UI badges it beside the project. It is NOT what makes re-entry work.
+// Measured against claude 2.1.245, a worktree entered with EnterWorktree
+// survives `--resume` on its own — the session lands back inside it and its own
+// ExitWorktree still acts on it — with no flag passed, while a plain Bash `cd`
+// does not survive. The `--worktree <name>` relaunch (resolveLaunchDir's
+// reentryArgs) is kept as a belt: re-passing it for a worktree the session
+// already holds is a no-op, and it would restore the binding if that behavior
+// ever changed. Re-measure before relying on either half.
+//
+// Best-effort like record-cwd: swallow every error and never exit non-zero, so a
+// hook blip can't wedge a turn or undo the tool that ran.
 async function recordWorktree() {
   try {
     const input = JSON.parse((await readStdin()) || '{}')

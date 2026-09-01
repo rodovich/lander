@@ -121,11 +121,18 @@ export function createClaudeAdapter({
       }
     },
     resolveLaunchDir({ root, worktree }) {
-      // Claude always launches at the project root — that's its permission
-      // boundary and config-load root, so it must never drift to a wandered cwd.
-      // A worktree is re-entered through argv (--worktree), landing the shell in
-      // the worktree without moving the boundary. recordedCwd is deliberately
-      // ignored: a manual `cd` last turn does not become this turn's root.
+      // This adapter launches every turn at the project root. Nothing in the CLI
+      // asks for that — `claude` runs wherever it is spawned — but the dir it is
+      // spawned in *becomes* its permission boundary and config-load root, so
+      // choosing the root here is what holds those fixed instead of letting them
+      // follow the agent around. A worktree is re-entered through argv
+      // (--worktree), landing the shell inside it while the launch dir stays
+      // root.
+      //
+      // recordedCwd is deliberately ignored: a manual `cd` last turn does not
+      // become this turn's root. Honoring it would make one stray cd permanent —
+      // the Stop hook records where the shell ended and the launch would read it
+      // back, with nothing in the loop to ever move it home again.
       if (worktree)
         return {
           cwd: root,
