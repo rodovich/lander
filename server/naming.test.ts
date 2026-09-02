@@ -11,7 +11,8 @@ import { normalizeProjectPath } from './projects'
 // counts what actually got asked of the model.
 const calls: string[] = []
 let answer: string | null = null
-vi.mock('./title', () => ({
+vi.mock('./title', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./title')>()),
   generateTitle: vi.fn(async (_dir: string, source: string) => {
     calls.push(source)
     await new Promise((r) => setTimeout(r, 80))

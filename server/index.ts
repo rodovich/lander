@@ -131,7 +131,7 @@ import {
 } from './hooks'
 import { readHookCredential, hookCredentialFor, HookRefusal } from './hook-runs'
 import { dispatchPendingHooks, hookDispatchInFlightFor } from './hook-dispatch'
-import { generateTitle } from './title'
+import { TITLE_MAX_CHARS, generateTitle } from './title'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const LANDER_BIN_DIR = path.join(ROOT, 'bin')
@@ -541,6 +541,8 @@ async function setTitle(
 // showed). The guard lives here, not at the retry sites, so the boot sweep and
 // the wakeup can both stay simple "flagged? then name it" checks.
 const namingInFlight = new Set<string>()
+// What a title over the limit is refused with, on creation and on rename alike.
+const titleTooLong = `a title may be at most ${TITLE_MAX_CHARS} characters`
 async function ensureTitle(
   project: Project,
   id: string,
@@ -2297,6 +2299,13 @@ app.post('/api/:project/tasks', async (c) => {
     const allowEdits = body.allowEdits === true
     if (!title && !rawMessage.trim())
       return c.json({ error: 'title or message is required' }, 400)
+    if (title.length > TITLE_MAX_CHARS)
+      return c.json(
+        cred
+          ? { ok: false, reason: 'error', error: titleTooLong }
+          : { error: titleTooLong },
+        400,
+      )
 
     // A scheduled/awaiting task is created at rest and launched later by the
     // scheduler. Resolve the launch triggers up front so a bad value fails loudly
@@ -2733,6 +2742,8 @@ app.patch('/api/:project/tasks/:id', async (c) => {
         { error: 'only the UI may change a task’s edit permission' },
         403,
       )
+    if (typeof body.title === 'string' && body.title.trim().length > TITLE_MAX_CHARS)
+      return c.json({ error: titleTooLong }, 400)
 
     // A task may land another task only if it spawned it: `lander land <child>`
     // winds down work a task launched, but a task can't reach over and land an

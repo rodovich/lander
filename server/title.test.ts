@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { generateTitle, type TitleExec } from './title'
+import { TITLE_MAX_CHARS, generateTitle, type TitleExec } from './title'
 
 type Call = {
   file: string
@@ -115,6 +115,19 @@ describe('generateTitle', () => {
   it('returns null on empty output rather than an empty title', async () => {
     const { exec } = recorder('   ')
     expect(await generateTitle('/proj', 'x', exec)).toBeNull()
+  })
+
+  it('returns null when the reply is too long to be a name', async () => {
+    // The model answering the task instead of naming it — a question about a
+    // missing file, or a whole analysis — comes back as a paragraph. That is a
+    // failed naming, to be retried, not a title.
+    const { exec } = recorder(
+      'File does not exist in the main checkout. Is it in a worktree or branch? I can search broader.',
+    )
+    expect(await generateTitle('/proj', 'x', exec)).toBeNull()
+    // The limit is inclusive, and measured after the quote/punctuation trim.
+    const atLimit = 'x'.repeat(TITLE_MAX_CHARS)
+    expect(await generateTitle('/proj', 'x', recorder(`"${atLimit}."`).exec)).toBe(atLimit)
   })
 })
 

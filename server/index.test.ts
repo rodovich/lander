@@ -14,6 +14,7 @@ import {
 import { normalizeProjectPath, projectSlug } from './projects'
 import { clearHookRunState, mintHookCredential } from './hook-runs'
 import { MAX_ACTION_TEXT } from './task-actions'
+import { TITLE_MAX_CHARS } from './title'
 import type { RevivedMarker } from './protocol'
 
 const UI_TOKEN = 'test-ui-token'
@@ -740,6 +741,53 @@ describe('the action bound’s reset', () => {
     await seedPair()
     await post(`/api/${slug}/tasks/${ID}/allow`, { rule: 'Bash(ls)' })
     expect(await resetAt()).toBeTruthy()
+  })
+})
+
+// A name over the limit is refused wherever one can be supplied, so the limit
+// generateTitle enforces on the model's answer cannot be bypassed by typing.
+describe('the title length limit', () => {
+  const ID = 'tsk-titled'
+  const seed = async (): Promise<void> => {
+    await writeFile(
+      path.join(tasksDir, `${ID}.json`),
+      JSON.stringify({
+        id: ID,
+        title: 'Short',
+        status: 'riding',
+        createdAt: AT,
+        updatedAt: AT,
+        token: `token-${ID}`,
+        shape: 2,
+        rides: [],
+        items: [{ id: 'u0', at: AT, kind: 'message', role: 'user', text: 'go' }],
+      }),
+    )
+  }
+  const rename = (title: string) =>
+    app.request(`/api/${slug}/tasks/${ID}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', 'x-lander-ui-token': UI_TOKEN },
+      body: JSON.stringify({ title }),
+    })
+
+  it('refuses a launch with a title over the limit', async () => {
+    const res = await post(`/api/${slug}/tasks`, {
+      title: 'x'.repeat(TITLE_MAX_CHARS + 1),
+      message: 'go',
+    })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toContain(String(TITLE_MAX_CHARS))
+  })
+
+  it('refuses a rename over the limit, and takes one at it', async () => {
+    await seed()
+    expect((await rename('y'.repeat(TITLE_MAX_CHARS + 1))).status).toBe(400)
+    expect(await readTaskField(ID, 'title')).toBe('Short')
+    // Padding around the name does not count: it is trimmed before storing.
+    const atLimit = 'y'.repeat(TITLE_MAX_CHARS)
+    expect((await rename(`  ${atLimit}  `)).status).toBe(200)
+    expect(await readTaskField(ID, 'title')).toBe(atLimit)
   })
 })
 

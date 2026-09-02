@@ -9,6 +9,13 @@ import { scrubbedEnv } from './secrets'
 
 const execFileAsync = promisify(execFile)
 
+// The longest a task name may be, generated or typed. Of the 1,073 distinct
+// names on record on 2026-09-01, every sane one fit in 55 characters (p99: 51)
+// and the runaways — a naming child answering the task, an agent wedging with a
+// paragraph — started at 95. Eighty leaves room for a long name without
+// admitting a short reply.
+export const TITLE_MAX_CHARS = 80
+
 // Narrow enough for a stub to satisfy: promisified execFile is overloaded and
 // returns a PromiseWithChild, which an ordinary async function is not.
 export type TitleExec = (
@@ -82,6 +89,9 @@ export async function generateTitle(
     child?.stdin?.end()
     const { stdout } = await running
     const title = stdout.trim().replace(/^["']+|["'.]+$/g, '').trim()
+    // Over the limit is a non-result like an empty one: the model answered
+    // something other than a name, and a retry is worth more than storing it.
+    if (title.length > TITLE_MAX_CHARS) return null
     return title || null
   } catch {
     return null

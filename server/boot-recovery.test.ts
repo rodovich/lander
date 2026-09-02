@@ -6,7 +6,8 @@ import { normalizeProjectPath } from './projects'
 
 // The naming child is a real `claude` process; stubbing it is what makes the
 // retry observable as a name landing on the record rather than as a spawn.
-vi.mock('./title', () => ({
+vi.mock('./title', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./title')>()),
   generateTitle: vi.fn(async () => 'Named by the stub'),
 }))
 
