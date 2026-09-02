@@ -67,6 +67,19 @@ function byRecency(a: TaskWithProject, b: TaskWithProject): number {
   return l === r ? 0 : r - l
 }
 
+// The text a task was launched with: its first user message. A generated title
+// paraphrases that prompt and drops most of its words, so searching the title
+// alone misses the task whose subject was only ever stated in the prompt. Only
+// the first — later replies are the conversation, not what the task is about.
+// Undefined for a task with no user message yet, or one whose payload carries no
+// conversation (the metadata-only projection; the displayed list is never that).
+function launchMessage(task: TaskWithProject): string | undefined {
+  for (const it of task.items ?? []) {
+    if (it.kind === 'message' && it.role === 'user') return it.text
+  }
+  return undefined
+}
+
 export function buildTaskRows(
   tasks: TaskWithProject[],
   opts: {
@@ -93,7 +106,8 @@ export function buildTaskRows(
     return { ms: start.getTime(), before: timeFilter === 'older' }
   })()
 
-  // Filter by time window, then by title (case-insensitive), before grouping.
+  // Filter by time window, then by title and launch message (case-insensitive),
+  // before grouping.
   const matchedTasks = tasks.filter((t) => {
     if (timeCutoff != null) {
       const ts = Date.parse(t.updatedAt ?? t.createdAt)
@@ -104,7 +118,9 @@ export function buildTaskRows(
     }
     if (view === 'unread' && !isUnread(t) && !stickyUnread.has(taskKeyOf(t)))
       return false
-    return query ? t.title.toLowerCase().includes(query) : true
+    if (!query) return true
+    if (t.title.toLowerCase().includes(query)) return true
+    return launchMessage(t)?.toLowerCase().includes(query) ?? false
   })
 
   // Sort into status groups, most recent first within each. The order is

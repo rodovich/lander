@@ -147,6 +147,31 @@ describe('buildTaskRows', () => {
       .toEqual(['hit'])
   })
 
+  it('matches the query against the first user message too', () => {
+    const msgs = (...texts: string[]) =>
+      texts.map((text, i) => ({
+        id: `m${i}`,
+        at: at(0),
+        kind: 'message' as const,
+        role: 'user' as const,
+        text,
+      }))
+    const tasks = [
+      task({ id: 'hit', title: 'Untitled', items: msgs('Rewrite the PARSER') }),
+      task({ id: 'miss', title: 'Untitled', items: msgs('Deploy the docs') }),
+      // Only the first message counts: a later reply is the conversation, not
+      // what the task is about.
+      task({
+        id: 'reply',
+        title: 'Untitled',
+        items: msgs('Deploy the docs', 'and the parser too'),
+      }),
+      task({ id: 'empty', title: 'Untitled' }),
+    ]
+    expect(build(tasks, { query: 'parser' }).orderedTasks.map((t) => t.id))
+      .toEqual(['hit'])
+  })
+
   it('unread view keeps unread tasks and sticky-held read ones', () => {
     const tasks = [
       // seenAt behind the latest user message → unread.
