@@ -532,13 +532,29 @@ async function setTitle(
 // when the task is created and stays set until a name lands (setTitle) or the
 // user supplies one, so the task's next wakeup retries (driveTask). Naming must
 // never hold up a turn, so callers fire-and-forget this.
+//
+// One call per task at a time. The flag that drives the retries is set for the
+// whole ~5s a naming call takes, and the opening turn starts a few milliseconds
+// after creation fires the first call — so without this guard every fresh launch
+// named itself twice and kept whichever result landed last (47 of the 74 tasks
+// launched in the week after 8379fc9 carried a title their launch event never
+// showed). The guard lives here, not at the retry sites, so the boot sweep and
+// the wakeup can both stay simple "flagged? then name it" checks.
+const namingInFlight = new Set<string>()
 async function ensureTitle(
   project: Project,
   id: string,
   source: string,
 ): Promise<void> {
-  const next = await generateTitle(project.path, source)
-  if (next) await setTitle(project.dataDir, id, next)
+  const key = taskKey(project.slug, id)
+  if (namingInFlight.has(key)) return
+  namingInFlight.add(key)
+  try {
+    const next = await generateTitle(project.path, source)
+    if (next) await setTitle(project.dataDir, id, next)
+  } finally {
+    namingInFlight.delete(key)
+  }
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -974,7 +990,8 @@ async function driveClaimedTask(project: Project, id: string): Promise<void> {
     // launch alike — so this is where a transient naming failure gets another
     // shot, named (as the first attempt would have been) from the opening
     // message. Fire-and-forget so it never holds up the turn; ensureTitle no-ops
-    // once the user has named the task themselves.
+    // once the user has named the task themselves, and while the creation-time
+    // call is still running — the opening turn arrives here inside that window.
     if (existing?.titlePending) {
       const opening = userItems(existing)[0]?.text
       if (opening) void ensureTitle(project, id, opening).catch(() => {})
