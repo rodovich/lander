@@ -68,6 +68,17 @@ describe('generateTitle', () => {
     expect(calls[0].args).toContain('--strict-mcp-config')
   })
 
+  it('withholds the built-in tools as well', async () => {
+    // With Read and Bash in hand the model has acted on the task text instead of
+    // labeling it, and the CLI prints its last message — so the "title" was a
+    // question about a missing file. An empty tool list is what makes the reply
+    // the only move available.
+    const { calls, exec } = recorder()
+    await generateTitle('/proj', 'read docs/plan.md and suggest a sequence', exec)
+    const { args } = calls[0]
+    expect(args[args.indexOf('--tools') + 1]).toBe('')
+  })
+
   it('ends the child’s stdin rather than leaving it open', async () => {
     // Left open, the CLI spends its first 3 seconds waiting for input that is
     // never coming — inside the window a server restart can orphan the child.

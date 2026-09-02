@@ -31,8 +31,15 @@ export type TitleExec = (
 // not need them, and its prompt is task text an untrusted caller supplied.
 // It runs with cwd inside the project, so it still picks up that project's own
 // agent settings — but not its MCP servers, which `--strict-mcp-config` leaves
-// unloaded. Naming is a labeling call over untrusted text and needs no tools;
-// the easel project was handing it 53-117 of them, a browser among them.
+// unloaded, and none of the CLI's built-in tools either, which `--tools ""`
+// withholds. Naming is a labeling call over untrusted text and needs no tools;
+// the easel project was handing it 53-117 MCP tools, a browser among them, and
+// with the built-ins alone the model can still answer the task instead of
+// naming it: on 2026-09-01 it read the file the task asked about and replied
+// with a question, which became the title. Its project instructions and output
+// style reach it on the user turn regardless of the replaced system prompt, so
+// the only reliable way to keep it a labeling call is to leave it nothing to act
+// with.
 export async function generateTitle(
   projectDir: string,
   message: string,
@@ -51,6 +58,8 @@ export async function generateTitle(
         '--model',
         'haiku',
         '--strict-mcp-config',
+        '--tools',
+        '',
         '--system-prompt',
         system,
         '-p',
