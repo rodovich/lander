@@ -2,13 +2,13 @@
 //
 // It exists to exercise the whole driver surface against something that isn't a
 // chat agent — emit (tool items for real work), state (phase, branch, PR
-// number), artifacts (the diff packet and a self-review), wedge (approval),
+// number), attachments (the diff packet and a self-review), wedge (approval),
 // rest/wakeup re-entry (CI watching with no in-process sleep), launch (a repair
 // sibling on failure), and view (reading back its own answered ask).
 //
 // Four phases, driven by ctx.state.phase; EVERY ride is a re-entry:
 //
-//   collect            → read the working tree, write artifacts, ask for approval
+//   collect            → read the working tree, attach the packet, ask for approval
 //   awaiting-approval  → read the answer, continue or stop
 //   push               → push the branch and open the PR, each behind a probe
 //   watch              → poll checks, resting between attempts
@@ -173,7 +173,7 @@ async function onTurn(ctx: Ctx): Promise<TurnResult> {
   }
 
   // A mutating command. In dry-run it emits the exact argv it WOULD run and
-  // reports nothing else — every read, artifact, ask, rest and re-entry still
+  // reports nothing else — every read, attachment, ask, rest and re-entry still
   // happens for real, so the only thing dry-run removes is the outward effect.
   const runMutating = async (
     command: string,
@@ -271,13 +271,13 @@ async function collect(
 
   ctx.state.set(['branch'], branch)
 
-  // The diff packet and a short self-review, as artifacts rather than state —
+  // The diff packet and a short self-review, as attachments rather than state —
   // state records decisions and identities; anything bulky belongs here.
-  await ctx.artifacts.put(
+  await ctx.attachments.put(
     'diff.patch',
     diff || '(no unstaged/uncommitted diff against HEAD)',
   )
-  await ctx.artifacts.put(
+  await ctx.attachments.put(
     'review.md',
     [
       `# Change review for \`${branch}\``,
@@ -300,7 +300,7 @@ async function collect(
     [
       `Ready to open a PR from \`${branch}\`.`,
       '',
-      'I wrote two artifacts: `diff.patch` and `review.md`.',
+      'I attached two files: `diff.patch` and `review.md`.',
       '',
       'Approving will push the branch and open a PR.',
     ].join('\n'),
@@ -482,7 +482,7 @@ async function watch(
   }
 
   if (result === 'failed') {
-    await ctx.artifacts.put(
+    await ctx.attachments.put(
       'ci-failure.log',
       `Checks failed for PR #${prNumber} after ${attempts + 1} attempt(s).`,
     )
@@ -492,7 +492,7 @@ async function watch(
         `CI checks are failing on PR #${prNumber}.`,
         '',
         'The failing-check summary is attached to the task that launched you as',
-        'the `ci-failure.log` artifact. Diagnose the failure and fix it.',
+        'the `ci-failure.log` attachment. Diagnose the failure and fix it.',
       ].join('\n'),
       {
         title: `Repair CI for PR #${prNumber}`,

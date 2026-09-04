@@ -269,6 +269,7 @@ export type Ctx = {
   // supervisor lights it up with no API change.
   signal: AbortSignal
   telemetry: CtxTelemetry
+  attachments: CtxAttachments
   artifacts: CtxArtifacts
   // Interaction + orchestration, over the public task API. The subset the
   // bundled flows consume is implemented; the rest stay reserved names that
@@ -300,6 +301,12 @@ export type Ctx = {
 
 export type CtxTelemetry = {
   set(items: unknown[]): void
+}
+
+export type CtxAttachments = {
+  // How a flow hands the user something too big or too binary for prose: it
+  // renders on the flow's own message.
+  put(name: string, content: string): Promise<unknown>
 }
 
 export type CtxArtifacts = {
@@ -896,6 +903,38 @@ export function createCtxRuntime(
     return body
   }
 
+  // The route takes MULTIPART, not JSON — `parseBody()` with a `file` part — so
+  // this can't go through apiCall. Emissions flush first, so anything the flow has
+  // already said is the item the ref lands on.
+  async function putAttachment(name: string, content: string): Promise<unknown> {
+    if (!api) throw new Error('ctx: LANDER_API is unset; no server to call')
+    flush()
+    flushState()
+    const fd = new FormData()
+    fd.append('file', new Blob([content], { type: guessArtifactMime(name) }), name)
+    fd.append('name', name)
+    const res = await fetch(
+      `${api}/api/${apiProject}/tasks/${apiTask}/attachments`,
+      {
+        method: 'POST',
+        headers: {
+          ...(apiTask ? { 'x-lander-task': apiTask } : {}),
+          ...(apiProject ? { 'x-lander-project': apiProject } : {}),
+          ...(apiToken ? { 'x-lander-token': apiToken } : {}),
+        },
+        body: fd,
+      },
+    )
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>
+    if (!res.ok)
+      throw new Error(
+        typeof body.error === 'string'
+          ? body.error
+          : `${res.status} ${res.statusText}`,
+      )
+    return body.attachment
+  }
+
   // Publish an artifact. The route takes MULTIPART, not JSON — `parseBody()`
   // with a `file` part — so this can't go through apiCall. Mirrors bin/lander's
   // putArtifact: the blob's filename is the slot name, with an explicit `name`
@@ -1031,6 +1070,9 @@ export function createCtxRuntime(
           'ctx.telemetry.set is not implemented at driver API v1 (the per-task footer stays client-side)',
         )
       },
+    },
+    attachments: {
+      put: putAttachment,
     },
     artifacts: {
       put: putArtifact,

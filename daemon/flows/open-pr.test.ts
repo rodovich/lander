@@ -195,7 +195,7 @@ describe('findOwnAsk', () => {
 })
 
 describe('open-pr — collect', () => {
-  it('writes artifacts and wedges for approval, phase-first', async () => {
+  it('attaches the packet and wedges for approval, phase-first', async () => {
     const r = await ride({
       outputs: [
         { out: 'feature-x' }, // rev-parse
@@ -206,9 +206,9 @@ describe('open-pr — collect', () => {
     })
     expect(r.stateAfter.phase).toBe('awaiting-approval')
     expect(r.stateAfter.branch).toBe('feature-x')
-    // Both artifacts, then the wedge.
+    // Both files attached to the turn, then the wedge.
     const posts = r.requests.filter((q) => q.method === 'POST')
-    expect(posts.filter((q) => q.url.includes('/artifacts'))).toHaveLength(2)
+    expect(posts.filter((q) => q.url.includes('/attachments'))).toHaveLength(2)
     const wedge = posts.find((q) => q.url.endsWith('/asks'))
     expect(wedge?.body).toMatchObject({ blocking: 'task' })
     expect(JSON.stringify(wedge?.body)).toContain('open-pr')
@@ -366,7 +366,7 @@ describe('open-pr — watch', () => {
       flowState: { phase: 'watch', prNumber: 9999, attempts: 2 },
       flowConfig: { dryRun: true, dryRunOutcome: 'failed' },
     })
-    expect(r.requests.some((q) => q.url.includes('/artifacts'))).toBe(true)
+    expect(r.requests.some((q) => q.url.includes('/attachments'))).toBe(true)
     const launch = r.requests.find(
       (q) => q.method === 'POST' && q.url.endsWith('/api/proj/tasks'),
     )
