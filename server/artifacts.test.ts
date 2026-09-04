@@ -42,14 +42,13 @@ describe('MAX_ARTIFACT_BYTES', () => {
 })
 
 describe('upsertArtifact', () => {
-  it('appends a new slot on first publish and reports no superseded blob', () => {
+  it('appends a new slot on first publish', () => {
     const task: { artifacts?: Artifact[] } = {}
-    const { artifact, supersededId } = upsertArtifact(task, {
+    const artifact = upsertArtifact(task, {
       name: 'out.txt',
       blob: blob(),
       at: '2026-01-01T00:00:00.000Z',
     })
-    expect(supersededId).toBeNull()
     expect(artifact).toEqual({
       name: 'out.txt',
       id: 'blob-1',
@@ -61,19 +60,18 @@ describe('upsertArtifact', () => {
     expect(task.artifacts).toEqual([artifact])
   })
 
-  it('republishing a name keeps createdAt, advances updatedAt, returns the old blob id', () => {
+  it('republishing a name keeps createdAt and advances updatedAt', () => {
     const task: { artifacts?: Artifact[] } = {}
     upsertArtifact(task, {
       name: 'out.txt',
       blob: blob({ id: 'blob-1', size: 12 }),
       at: '2026-01-01T00:00:00.000Z',
     })
-    const { artifact, supersededId } = upsertArtifact(task, {
+    const artifact = upsertArtifact(task, {
       name: 'out.txt',
       blob: blob({ id: 'blob-2', size: 99, mime: 'text/csv' }),
       at: '2026-01-02T00:00:00.000Z',
     })
-    expect(supersededId).toBe('blob-1')
     expect(task.artifacts).toHaveLength(1)
     expect(artifact).toMatchObject({
       name: 'out.txt',

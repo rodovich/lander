@@ -165,10 +165,13 @@ export function MessageAttachments({
 
 // The artifacts (named output files) an assistant message published, rendered as
 // the same chips at the bottom of that message. Each resolves its slot's blob by
-// name from the task's artifact endpoint — not by the ref's blob id, since a
-// republish deletes the superseded blob, so only the by-name route is guaranteed
-// to resolve (it serves the latest version). Keyed by blob id so two refs of the
-// same name (a republish within one turn) don't collide.
+// name from the task's artifact endpoint rather than by the ref's own blob id,
+// which means a ref left by an earlier publish shows its own size against the
+// latest bytes. Publishing no longer deletes the blob a republish displaces, so
+// by-id would now resolve for anything published since — but refs recorded before
+// that change name blobs that were already deleted, and by-id would 404 on them.
+// The switch waits for the migration that drops those dead refs. Keyed by blob id
+// so two refs of the same name don't collide.
 export function MessageArtifacts({
   artifacts,
   taskId,

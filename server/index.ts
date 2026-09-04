@@ -90,7 +90,6 @@ import {
   saveAttachment,
   readAttachmentMeta,
   readAttachmentBytes,
-  deleteAttachment,
   sanitizeName,
   isAttachmentId,
   AttachmentTooLargeError,
@@ -1892,19 +1891,17 @@ app.post('/api/:project/tasks/:id/artifacts', async (c) => {
       throw e
     }
 
-    // Upsert the slot and record the message ref in one read-modify-write, then
-    // delete the superseded blob after the write has committed.
+    // Upsert the slot and record the message ref in one read-modify-write. A blob
+    // a republish displaces stays in the store: the refs already recorded on
+    // earlier messages point at it, and a published output is a record of what
+    // that turn produced, not a mutable cell.
     const now = new Date().toISOString()
     let artifact: Artifact | undefined
-    let supersededId: string | null = null
     await mutateTask(file, (t) => {
-      const res = upsertArtifact(t, { name, blob, at: now })
-      artifact = res.artifact
-      supersededId = res.supersededId
-      recordArtifactOnMessage(t, res.artifact)
+      artifact = upsertArtifact(t, { name, blob, at: now })
+      recordArtifactOnMessage(t, artifact)
       t.updatedAt = now
     })
-    if (supersededId) await deleteAttachment(project.attachmentsDir, supersededId)
     return c.json({ artifact }, 201)
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)

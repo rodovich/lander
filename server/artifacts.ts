@@ -38,14 +38,20 @@ export function isArtifactName(name: unknown): name is string {
 }
 
 // Upsert a freshly published blob into a task's `artifacts` slot registry by
-// name, returning the ref that now occupies the slot and the id of the blob it
-// superseded (null on a first publish). Stays pure — no I/O: the caller deletes
-// the superseded blob after the task write commits. On a republish the slot keeps
-// its original `createdAt` and advances `updatedAt`; a new name is appended.
+// name, returning the ref that now occupies the slot. Stays pure — no I/O. On a
+// republish the slot keeps its original `createdAt` and advances `updatedAt`; a
+// new name is appended.
+//
+// The blob a republish displaces is NOT deleted. Every blob this store has ever
+// held is immutable and permanent, so a ref recorded on an earlier message keeps
+// resolving to the bytes that message actually published. Superseding used to
+// delete it, on the reasoning that the slot was the blob's only pointer — but the
+// same design records a ref on the generating message, so history pointed at it
+// too and those refs were left dangling.
 export function upsertArtifact(
   task: { artifacts?: Artifact[] },
   input: { name: string; blob: Attachment; at: string },
-): { artifact: Artifact; supersededId: string | null } {
+): Artifact {
   const artifacts = (task.artifacts ??= [])
   const existing = artifacts.find((a) => a.name === input.name)
   const artifact: Artifact = {
@@ -57,10 +63,9 @@ export function upsertArtifact(
     updatedAt: input.at,
   }
   if (existing) {
-    const supersededId = existing.id
     Object.assign(existing, artifact)
-    return { artifact, supersededId }
+    return artifact
   }
   artifacts.push(artifact)
-  return { artifact, supersededId: null }
+  return artifact
 }

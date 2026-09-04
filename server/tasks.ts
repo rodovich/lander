@@ -1634,9 +1634,14 @@ export function deliverQueuedBatch(
 // renders the output row under it. Prefers the open ride's last main-agent flow
 // item (the common publish-during-a-run case), else the last flow item overall; if
 // the task has none yet, this is a no-op and the task's slot registry alone holds
-// the artifact. Republishing a name updates that item's ref in place — one chip per
-// output name, always the latest blob. A ref left on an earlier item keeps its old
-// size but stays correct to click: downloads resolve by slot name, serving latest.
+// the artifact — see the orphaned slots the open-PR flow leaves by publishing
+// before it emits anything.
+//
+// Republishing a name updates that item's ref in place — one chip per output name
+// on any one message. A ref on an EARLIER item keeps that publish's own id and
+// size, and now that the store never deletes, those bytes are still there; the UI
+// resolves such a ref by slot name today, so it renders the old size against the
+// latest bytes. Both halves are addressed when refs move onto `attachments`.
 export function recordArtifactOnMessage(
   task: { items?: Item[]; rides?: Ride[] },
   artifact: Artifact,

@@ -2559,9 +2559,12 @@ describe('artifacts', () => {
     expect(flow.artifacts).toHaveLength(1)
     expect(flow.artifacts![0].id).toBe(raw.artifacts[0].id)
 
-    // The superseded blob (+ sidecar) is gone: only the current one remains.
+    // The superseded blob (+ sidecar) is RETAINED alongside the current one. Refs
+    // recorded on earlier messages still point at it, so deleting it would rewrite
+    // what those turns published; the store has no delete at all.
     const entries = await readdir(attachmentsDir())
-    expect(entries).not.toContain(firstBlob)
+    expect(entries).toContain(firstBlob)
+    expect(entries).toContain(`${firstBlob}.json`)
     expect(entries).toContain(raw.artifacts[0].id)
     // Download serves the latest bytes.
     const dl = await app.request(`/api/${slug}/tasks/${id}/artifacts/r.txt`, {

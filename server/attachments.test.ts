@@ -6,7 +6,6 @@ import {
   saveAttachment,
   readAttachmentMeta,
   readAttachmentBytes,
-  deleteAttachment,
   sanitizeName,
   isAttachmentId,
   AttachmentTooLargeError,
@@ -97,22 +96,6 @@ describe('saveAttachment maxBytes override', () => {
       MAX_ATTACHMENT_BYTES + 10,
     )
     expect(meta.size).toBe(bytes.byteLength)
-  })
-})
-
-describe('deleteAttachment', () => {
-  it('removes the blob and its sidecar, and is a no-op on a missing id', async () => {
-    const meta = await saveAttachment(dir, {
-      name: 'x.bin',
-      mime: 'application/octet-stream',
-      bytes: new Uint8Array([1, 2, 3]),
-    })
-    await deleteAttachment(dir, meta.id)
-    expect(await readAttachmentMeta(dir, meta.id)).toBeNull()
-    expect(await readAttachmentBytes(dir, meta.id)).toBeNull()
-    // Deleting again (or an unknown/path-unsafe id) doesn't throw.
-    await expect(deleteAttachment(dir, meta.id)).resolves.toBeUndefined()
-    await expect(deleteAttachment(dir, '../secret')).resolves.toBeUndefined()
   })
 })
 

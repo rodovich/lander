@@ -2,8 +2,11 @@
 // `<id>` blob file plus an `<id>.json` metadata sidecar in the project's
 // attachmentsDir. Kept free of the server's HTTP wiring so it can be unit-tested
 // against a temp dir; index.ts binds these to the endpoints.
+//
+// The store is append-only: every id is referenced from conversation history, and
+// a message's record of the bytes it carried must not change under it.
 
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 
@@ -115,16 +118,3 @@ export async function readAttachmentBytes(
   }
 }
 
-// Delete a blob and its metadata sidecar, best-effort — a missing file is not an
-// error. Used by the artifact slot store when a republish supersedes a blob: the
-// caller deletes the old one only after the task JSON write commits, so a crash
-// strands an orphan blob rather than a dangling ref. Guards the id to a filename
-// segment so a bad id can't reach outside the store.
-export async function deleteAttachment(
-  attachmentsDir: string,
-  id: string,
-): Promise<void> {
-  if (!isAttachmentId(id)) return
-  await rm(blobFile(attachmentsDir, id), { force: true })
-  await rm(metaFile(attachmentsDir, id), { force: true })
-}
