@@ -307,6 +307,36 @@ describe('RideTurn settled/open footers', () => {
     expect(html).toContain('message-attachments')
     expect(html).toContain('report.md')
   })
+
+  it('gathers the flow items’ attachments below the turn', () => {
+    const html = render([
+      flow('a', 'done', {
+        attachments: [
+          { id: 'blob1', name: 'diff.patch', mime: 'text/plain', size: 42 },
+        ],
+      }),
+    ])
+    expect(html).toContain('message-attachments')
+    expect(html).toContain('diff.patch')
+  })
+
+  it('shows every version when one name was attached twice', () => {
+    // Two publishes of a name are two outputs now, not one slot overwritten, so
+    // both chips render — each with its own size.
+    const html = render([
+      flow('a', 'done', {
+        attachments: [
+          { id: 'blob1', name: 'shot.png', mime: 'image/png', size: 11 },
+          { id: 'blob2', name: 'shot.png', mime: 'image/png', size: 22 },
+        ],
+      }),
+    ])
+    expect(html.match(/attachment-chip-name/g) ?? []).toHaveLength(2)
+    // Each chip carries its own version's size rather than both collapsing to
+    // whichever was published last.
+    expect(html).toContain('11 B')
+    expect(html).toContain('22 B')
+  })
 })
 
 describe('RideTurn open-ask footer', () => {

@@ -1,6 +1,6 @@
 import { Fragment, memo } from 'react'
 import { AskForm } from './asks'
-import { MessageArtifacts } from './attachments'
+import { MessageArtifacts, MessageAttachments } from './attachments'
 import { formatTimestamp } from './format'
 import { BlockedSummary } from './grants'
 import type { TaskLinkResolver } from './markdown'
@@ -326,8 +326,17 @@ export const RideTurn = memo(function RideTurn({
           {`${taskAgentModelName(agent, ride.usage?.model)} is working…`}
         </div>
       )}
-      {/* Artifacts the turn published, gathered from its flow items and
-          shown at the bottom — below the working spinner, as before. */}
+      {/* Files the turn produced, gathered from its flow items and shown below
+          the working spinner. Attachments resolve by blob id; artifacts still
+          resolve by slot name, so they render separately for now. */}
+      {(() => {
+        const files = items.flatMap((it) =>
+          it.kind === 'message' ? (it.attachments ?? []) : [],
+        )
+        return files.length > 0 ? (
+          <MessageAttachments attachments={files} slug={slug} />
+        ) : null
+      })()}
       {(() => {
         const arts = items.flatMap((it) =>
           it.kind === 'message' ? (it.artifacts ?? []) : [],
