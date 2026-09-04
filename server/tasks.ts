@@ -871,7 +871,7 @@ export type ScheduledMessage = {
   waitFor?: string[]
   relaunch?: boolean
   repeat?: RepeatSpec
-  // Attachment refs sent with a deferred `lander send --files --date/--await`,
+  // Attachment refs sent with a deferred `lander send --attach --date/--await`,
   // carried until delivery when they land on the appended user message (like an
   // immediate send). Absent when the deferred message had none.
   attachments?: Attachment[]

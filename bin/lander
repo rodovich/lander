@@ -333,8 +333,8 @@ async function launchTask(rest) {
       if (!k) die('launch: --key needs a name and a value')
       ;(o.flowConfig ??= {})[k] = coerceConfigValue(rest[++i] ?? '')
     }
-    // --files is variadic: consume following args up to the next --flag.
-    else if (a === '--files')
+    // --attach is variadic: consume following args up to the next --flag.
+    else if (a === '--attach')
       while (i + 1 < rest.length && !rest[i + 1].startsWith('--'))
         o.files.push(rest[++i])
     else pos.push(a)
@@ -363,7 +363,7 @@ async function launchTask(rest) {
   // here); combinable with --date/--time, in which case launch fires on
   // whichever trigger comes first.
   o.await = resolveAwait(o.await)
-  // Upload any --files first so the new task's opening message references them.
+  // Upload any --attach paths first so the opening message references them.
   if (o.files.length) o.attachments = await uploadAttachments(o.project, o.files)
   // --title sets the name directly; without it the server asks haiku. --date or
   // --time defers the launch (a date/time the server parses, or N minutes from
@@ -740,8 +740,8 @@ async function sendTask(args) {
     if (a === '--date') o.date = args[++i]
     else if (a === '--time') o.time = Number(args[++i])
     else if (a === '--await') o.await = args[++i]
-    // --files is variadic: consume following args up to the next --flag.
-    else if (a === '--files')
+    // --attach is variadic: consume following args up to the next --flag.
+    else if (a === '--attach')
       while (i + 1 < args.length && !args[i + 1].startsWith('--'))
         o.files.push(args[++i])
     else pos.push(a)
@@ -1311,10 +1311,10 @@ async function clearWorktree() {
 const USAGE = {
   land: 'land [id…]',
   launch:
-    'launch <message|-> [--title <t>] [--project <slug>] [--date <when>|--time <min>] [--await <ids>] [--edits] [--flow <name>] [--key <k> <v>]… [--files <paths…>]',
+    'launch <message|-> [--title <t>] [--project <slug>] [--date <when>|--time <min>] [--await <ids>] [--edits] [--flow <name>] [--key <k> <v>]… [--attach <paths…>]',
   list: 'list [--status <s>] [--since <when>] [--until <when>] [--text <terms>] [--archived] [--json]',
   view: 'view <id> [--tools] [--messages <N|all>] [--clip <N|all>] [--json]',
-  send: 'send <id> <message|-> [--date <when>|--time <min>] [--await <ids>] [--files <paths…>]',
+  send: 'send <id> <message|-> [--date <when>|--time <min>] [--await <ids>] [--attach <paths…>]',
   rest: 'rest (--date <when> | --time <min> | --await <ids> | --clear)',
   relaunch:
     'relaunch <message|-> [--date <when>|--time <min>|--await <ids>] [--interval <min> [--repeat-count <n>|--repeat-until <when>]] [--clear]',

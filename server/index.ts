@@ -1751,7 +1751,7 @@ app.get('/api/:project/flows/:name', async (c) => {
 
 // Upload one or more file/image attachments to a project's durable blob store,
 // returning their refs ({id,name,mime,size}). The browser (paperclip) and the
-// `lander --files` CLI both POST here as multipart/form-data; each `file` part
+// `lander --attach` CLI both POST here as multipart/form-data; each `file` part
 // becomes one attachment. Only an identified caller may upload — the human
 // (UI token) or an authenticated task — so an anon request can't fill the store.
 // A follow-up POST /tasks or /messages carries the returned ids to associate them
