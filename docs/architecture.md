@@ -26,7 +26,8 @@ A task id is a short URL-safe token — ten random bytes drawn over a 64-symbol
 alphabet — minted by the server and used as the filename stem, the URL segment,
 the `LANDER_TASK` env var, and the `X-Lander-Task` header. Tasks refer to each
 other by it. Legacy tasks are still keyed by the uuid they were created with,
-backfilled from their filename.
+which a since-retired boot migration copied onto the record from the filename
+(see [Durable data migrations](#durable-data-migrations)).
 
 Ids are unique only within a project. Server run guards, mutation locks,
 provenance, and client selection/draft state therefore key a task by
@@ -88,6 +89,39 @@ editable profile otherwise preserves workspace-write behavior, including general
 filesystem reads and writes to `/tmp` and `$TMPDIR`. Task allow rules are stored
 by Lander but do not affect Codex runs yet, and Codex has no separate git gate
 inside an editable task.
+
+## Durable data migrations
+
+Task JSON has no schema version, so a field added to the `Task` record is absent
+on every task saved before it. Most such fields are handled by reading through a
+fallback at the use site, which needs no migration at all and is the first thing
+to reach for. When a field genuinely must exist on disk — because too many call
+sites would otherwise have to guard, or because a *rewrite* is needed rather than
+a default — lander uses a one-time boot migration, and each part of its shape
+earned its place:
+
+- **Run before serving.** The migration is awaited in the boot path ahead of
+  `recoverQueues()` and `serve()`, so no request observes a half-migrated store.
+- **Go through `mutateTask`.** The server is the sole writer of task JSON, and
+  `mutateTask` serializes read-modify-write per file. A migration that writes the
+  file directly races live turns streaming into it — hand-editing task JSON while
+  the server runs loses the edit.
+- **Cover `dataDir` *and* `archiveDir`.** The UI reads archived tasks back, so a
+  migration that skips the archive leaves visibly broken records.
+- **Be idempotent, and skip early.** Re-read the field's own absence as the guard
+  and `continue` when it is already set. The migration then costs one read per
+  file on every subsequent boot and writes nothing.
+- **Swallow per-file errors.** One unreadable or hand-corrupted file must not stop
+  the boot; skip it and carry on.
+- **Only walk `PROJECTS`.** A data directory whose project has left
+  `PROJECT_DIRS` is never visited, so its tasks stay un-migrated indefinitely.
+  That is usually fine — nothing reads them either — but it means "the migration
+  has run everywhere" is only ever true of the *configured* projects.
+
+No migration is installed today: `backfillIds`, `backfillAgents`, and
+`backfillSeen` were retired once every configured project read clean. Recover any
+of the three from git history (`git log -S backfillIds -- server/index.ts`) rather
+than rewriting the pattern from this description.
 
 ## Restart and hot reload
 

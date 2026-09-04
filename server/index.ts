@@ -46,7 +46,6 @@ import {
   publicTask,
   taskSummary,
   taskFlow,
-  latestUpdateAt,
   recordStatusTransition,
   recordArtifactOnMessage,
   turnAttachments,
@@ -149,7 +148,6 @@ const PROJECTS = parseProjects(DATA_ROOT, process.env, process.cwd())
 const PROJECT_BY_SLUG = new Map<string, Project>(
   PROJECTS.map((p) => [p.slug, p]),
 )
-const LEGACY_AGENT: AgentKind = 'claude'
 // The configured default flow, read ONCE at boot — a task must serve the
 // provider it was created with, not re-resolve the environment on every read
 // (which is what DEFAULT_NEW_TASK_AGENT, now superseded, guaranteed). Its
@@ -4116,134 +4114,12 @@ export async function recoverQueues(): Promise<void> {
   }
 }
 
-// One-time backfill of `seenAt` for tasks saved before the field existed: pin it
-// to the task's current latest update so they start out caught-up (no unseen
-// dot), and only genuinely newer activity lights it. Idempotent — a task that
-// already has a marker is left alone, so this is a no-op on every boot after the
-// first.
-async function backfillSeen(): Promise<void> {
-  for (const project of PROJECTS) {
-    let names: string[]
-    try {
-      names = await readdir(project.dataDir)
-    } catch {
-      continue
-    }
-    for (const name of names) {
-      if (!name.endsWith('.json')) continue
-      const file = path.join(project.dataDir, name)
-      try {
-        const task = JSON.parse(await readFile(file, 'utf8')) as Task
-        if (task.seenAt !== undefined) continue
-        await mutateTask(file, (t) => {
-          if (t.seenAt === undefined) t.seenAt = latestUpdateAt(t)
-        })
-      } catch {
-        // skip unreadable/invalid files
-      }
-    }
-  }
-}
-
-// One-time backfill of the task provider field introduced before Codex support:
-// existing tasks all ran through Claude, so pin them to that provider. Covers
-// archived tasks too, matching backfillIds.
-async function backfillAgents(): Promise<void> {
-  for (const project of PROJECTS) {
-    for (const dir of [project.dataDir, project.archiveDir]) {
-      let names: string[]
-      try {
-        names = await readdir(dir)
-      } catch {
-        continue
-      }
-      for (const name of names) {
-        if (!name.endsWith('.json')) continue
-        const file = path.join(dir, name)
-        try {
-          const task = JSON.parse(await readFile(file, 'utf8')) as Task
-          if (task.agent !== undefined) continue
-          // A task that names a flow is NOT a legacy task missing its agent —
-          // it is one that deliberately has none. Stamping LEGACY_AGENT here
-          // would make taskFlow() still read `flow` correctly, but it would
-          // resurrect `agent` on every server boot and hand the C6 dispatch
-          // path a legal-looking legacy kind for a flow that isn't one.
-          if (task.flow !== undefined) continue
-          await mutateTask(file, (t) => {
-            if (t.agent === undefined && t.flow === undefined)
-              t.agent = LEGACY_AGENT
-          })
-        } catch {
-          // skip unreadable/invalid files
-        }
-      }
-    }
-  }
-}
-
-// One-time migration of the pre-rename `session` field, when a task's only
-// identity was its filename (which doubled as `session`) and "awaiting" lifecycle
-// events stored their awaited tasks as `{ session, title }`. Two fixes per file:
-// give the task an `id` (always its filename stem — legacy tasks keep the uuid
-// they were keyed by, new ones already carry their nanoid), and rewrite any
-// legacy `awaiting` event entries to `{ id, title }` so the UI's link rendering
-// (which now reads `.id`) doesn't choke on an undefined id. Covers archived tasks
-// too, since the UI reads those back. Idempotent: a file already in the new shape
-// is left untouched.
-type LegacyAwait = { id?: string; session?: string; title: string }
-
-async function backfillIds(): Promise<void> {
-  for (const project of PROJECTS) {
-    for (const dir of [project.dataDir, project.archiveDir]) {
-      let names: string[]
-      try {
-        names = await readdir(dir)
-      } catch {
-        continue
-      }
-      for (const name of names) {
-        if (!name.endsWith('.json')) continue
-        const file = path.join(dir, name)
-        const stem = name.slice(0, -'.json'.length)
-        try {
-          // Revive on read so the awaiting scan runs over v2 event items (the
-          // converter carries any legacy `awaiting` verbatim onto them).
-          const task = await readTask(dir, stem)
-          if (!task) continue
-          const legacyAwaits = eventItems(task).some((e) =>
-            (e.awaiting as LegacyAwait[] | undefined)?.some(
-              (a) => a.id === undefined && a.session !== undefined,
-            ),
-          )
-          if (task.id !== undefined && !legacyAwaits) continue
-          await mutateTask(file, (t) => {
-            if (t.id === undefined) t.id = stem
-            for (const e of eventItems(t)) {
-              for (const a of (e.awaiting as LegacyAwait[] | undefined) ?? []) {
-                if (a.id === undefined && a.session !== undefined) {
-                  a.id = a.session
-                  delete a.session
-                }
-              }
-            }
-          })
-        } catch {
-          // skip unreadable/invalid files
-        }
-      }
-    }
-  }
-}
-
 const port = Number(process.env.PORT ?? 6181)
 if (process.env.NODE_ENV !== 'test' && process.env.VITEST !== 'true') {
-  // Finish durable migrations and claim every recoverable active task before
-  // accepting archive or mutation requests. driveTask takes its in-memory claim
-  // synchronously before its first await, so recoverQueues may return while the
-  // daemon reattachment proceeds without leaving an unguarded move window.
-  await backfillIds()
-  await backfillAgents()
-  await backfillSeen()
+  // Claim every recoverable active task before accepting archive or mutation
+  // requests. driveTask takes its in-memory claim synchronously before its first
+  // await, so recoverQueues may return while the daemon reattachment proceeds
+  // without leaving an unguarded move window.
   await recoverQueues()
 
   const server = serve({ fetch: app.fetch, port })
