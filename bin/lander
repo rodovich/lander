@@ -7,7 +7,7 @@
 // LANDER_TASK, and LANDER_TOKEN (the per-task secret that authenticates these
 // callbacks).
 import { spawnSync } from 'node:child_process'
-import { createReadStream, readFileSync } from 'node:fs'
+import { createReadStream, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { inDateRange, matchesText, taskMetadata } from './task-metadata.js'
@@ -119,39 +119,133 @@ async function uploadAttachments(project, paths) {
   return (body.attachments ?? []).map((a) => a.id)
 }
 
-// `lander attachment cat <id>` — stream the materialized blob to stdout.
-// `lander attachment ls` — list this task's attachments (manifest.json) with sizes.
+// Every attachment this task has: inputs the daemon materialized and outputs
+// `attachment put` wrote here. Missing or unreadable is an empty list, not an
+// error — a task simply may have no files.
+function readManifest() {
+  try {
+    const m = JSON.parse(readFileSync(join(FILES_DIR, 'manifest.json'), 'utf8'))
+    return Array.isArray(m) ? m : []
+  } catch {
+    return []
+  }
+}
+
+// The daemon's manifest refresh unions by id rather than overwriting, so a row
+// written here survives the next turn's materialization.
+function writeToLocalStore(ref, bytes) {
+  if (!FILES_DIR) return false
+  try {
+    mkdirSync(FILES_DIR, { recursive: true })
+    writeFileSync(join(FILES_DIR, ref.id), bytes)
+    const manifest = readManifest().filter((a) => a && a.id !== ref.id)
+    manifest.push({ id: ref.id, name: ref.name, mime: ref.mime, size: ref.size })
+    writeFileSync(
+      join(FILES_DIR, 'manifest.json'),
+      JSON.stringify(manifest, null, 2),
+    )
+    return true
+  } catch {
+    // Reported rather than fatal: the blob is safe on the server, so a failed
+    // local cache costs a read, not the attachment.
+    return false
+  }
+}
+
+function listLocalFiles() {
+  const manifest = readManifest()
+  if (!manifest.length) return void console.log('(no attachments)')
+  for (const a of manifest)
+    console.log(`${a.id}  ${String(a.size).padStart(9)}  ${a.mime}  ${a.name}`)
+}
+
+async function catLocalFile(id, usage) {
+  if (!id) die(usage)
+  // Guard the id to a filename segment so `cat ../foo` can't escape the store.
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) die(`invalid attachment id: ${id}`)
+  await new Promise((resolve, reject) => {
+    const stream = createReadStream(join(FILES_DIR, id))
+    stream.on('error', () => reject(new Error(`no such attachment: ${id}`)))
+    stream.on('end', resolve)
+    stream.pipe(process.stdout, { end: false })
+  }).catch((e) => die(e.message))
+}
+
+// Attach a local file (path) or in-memory bytes to the turn the calling task is
+// riding. Also writes the blob into the task's local store: the daemon
+// materializes turn inputs only, so nothing else would ever fetch an output down
+// and `ls`/`cat` would not see it.
+async function putAttachment(pathOrBytes, { name, mime } = {}) {
+  if (!API) die('not inside a lander task (LANDER_API unset)')
+  if (!TASK) die('no current task (LANDER_TASK unset)')
+  let bytes
+  let filename
+  if (typeof pathOrBytes === 'string') {
+    try {
+      bytes = readFileSync(pathOrBytes)
+    } catch {
+      die(`cannot read file: ${pathOrBytes}`)
+    }
+    filename = name || basename(pathOrBytes)
+    mime ||= guessMime(pathOrBytes)
+  } else {
+    bytes = pathOrBytes
+    filename = name || 'file'
+  }
+  const fd = new FormData()
+  fd.append(
+    'file',
+    new Blob([bytes], { type: mime || 'application/octet-stream' }),
+    filename,
+  )
+  if (name) fd.append('name', name)
+  const auth = {}
+  if (TASK) auth['x-lander-task'] = TASK
+  if (PROJECT) auth['x-lander-project'] = PROJECT
+  if (TOKEN) auth['x-lander-token'] = TOKEN
+  const res = await fetch(`${API}/api/${PROJECT}/tasks/${TASK}/attachments`, {
+    method: 'POST',
+    headers: auth,
+    body: fd,
+  })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) die(body.error || `${res.status} ${res.statusText}`)
+  const ref = body.attachment
+  writeToLocalStore(ref, bytes)
+  // Stored, but with no turn to hang it on nothing will render it — so an agent
+  // that meant to show the user a file hears that the user will not see one.
+  if (body.hosted === false)
+    process.stderr.write(
+      `warning: ${ref.name} was stored but not attached to any turn — ` +
+        `this task has no assistant turn to carry it\n`,
+    )
+  return ref
+}
+
 async function attachmentCommand(args) {
   const [sub, ...rest] = args
-  if (!FILES_DIR)
-    die('no attachments for this task (LANDER_FILES_DIR unset)')
-  if (sub === 'ls') {
-    let manifest
-    try {
-      manifest = JSON.parse(readFileSync(join(FILES_DIR, 'manifest.json'), 'utf8'))
-    } catch {
-      manifest = []
+  if (sub === 'put') {
+    const o = {}
+    const pos = []
+    for (let i = 0; i < rest.length; i++) {
+      const a = rest[i]
+      if (a === '--name') o.name = rest[++i]
+      else if (a === '--mime') o.mime = rest[++i]
+      else pos.push(a)
     }
-    if (!Array.isArray(manifest) || !manifest.length)
-      return void console.log('(no attachments)')
-    for (const a of manifest)
-      console.log(`${a.id}  ${String(a.size).padStart(9)}  ${a.mime}  ${a.name}`)
+    const p = pos.shift()
+    if (!p) die('usage: lander attachment put <path> [--name <n>] [--mime <m>]')
+    const ref = await putAttachment(p, { name: o.name, mime: o.mime })
+    console.log(`${ref.name}  ${ref.id}  ${ref.size}`)
     return
   }
-  if (sub === 'cat') {
-    const id = rest[0]
-    if (!id) die('usage: lander attachment cat <id>')
-    // Guard the id to a filename segment so `cat ../foo` can't escape the store.
-    if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) die(`invalid attachment id: ${id}`)
-    await new Promise((resolve, reject) => {
-      const stream = createReadStream(join(FILES_DIR, id))
-      stream.on('error', () => reject(new Error(`no such attachment: ${id}`)))
-      stream.on('end', resolve)
-      stream.pipe(process.stdout, { end: false })
-    }).catch((e) => die(e.message))
-    return
-  }
-  die('usage: lander attachment (ls | cat <id>)')
+  // Reject an unknown subcommand before the store guard, so a typo reports the
+  // usage rather than a confusing "no attachments for this task".
+  if (sub !== 'ls' && sub !== 'cat')
+    die('usage: lander attachment (put <path> [--name <n>] [--mime <m>] | ls | cat <id>)')
+  if (!FILES_DIR) die('no attachments for this task (LANDER_FILES_DIR unset)')
+  if (sub === 'ls') return void listLocalFiles()
+  await catLocalFile(rest[0], 'usage: lander attachment cat <id>')
 }
 
 // --- artifacts -------------------------------------------------------------
@@ -1117,9 +1211,16 @@ function makeLander(inputs) {
         }),
       })
     },
+    // Attach a file/bytes to the turn this flow is riding — the flow-side mirror
+    // of the `lander attachment` CLI, scoped to LANDER_TASK.
+    attachments: {
+      put: (pathOrBytes, opts = {}) => putAttachment(pathOrBytes, opts),
+      list: () => readManifest(),
+    },
     // The current task's named output slots: publish a file/bytes, list the
     // slots, or fetch a slot's current blob as bytes — the flow-side mirror of
-    // the `lander artifact` CLI, scoped to LANDER_TASK.
+    // the `lander artifact` CLI, scoped to LANDER_TASK. Superseded by
+    // `attachments` above; kept until the artifact model is removed.
     artifacts: {
       put: (pathOrBytes, opts = {}) => putArtifact(pathOrBytes, opts),
       list: () => listArtifacts(),
@@ -1321,7 +1422,8 @@ const USAGE = {
   ask: 'ask --option <id:label> [--option …]',
   archive: 'archive <id…> [--restore]',
   assist: 'assist <prompt> [text …]',
-  attachment: 'attachment (ls | cat <id>)',
+  attachment:
+    'attachment (put <path> [--name <n>] [--mime <m>] | ls | cat <id>)',
   artifact: 'artifact (put <path> [--name <n>] [--mime <m>] | ls | cat <name>)',
   flow: 'flow <name> [--key <k> <v> …]',
 }

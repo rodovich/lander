@@ -94,6 +94,9 @@ describe('buildManifestBlock', () => {
     )
     expect(block).toContain('already attached to your vision')
     expect(block).toContain('lander attachment cat')
+    // The block also advertises the write direction, so an agent knows it can
+    // hand a file back without being told separately.
+    expect(block).toContain('lander attachment put')
   })
 
   it('gives a non-vision agent the image path to Read', () => {

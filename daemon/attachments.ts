@@ -130,7 +130,8 @@ export function buildManifestBlock(
   lines.push(
     '',
     'To read any attached file’s raw bytes, run `lander attachment cat <id>` ' +
-      '(list them with `lander attachment ls`).',
+      '(list them with `lander attachment ls`). To show the user a file you ' +
+      'produce, run `lander attachment put <path>` — it appears on your reply.',
     '</task-attachments>',
   )
   return lines.join('\n')
