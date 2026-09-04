@@ -6,6 +6,7 @@ import {
   latestUpdateAt,
   recordStatusTransition,
   recordArtifactOnMessage,
+  recordAttachmentOnMessage,
   lastTurnPrompts,
   turnAttachments,
   deliverQueuedBatch,
@@ -748,6 +749,69 @@ describe('recordArtifactOnMessage', () => {
     expect((t.items[0] as MessageItem).artifacts).toEqual([artifact])
     const empty = { items: [] as Item[] }
     expect(() => recordArtifactOnMessage(empty, artifact)).not.toThrow()
+  })
+})
+
+describe('recordAttachmentOnMessage', () => {
+  const blob = (id = 'b1', size = 2) => ({ id, name: 'out.txt', mime: 'text/plain', size })
+
+  it('appends to the open ride’s last flow item', () => {
+    const t = {
+      items: [flowItem('a', 'r1'), flowItem('b', 'r1', later(1))],
+      rides: [{ id: 'r1', startedAt: AT } as Ride],
+    }
+    recordAttachmentOnMessage(t, blob(), later(2))
+    expect((t.items[1] as MessageItem).attachments).toEqual([blob()])
+  })
+
+  it('appends rather than replacing, so two publishes of one name are two refs', () => {
+    const host = flowItem('a', 'r1')
+    const t = { items: [host], rides: [{ id: 'r1', startedAt: AT } as Ride] }
+    recordAttachmentOnMessage(t, blob('b1', 2), later(1))
+    recordAttachmentOnMessage(t, blob('b2', 99), later(2))
+    expect(host.attachments).toHaveLength(2)
+    expect(host.attachments!.map((a) => a.id)).toEqual(['b1', 'b2'])
+    // Each ref keeps its own size: the blobs are distinct and both survive.
+    expect(host.attachments!.map((a) => a.size)).toEqual([2, 99])
+  })
+
+  it('opens a flow item when the ride has said nothing yet', () => {
+    // The open-pr case: a flow writes its outputs before it emits any prose. The
+    // artifact path dropped these on the floor; here the publish begins the turn.
+    const t = { items: [] as Item[], rides: [{ id: 'r1', startedAt: AT } as Ride] }
+    const host = recordAttachmentOnMessage(t, blob(), later(1))
+    expect(host).toBeDefined()
+    expect(t.items).toHaveLength(1)
+    const item = t.items[0] as MessageItem
+    expect(item.role).toBe('flow')
+    expect(item.rideId).toBe('r1')
+    expect(item.attachments).toEqual([blob()])
+  })
+
+  it('does not file a new ride’s output under a previous ride’s item', () => {
+    const older = flowItem('a', 'r1')
+    const t = {
+      items: [older],
+      rides: [
+        { id: 'r1', startedAt: AT, endedAt: later(1), outcome: 'done' } as Ride,
+        { id: 'r2', startedAt: later(2) } as Ride,
+      ],
+    }
+    recordAttachmentOnMessage(t, blob(), later(3))
+    expect(older.attachments).toBeUndefined()
+    expect((t.items[1] as MessageItem).rideId).toBe('r2')
+  })
+
+  it('falls back to the last flow item outside a ride, and no-ops with none', () => {
+    const t = {
+      items: [flowItem('a', 'r1')],
+      rides: [{ id: 'r1', startedAt: AT, endedAt: later(1), outcome: 'done' } as Ride],
+    }
+    recordAttachmentOnMessage(t, blob(), later(2))
+    expect((t.items[0] as MessageItem).attachments).toEqual([blob()])
+    const empty = { items: [] as Item[] }
+    expect(recordAttachmentOnMessage(empty, blob(), AT)).toBeUndefined()
+    expect(empty.items).toHaveLength(0)
   })
 })
 

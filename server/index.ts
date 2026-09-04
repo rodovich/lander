@@ -48,6 +48,7 @@ import {
   taskFlow,
   recordStatusTransition,
   recordArtifactOnMessage,
+  recordAttachmentOnMessage,
   turnAttachments,
   deliverQueuedBatch,
   worktreeName,
@@ -1833,14 +1834,85 @@ app.get('/api/:project/attachments/:id', async (c) => {
   })
 })
 
+// Attach a file a task produced to the turn that produced it. Multipart: a `file`
+// part plus an optional `name` text field.
+//
+// Auth is narrower than the plain project upload, and that is the load-bearing
+// part: uploading a blob is a project-wide right, but writing a ref onto task T's
+// turn is a claim about what T produced, so only T itself (or the human) may post
+// here. Reads need no route of their own — the ref carries a blob id, which the
+// project-scoped download already serves.
+app.post('/api/:project/tasks/:id/attachments', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  try {
+    const id = c.req.param('id')
+    if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+    const file = path.join(project.dataDir, `${id}.json`)
+    if (!(await readTask(project.dataDir, id)))
+      return c.json({ error: 'task not found' }, 404)
+
+    const principal = await resolvePrincipal(c.req)
+    if (principal.kind !== 'ui' && !isSelfPrincipal(principal, project, id))
+      return c.json(
+        { error: 'only the task itself may attach its own output' },
+        403,
+      )
+
+    const body = await c.req.parseBody()
+    const part = body['file']
+    if (!(part instanceof File))
+      return c.json({ error: 'no file in upload' }, 400)
+    // The name is display-only here — the ref resolves by blob id — so it needs
+    // sanitizing but not the artifact route-segment regex.
+    const rawName =
+      typeof body['name'] === 'string' && body['name'].trim()
+        ? body['name']
+        : part.name
+    const name = sanitizeName(rawName)
+
+    const bytes = new Uint8Array(await part.arrayBuffer())
+    let blob: Attachment
+    try {
+      blob = await saveAttachment(
+        project.attachmentsDir,
+        { name, mime: part.type, bytes },
+        MAX_ARTIFACT_BYTES,
+      )
+    } catch (e) {
+      if (e instanceof AttachmentTooLargeError)
+        return c.json(
+          { error: `attachment too large (max ${MAX_ARTIFACT_BYTES} bytes)` },
+          413,
+        )
+      throw e
+    }
+
+    const now = new Date().toISOString()
+    let hosted = false
+    await mutateTask(file, (t) => {
+      hosted = recordAttachmentOnMessage(t, blob, now) !== undefined
+      t.updatedAt = now
+    })
+    // Not an error when unhosted: the blob is saved and fetchable by id, so this
+    // reports only that no turn will render it.
+    return c.json({ attachment: blob, hosted }, 201)
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
+  }
+})
+
 // Publish an artifact — a named output file — of a task, latest version only.
 // Multipart: a `file` part plus an optional `name` text field (defaults to the
 // uploaded filename, sanitized then validated against the addressable-name
-// regex). Publishing to an existing name mints a fresh blob, repoints the slot,
-// and — only after the task JSON write commits — deletes the superseded blob (a
-// crash strands an orphan, never a dangling ref). Only the human (UI token) or
-// the task itself may publish; a task owns its own outputs. The buffered save
-// (whole blob in memory) is acceptable for v1's local single-user server.
+// regex). Publishing to an existing name mints a fresh blob and repoints the
+// slot; the displaced blob is retained. Only the human (UI token) or the task
+// itself may publish; a task owns its own outputs. The buffered save (whole blob
+// in memory) is acceptable for v1's local single-user server.
+//
+// Superseded by POST .../attachments above, which records the same blob on the
+// generating turn without the mutable name slot. Kept until the artifact model
+// is removed.
 app.post('/api/:project/tasks/:id/artifacts', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)

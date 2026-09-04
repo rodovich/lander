@@ -1655,6 +1655,30 @@ export function recordArtifactOnMessage(
   else refs.push(artifact)
 }
 
+// Record a published attachment on the flow item that produced it, so its chip
+// renders under that turn. Appends rather than replacing by name: blobs are
+// immutable, so two publishes of one name are two outputs, not one overwritten.
+//
+// An open ride with no item yet gets one opened, so a publish that precedes any
+// prose begins the turn — a flow that writes its outputs before it speaks would
+// otherwise have nowhere to put them. That branch has to precede the fall back to
+// the last item overall, or a new turn's output files itself under a previous
+// ride. Returning undefined means the task has never ridden, so there is no turn
+// the ref could belong to.
+export function recordAttachmentOnMessage(
+  task: { items?: Item[]; rides?: Ride[] },
+  attachment: Attachment,
+  at: string,
+): MessageItem | undefined {
+  const ride = openRide(task)
+  const host = ride
+    ? (lastFlowItem(task, ride.id) ?? pushFlowItem(task, ride.id, '', at))
+    : lastFlowItem(task)
+  if (!host) return undefined
+  ;(host.attachments ??= []).push(attachment)
+  return host
+}
+
 // Derive the name to pass to `claude --worktree` from the absolute worktree root
 // the EnterWorktree hook reported (its `worktreePath`), given the project root.
 // Worktrees the agent enters live under `<project>/.claude/worktrees/<name>`, and

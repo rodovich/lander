@@ -2639,6 +2639,209 @@ describe('artifacts', () => {
   })
 })
 
+describe('task attachments (a task attaching its own output)', () => {
+  const attachmentsDir = () => path.join(dataRoot, 'attachments')
+
+  async function seedTask(
+    id: string,
+    over: Record<string, unknown> = {},
+  ): Promise<void> {
+    await writeFile(
+      path.join(tasksDir, `${id}.json`),
+      JSON.stringify(
+        {
+          id,
+          title: 'Output task',
+          status: 'riding',
+          createdAt: AT,
+          updatedAt: AT,
+          allowEdits: false,
+          token: `token-${id}`,
+          runId: `run-${id}`,
+          shape: 2,
+          rides: [{ id: `run-${id}`, startedAt: AT }],
+          items: [
+            { id: 'u0', at: AT, kind: 'message', role: 'user', text: 'make a file' },
+            {
+              id: 'f0',
+              at: AT,
+              rideId: `run-${id}`,
+              kind: 'message',
+              role: 'flow',
+              text: 'working',
+            },
+          ],
+          ...over,
+        },
+        null,
+        2,
+      ),
+    )
+  }
+
+  async function attach(
+    id: string,
+    file: { name: string; type: string; bytes: Uint8Array },
+    opts: { name?: string; headers?: Record<string, string> } = {},
+  ): Promise<Response> {
+    const fd = new FormData()
+    fd.append('file', new File([file.bytes as BlobPart], file.name, { type: file.type }))
+    if (opts.name) fd.append('name', opts.name)
+    return app.request(`/api/${slug}/tasks/${id}/attachments`, {
+      method: 'POST',
+      headers: opts.headers ?? { 'x-lander-ui-token': UI_TOKEN },
+      body: fd,
+    })
+  }
+
+  const raw = async (id: string) =>
+    JSON.parse(await readFile(path.join(tasksDir, `${id}.json`), 'utf8'))
+
+  it('stores the blob and records the ref on the generating flow item', async () => {
+    const id = 'att-basic'
+    await seedTask(id)
+    const res = await attach(id, {
+      name: 'out.txt',
+      type: 'text/plain',
+      bytes: new Uint8Array([1, 2, 3]),
+    })
+    expect(res.status).toBe(201)
+    const { attachment, hosted } = (await res.json()) as {
+      attachment: { id: string; name: string; size: number }
+      hosted: boolean
+    }
+    expect(hosted).toBe(true)
+    expect(attachment.name).toBe('out.txt')
+    expect(attachment.size).toBe(3)
+
+    const t = await raw(id)
+    const flow = (t.items as { role?: string; attachments?: { id: string }[] }[]).find(
+      (i) => i.role === 'flow',
+    )!
+    expect(flow.attachments).toEqual([attachment])
+
+    // The bytes come back from the existing project-scoped download, by id — no
+    // new read route, and no by-name indirection.
+    const dl = await app.request(`/api/${slug}/attachments/${attachment.id}`, {
+      headers: { 'x-lander-ui-token': UI_TOKEN },
+    })
+    expect(dl.status).toBe(200)
+    expect(new Uint8Array(await dl.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]))
+  })
+
+  it('keeps both versions when one name is attached twice', async () => {
+    const id = 'att-twice'
+    await seedTask(id)
+    const a = (await (
+      await attach(id, { name: 'r.txt', type: 'text/plain', bytes: new Uint8Array([1]) })
+    ).json()) as { attachment: { id: string; size: number } }
+    const b = (await (
+      await attach(id, { name: 'r.txt', type: 'text/plain', bytes: new Uint8Array([2, 2]) })
+    ).json()) as { attachment: { id: string; size: number } }
+    expect(a.attachment.id).not.toBe(b.attachment.id)
+
+    // Two refs, each its own size — not one slot collapsing to the latest.
+    const t = await raw(id)
+    const flow = (t.items as { role?: string; attachments?: { id: string; size: number }[] }[]).find(
+      (i) => i.role === 'flow',
+    )!
+    expect(flow.attachments!.map((x) => x.id)).toEqual([a.attachment.id, b.attachment.id])
+    expect(flow.attachments!.map((x) => x.size)).toEqual([1, 2])
+
+    // And both sets of bytes are still fetchable.
+    const entries = await readdir(attachmentsDir())
+    expect(entries).toContain(a.attachment.id)
+    expect(entries).toContain(b.attachment.id)
+  })
+
+  it('opens a flow item when the ride has produced nothing yet', async () => {
+    const id = 'att-prespeech'
+    await seedTask(id, {
+      items: [{ id: 'u0', at: AT, kind: 'message', role: 'user', text: 'go' }],
+    })
+    const res = await attach(id, {
+      name: 'diff.patch',
+      type: 'text/plain',
+      bytes: new Uint8Array([9]),
+    })
+    expect(res.status).toBe(201)
+    expect(((await res.json()) as { hosted: boolean }).hosted).toBe(true)
+
+    const t = await raw(id)
+    const flow = (t.items as { role?: string; rideId?: string; attachments?: unknown[] }[]).find(
+      (i) => i.role === 'flow',
+    )!
+    expect(flow.rideId).toBe(`run-${id}`)
+    expect(flow.attachments).toHaveLength(1)
+  })
+
+  it('lets the task itself attach, and refuses a sibling task', async () => {
+    const id = 'att-self'
+    const other = 'att-other'
+    await seedTask(id)
+    await seedTask(other)
+
+    const own = await attach(
+      id,
+      { name: 'mine.txt', type: 'text/plain', bytes: new Uint8Array([1]) },
+      {
+        headers: {
+          'x-lander-token': `token-${id}`,
+          'x-lander-task': id,
+          'x-lander-project': slug,
+        },
+      },
+    )
+    expect(own.status).toBe(201)
+
+    // A sibling holds a valid project token, but writing a ref onto this task's
+    // turn would be a claim about what THIS task produced.
+    const forged = await attach(
+      id,
+      { name: 'forged.txt', type: 'text/plain', bytes: new Uint8Array([1]) },
+      {
+        headers: {
+          'x-lander-token': `token-${other}`,
+          'x-lander-task': other,
+          'x-lander-project': slug,
+        },
+      },
+    )
+    expect(forged.status).toBe(403)
+
+    const anon = await attach(
+      id,
+      { name: 'anon.txt', type: 'text/plain', bytes: new Uint8Array([1]) },
+      { headers: {} },
+    )
+    expect(anon.status).toBe(403)
+
+    const t = await raw(id)
+    const flow = (t.items as { role?: string; attachments?: { name: string }[] }[]).find(
+      (i) => i.role === 'flow',
+    )!
+    expect(flow.attachments!.map((x) => x.name)).toEqual(['mine.txt'])
+  })
+
+  it('404s an unknown task and 400s a bodyless post', async () => {
+    const id = 'att-edge'
+    await seedTask(id)
+    const missing = await attach('no-such-task', {
+      name: 'x.txt',
+      type: 'text/plain',
+      bytes: new Uint8Array([1]),
+    })
+    expect(missing.status).toBe(404)
+
+    const empty = await app.request(`/api/${slug}/tasks/${id}/attachments`, {
+      method: 'POST',
+      headers: { 'x-lander-ui-token': UI_TOKEN },
+      body: new FormData(),
+    })
+    expect(empty.status).toBe(400)
+  })
+})
+
 describe('asks', () => {
   type Raw = Record<string, unknown>
   const taskFile = (id: string) => path.join(tasksDir, `${id}.json`)
