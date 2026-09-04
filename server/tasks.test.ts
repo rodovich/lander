@@ -7,6 +7,8 @@ import {
   recordStatusTransition,
   recordArtifactOnMessage,
   recordAttachmentOnMessage,
+  migrateArtifactsToAttachments,
+  hasArtifactRecords,
   lastTurnPrompts,
   turnAttachments,
   deliverQueuedBatch,
@@ -812,6 +814,91 @@ describe('recordAttachmentOnMessage', () => {
     const empty = { items: [] as Item[] }
     expect(recordAttachmentOnMessage(empty, blob(), AT)).toBeUndefined()
     expect(empty.items).toHaveLength(0)
+  })
+})
+
+describe('migrateArtifactsToAttachments', () => {
+  const art = (id: string, name = 'out.txt', size = 5) => ({
+    id,
+    name,
+    mime: 'text/plain',
+    size,
+    createdAt: AT,
+    updatedAt: AT,
+  })
+
+  it('moves a live ref onto the item that published it and drops the slot', () => {
+    const host = flowItem('a', 'r1')
+    host.artifacts = [art('b1')]
+    const t = { items: [host] as Item[], artifacts: [art('b1')] }
+    const counts = migrateArtifactsToAttachments(t, new Set(['b1']))
+    expect(counts).toEqual({ moved: 1, dropped: 0, surfaced: 0 })
+    expect(host.attachments).toEqual([
+      { id: 'b1', name: 'out.txt', mime: 'text/plain', size: 5 },
+    ])
+    expect(host.artifacts).toBeUndefined()
+    expect(t.artifacts).toBeUndefined()
+  })
+
+  it('drops a ref whose blob was deleted by a republish', () => {
+    const host = flowItem('a', 'r1')
+    // The old model's shape: an earlier publish's ref left behind after its blob
+    // was unlinked, plus the current one.
+    host.artifacts = [art('gone'), art('b2', 'out.txt', 9)]
+    const t = { items: [host] as Item[], artifacts: [art('b2', 'out.txt', 9)] }
+    const counts = migrateArtifactsToAttachments(t, new Set(['b2']))
+    expect(counts).toEqual({ moved: 1, dropped: 1, surfaced: 0 })
+    expect(host.attachments!.map((a) => a.id)).toEqual(['b2'])
+  })
+
+  it('surfaces a slot no item referenced, rather than losing its last pointer', () => {
+    // The open-pr shape: published before the flow emitted anything, so the ref
+    // had no host and only the registry held it.
+    const spoke = flowItem('said something', 'r1')
+    const t = { items: [spoke] as Item[], artifacts: [art('b1', 'diff.patch')] }
+    const counts = migrateArtifactsToAttachments(t, new Set(['b1']))
+    expect(counts).toEqual({ moved: 0, dropped: 0, surfaced: 1 })
+    expect(spoke.attachments!.map((a) => a.name)).toEqual(['diff.patch'])
+  })
+
+  it('does not double-place a slot already recorded on an item', () => {
+    const host = flowItem('a', 'r1')
+    host.artifacts = [art('b1')]
+    const t = { items: [host] as Item[], artifacts: [art('b1')] }
+    migrateArtifactsToAttachments(t, new Set(['b1']))
+    expect(host.attachments).toHaveLength(1)
+  })
+
+  it('keeps attachments the item already carried', () => {
+    const host = flowItem('a', 'r1')
+    host.attachments = [{ id: 'existing', name: 'in.txt', mime: 'text/plain', size: 1 }]
+    host.artifacts = [art('b1')]
+    const t = { items: [host] as Item[], artifacts: [art('b1')] }
+    migrateArtifactsToAttachments(t, new Set(['b1', 'existing']))
+    expect(host.attachments!.map((a) => a.id)).toEqual(['existing', 'b1'])
+  })
+
+  it('drops an orphan slot with no flow item to host it', () => {
+    const t = { items: [userItem('hi', AT)] as Item[], artifacts: [art('b1')] }
+    const counts = migrateArtifactsToAttachments(t, new Set(['b1']))
+    expect(counts.surfaced).toBe(0)
+    expect(t.artifacts).toBeUndefined()
+  })
+
+  it('is idempotent: a converted record needs no further work', () => {
+    const host = flowItem('a', 'r1')
+    host.artifacts = [art('b1')]
+    const t = { items: [host] as Item[], artifacts: [art('b1')] }
+    expect(hasArtifactRecords(t)).toBe(true)
+    migrateArtifactsToAttachments(t, new Set(['b1']))
+    expect(hasArtifactRecords(t)).toBe(false)
+    // Re-running would add nothing even if it were called again.
+    expect(migrateArtifactsToAttachments(t, new Set(['b1']))).toEqual({
+      moved: 0,
+      dropped: 0,
+      surfaced: 0,
+    })
+    expect(host.attachments).toHaveLength(1)
   })
 })
 

@@ -118,10 +118,18 @@ earned its place:
   That is usually fine — nothing reads them either — but it means "the migration
   has run everywhere" is only ever true of the *configured* projects.
 
-No migration is installed today: `backfillIds`, `backfillAgents`, and
-`backfillSeen` were retired once every configured project read clean. Recover any
-of the three from git history (`git log -S backfillIds -- server/index.ts`) rather
-than rewriting the pattern from this description.
+`backfillTasks` in `server/index.ts` is that shape as a helper. Three earlier
+migrations — `backfillIds`, `backfillAgents`, `backfillSeen` — were retired once
+every configured project read clean; recover one from git history
+(`git log -S backfillIds -- server/index.ts`) rather than rewriting the pattern
+from this description.
+
+**A migration runs on every hot reload, not just a deliberate restart.** The API
+runs under `tsx watch`, so saving the file that adds one restarts the process and
+executes it immediately, against real data, in the same edit that wrote it. Take
+whatever backup you want *before* the file is saved, not before some later
+launch — and treat `mutateTask` as non-negotiable for exactly this reason, since
+the reload can land mid-turn on a riding task.
 
 ## Restart and hot reload
 

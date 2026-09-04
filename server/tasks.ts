@@ -1679,6 +1679,66 @@ export function recordAttachmentOnMessage(
   return host
 }
 
+// Fold a task's artifact records into plain attachments, in place.
+//
+// `liveBlobIds` — the ids present in the project's blob store — decides what
+// survives. A ref whose blob is gone was superseded back when a republish deleted
+// what it displaced; those bytes are unrecoverable, so the ref is dropped rather
+// than left to 404. A slot no item referenced is surfaced onto the last flow item:
+// its blob is intact, and it was only invisible because the publishing flow had
+// emitted nothing for the ref to land on.
+export function migrateArtifactsToAttachments(
+  task: { items?: Item[]; artifacts?: Artifact[] },
+  liveBlobIds: ReadonlySet<string>,
+): { moved: number; dropped: number; surfaced: number } {
+  const placed = new Set<string>()
+  let moved = 0
+  let dropped = 0
+  let surfaced = 0
+
+  const asAttachment = (a: Artifact): Attachment => ({
+    id: a.id,
+    name: a.name,
+    mime: a.mime,
+    size: a.size,
+  })
+
+  for (const it of task.items ?? []) {
+    if (it.kind !== 'message' || !it.artifacts) continue
+    for (const ref of it.artifacts) {
+      if (!liveBlobIds.has(ref.id)) {
+        dropped++
+        continue
+      }
+      ;(it.attachments ??= []).push(asAttachment(ref))
+      placed.add(ref.id)
+      moved++
+    }
+    delete it.artifacts
+  }
+
+  for (const slot of task.artifacts ?? []) {
+    if (placed.has(slot.id) || !liveBlobIds.has(slot.id)) continue
+    const host = lastFlowItem(task)
+    if (!host) continue
+    ;(host.attachments ??= []).push(asAttachment(slot))
+    placed.add(slot.id)
+    surfaced++
+  }
+  delete task.artifacts
+
+  return { moved, dropped, surfaced }
+}
+
+// The read-side guard, so the migration does not rewrite a file it has done.
+export function hasArtifactRecords(task: {
+  items?: Item[]
+  artifacts?: Artifact[]
+}): boolean {
+  if (task.artifacts !== undefined) return true
+  return (task.items ?? []).some((it) => it.kind === 'message' && it.artifacts)
+}
+
 // Derive the name to pass to `claude --worktree` from the absolute worktree root
 // the EnterWorktree hook reported (its `worktreePath`), given the project root.
 // Worktrees the agent enters live under `<project>/.claude/worktrees/<name>`, and

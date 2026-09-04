@@ -49,6 +49,8 @@ import {
   recordStatusTransition,
   recordArtifactOnMessage,
   recordAttachmentOnMessage,
+  migrateArtifactsToAttachments,
+  hasArtifactRecords,
   turnAttachments,
   deliverQueuedBatch,
   worktreeName,
@@ -4183,12 +4185,86 @@ export async function recoverQueues(): Promise<void> {
   }
 }
 
+// Walk every task record in every configured project and apply a one-time
+// migration; docs/architecture.md, "Durable data migrations", covers the shape and
+// why each part of it is there. `apply` runs under mutateTask because a hot reload
+// can fire a migration into a record a turn is streaming into. `prepare` exists
+// because that callback is synchronous, so anything the visit must consult has to
+// be gathered per project up front.
+async function backfillTasks(spec: {
+  label: string
+  prepare?: (project: Project) => Promise<void>
+  needsWork: (task: Task) => boolean
+  apply: (task: Task, project: Project) => void
+}): Promise<void> {
+  let touched = 0
+  for (const project of PROJECTS) {
+    await spec.prepare?.(project)
+    for (const dir of [project.dataDir, project.archiveDir]) {
+      let names: string[]
+      try {
+        names = await readdir(dir)
+      } catch {
+        continue
+      }
+      for (const name of names) {
+        if (!name.endsWith('.json')) continue
+        const file = path.join(dir, name)
+        try {
+          const task = JSON.parse(await readFile(file, 'utf8')) as Task
+          if (!spec.needsWork(task)) continue
+          await mutateTask(file, (t) => {
+            if (spec.needsWork(t)) spec.apply(t, project)
+          })
+          touched++
+        } catch {
+          // skip unreadable/invalid files
+        }
+      }
+    }
+  }
+  if (touched) console.log(`${spec.label}: migrated ${touched} task(s)`)
+}
+
+// Fold every task's artifact records into plain attachments. Reports its totals
+// because it drops refs: this rewrites conversation history, and doing that
+// silently would be worse than the wart it fixes.
+async function backfillArtifactsToAttachments(): Promise<void> {
+  let live = new Set<string>()
+  let moved = 0
+  let dropped = 0
+  let surfaced = 0
+  await backfillTasks({
+    label: 'artifacts→attachments',
+    prepare: async (project) => {
+      try {
+        live = new Set(await readdir(project.attachmentsDir))
+      } catch {
+        live = new Set()
+      }
+    },
+    needsWork: hasArtifactRecords,
+    apply: (t) => {
+      const counts = migrateArtifactsToAttachments(t, live)
+      moved += counts.moved
+      dropped += counts.dropped
+      surfaced += counts.surfaced
+    },
+  })
+  if (moved || dropped || surfaced)
+    console.log(
+      `artifacts→attachments: ${moved} ref(s) moved, ${surfaced} orphaned slot(s) ` +
+        `surfaced, ${dropped} ref(s) dropped (blob deleted by a pre-fix republish)`,
+    )
+}
+
 const port = Number(process.env.PORT ?? 6181)
 if (process.env.NODE_ENV !== 'test' && process.env.VITEST !== 'true') {
-  // Claim every recoverable active task before accepting archive or mutation
-  // requests. driveTask takes its in-memory claim synchronously before its first
-  // await, so recoverQueues may return while the daemon reattachment proceeds
-  // without leaving an unguarded move window.
+  // Finish durable migrations, then claim every recoverable active task before
+  // accepting archive or mutation requests. driveTask takes its in-memory claim
+  // synchronously before its first await, so recoverQueues may return while the
+  // daemon reattachment proceeds without leaving an unguarded move window.
+  await backfillArtifactsToAttachments()
   await recoverQueues()
 
   const server = serve({ fetch: app.fetch, port })
