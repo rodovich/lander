@@ -755,7 +755,8 @@ export function pushHookItem(
 
 // The last main-agent flow message item (a `flow` message with no `parentId`, so
 // not a subagent's nested prose), optionally scoped to one ride. The anchor for
-// finalText updates (applyUpdate) and artifact refs (recordArtifactOnMessage).
+// finalText updates (applyUpdate) and attachment refs
+// (recordAttachmentOnMessage).
 export function lastFlowItem(
   task: { items?: Item[] },
   rideId?: string,
@@ -1620,26 +1621,16 @@ export function deliverQueuedBatch(
   }
 }
 
-// Record a published attachment on the flow message item that produced it, so the
-// UI renders its chip under that turn. Unlike an artifact ref this always appends:
-// a blob is immutable and the store never deletes, so two publishes of one name
-// are two distinct outputs, each chip showing its own bytes and size.
+// Record a published attachment on the flow item that produced it, so its chip
+// renders under that turn. Appends rather than replacing by name: blobs are
+// immutable, so two publishes of one name are two outputs, not one overwritten.
 //
-// The host is chosen so that output can never land on the wrong turn:
-//
-//   - the open ride's last flow item, the ordinary publish-mid-turn case;
-//   - else, when a ride is open but has said nothing yet, a fresh empty flow item
-//     in that ride — so a publish that precedes any prose BEGINS the turn instead
-//     of vanishing. A flow that writes its outputs before it speaks (open-pr does
-//     exactly this) used to leave the ref homeless, because the previous rule
-//     needed an item and would not make one;
-//   - else the last flow item overall, for a publish outside any ride (the human
-//     posting to a resting task through the UI token);
-//   - else nothing to host it: a task that has never ridden, where dropping the
-//     ref is right because there is no turn it could belong to.
-//
-// Note the second rule must come before the third: falling back to the newest item
-// of a PREVIOUS ride would file this turn's output under an earlier one.
+// An open ride with no item yet gets one opened, so a publish that precedes any
+// prose begins the turn — a flow that writes its outputs before it speaks would
+// otherwise have nowhere to put them. That branch has to precede the fall back to
+// the last item overall, or a new turn's output files itself under a previous
+// ride. Returning undefined means the task has never ridden, so there is no turn
+// the ref could belong to.
 export function recordAttachmentOnMessage(
   task: { items?: Item[]; rides?: Ride[] },
   attachment: Attachment,
@@ -1669,21 +1660,14 @@ type LegacyArtifact = {
 type LegacyTask = { items?: Item[]; artifacts?: LegacyArtifact[] }
 type LegacyItem = Item & { artifacts?: LegacyArtifact[] }
 
-// Fold a task's artifact records into plain attachments, in place. Artifacts were
-// a task's outputs as a mutable name→blob slot registry; attachments are the same
-// blobs recorded on the turn that produced them, which is all the slot ever
-// usefully was once the store stopped deleting.
+// Fold a task's artifact records into plain attachments, in place.
 //
-// `liveBlobIds` is the set of ids actually present in the project's blob store,
-// and it decides what survives. A ref whose blob is gone is dropped: those are the
-// publishes that were superseded back when a republish deleted what it displaced,
-// so the bytes cannot be recovered and a chip pointing at them would 404. A slot
-// no item ever referenced — a flow that published before it emitted anything, so
-// there was no item to host the ref — is surfaced on the last flow item instead of
-// discarded, since its blob is intact and nothing rendered it before.
-//
-// Returns per-record counts so the boot migration can report what it did rather
-// than change history silently.
+// `liveBlobIds` — the ids present in the project's blob store — decides what
+// survives. A ref whose blob is gone was superseded back when a republish deleted
+// what it displaced; those bytes are unrecoverable, so the ref is dropped rather
+// than left to 404. A slot no item referenced is surfaced onto the last flow item:
+// its blob is intact, and it was only invisible because the publishing flow had
+// emitted nothing for the ref to land on.
 export function migrateArtifactsToAttachments(
   task: LegacyTask,
   liveBlobIds: ReadonlySet<string>,
@@ -1727,8 +1711,7 @@ export function migrateArtifactsToAttachments(
   return { moved, dropped, surfaced }
 }
 
-// Whether the record above has anything to convert — the cheap read-side guard
-// that keeps the migration from rewriting a file it has already done.
+// The read-side guard, so the migration does not rewrite a file it has done.
 export function hasArtifactRecords(task: LegacyTask): boolean {
   if (task.artifacts !== undefined) return true
   return ((task.items ?? []) as LegacyItem[]).some(

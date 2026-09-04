@@ -424,7 +424,7 @@ type Task = {
   // applyStatePatch. Convention (flow-inversion.md §Durable state): it records the
   // flow's decisions, identities, and user-visible progress — the PR number, the
   // CI run id, the approved message text, the phase — while bulk/derivable data
-  // goes to scratch or artifacts. The server never interprets it; it rides back
+  // goes to scratch or an attachment. The server never interprets it; it rides back
   // out to the flow on start-run (StartRunMessage.flowState) and is cleared on
   // relaunch (sealForRelaunch). Stripped from the public task (publicTask).
   // Absent until a flow first writes it — no producer exists in step 1.
@@ -1852,7 +1852,7 @@ app.post('/api/:project/tasks/:id/attachments', async (c) => {
     if (!(part instanceof File))
       return c.json({ error: 'no file in upload' }, 400)
     // The name is display-only here — the ref resolves by blob id — so it needs
-    // sanitizing but not the artifact route-segment regex.
+    // sanitizing but no addressability check: nothing routes by it.
     const rawName =
       typeof body['name'] === 'string' && body['name'].trim()
         ? body['name']
@@ -3632,7 +3632,7 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
 // leaves the status alone — the task rests with the question attached, nothing in
 // the list. Principal: the task itself (posting its own ask mid-turn —
 // self-initiated, so no run interrupt, exactly like `lander wedge`) or the UI
-// (mirror the artifact-publish gate). Ride-blocking (`ride`) ships in the
+// (mirror the task-attachment gate). Ride-blocking (`ride`) ships in the
 // vocabulary but 400s here until its behavior exists.
 app.post('/api/:project/tasks/:id/asks', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))

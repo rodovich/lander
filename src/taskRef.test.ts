@@ -25,7 +25,7 @@ describe('task references', () => {
       projectSlug: 'project',
       id: 'task',
     })
-    expect(taskRefFromPath('/project/task/artifacts')).toBeNull()
+    expect(taskRefFromPath('/project/task/attachments')).toBeNull()
     expect(taskRefFromPath('/')).toBeNull()
   })
 

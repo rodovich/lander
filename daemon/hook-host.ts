@@ -156,7 +156,7 @@ async function checkApproval(
 // ── The context ────────────────────────────────────────────────────────────
 //
 // Deliberately small: a body needs far less than a driver flow. No `emit`
-// (there is no ride), no `state`, no `artifacts`, and no ask/wedge/rest/relaunch
+// (there is no ride), no `state`, no `attachments`, and no ask/wedge/rest/relaunch
 // — absent from the surface rather than denied at each route, which is why this
 // shape needs no deny floor across every mutating path.
 //

@@ -55,8 +55,12 @@ parent's turn.
 Choose the cheapest instrument that is still faithful:
 
 - **Test on yourself** when the behavior is self-directed — run the command you
-  expect to be denied, wedge with options, rest with a wakeup, publish an
-  artifact. Your own task is a real task.
+  expect to be denied, wedge with options, rest with a wakeup. Your own task is a
+  real task. The exception is anything that leaves a permanent mark on the
+  conversation: `lander attachment put` writes a chip onto your own reply that
+  nothing can remove, so probe it from a sibling. The task that first built
+  outputs tested them on itself and left two dead chips on its transcript for
+  good.
 - **Launch a sibling** when the subject is task creation, message delivery,
   inheritance, permission grants, or anything the parent cannot do to itself.
   Pass `--edits` only when the behavior under test needs it; a read-only
@@ -142,7 +146,7 @@ moving to the next.
 ## Outward-facing actions
 
 Testing stops at the boundary of anything the outside world sees. Exercise
-push/PR-shaped paths in dry-run — performing every read, artifact, ask, and
+push/PR-shaped paths in dry-run — performing every read, attachment, ask, and
 re-entry while emitting the command instead of running it — and stop for explicit
 user confirmation before the real thing. Do not open a PR, push, or send anything
 outward on your own initiative as part of a test.

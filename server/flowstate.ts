@@ -14,7 +14,7 @@ import type { StatePatchOp } from './protocol'
 export type StatePatchTask = {
   // The flow's opaque durable state — its decisions/identities/user-visible
   // progress (the PR number, the CI run id, the phase); bulk goes to scratch or
-  // artifacts. Absent until a flow first writes it.
+  // an attachment. Absent until a flow first writes it.
   flowState?: Record<string, unknown>
   // Increments once per applied `state-patch` op batch (the doc's revision
   // counter). Absent until the first write.
@@ -101,7 +101,7 @@ export function applyStatePatch(
     console.warn(
       `flowState is ${size} bytes, over the ${STATE_WARN_BYTES}-byte cap — ` +
         `a producer bypassed the host-side limit. State belongs in scratch or ` +
-        `artifacts once it is this large.`,
+        `an attachment once it is this large.`,
     )
 }
 

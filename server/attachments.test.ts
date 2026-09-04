@@ -83,7 +83,7 @@ describe('readAttachmentMeta / readAttachmentBytes', () => {
 })
 
 describe('saveAttachment maxBytes override', () => {
-  it('honors a caller-supplied larger cap (the artifact path)', async () => {
+  it('honors a caller-supplied larger cap (the task-output path)', async () => {
     const bytes = new Uint8Array(MAX_ATTACHMENT_BYTES + 1)
     // Rejected at the default attachment cap...
     await expect(

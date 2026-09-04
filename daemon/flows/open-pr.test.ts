@@ -361,7 +361,7 @@ describe('open-pr — watch', () => {
     expect(r.requests.some((q) => q.url.endsWith('/rest'))).toBe(false)
   })
 
-  it('walks the scripted failure branch: artifact, sibling launch, wedge', async () => {
+  it('walks the scripted failure branch: attachment, sibling launch, wedge', async () => {
     const r = await ride({
       flowState: { phase: 'watch', prNumber: 9999, attempts: 2 },
       flowConfig: { dryRun: true, dryRunOutcome: 'failed' },
