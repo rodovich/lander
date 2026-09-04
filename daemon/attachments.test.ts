@@ -93,7 +93,7 @@ describe('buildManifestBlock', () => {
       true,
     )
     expect(block).toContain('already attached to your vision')
-    expect(block).toContain('lander file cat')
+    expect(block).toContain('lander attachment cat')
   })
 
   it('gives a non-vision agent the image path to Read', () => {

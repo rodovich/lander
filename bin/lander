@@ -63,10 +63,9 @@ async function readStdin() {
 }
 
 // --- attachments -----------------------------------------------------------
-// `lander file cat/ls` read the daemon-local file store the daemon materialized
-// for this turn (LANDER_FILES_DIR): a `<id>` blob per attachment plus a
-// manifest.json. Pure local reads — no server call, no sandbox widening — so they
-// work over the already-allowlisted Bash(lander:*) channel.
+// The daemon-local file store: an `<id>` blob per attachment plus a manifest.json.
+// `attachment ls`/`cat` are pure local reads of it — no server call, no sandbox
+// widening — so they work over the already-allowlisted Bash(lander:*) channel.
 const FILES_DIR = process.env.LANDER_FILES_DIR
 
 // Guess an upload's mime from its extension; the server stores whatever we send
@@ -120,9 +119,9 @@ async function uploadAttachments(project, paths) {
   return (body.attachments ?? []).map((a) => a.id)
 }
 
-// `lander file cat <id>` — stream the materialized blob to stdout.
-// `lander file ls` — list this task's attachments (manifest.json) with sizes.
-async function fileCommand(args) {
+// `lander attachment cat <id>` — stream the materialized blob to stdout.
+// `lander attachment ls` — list this task's attachments (manifest.json) with sizes.
+async function attachmentCommand(args) {
   const [sub, ...rest] = args
   if (!FILES_DIR)
     die('no attachments for this task (LANDER_FILES_DIR unset)')
@@ -141,7 +140,7 @@ async function fileCommand(args) {
   }
   if (sub === 'cat') {
     const id = rest[0]
-    if (!id) die('usage: lander file cat <id>')
+    if (!id) die('usage: lander attachment cat <id>')
     // Guard the id to a filename segment so `cat ../foo` can't escape the store.
     if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) die(`invalid attachment id: ${id}`)
     await new Promise((resolve, reject) => {
@@ -152,7 +151,7 @@ async function fileCommand(args) {
     }).catch((e) => die(e.message))
     return
   }
-  die('usage: lander file (ls | cat <id>)')
+  die('usage: lander attachment (ls | cat <id>)')
 }
 
 // --- artifacts -------------------------------------------------------------
@@ -1322,7 +1321,7 @@ const USAGE = {
   ask: 'ask --option <id:label> [--option …]',
   archive: 'archive <id…> [--restore]',
   assist: 'assist <prompt> [text …]',
-  file: 'file (ls | cat <id>)',
+  attachment: 'attachment (ls | cat <id>)',
   artifact: 'artifact (put <path> [--name <n>] [--mime <m>] | ls | cat <name>)',
   flow: 'flow <name> [--key <k> <v> …]',
 }
@@ -1363,7 +1362,7 @@ const run = {
   send: () => sendTask(rest),
   archive: () => archiveTask(rest),
   assist: () => assist(rest),
-  file: () => fileCommand(rest),
+  attachment: () => attachmentCommand(rest),
   artifact: () => artifactCommand(rest),
   flow: () => runFlow(rest),
   'bash-guard': () => bashGuard(),

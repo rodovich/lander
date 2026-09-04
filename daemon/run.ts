@@ -82,7 +82,7 @@ export type RunManagerOptions = {
   ) => { root: string; cwd: string; reentryArgs: string[]; effectiveCwd?: string }
   send: (msg: RunManagerMessage) => void
   // The deterministic per-task file store dir (pure function of the run's
-  // project/task). Set as LANDER_FILES_DIR on EVERY turn so `lander file cat/ls`
+  // project/task). Set as LANDER_FILES_DIR on EVERY turn so `lander attachment cat/ls`
   // keep reaching a file attached on an earlier turn — the blobs persist there
   // even on turns that carry no new attachment. Sync so the common (no-attachment)
   // path still spawns without an await.

@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 
 // The public shape shared by the message record, the daemon manifest, and
-// `lander file ls`. Just enough to identify and size a file — never the bytes.
+// `lander attachment ls`. Just enough to identify and size a file — never the bytes.
 export type Attachment = { id: string; name: string; mime: string; size: number }
 
 // Cap a single upload so a runaway file can't exhaust the daemon's disk when it

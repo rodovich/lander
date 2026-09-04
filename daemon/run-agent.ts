@@ -171,7 +171,7 @@ export function runAgent(
   if (start.revived) promptParts.push(buildRevivedBlock(start.revived))
   if (sentContext) promptParts.push(sentContext)
   // The daemon already resolved the persistent per-task store dir; expose it as
-  // LANDER_FILES_DIR (so `lander file cat/ls` reach files attached on an earlier
+  // LANDER_FILES_DIR (so `lander attachment cat/ls` reach files attached on an earlier
   // turn) and hand image paths to the vision channel.
   const filesDir = input.filesDir
   const landerEnv = filesDir

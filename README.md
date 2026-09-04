@@ -72,7 +72,7 @@ A task's agent can call back into lander to manage itself. When the daemon launc
 | `lander view <id>` | Show one task's status and recent conversation. |
 | `lander send <id> <message>` | Message another task in this project — now, or deferred with `--date`/`--time`/`--await`. |
 | `lander archive <id> [--restore]` | Archive a task (or `--restore` it) — move it out of the list into `archived/`, or back. |
-| `lander file ls` / `lander file cat <id>` | List **this** task's attachments (id/name/mime/size) or stream one's raw bytes to stdout — see [Attachments](#attachments). |
+| `lander attachment ls` / `lander attachment cat <id>` | List **this** task's attachments (id/name/mime/size) or stream one's raw bytes to stdout — see [Attachments](#attachments). |
 | `lander artifact put <path> [--name <n>] [--mime <m>]` / `lander artifact ls` / `lander artifact cat <name>` | Publish **this** task's named output file (name defaults to the basename), list its output slots, or stream a slot's current blob to stdout — see [Artifacts](#artifacts). |
 | `lander help [command]` / `lander <command> --help` | Print usage — the full command index, or one command's flags. Print-only: `--help`/`-h`/`help` are intercepted before dispatch, so they never launch or send anything. |
 
@@ -90,7 +90,7 @@ With no trigger flag, `send` delivers immediately, queued behind any in-flight t
 
 Messages can carry file/image attachments, propagated to both Claude and Codex agents. From the web UI, a **paperclip** below the new-task and reply composers attaches files; from the CLI, `lander launch` and `lander send` take `--files <paths…>` (variadic — put it last, after the message, since it consumes following args up to the next `--flag`). Attachments are uploaded to a durable per-project blob store (`data/<project>/attachments/`, an `<id>` blob plus an `<id>.json` metadata sidecar) and carried on the message as refs (`{id, name, mime, size}`) — never inlined into the prompt.
 
-At turn time the daemon lazily materializes a task's attachments into a per-task dir on its host (`LANDER_FILES_DIR`, cached across turns), writes a `manifest.json`, and appends a small **manifest block** (ids/names/sizes, never the bytes) to the outgoing prompt. Images additionally reach the model's **vision**: Codex via `--image`, Claude via `Read` on the local path (the daemon grants `--add-dir` for the store dir so Read can reach it). To read any attached file's bytes an agent runs `lander file cat <id>` (a pure local read of `$LANDER_FILES_DIR/<id>` — no server call, no sandbox widening), and `lander file ls` lists the current task's attachments with sizes.
+At turn time the daemon lazily materializes a task's attachments into a per-task dir on its host (`LANDER_FILES_DIR`, cached across turns), writes a `manifest.json`, and appends a small **manifest block** (ids/names/sizes, never the bytes) to the outgoing prompt. Images additionally reach the model's **vision**: Codex via `--image`, Claude via `Read` on the local path (the daemon grants `--add-dir` for the store dir so Read can reach it). To read any attached file's bytes an agent runs `lander attachment cat <id>` (a pure local read of `$LANDER_FILES_DIR/<id>` — no server call, no sandbox widening), and `lander attachment ls` lists the current task's attachments with sizes.
 
 #### Artifacts
 

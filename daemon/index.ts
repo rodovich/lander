@@ -322,7 +322,7 @@ const runManager = createRunManager({
   resolveRunPaths,
   send,
   // Point LANDER_FILES_DIR at the task's persistent store every turn, so a file
-  // attached on an earlier turn stays reachable via `lander file cat/ls`.
+  // attached on an earlier turn stays reachable via `lander attachment cat/ls`.
   resolveFilesDir: (msg) => taskFilesDir(FILES_ROOT, msg.project, msg.taskId),
   materialize,
   refreshUsage,

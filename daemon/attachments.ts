@@ -1,6 +1,6 @@
 // Daemon-side attachment materialization. At turn time the daemon fetches a run's
 // attachment bytes from the server's authed download endpoint into a stable
-// per-task dir (LANDER_FILES_DIR, cached across turns so `lander file cat` keeps
+// per-task dir (LANDER_FILES_DIR, cached across turns so `lander attachment cat` keeps
 // working), refreshes that dir's manifest.json, and builds the prompt-facing
 // manifest block. Images additionally surface their local path for the vision
 // channel (Codex --image / Claude Read). Pure of the run manager's wiring so the
@@ -12,7 +12,7 @@ import os from 'node:os'
 import type { AttachmentRef } from '../server/protocol'
 
 // Where a task's materialized blobs live on the daemon host. Cached across turns
-// (never cleaned per-run) so repeat `lander file cat` reads stay local and cheap.
+// (never cleaned per-run) so repeat `lander attachment cat` reads stay local and cheap.
 // Under the OS temp dir by default; keyed by project slug + task id.
 export function defaultFilesRoot(): string {
   return path.join(os.tmpdir(), 'lander-files')
@@ -41,7 +41,7 @@ export type MaterializedFiles = {
 type FetchBytes = (ref: AttachmentRef) => Promise<Uint8Array>
 
 // Fetch and cache this turn's attachment blobs, refresh manifest.json (the union
-// of every attachment the task has ever carried, so `lander file ls`/`cat` see
+// of every attachment the task has ever carried, so `lander attachment ls`/`cat` see
 // them all), and build the prompt block. A blob already on disk isn't re-fetched.
 export async function materializeAttachments(opts: {
   filesDir: string
@@ -72,7 +72,7 @@ export async function materializeAttachments(opts: {
   return { filesDir, images, manifestBlock }
 }
 
-// The on-disk manifest.json `lander file ls` reads: {id,name,mime,size} entries,
+// The on-disk manifest.json `lander attachment ls` reads: {id,name,mime,size} entries,
 // unioned by id with whatever prior turns left, so a file attached earlier stays
 // listable/cat-able even on a turn that attaches nothing.
 async function refreshManifest(
@@ -129,8 +129,8 @@ export function buildManifestBlock(
   }
   lines.push(
     '',
-    'To read any attached file’s raw bytes, run `lander file cat <id>` ' +
-      '(list them with `lander file ls`).',
+    'To read any attached file’s raw bytes, run `lander attachment cat <id>` ' +
+      '(list them with `lander attachment ls`).',
     '</task-attachments>',
   )
   return lines.join('\n')

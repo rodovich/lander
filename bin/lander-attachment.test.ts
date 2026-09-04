@@ -42,11 +42,11 @@ async function makeFilesDir() {
   return dir
 }
 
-describe('lander file', () => {
+describe('lander attachment', () => {
   it('ls lists the manifest with sizes', async () => {
     const dir = await makeFilesDir()
     try {
-      const { stdout, code } = await execLander(['file', 'ls'], {
+      const { stdout, code } = await execLander(['attachment','ls'], {
         ...process.env,
         LANDER_FILES_DIR: dir,
       })
@@ -63,7 +63,7 @@ describe('lander file', () => {
   it('cat streams a blob by id', async () => {
     const dir = await makeFilesDir()
     try {
-      const { stdout, code } = await execLander(['file', 'cat', 'id-a'], {
+      const { stdout, code } = await execLander(['attachment','cat', 'id-a'], {
         ...process.env,
         LANDER_FILES_DIR: dir,
       })
@@ -77,7 +77,7 @@ describe('lander file', () => {
   it('cat rejects a path-escaping id', async () => {
     const dir = await makeFilesDir()
     try {
-      const { stderr, code } = await execLander(['file', 'cat', '../manifest.json'], {
+      const { stderr, code } = await execLander(['attachment','cat', '../manifest.json'], {
         ...process.env,
         LANDER_FILES_DIR: dir,
       })
@@ -91,7 +91,7 @@ describe('lander file', () => {
   it('errors when LANDER_FILES_DIR is unset', async () => {
     const env = { ...process.env }
     delete env.LANDER_FILES_DIR
-    const { stderr, code } = await execLander(['file', 'ls'], env)
+    const { stderr, code } = await execLander(['attachment','ls'], env)
     expect(code).not.toBe(0)
     expect(stderr).toContain('LANDER_FILES_DIR')
   })
