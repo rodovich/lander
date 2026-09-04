@@ -19,6 +19,11 @@ export type Attachment = { id: string; name: string; mime: string; size: number 
 // and data files while staying well under memory-per-request limits.
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 
+// Larger than the message cap: a build output or a diff packet runs bigger than
+// what a human drags into a composer. Bounded by the save path buffering the
+// whole blob in memory.
+export const MAX_TASK_OUTPUT_BYTES = 100 * 1024 * 1024
+
 // A path-safe attachment id: same closed alphabet as a task id (no `/`, `.`), so
 // it can be a filename segment on both the server store and the daemon-local dir.
 const ATTACHMENT_ID = /^[A-Za-z0-9_-]{1,64}$/
@@ -62,9 +67,8 @@ export class AttachmentTooLargeError extends Error {
 
 // Persist an uploaded blob: mint an id, write the bytes and a metadata sidecar,
 // return the ref. Throws AttachmentTooLargeError on an over-size upload (the
-// caller maps it to a 413). `maxBytes` defaults to the attachment cap; the
-// artifact endpoints pass their own larger MAX_ARTIFACT_BYTES, since both kinds
-// of output share this one blob store.
+// caller maps it to a 413). `maxBytes` is a parameter because a file a task
+// attaches and a file a human sends share this store under different caps.
 export async function saveAttachment(
   attachmentsDir: string,
   input: { name: unknown; mime: unknown; bytes: Uint8Array },

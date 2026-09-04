@@ -5,7 +5,6 @@ import {
   taskFlow,
   latestUpdateAt,
   recordStatusTransition,
-  recordArtifactOnMessage,
   recordAttachmentOnMessage,
   migrateArtifactsToAttachments,
   hasArtifactRecords,
@@ -724,36 +723,6 @@ describe('deliverQueuedBatch', () => {
   })
 })
 
-describe('recordArtifactOnMessage', () => {
-  const artifact = { name: 'out', id: 'b', mime: 'text/plain', size: 2, createdAt: AT, updatedAt: AT }
-
-  it('attaches to the open ride’s last flow item', () => {
-    const t = {
-      items: [flowItem('a', 'r1'), flowItem('b', 'r1', later(1))],
-      rides: [{ id: 'r1', startedAt: AT } as Ride],
-    }
-    recordArtifactOnMessage(t, artifact)
-    expect((t.items[1] as MessageItem).artifacts).toEqual([artifact])
-  })
-
-  it('updates an existing ref for the same name in place', () => {
-    const host = flowItem('a', 'r1')
-    host.artifacts = [artifact]
-    const t = { items: [host], rides: [{ id: 'r1', startedAt: AT } as Ride] }
-    recordArtifactOnMessage(t, { ...artifact, size: 99 })
-    expect(host.artifacts).toHaveLength(1)
-    expect(host.artifacts![0].size).toBe(99)
-  })
-
-  it('falls back to the last flow item when no ride is open, and no-ops with none', () => {
-    const t = { items: [flowItem('a', 'r1')], rides: [{ id: 'r1', startedAt: AT, endedAt: later(1), outcome: 'done' } as Ride] }
-    recordArtifactOnMessage(t, artifact)
-    expect((t.items[0] as MessageItem).artifacts).toEqual([artifact])
-    const empty = { items: [] as Item[] }
-    expect(() => recordArtifactOnMessage(empty, artifact)).not.toThrow()
-  })
-})
-
 describe('recordAttachmentOnMessage', () => {
   const blob = (id = 'b1', size = 2) => ({ id, name: 'out.txt', mime: 'text/plain', size })
 
@@ -826,10 +795,14 @@ describe('migrateArtifactsToAttachments', () => {
     createdAt: AT,
     updatedAt: AT,
   })
+  // The legacy field is gone from MessageItem, so a fixture standing in for a
+  // pre-migration record has to add it back the way the stored JSON has it.
+  type Legacy = MessageItem & { artifacts?: ReturnType<typeof art>[] }
+  const legacy = (it: MessageItem, arts: ReturnType<typeof art>[]): Legacy =>
+    Object.assign(it as Legacy, { artifacts: arts })
 
   it('moves a live ref onto the item that published it and drops the slot', () => {
-    const host = flowItem('a', 'r1')
-    host.artifacts = [art('b1')]
+    const host = legacy(flowItem('a', 'r1'), [art('b1')])
     const t = { items: [host] as Item[], artifacts: [art('b1')] }
     const counts = migrateArtifactsToAttachments(t, new Set(['b1']))
     expect(counts).toEqual({ moved: 1, dropped: 0, surfaced: 0 })
@@ -841,10 +814,9 @@ describe('migrateArtifactsToAttachments', () => {
   })
 
   it('drops a ref whose blob was deleted by a republish', () => {
-    const host = flowItem('a', 'r1')
     // The old model's shape: an earlier publish's ref left behind after its blob
     // was unlinked, plus the current one.
-    host.artifacts = [art('gone'), art('b2', 'out.txt', 9)]
+    const host = legacy(flowItem('a', 'r1'), [art('gone'), art('b2', 'out.txt', 9)])
     const t = { items: [host] as Item[], artifacts: [art('b2', 'out.txt', 9)] }
     const counts = migrateArtifactsToAttachments(t, new Set(['b2']))
     expect(counts).toEqual({ moved: 1, dropped: 1, surfaced: 0 })
@@ -862,17 +834,15 @@ describe('migrateArtifactsToAttachments', () => {
   })
 
   it('does not double-place a slot already recorded on an item', () => {
-    const host = flowItem('a', 'r1')
-    host.artifacts = [art('b1')]
+    const host = legacy(flowItem('a', 'r1'), [art('b1')])
     const t = { items: [host] as Item[], artifacts: [art('b1')] }
     migrateArtifactsToAttachments(t, new Set(['b1']))
     expect(host.attachments).toHaveLength(1)
   })
 
   it('keeps attachments the item already carried', () => {
-    const host = flowItem('a', 'r1')
+    const host = legacy(flowItem('a', 'r1'), [art('b1')])
     host.attachments = [{ id: 'existing', name: 'in.txt', mime: 'text/plain', size: 1 }]
-    host.artifacts = [art('b1')]
     const t = { items: [host] as Item[], artifacts: [art('b1')] }
     migrateArtifactsToAttachments(t, new Set(['b1', 'existing']))
     expect(host.attachments!.map((a) => a.id)).toEqual(['existing', 'b1'])
@@ -886,8 +856,7 @@ describe('migrateArtifactsToAttachments', () => {
   })
 
   it('is idempotent: a converted record needs no further work', () => {
-    const host = flowItem('a', 'r1')
-    host.artifacts = [art('b1')]
+    const host = legacy(flowItem('a', 'r1'), [art('b1')])
     const t = { items: [host] as Item[], artifacts: [art('b1')] }
     expect(hasArtifactRecords(t)).toBe(true)
     migrateArtifactsToAttachments(t, new Set(['b1']))

@@ -18,14 +18,6 @@ export type TokenUsage = {
 }
 
 export type Attachment = { id: string; name: string; mime: string; size: number }
-export type Artifact = {
-  name: string
-  id: string
-  mime: string
-  size: number
-  createdAt: string
-  updatedAt: string
-}
 
 // The lifecycle event kinds carried by an event item (see EventItem): the task's
 // launch, a rename, a schedule/await, a `relaunch` divider, or a crossing into/
@@ -123,7 +115,6 @@ export type MessageItem = ItemCommon & {
   // Which hook spoke, on a `hook` message.
   from?: { hook: string; path: string; fireId: string }
   attachments?: Attachment[]
-  artifacts?: Artifact[]
   // Set on a user message once a queued batch delivers it: the ride that
   // consumed it. Absent on converted history.
   deliveredIn?: string

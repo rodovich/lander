@@ -289,25 +289,6 @@ describe('RideTurn settled/open footers', () => {
     expect(html).not.toContain('is working…')
   })
 
-  it('gathers the flow items’ artifacts below the turn', () => {
-    const html = render([
-      flow('a', 'done', {
-        artifacts: [
-          {
-            name: 'report.md',
-            id: 'art1',
-            mime: 'text/markdown',
-            size: 10,
-            createdAt: AT,
-            updatedAt: AT,
-          },
-        ],
-      }),
-    ])
-    expect(html).toContain('message-attachments')
-    expect(html).toContain('report.md')
-  })
-
   it('gathers the flow items’ attachments below the turn', () => {
     const html = render([
       flow('a', 'done', {

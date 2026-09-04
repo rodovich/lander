@@ -47,7 +47,6 @@ import {
   taskSummary,
   taskFlow,
   recordStatusTransition,
-  recordArtifactOnMessage,
   recordAttachmentOnMessage,
   migrateArtifactsToAttachments,
   hasArtifactRecords,
@@ -97,14 +96,9 @@ import {
   isAttachmentId,
   AttachmentTooLargeError,
   MAX_ATTACHMENT_BYTES,
+  MAX_TASK_OUTPUT_BYTES,
   type Attachment,
 } from './attachments'
-import {
-  isArtifactName,
-  upsertArtifact,
-  MAX_ARTIFACT_BYTES,
-  type Artifact,
-} from './artifacts'
 import {
   createAsk,
   wireAsk,
@@ -297,14 +291,6 @@ type Task = {
   // marker a future format change would key its migration off — the v1 reader that
   // used to fill it in on read is gone, the backlog having been converted.
   shape?: number
-  // Named output slots this task has published (`lander artifact put`), latest
-  // version only — the slot registry, upserted by name. Each points at its
-  // current blob in the project's attachmentsDir (shared with input attachments);
-  // republishing a name mints a fresh blob and supersedes the old. The generating
-  // flow message item also carries a point-in-time ref, but this is the source of
-  // truth for the current version, and downloads resolve against it by name.
-  // Absent on tasks that have published none.
-  artifacts?: Artifact[]
   // Follow-up prompts sent while a run was in flight, awaiting their turn.
   // Persisted so they survive a server restart; drained by driveTask when the
   // current run finishes — the whole queue joins into one turn (see driveTask).
@@ -1879,12 +1865,12 @@ app.post('/api/:project/tasks/:id/attachments', async (c) => {
       blob = await saveAttachment(
         project.attachmentsDir,
         { name, mime: part.type, bytes },
-        MAX_ARTIFACT_BYTES,
+        MAX_TASK_OUTPUT_BYTES,
       )
     } catch (e) {
       if (e instanceof AttachmentTooLargeError)
         return c.json(
-          { error: `attachment too large (max ${MAX_ARTIFACT_BYTES} bytes)` },
+          { error: `attachment too large (max ${MAX_TASK_OUTPUT_BYTES} bytes)` },
           413,
         )
       throw e
@@ -1902,128 +1888,6 @@ app.post('/api/:project/tasks/:id/attachments', async (c) => {
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
-})
-
-// Publish an artifact — a named output file — of a task, latest version only.
-// Multipart: a `file` part plus an optional `name` text field (defaults to the
-// uploaded filename, sanitized then validated against the addressable-name
-// regex). Publishing to an existing name mints a fresh blob and repoints the
-// slot; the displaced blob is retained. Only the human (UI token) or the task
-// itself may publish; a task owns its own outputs. The buffered save (whole blob
-// in memory) is acceptable for v1's local single-user server.
-//
-// Superseded by POST .../attachments above, which records the same blob on the
-// generating turn without the mutable name slot. Kept until the artifact model
-// is removed.
-app.post('/api/:project/tasks/:id/artifacts', async (c) => {
-  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
-  if (!project) return c.json({ error: 'unknown project' }, 404)
-  try {
-    const id = c.req.param('id')
-    if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
-    const file = path.join(project.dataDir, `${id}.json`)
-    if (!(await readTask(project.dataDir, id)))
-      return c.json({ error: 'task not found' }, 404)
-
-    const principal = await resolvePrincipal(c.req)
-    if (
-      principal.kind !== 'ui' &&
-      !isSelfPrincipal(principal, project, id)
-    )
-      return c.json(
-        { error: 'only the task itself may publish its artifacts' },
-        403,
-      )
-
-    const body = await c.req.parseBody()
-    const part = body['file']
-    if (!(part instanceof File)) return c.json({ error: 'no file in upload' }, 400)
-    // Name defaults to the uploaded filename; sanitize (strip dirs/control chars)
-    // then validate, so anything unsafe for a route segment / filename 400s here.
-    const rawName =
-      typeof body['name'] === 'string' && body['name'].trim()
-        ? body['name']
-        : part.name
-    const name = sanitizeName(rawName)
-    if (!isArtifactName(name))
-      return c.json({ error: `invalid artifact name: ${name}` }, 400)
-
-    const bytes = new Uint8Array(await part.arrayBuffer())
-    let blob: Attachment
-    try {
-      blob = await saveAttachment(
-        project.attachmentsDir,
-        { name, mime: part.type, bytes },
-        MAX_ARTIFACT_BYTES,
-      )
-    } catch (e) {
-      if (e instanceof AttachmentTooLargeError)
-        return c.json(
-          { error: `artifact too large (max ${MAX_ARTIFACT_BYTES} bytes)` },
-          413,
-        )
-      throw e
-    }
-
-    // Upsert the slot and record the message ref in one read-modify-write. A blob
-    // a republish displaces stays in the store: the refs already recorded on
-    // earlier messages point at it, and a published output is a record of what
-    // that turn produced, not a mutable cell.
-    const now = new Date().toISOString()
-    let artifact: Artifact | undefined
-    await mutateTask(file, (t) => {
-      artifact = upsertArtifact(t, { name, blob, at: now })
-      recordArtifactOnMessage(t, artifact)
-      t.updatedAt = now
-    })
-    return c.json({ artifact }, 201)
-  } catch (e) {
-    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
-  }
-})
-
-// List a task's artifact slots (latest version of each). Any identified caller
-// may read — the human or any task in the project — matching the attachment
-// download's posture; an anon request is refused.
-app.get('/api/:project/tasks/:id/artifacts', async (c) => {
-  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
-  if (!project) return c.json({ error: 'unknown project' }, 404)
-  const id = c.req.param('id')
-  if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
-  const principal = await resolvePrincipal(c.req)
-  if (principal.kind === 'anon') return c.json({ error: 'not authorized' }, 403)
-  const task = await readTask(project.dataDir, id)
-  if (!task) return c.json({ error: 'task not found' }, 404)
-  return c.json({ artifacts: task.artifacts ?? [] })
-})
-
-// Stream an artifact's current blob by slot name, with its stored Content-Type
-// and a filename download disposition (the name is regex-validated, so it's safe
-// unquoted). Same read auth as the list/attachment download. 404 on an unknown
-// task or name.
-app.get('/api/:project/tasks/:id/artifacts/:name', async (c) => {
-  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
-  if (!project) return c.json({ error: 'unknown project' }, 404)
-  const id = c.req.param('id')
-  if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
-  const principal = await resolvePrincipal(c.req)
-  if (principal.kind === 'anon') return c.json({ error: 'not authorized' }, 403)
-  const name = c.req.param('name')
-  const task = await readTask(project.dataDir, id)
-  if (!task) return c.json({ error: 'task not found' }, 404)
-  const artifact = task.artifacts?.find((a) => a.name === name)
-  if (!artifact) return c.json({ error: 'artifact not found' }, 404)
-  const bytes = await readAttachmentBytes(project.attachmentsDir, artifact.id)
-  if (!bytes) return c.json({ error: 'artifact not found' }, 404)
-  const ab = bytes.buffer.slice(
-    bytes.byteOffset,
-    bytes.byteOffset + bytes.byteLength,
-  ) as ArrayBuffer
-  return c.body(ab, 200, {
-    'content-type': artifact.mime,
-    'content-length': String(artifact.size),
-    'content-disposition': `attachment; filename="${artifact.name}"`,
-  })
 })
 
 // Resolve a requested wakeup time from either `date` (any date/time the server

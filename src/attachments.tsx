@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { formatBytes } from './format'
-import type { Artifact, Attachment } from './types'
+import type { Attachment } from './types'
 
 type PreviewFile = { file: Attachment; url: string }
 type PreviewKind = 'image' | 'text' | 'pdf' | 'audio' | 'video' | 'unknown'
@@ -142,9 +142,9 @@ function PaperclipIcon() {
   )
 }
 
-// The attachments a user message carried, rendered as chips beside — never inside
-// — the message text (the prompt manifest the agent sees is generated separately
-// by the daemon and never stored in Message.text). Images additionally show a
+// The attachments a message carried, rendered as chips beside — never inside —
+// the message text (the prompt manifest the agent sees is generated separately by
+// the daemon and never stored in the item's text). Images additionally show a
 // thumbnail; clicking any chip opens the message's attachment gallery.
 export function MessageAttachments({
   attachments,
@@ -158,34 +158,6 @@ export function MessageAttachments({
       files={attachments.map((file) => ({
         file,
         url: `/api/${slug}/attachments/${file.id}`,
-      }))}
-    />
-  )
-}
-
-// The artifacts (named output files) an assistant message published, rendered as
-// the same chips at the bottom of that message. Each resolves its slot's blob by
-// name from the task's artifact endpoint rather than by the ref's own blob id,
-// which means a ref left by an earlier publish shows its own size against the
-// latest bytes. Publishing no longer deletes the blob a republish displaces, so
-// by-id would now resolve for anything published since — but refs recorded before
-// that change name blobs that were already deleted, and by-id would 404 on them.
-// The switch waits for the migration that drops those dead refs. Keyed by blob id
-// so two refs of the same name don't collide.
-export function MessageArtifacts({
-  artifacts,
-  taskId,
-  slug,
-}: {
-  artifacts: Artifact[]
-  taskId: string
-  slug: string
-}) {
-  return (
-    <FileGallery
-      files={artifacts.map((file) => ({
-        file,
-        url: `/api/${slug}/tasks/${taskId}/artifacts/${encodeURIComponent(file.name)}`,
       }))}
     />
   )
@@ -244,10 +216,9 @@ function FileGallery({ files }: { files: PreviewFile[] }) {
   )
 }
 
-// A single file chip — shared by input attachments and output artifacts (an
-// Artifact is structurally an Attachment plus timestamps). `file` supplies the
-// display fields; `url` is the token-gated endpoint the bytes come from, which
-// differs by kind (attachment-by-id vs artifact-by-name).
+// `url` is the token-gated endpoint the bytes come from, passed in rather than
+// derived so one chip serves both the files sent to a task and the ones it
+// attached itself.
 const FileChip = forwardRef<
   HTMLButtonElement,
   { file: Attachment; url: string; onOpen: () => void }

@@ -270,7 +270,6 @@ export type Ctx = {
   signal: AbortSignal
   telemetry: CtxTelemetry
   attachments: CtxAttachments
-  artifacts: CtxArtifacts
   // Interaction + orchestration, over the public task API. The subset the
   // bundled flows consume is implemented; the rest stay reserved names that
   // throw, so the v1 type is stable and step 6 (which converges command flows
@@ -309,11 +308,6 @@ export type CtxAttachments = {
   put(name: string, content: string): Promise<unknown>
 }
 
-export type CtxArtifacts = {
-  put(name: string, content: string): Promise<unknown>
-  list(): Promise<unknown>
-  cat(name: string): Promise<unknown>
-}
 
 // One option on a flow-authored ask. `id` is what comes back on the answer, so
 // a flow matches on it rather than on the label.
@@ -935,63 +929,6 @@ export function createCtxRuntime(
     return body.attachment
   }
 
-  // Publish an artifact. The route takes MULTIPART, not JSON — `parseBody()`
-  // with a `file` part — so this can't go through apiCall. Mirrors bin/lander's
-  // putArtifact: the blob's filename is the slot name, with an explicit `name`
-  // field only when overriding it.
-  async function putArtifact(name: string, content: string): Promise<unknown> {
-    if (!api) throw new Error('ctx: LANDER_API is unset; no server to call')
-    flush()
-    flushState()
-    const fd = new FormData()
-    fd.append('file', new Blob([content], { type: guessArtifactMime(name) }), name)
-    fd.append('name', name)
-    const res = await fetch(`${api}/api/${apiProject}/tasks/${apiTask}/artifacts`, {
-      method: 'POST',
-      headers: {
-        ...(apiTask ? { 'x-lander-task': apiTask } : {}),
-        ...(apiProject ? { 'x-lander-project': apiProject } : {}),
-        ...(apiToken ? { 'x-lander-token': apiToken } : {}),
-      },
-      body: fd,
-    })
-    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>
-    if (!res.ok)
-      throw new Error(
-        typeof body.error === 'string'
-          ? body.error
-          : `${res.status} ${res.statusText}`,
-      )
-    return body.artifact
-  }
-
-  // The blob, as text. The GET returns raw bytes rather than JSON, so this also
-  // bypasses apiCall.
-  async function catArtifact(name: string): Promise<string> {
-    if (!api) throw new Error('ctx: LANDER_API is unset; no server to call')
-    flush()
-    flushState()
-    const res = await fetch(
-      `${api}/api/${apiProject}/tasks/${apiTask}/artifacts/${encodeURIComponent(name)}`,
-      {
-        headers: {
-          ...(apiTask ? { 'x-lander-task': apiTask } : {}),
-          ...(apiProject ? { 'x-lander-project': apiProject } : {}),
-          ...(apiToken ? { 'x-lander-token': apiToken } : {}),
-        },
-      },
-    )
-    if (!res.ok) {
-      const body = (await res.json().catch(() => ({}))) as Record<string, unknown>
-      throw new Error(
-        typeof body.error === 'string'
-          ? body.error
-          : `${res.status} ${res.statusText}`,
-      )
-    }
-    return res.text()
-  }
-
   // Raise an ask. `blocking: 'task'` wedges the task (the user must answer
   // before it rides again); 'none' is advisory and leaves it resting. Returns
   // the created ask, so a caller could hold its id — though the open-PR flow
@@ -1073,14 +1010,6 @@ export function createCtxRuntime(
     },
     attachments: {
       put: putAttachment,
-    },
-    artifacts: {
-      put: putArtifact,
-      list: async () =>
-        ((await apiCall(`/tasks/${apiTask}/artifacts`)) as {
-          artifacts?: unknown
-        }).artifacts ?? [],
-      cat: catArtifact,
     },
     ask: (opts) => raiseAsk(opts?.options, 'none', opts?.prompt),
     wedge: (opts) => raiseAsk(opts?.options, 'task', opts?.prompt),

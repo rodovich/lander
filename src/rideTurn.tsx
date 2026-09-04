@@ -1,6 +1,6 @@
 import { Fragment, memo } from 'react'
 import { AskForm } from './asks'
-import { MessageArtifacts, MessageAttachments } from './attachments'
+import { MessageAttachments } from './attachments'
 import { formatTimestamp } from './format'
 import { BlockedSummary } from './grants'
 import type { TaskLinkResolver } from './markdown'
@@ -42,7 +42,7 @@ function TurnActions({
 // nested tool chips and prose grouped by inference, with settled turns folded
 // down (planTurnCollapse), the cross-task actions the turn took anchored into
 // that trace (planTurnActions), the turn's confirmed denials, the in-flight
-// working spinner, published artifacts, and — when this turn raised the open
+// working spinner, the files it attached, and — when this turn raised the open
 // ask — the ask's form as the turn's footer.
 export const RideTurn = memo(function RideTurn({
   ride,
@@ -326,23 +326,15 @@ export const RideTurn = memo(function RideTurn({
           {`${taskAgentModelName(agent, ride.usage?.model)} is working…`}
         </div>
       )}
-      {/* Files the turn produced, gathered from its flow items and shown below
-          the working spinner. Attachments resolve by blob id; artifacts still
-          resolve by slot name, so they render separately for now. */}
+      {/* Files the turn produced, gathered from its flow items and shown at the
+          bottom, below the working spinner. Each resolves by blob id, so a chip
+          serves the bytes and the size that turn actually attached. */}
       {(() => {
         const files = items.flatMap((it) =>
           it.kind === 'message' ? (it.attachments ?? []) : [],
         )
         return files.length > 0 ? (
           <MessageAttachments attachments={files} slug={slug} />
-        ) : null
-      })()}
-      {(() => {
-        const arts = items.flatMap((it) =>
-          it.kind === 'message' ? (it.artifacts ?? []) : [],
-        )
-        return arts.length > 0 ? (
-          <MessageArtifacts artifacts={arts} taskId={taskId} slug={slug} />
         ) : null
       })()}
       {/* The open ask's controls hang off the turn that raised it, as
