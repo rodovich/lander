@@ -5,7 +5,7 @@ import { timed } from './perf'
 // (never HTML strings / dangerouslySetInnerHTML), so React escapes all text
 // for us — raw HTML in the source is rendered as literal text, not markup.
 // Supported: headers, ordered/unordered lists, blockquotes, fenced code
-// blocks, horizontal rules, and inline bold/italic/code/links.
+// blocks, horizontal rules, and inline bold/italic/strikethrough/code/links.
 
 // Resolves a bare task id found in message text to an internal link to that
 // task. Returns the link target and the task's title (used as the link text),
@@ -66,8 +66,8 @@ function maskCodeSpans(text: string, spans: CodeSpan[]): string {
   return out + text.slice(at)
 }
 
-// Parse inline spans (bold, italic, code, links) into React nodes. Operates on
-// plain text, so anything it doesn't recognize stays literal.
+// Parse inline spans (bold, italic, strikethrough, code, links) into React
+// nodes. Operates on plain text, so anything it doesn't recognize stays literal.
 function renderInline(
   text: string,
   keyPrefix: string,
@@ -159,6 +159,17 @@ function renderInline(
         <em key={k}>
           {renderInline(group(m, 1) ?? group(m, 2) ?? '', k, linkTask)}
         </em>
+      ),
+    },
+    {
+      // Strikethrough. GFM also accepts a single "~", but this renderer does
+      // not: a lone tilde opens a home path, and lander messages are full of
+      // them, so "~/code/lander and ~/code/easel" would strike its middle out.
+      // Requiring the pair costs nothing a message actually uses. The body is
+      // lazy and recursed, like bold's, so inner emphasis stays inside.
+      re: /~~([\s\S]+?)~~/gd,
+      render: (m, k) => (
+        <del key={k}>{renderInline(group(m, 1) ?? '', k, linkTask)}</del>
       ),
     },
     {

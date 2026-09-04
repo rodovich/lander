@@ -1588,6 +1588,12 @@ body {
   color: var(--muted);
 }
 
+/* Struck-out text is text the author has withdrawn, so it recedes to the same
+   grey as a blockquote rather than keeping full contrast behind the line. */
+.message-text del {
+  color: var(--muted);
+}
+
 .message-text code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.9em;

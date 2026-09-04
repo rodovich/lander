@@ -252,6 +252,34 @@ describe('Markdown rendering', () => {
     expect(render('`c`')).toContain('<code>c</code>')
   })
 
+  it('renders strikethrough, and nests emphasis inside it', () => {
+    expect(render('~~gone~~')).toContain('<del>gone</del>')
+    expect(render('~~a **b** c~~')).toContain(
+      '<del>a <strong>b</strong> c</del>',
+    )
+    expect(render('**a ~~b~~ c**')).toContain(
+      '<strong>a <del>b</del> c</strong>',
+    )
+  })
+
+  it('leaves single tildes and home paths alone', () => {
+    // A lone "~" must not open a strikethrough, or a message naming two home
+    // paths would strike out everything between them.
+    const paths = render('~/code/lander and ~/code/easel')
+    expect(paths).not.toContain('<del>')
+    expect(paths).toContain('~/code/lander and ~/code/easel')
+    expect(render('~x~')).not.toContain('<del>')
+    // An opening pair with no closer stays literal.
+    expect(render('~~a')).not.toContain('<del>')
+  })
+
+  it('keeps a tilde pair inside a code span from opening strikethrough', () => {
+    expect(render('~~a `x ~~ y` b~~')).toContain(
+      '<del>a <code>x ~~ y</code> b</del>',
+    )
+    expect(render('run `rm -rf ~~foo`')).not.toContain('<del>')
+  })
+
   it('nests emphasis inside bold', () => {
     expect(render('**b _i_**')).toContain('<strong>b <em>i</em></strong>')
     // Asterisk italic nested in bold: the "*" inside must stay within the bold
