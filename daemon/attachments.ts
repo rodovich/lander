@@ -29,6 +29,10 @@ export function isImage(mime: string): boolean {
   return mime.startsWith('image/')
 }
 
+// `run` is absent on rows written before it was recorded; `ls` renders those as
+// an unknown turn rather than guessing one.
+export type ManifestEntry = AttachmentRef & { run?: string }
+
 export type MaterializedFiles = {
   // The per-task dir, injected to the child as LANDER_FILES_DIR.
   filesDir: string
@@ -50,6 +54,8 @@ export async function materializeAttachments(opts: {
   // Whether the provider delivers images to vision itself (Codex) — the block's
   // image instructions differ when the agent must Read the path instead (Claude).
   visionNative: boolean
+  // The run these attachments arrive on, stamped onto their manifest rows.
+  run?: string
   fileExists?: (p: string) => Promise<boolean>
 }): Promise<MaterializedFiles> {
   const { filesDir, attachments, fetchBytes, visionNative } = opts
@@ -63,7 +69,7 @@ export async function materializeAttachments(opts: {
     await writeFile(dest, bytes)
   }
 
-  await refreshManifest(filesDir, attachments)
+  await refreshManifest(filesDir, attachments, opts.run)
 
   const images = attachments
     .filter((a) => isImage(a.mime))
@@ -72,25 +78,33 @@ export async function materializeAttachments(opts: {
   return { filesDir, images, manifestBlock }
 }
 
-// The on-disk manifest.json `lander attachment ls` reads: {id,name,mime,size} entries,
-// unioned by id with whatever prior turns left, so a file attached earlier stays
-// listable/cat-able even on a turn that attaches nothing.
+// The on-disk manifest.json `lander attachment ls` reads, unioned by id with
+// whatever prior turns left, so a file attached earlier stays listable on a turn
+// that attaches nothing. An entry already present keeps its original run: it
+// belongs to the turn it arrived on, not to whichever turn last rewrote the file.
 async function refreshManifest(
   filesDir: string,
   attachments: AttachmentRef[],
+  run?: string,
 ): Promise<void> {
   const file = path.join(filesDir, 'manifest.json')
-  let existing: AttachmentRef[] = []
+  let existing: ManifestEntry[] = []
   try {
     const parsed = JSON.parse(await readFile(file, 'utf8'))
-    if (Array.isArray(parsed)) existing = parsed as AttachmentRef[]
+    if (Array.isArray(parsed)) existing = parsed as ManifestEntry[]
   } catch {
     // no manifest yet, or unreadable — start fresh
   }
-  const byId = new Map<string, AttachmentRef>()
+  const byId = new Map<string, ManifestEntry>()
   for (const a of existing) if (a && typeof a.id === 'string') byId.set(a.id, a)
   for (const a of attachments)
-    byId.set(a.id, { id: a.id, name: a.name, mime: a.mime, size: a.size })
+    byId.set(a.id, {
+      id: a.id,
+      name: a.name,
+      mime: a.mime,
+      size: a.size,
+      ...(byId.get(a.id)?.run ? { run: byId.get(a.id)!.run } : run ? { run } : {}),
+    })
   await writeFile(file, JSON.stringify([...byId.values()], null, 2))
 }
 

@@ -108,6 +108,61 @@ describe('lander attachment', () => {
     expect(cat.stdout).toBe('a,b\n1,2\n')
   })
 
+  it('ls numbers each run in first-appearance order', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'lander-att-'))
+    cleanups.push(() => rm(dir, { recursive: true, force: true }))
+    // Two turns, plus a row written before runs were stamped.
+    await writeFile(
+      path.join(dir, 'manifest.json'),
+      JSON.stringify([
+        { id: 'old', name: 'legacy.txt', mime: 'text/plain', size: 1 },
+        { id: 'a', name: 'shot.png', mime: 'image/png', size: 2, run: 'ride-1' },
+        { id: 'b', name: 'notes.md', mime: 'text/markdown', size: 3, run: 'ride-1' },
+        { id: 'c', name: 'shot.png', mime: 'image/png', size: 4, run: 'ride-2' },
+      ]),
+    )
+    const { stdout, code } = await execLander(['attachment', 'ls'], {
+      ...bareEnv(),
+      LANDER_FILES_DIR: dir,
+    })
+    expect(code).toBe(0)
+    const rows = stdout.trim().split('\n')
+    // An unstamped row reads as turn 0 rather than claiming a turn of its own.
+    expect(rows[0]).toContain('0/legacy.txt')
+    expect(rows[1]).toContain('1/shot.png')
+    expect(rows[2]).toContain('1/notes.md')
+    // The second turn's same-named file is distinguishable by its prefix, and
+    // still addressable by the id in the first column.
+    expect(rows[3]).toContain('2/shot.png')
+    expect(rows[3]).toContain('c')
+  })
+
+  it('put stamps the run it was attached on', async () => {
+    const dir = await makeFilesDir()
+    cleanups.push(() => rm(dir, { recursive: true, force: true }))
+    const src = path.join(dir, 'out.txt')
+    await writeFile(src, 'x')
+    const stub = await stubServer(() => ({
+      attachment: { id: 'blob-9', name: 'out.txt', mime: 'text/plain', size: 1 },
+      hosted: true,
+    }))
+    cleanups.push(stub.close)
+
+    await execLander(['attachment', 'put', src], {
+      ...bareEnv(),
+      LANDER_API: stub.origin,
+      LANDER_TASK: 'task-1',
+      LANDER_PROJECT: 'proj',
+      LANDER_TOKEN: 'secret',
+      LANDER_FILES_DIR: dir,
+      LANDER_RUN: 'ride-7',
+    })
+    const manifest = JSON.parse(
+      await readFile(path.join(dir, 'manifest.json'), 'utf8'),
+    ) as { id: string; run?: string }[]
+    expect(manifest.find((m) => m.id === 'blob-9')?.run).toBe('ride-7')
+  })
+
   it('cat rejects a path-escaping id', async () => {
     const dir = await makeFilesDir()
     cleanups.push(() => rm(dir, { recursive: true, force: true }))

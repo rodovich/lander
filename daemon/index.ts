@@ -314,6 +314,7 @@ async function materialize(
     attachments: msg.attachments,
     fetchBytes: (ref) => fetchAttachmentBytes(msg.env, ref),
     visionNative,
+    run: msg.runId,
   })
 }
 

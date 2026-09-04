@@ -326,9 +326,8 @@ export const RideTurn = memo(function RideTurn({
           {`${taskAgentModelName(agent, ride.usage?.model)} is working…`}
         </div>
       )}
-      {/* Files the turn produced, gathered from its flow items and shown at the
-          bottom, below the working spinner. Each resolves by blob id, so a chip
-          serves the bytes and the size that turn actually attached. */}
+      {/* Files the turn produced, gathered from its flow items and shown below
+          the working spinner. */}
       {(() => {
         const files = items.flatMap((it) =>
           it.kind === 'message' ? (it.attachments ?? []) : [],

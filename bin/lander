@@ -67,6 +67,9 @@ async function readStdin() {
 // `attachment ls`/`cat` are pure local reads of it — no server call, no sandbox
 // widening — so they work over the already-allowlisted Bash(lander:*) channel.
 const FILES_DIR = process.env.LANDER_FILES_DIR
+// The run this turn is riding, stamped onto what `attachment put` writes. Absent
+// outside a turn (a flow host, a bare shell).
+const RUN = process.env.LANDER_RUN
 
 // Guess an upload's mime from its extension; the server stores whatever we send
 // and only special-cases image/* for the vision channel, so a coarse map is fine.
@@ -139,7 +142,13 @@ function writeToLocalStore(ref, bytes) {
     mkdirSync(FILES_DIR, { recursive: true })
     writeFileSync(join(FILES_DIR, ref.id), bytes)
     const manifest = readManifest().filter((a) => a && a.id !== ref.id)
-    manifest.push({ id: ref.id, name: ref.name, mime: ref.mime, size: ref.size })
+    manifest.push({
+      id: ref.id,
+      name: ref.name,
+      mime: ref.mime,
+      size: ref.size,
+      ...(RUN ? { run: RUN } : {}),
+    })
     writeFileSync(
       join(FILES_DIR, 'manifest.json'),
       JSON.stringify(manifest, null, 2),
@@ -152,11 +161,30 @@ function writeToLocalStore(ref, bytes) {
   }
 }
 
+// A short turn index in place of the opaque run id. Manifest order is insertion
+// order, so first appearance is chronological. A row with no run — written before
+// the stamp existed — gets 0, which reads as "some earlier turn".
+function turnIndexByRun(manifest) {
+  const order = new Map()
+  for (const a of manifest) {
+    if (!a?.run || order.has(a.run)) continue
+    order.set(a.run, order.size + 1)
+  }
+  return order
+}
+
+// `<turn>/<name>` distinguishes two files sharing a name across turns; the id
+// column stays what `cat` takes.
 function listLocalFiles() {
   const manifest = readManifest()
   if (!manifest.length) return void console.log('(no attachments)')
-  for (const a of manifest)
-    console.log(`${a.id}  ${String(a.size).padStart(9)}  ${a.mime}  ${a.name}`)
+  const turns = turnIndexByRun(manifest)
+  for (const a of manifest) {
+    const turn = a.run ? turns.get(a.run) : 0
+    console.log(
+      `${a.id}  ${String(a.size).padStart(9)}  ${a.mime}  ${turn}/${a.name}`,
+    )
+  }
 }
 
 async function catLocalFile(id, usage) {

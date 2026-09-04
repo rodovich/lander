@@ -158,12 +158,13 @@ export function makeFlow({
       const child = ctx.spawn('claude', args, {
         env: {
           ...ctx.task.env,
-          // No existence gate: the daemon always supplies this, and `lander
+          // No existence gate: the daemon always supplies these, and `lander
           // attachment cat/ls` must reach a file attached on an earlier turn.
           // Only --add-dir is gated on the dir actually existing.
           ...(ctx.turn.filesDir
             ? { LANDER_FILES_DIR: ctx.turn.filesDir }
             : {}),
+          ...(ctx.turn.run ? { LANDER_RUN: ctx.turn.run } : {}),
         },
       })
 

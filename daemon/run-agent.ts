@@ -171,12 +171,14 @@ export function runAgent(
   if (start.revived) promptParts.push(buildRevivedBlock(start.revived))
   if (sentContext) promptParts.push(sentContext)
   // The daemon already resolved the persistent per-task store dir; expose it as
-  // LANDER_FILES_DIR (so `lander attachment cat/ls` reach files attached on an earlier
-  // turn) and hand image paths to the vision channel.
+  // LANDER_FILES_DIR (so `lander attachment cat/ls` reach files attached on an
+  // earlier turn) and hand image paths to the vision channel. The store spans a
+  // whole task, so LANDER_RUN rides along for `ls` to say which turn a row is
+  // from.
   const filesDir = input.filesDir
   const landerEnv = filesDir
-    ? { ...start.env, LANDER_FILES_DIR: filesDir }
-    : start.env
+    ? { ...start.env, LANDER_FILES_DIR: filesDir, LANDER_RUN: start.runId }
+    : { ...start.env, LANDER_RUN: start.runId }
   const launch = adapter.buildLaunch({
     task: taskView,
     prompt: promptParts.join('\n\n'),

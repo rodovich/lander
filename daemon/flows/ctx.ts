@@ -127,6 +127,10 @@ export type CtxTurn = {
   // The existence gate, which applies to --add-dir ONLY. One gated field cannot
   // express both values, hence the pair.
   filesDirExists: boolean
+  // Set as LANDER_RUN, so a file the agent attaches carries the turn that
+  // produced it. Ungated for the same reason as filesDir: the adapter always sets
+  // it, so gating here would diverge from it.
+  run?: string
 }
 
 // Reserved shape for the answer that woke an asked/wedged task. Nothing
@@ -443,7 +447,7 @@ export function createCtxRuntime(
   // ── Durable state ────────────────────────────────────────────────────────
   // The blob is meant to hold decisions, identities, and user-visible progress —
   // a PR number, a run id, a phase — not bulk data. Anything derivable belongs
-  // in ctx.scratch; anything large the user should see belongs in an artifact.
+  // in ctx.scratch; anything large the user should see belongs in an attachment.
   // Seed the in-memory copy from flowState, falling back to the legacy top-level
   // wire fields for thread identity. This fallback is not a nicety: a task whose
   // session predates the storage flip keeps its sessionId at the legacy level
@@ -588,7 +592,7 @@ export function createCtxRuntime(
     if (projected.length > STATE_MAX_BYTES) {
       throw new Error(
         `flow state exceeds ${STATE_MAX_BYTES} bytes (${projected.length}); ` +
-          `put bulk data in ctx.scratch or an artifact`,
+          `put bulk data in ctx.scratch or an attachment`,
       )
     }
     localApply(op)
@@ -600,7 +604,7 @@ export function createCtxRuntime(
       undoLocal(op, stateCopy)
       throw new Error(
         `flow state would exceed ${STATE_MAX_BYTES} bytes (${after.length}); ` +
-          `put bulk data in ctx.scratch or an artifact`,
+          `put bulk data in ctx.scratch or an attachment`,
       )
     }
     pushOp(op)
@@ -972,6 +976,7 @@ export function createCtxRuntime(
         : {}),
       filesDir,
       filesDirExists: filesDir ? existsSync(filesDir) : false,
+      run: start.runId,
     },
     task: {
       taskId: start.taskId,

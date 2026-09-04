@@ -81,6 +81,33 @@ describe('materializeAttachments', () => {
   })
 })
 
+describe('refreshManifest run stamping', () => {
+  it('stamps this run on new rows and leaves an earlier row’s run alone', async () => {
+    const fetchBytes = async () => new Uint8Array([1])
+    await materializeAttachments({
+      filesDir: dir,
+      attachments: [ref({ id: 'a', name: 'a.txt' })],
+      fetchBytes,
+      visionNative: true,
+      run: 'ride-1',
+    })
+    await materializeAttachments({
+      filesDir: dir,
+      attachments: [ref({ id: 'a', name: 'a.txt' }), ref({ id: 'b', name: 'b.txt' })],
+      fetchBytes,
+      visionNative: true,
+      run: 'ride-2',
+    })
+    const manifest = JSON.parse(
+      await readFile(path.join(dir, 'manifest.json'), 'utf8'),
+    ) as { id: string; run?: string }[]
+    // `a` arrived on ride-1 and keeps it even though ride-2 re-listed it; the
+    // row belongs to the turn it arrived on.
+    expect(manifest.find((m) => m.id === 'a')?.run).toBe('ride-1')
+    expect(manifest.find((m) => m.id === 'b')?.run).toBe('ride-2')
+  })
+})
+
 describe('buildManifestBlock', () => {
   it('is empty when there are no attachments', () => {
     expect(buildManifestBlock(dir, [], true)).toBe('')

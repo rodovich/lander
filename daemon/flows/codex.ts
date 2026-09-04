@@ -166,6 +166,7 @@ export function makeFlow({
         env: {
           ...ctx.task.env,
           ...(ctx.turn.filesDir ? { LANDER_FILES_DIR: ctx.turn.filesDir } : {}),
+          ...(ctx.turn.run ? { LANDER_RUN: ctx.turn.run } : {}),
         },
       })
 
