@@ -76,6 +76,34 @@ async function settled(
   return last
 }
 
+// A task's record once the queue drain has TAKEN its turn, returned for the same
+// reason `settled` returns one: so a caller can amend it without re-reading. The
+// drain empties `queued`, stamps `deliveredIn` on the user items it took, and
+// deletes the one-shot `revived` marker — all under one lock, so that stamp is a
+// happens-after edge for the delete and a field hand-written past it survives.
+// `settled` is no such edge: two identical reads say only that the record is not
+// moving *now*, which is equally true in the few milliseconds between the POST's
+// write and the drain's, and a `revived` hand-written in that window is deleted
+// a moment later. Past the drain nothing writes the record again until the turn
+// returns, and with no daemon in this suite the turn parks waiting for one.
+async function drained(id: string, ms = 2000): Promise<string> {
+  const file = path.join(tasksDir, `${id}.json`)
+  const start = Date.now()
+  while (Date.now() - start < ms) {
+    const now = await readFile(file, 'utf8')
+    const task = JSON.parse(now) as {
+      queued?: string[]
+      items?: { deliveredIn?: string }[]
+    }
+    if (!task.queued?.length && task.items?.some((i) => i.deliveredIn))
+      return now
+    await new Promise((r) => setTimeout(r, 10))
+  }
+  // Throw rather than hand back an undrained record: returning the last read is
+  // what let the race this replaced read as a flake instead of a failure.
+  throw new Error(`task ${id} never drained its queue within ${ms}ms`)
+}
+
 async function createTask(
   title: string,
   projectSlug = slug,
@@ -1648,14 +1676,14 @@ describe('server task provider behavior', () => {
     // closed and the deferred message is dated past any horizon, so neither
     // makes this task look live to anything else in the suite.
     //
-    // All three are written by hand, after waiting for the message's turn to
-    // settle. The turn rewrites the record asynchronously, so a hand-written
-    // field placed before that lands under it; and `revived` is a ONE-SHOT
-    // marker the queue drain deletes as it launches the run, so observing the
-    // real one means winning a race against the drain. What this test freezes is
-    // the projection's field set, not how a field came to be set.
+    // All three are written by hand, after waiting for the drain to take the
+    // message's turn. The turn rewrites the record asynchronously, so a
+    // hand-written field placed before that lands under it; and `revived` is a
+    // ONE-SHOT marker the drain deletes as it launches the run, so the wait has
+    // to be `drained` rather than `settled` — see its note. What this test
+    // freezes is the projection's field set, not how a field came to be set.
     const file = path.join(tasksDir, `${task.id}.json`)
-    const stored = JSON.parse(await settled(task.id))
+    const stored = JSON.parse(await drained(task.id))
     await writeFile(
       file,
       JSON.stringify({
