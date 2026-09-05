@@ -1054,10 +1054,20 @@ describe('the launch', () => {
   // a count-based assertion fail about one run in ten — a flake that says
   // nothing about the launch route. The set difference also states the property
   // the test is for, which a count only stood in for.
-  const taskFiles = async (): Promise<Set<string>> => new Set(await readdir(tasksDir))
+  //
+  // Both reads take `*.json` alone. `writeTask` commits through a
+  // `<file>.<uuid>.tmp` sidecar it renames into place, so a readdir taken while
+  // any task is being rewritten can see a name that was not there before — and
+  // the sidecar of a hook-launched task parses as one, which is exactly what the
+  // difference is looking for. The launched task's own drain, a few milliseconds
+  // behind the response, is enough to produce one.
+  const taskJson = (names: string[]): string[] =>
+    names.filter((n) => n.endsWith('.json'))
+  const taskFiles = async (): Promise<Set<string>> =>
+    new Set(taskJson(await readdir(tasksDir)))
   const hookLaunchesSince = async (before: Set<string>): Promise<string[]> => {
     const out: string[] = []
-    for (const f of (await readdir(tasksDir)).filter((f) => !before.has(f))) {
+    for (const f of taskJson(await readdir(tasksDir)).filter((f) => !before.has(f))) {
       const t = JSON.parse(await readFile(path.join(tasksDir, f), 'utf8')) as {
         id: string
         hookOrigin?: unknown
