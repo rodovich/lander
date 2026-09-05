@@ -13,6 +13,7 @@ import {
 } from './daemon'
 import { normalizeProjectPath, projectSlug } from './projects'
 import { clearHookRunState, mintHookCredential } from './hook-runs'
+import { observeWrites } from './store'
 import { MAX_ACTION_TEXT } from './task-actions'
 import { TITLE_MAX_CHARS } from './title'
 import type { RevivedMarker } from './protocol'
@@ -102,6 +103,35 @@ async function drained(id: string, ms = 2000): Promise<string> {
   // Throw rather than hand back an undrained record: returning the last read is
   // what let the race this replaced read as a flake instead of a failure.
   throw new Error(`task ${id} never drained its queue within ${ms}ms`)
+}
+
+// Every version of a task's record committed while a request ran, oldest first,
+// taken from the store's write observer instead of read back once the response
+// lands. A route that queues a prompt starts the drain that takes it in the same
+// breath (`driveClaimedTask`), and the drain deletes `queued` as it launches the
+// run — so reading the file afterwards races that drain for a field whose whole
+// life is the moment in between, and the read loses often enough to flake.
+//
+// Every version, not just the route's own: a turn that is still finishing writes
+// the same record, so which write is the route's is not something the caller can
+// count off. Assert over the sequence (`toContainEqual`) — that a value was
+// committed at all is the claim, and only this request could have committed it.
+async function writesDuring(
+  id: string,
+  request: () => Promise<Response>,
+): Promise<{ res: Response; writes: Record<string, unknown>[] }> {
+  const file = path.join(tasksDir, `${id}.json`)
+  const writes: Record<string, unknown>[] = []
+  const stop = observeWrites((written, value) => {
+    if (written === file) writes.push(value as Record<string, unknown>)
+  })
+  try {
+    const res = await request()
+    if (!writes.length) throw new Error(`nothing wrote ${id} while the request ran`)
+    return { res, writes }
+  } finally {
+    stop()
+  }
 }
 
 async function createTask(
@@ -3103,12 +3133,15 @@ describe('asks', () => {
       retry: { committed: true, prompts: ['do the thing'] },
       asks: [retryAsk()],
     })
-    const res = await answer(id, 'ask-retry-0', { optionId: 'retry-now' })
+    const { res, writes } = await writesDuring(id, () =>
+      answer(id, 'ask-retry-0', { optionId: 'retry-now' }),
+    )
     expect(res.status).toBe(200)
+    // Committed → a "try again" nudge (re-sending would duplicate the turn).
+    // Read off what the answer committed, which the drain empties moments later.
+    expect(writes.map((w) => w.queued)).toContainEqual(['try again'])
     const raw = await readRaw(id)
     expect(raw.status).toBe('riding')
-    // Committed → a "try again" nudge (re-sending would duplicate the turn).
-    expect(raw.queued).toEqual(['try again'])
     expect(raw.retry).toBeUndefined()
     expect(asksOf(raw)[0].state).toBe('answered')
     // No generic "Answer to …" delivery message for a retry ask.
@@ -3123,12 +3156,13 @@ describe('asks', () => {
       retry: { committed: false, prompts: ['first', 'second'] },
       asks: [retryAsk({ form: { type: 'choice', options: [{ id: 'retry-now', label: 'Resend' }] } })],
     })
-    const res = await answer(id, 'ask-retry-0', { optionId: 'retry-now' })
+    const { res, writes } = await writesDuring(id, () =>
+      answer(id, 'ask-retry-0', { optionId: 'retry-now' }),
+    )
     expect(res.status).toBe(200)
-    const raw = await readRaw(id)
-    expect(raw.status).toBe('riding')
     // Not committed → re-queue the exact prompts (already in messages[]).
-    expect(raw.queued).toEqual(['first', 'second'])
+    expect(writes.map((w) => w.queued)).toContainEqual(['first', 'second'])
+    expect((await readRaw(id)).status).toBe('riding')
   })
 
   it('answers retry-at-reset: stays wedged and schedules the recovery for the reset', async () => {
@@ -3736,14 +3770,17 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
 
     // Answering the retry re-drives: the un-received prompt is re-queued and the
     // task goes riding (the retry stash is consumed).
-    const answer = await post(
-      `/api/${slug}/tasks/${id}/asks/${String(ask!.id)}/answer`,
-      { optionId: 'retry-now' },
+    const { res: answered, writes } = await writesDuring(id, () =>
+      post(`/api/${slug}/tasks/${id}/asks/${String(ask!.id)}/answer`, {
+        optionId: 'retry-now',
+      }),
     )
-    expect(answer.status).toBe(200)
+    expect(answered.status).toBe(200)
+    // Read off what the answer committed: the drain empties the queue as it
+    // takes it, and the crashed turn is still writing this record besides.
+    expect(writes.map((w) => w.queued)).toContainEqual(['go'])
     const after = await readRaw(id)
     expect(after.status).toBe('riding')
-    expect(after.queued).toEqual(['go'])
     expect(after.retry).toBeUndefined()
   }, 30_000)
 
