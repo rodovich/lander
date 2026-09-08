@@ -118,3 +118,25 @@ describe('lander launch --flow', () => {
     expect(stderr).toContain('--key needs a name and a value')
   })
 })
+
+// `--notify` is a bare flag with no target — the server arms it against the
+// calling task. Covered here because bin/ is outside tsconfig's `include`, so
+// nothing else would catch it consuming the next argv token as a value.
+describe('lander launch --notify', () => {
+  it('posts notify:true without swallowing the message', async () => {
+    const { stdout, code } = await execLander(['launch', '--notify', 'say hi'])
+    expect(code).toBe(0)
+    expect(stdout.trim()).toBe('new-task')
+    expect(lastBody).toMatchObject({ notify: true, message: 'say hi' })
+  })
+
+  it('omits notify entirely when the flag is absent', async () => {
+    await execLander(['launch', 'say hi'])
+    expect('notify' in lastBody!).toBe(false)
+  })
+
+  it('combines with --await, which still takes its own value', async () => {
+    await execLander(['launch', '--notify', '--await', 'abc123', 'go'])
+    expect(lastBody).toMatchObject({ notify: true, await: ['abc123'], message: 'go' })
+  })
+})

@@ -411,6 +411,55 @@ describe('applyDone records the ride-ended fire', () => {
   })
 })
 
+// `--notify` rides the same signal as the ride-ended fire, so the cases that
+// decide the fire's principal decide whether the launcher is woken.
+describe('applyDone arms the one-shot notify', () => {
+  const done = (t: ApplyTask, exitCode = 0, interrupted = false) =>
+    applyDone(t, { exitCode, interrupted, stderr: '' }, { at: AT, askId: 'ask-0' })
+
+  it('arms on a clean turn, naming the launcher and the ride that closed', () => {
+    const t = task({ notify: 'parent-1' })
+    done(t)
+    expect(t.pendingNotify).toEqual({ to: 'parent-1', at: AT, rideId: 'r1' })
+  })
+
+  // One-shot: the arming is consumed here, not at delivery, so a child that
+  // rides ten more times wakes its launcher exactly once.
+  it('consumes the arming, so a second clean turn notifies nobody', () => {
+    const t = task({ notify: 'parent-1' })
+    done(t)
+    expect(t.notify).toBeUndefined()
+    delete t.pendingNotify
+    t.rides!.push({ id: 'r2', startedAt: AT })
+    t.status = 'riding'
+    done(t)
+    expect(t.pendingNotify).toBeUndefined()
+  })
+
+  // An interrupt is a human or a sibling stopping the turn; an error is the
+  // platform's. Neither produced a reply, so reporting one would be a lie — and
+  // the arming must survive so the turn that DOES finish still notifies.
+  it('does not arm on an interrupt, and keeps the arming for a later turn', () => {
+    const t = task({ notify: 'parent-1' })
+    done(t, 0, true)
+    expect(t.pendingNotify).toBeUndefined()
+    expect(t.notify).toBe('parent-1')
+  })
+
+  it('does not arm on an assistant error', () => {
+    const t = task({ notify: 'parent-1' })
+    done(t, 1)
+    expect(t.pendingNotify).toBeUndefined()
+    expect(t.notify).toBe('parent-1')
+  })
+
+  it('arms nothing on a task launched without the flag', () => {
+    const t = task()
+    done(t)
+    expect(t.pendingNotify).toBeUndefined()
+  })
+})
+
 describe('continuation across batches', () => {
   it('folds a later batch’s result onto an already-running tool item and finishes', () => {
     const t = task({

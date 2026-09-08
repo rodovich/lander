@@ -324,6 +324,9 @@ async function launchTask(rest) {
     else if (a === '--date') o.date = rest[++i]
     else if (a === '--time') o.time = Number(rest[++i])
     else if (a === '--await') o.await = rest[++i]
+    // --notify takes no target: the server arms it against the calling task, so
+    // there is no id to mistype and no way to point a notification at a stranger.
+    else if (a === '--notify') o.notify = true
     else if (a === '--edits') o.allowEdits = true
     else if (a === '--flow') o.flow = rest[++i]
     // --key <name> <value> pairs accumulate into the flow's config. Values are
@@ -1311,7 +1314,7 @@ async function clearWorktree() {
 const USAGE = {
   land: 'land [id…]',
   launch:
-    'launch <message|-> [--title <t>] [--project <slug>] [--date <when>|--time <min>] [--await <ids>] [--edits] [--flow <name>] [--key <k> <v>]… [--attach <paths…>]',
+    'launch <message|-> [--title <t>] [--project <slug>] [--date <when>|--time <min>] [--await <ids>] [--notify] [--edits] [--flow <name>] [--key <k> <v>]… [--attach <paths…>]',
   list: 'list [--status <s>] [--since <when>] [--until <when>] [--text <terms>] [--archived] [--json]',
   view: 'view <id> [--tools] [--messages <N|all>] [--clip <N|all>] [--json]',
   send: 'send <id> <message|-> [--date <when>|--time <min>] [--await <ids>] [--attach <paths…>]',

@@ -72,6 +72,7 @@ import {
   eventItems,
   recordAssistantError,
   recordRideEnded,
+  lastFlowItem,
   type ScheduledMessage,
   type RepeatSpec,
   type Ride,
@@ -329,6 +330,23 @@ type Task = {
   // that wakes the task early, since a dependency on siblings outlives that.
   // Absent when not awaiting.
   waitingFor?: string[]
+  // The task to wake once, when THIS task next finishes a turn cleanly
+  // (`lander launch --notify`). Armed at creation and naming the launcher, so
+  // the notification is always "tell the task that spawned me", never an
+  // arbitrary target a caller could point at a stranger. Consumed by applyDone,
+  // which moves it to `pendingNotify`; absent once it has fired, and absent on
+  // tasks launched without the flag.
+  //
+  // This is the counterpart to `waitingFor`, not a replacement: an await resumes
+  // the waiter when a CONDITION holds and is satisfied only by landing, while a
+  // notify tells the launcher its child has spoken and leaves it to decide. A
+  // notify that arrives mid-job costs one turn; an await that fires mid-job
+  // resumes the waiter on unfinished work for good.
+  notify?: string
+  // A fired notification waiting for the sweep to deliver it: who to wake, when
+  // the turn ended, and which ride it ended. Recorded under the child's mutation
+  // lock and delivered outside it, exactly as `pendingHooks` is.
+  pendingNotify?: { to: string; at: string; rideId?: string }
   // Transient flag set when a task is read from the project's archive dir, so
   // the UI can mark archived rows and offer "Restore" instead of "Archive". Not
   // persisted: a task's location on disk (archived/ vs tasks/) is the source of
@@ -1179,6 +1197,84 @@ async function deliverScheduledMessages(
   if (claimed) void driveClaimedTask(project, id)
 }
 
+// How much of the child's closing message rides along. The point of carrying it
+// at all is that the launcher learns the OUTCOME without spending a turn to go
+// read it — a bare "your child finished" wake costs the turn it was meant to
+// save, since the resume prompt names nothing (see the "Resumed at …" text). A
+// cap because a closing message can be thousands of words and this is a
+// courtesy note, not a transcript; the launcher can always `lander view`.
+const NOTIFY_TEXT_MAX_CHARS = 2000
+
+// Deliver a child's armed `--notify`: wake the task that launched it with the
+// child's closing message. Clears `pendingNotify` from the child whatever the
+// outcome — a notification is a courtesy, and one that cannot be delivered
+// (target landed, archived, or gone) must not be retried on every sweep for the
+// life of the instance.
+//
+// The delivery is shaped exactly like a scheduled message rather than going out
+// through POST /messages: the sender is the scheduler, not the child, and the
+// child is at rest by now and may never ride again — so there is no principal to
+// authenticate and nothing to send from.
+async function deliverNotification(
+  project: Project,
+  childId: string,
+  child: Task,
+): Promise<void> {
+  const pending = child.pendingNotify
+  if (!pending) return
+  // Clear the child's arming FIRST and unconditionally. The alternative —
+  // clearing after a successful delivery — turns a target that is merely gone
+  // into a permanent per-sweep write, and leaves a crash between the two writes
+  // able to wake the launcher twice.
+  await mutateTask(path.join(project.dataDir, `${childId}.json`), (t) => {
+    delete t.pendingNotify
+  }).catch(() => {})
+  if (pending.to === childId) return
+  const target = await readTask(project.dataDir, pending.to)
+  // A landed target is deliberately not revived. Landing is terminal and the
+  // launcher landing before its child spoke means it stopped caring; reviving it
+  // to read a courtesy note is the "resurrect a finished task to report it has
+  // nothing to do" failure that landing-disarms-wakeups exists to prevent.
+  if (!target || target.status === 'landed') return
+
+  const closing = lastFlowItem(child, pending.rideId)?.text?.trim() ?? ''
+  const clipped =
+    closing.length > NOTIFY_TEXT_MAX_CHARS
+      ? `${closing.slice(0, NOTIFY_TEXT_MAX_CHARS)}…`
+      : closing
+  // Lead with the bare child id so the client's task-mention linking renders it
+  // as a status-tinted chip, the same convention a task→task message uses. The
+  // wording says "finished a turn" rather than "is done": a clean turn-end is
+  // not a claim that the work is complete, and the launcher has to decide that
+  // for itself.
+  const text = clipped
+    ? `${childId} finished a turn:\n\n${clipped}`
+    : `${childId} finished a turn.`
+
+  let drive = false
+  let claimed = false
+  await mutateTask(path.join(project.dataDir, `${pending.to}.json`), (t) => {
+    if (t.status === 'landed') return
+    const at = new Date().toISOString()
+    // Revives a wedged target, same as any delivered message, and records the
+    // crossing a hair ahead so the timeline orders right. `system`, because the
+    // scheduler is what delivered it — the child's own turn was over.
+    recordStatusTransition(
+      t,
+      'riding',
+      new Date(Date.parse(at) - 1).toISOString(),
+      'system',
+    )
+    applyDueMessages(t, [{ text }], at)
+    t.status = 'riding'
+    t.updatedAt = at
+    drive = true
+  }, () => {
+    if (drive) claimed = claimTaskRun(project, pending.to)
+  }).catch(() => {})
+  if (claimed) void driveClaimedTask(project, pending.to)
+}
+
 // Scan every project for scheduled tasks whose launch time has arrived and run
 // them, and deliver any due scheduled messages. Best-effort: a periodic sweep
 // (and one on boot) acts as soon as each is due, or right away if its time
@@ -1288,6 +1384,14 @@ async function sweepOnce(): Promise<void> {
       }
       // Then launch a deferred task whose trigger has fired.
       if (running.has(taskKey(project.slug, id))) continue
+      // BELOW the `running` guard, unlike the two above it, and that placement
+      // is the whole correctness argument. A ride closing `done` is the end of a
+      // TURN, not of the work: a task with follow-ups still queued closes one
+      // ride and immediately rides again, and `running` holds it for that whole
+      // chain. Delivering above the guard would wake the launcher between two
+      // turns of a drain it never saw start. Here, the notification waits until
+      // the child is genuinely at rest.
+      if (task.pendingNotify) await deliverNotification(project, id, task)
       const timeDue =
         task.scheduledFor != null && Date.parse(task.scheduledFor) <= now
       const awaitDue =
@@ -2145,6 +2249,7 @@ app.post('/api/:project/tasks', async (c) => {
       date?: unknown
       time?: unknown
       await?: unknown
+      notify?: unknown
       agent?: unknown
       flow?: unknown
       flowConfig?: unknown
@@ -2353,6 +2458,15 @@ app.post('/api/:project/tasks', async (c) => {
       // has no spawner.
       ...(principal.kind === 'task'
         ? { spawnedBy: principal.id, spawnedByProject: principal.slug }
+        : {}),
+      // `--notify`: wake the spawner once, when this task first finishes a turn
+      // cleanly. Gated on a task principal because the target IS the principal —
+      // there is nobody to wake when a human launches from the UI, and a hook's
+      // launch has no spawning task at all (see hookOrigin below). Silently
+      // ignored rather than rejected in those cases: the flag is a request for a
+      // courtesy that does not apply, not a malformed launch.
+      ...(body.notify === true && principal.kind === 'task'
+        ? { notify: principal.id }
         : {}),
       // The hook that caused this task, or the one inherited from the task that
       // spawned it — so the exemption covers a chain and not just its head. A

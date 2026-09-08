@@ -50,6 +50,8 @@ export type ApplyTask = {
   retry?: { committed: boolean; prompts: string[]; resetsAt?: string }
   pendingHooks?: PendingHook[]
   hookFireSeq?: number
+  notify?: string
+  pendingNotify?: { to: string; at: string; rideId?: string }
 }
 
 // One reduced batch of run output to fold onto the task: the activity it
@@ -323,6 +325,27 @@ export function applyDone(
   // late done for a ride some other path already closed emits nothing rather
   // than naming a ride that ended for another reason at another time.
   recordRideEnded(task, ride, outcome, at)
+  // Arm the one-shot `--notify` delivery on the same signal the `ride-ended`
+  // trigger uses, and for the same reason: a clean end is the agent finishing
+  // its own turn, while `interrupted` is a human or a sibling stopping it and
+  // `error` is the platform's doing. Notifying on either of those would report
+  // "your child replied" for a turn that produced no reply — the corpus case
+  // being a batch whose first ride ended `interrupted` on a command timeout,
+  // 12 minutes before it actually finished.
+  //
+  // Recorded here and delivered off the sweep, following the pendingHooks rule
+  // (tasks.ts): recording is synchronous inside the task's mutation lock, while
+  // delivery needs another task's file and must not run under this one's lock.
+  // Consumed on arming, never on delivery, so a delivery that fails cannot
+  // re-arm the notification and wake the parent twice.
+  if (outcome === 'done' && task.notify) {
+    task.pendingNotify = {
+      to: task.notify,
+      at,
+      ...(rideId ? { rideId } : {}),
+    }
+    delete task.notify
+  }
   closeRide(task, outcome, at)
   task.updatedAt = at
   delete task.runId

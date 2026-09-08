@@ -2125,6 +2125,53 @@ describe('acting task coordination history', () => {
     expect((await rawTask(actor.id)).updatedAt).toBe(before.updatedAt)
   })
 
+  // `--notify` arms the child against its LAUNCHER, never against an id the
+  // caller supplied — so the flag carries no target and cannot be pointed at a
+  // task the caller has nothing to do with.
+  it('arms --notify against the launching task, and nobody else', async () => {
+    const actor = await createTask('Notify launcher')
+
+    const child = await launchAs(actor.id, slug, {
+      title: 'Notified child',
+      message: 'Acknowledge and land.',
+      notify: true,
+    })
+    expect(child.status).toBe(201)
+    const childId = ((await child.json()) as { id: string }).id
+    expect((await rawTask(childId)).notify).toBe(actor.id)
+
+    // Nothing armed without the flag.
+    const plain = await launchAs(actor.id, slug, {
+      title: 'Un-notified child',
+      message: 'Acknowledge and land.',
+    })
+    const plainId = ((await plain.json()) as { id: string }).id
+    expect((await rawTask(plainId)).notify).toBeUndefined()
+  })
+
+  // A human launching from the UI is not a task, so there is nobody to wake.
+  // The flag is ignored rather than refused: it asks for a courtesy that does
+  // not apply here, which is not a malformed launch.
+  it('ignores --notify on a launch with no spawning task', async () => {
+    const res = await app.request(`/api/${slug}/tasks`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-lander-ui-token': UI_TOKEN,
+      },
+      body: JSON.stringify({
+        title: 'UI child',
+        message: 'Acknowledge and land.',
+        notify: true,
+      }),
+    })
+    expect(res.status).toBe(201)
+    const id = ((await res.json()) as { id: string }).id
+    const raw = await rawTask(id)
+    expect(raw.notify).toBeUndefined()
+    expect(raw.spawnedBy).toBeUndefined()
+  })
+
   it('records both deferred message forms, echoing what the sender wrote', async () => {
     const actor = await createTask('Message action actor')
     const immediate = await createTask('Immediate recipient')
