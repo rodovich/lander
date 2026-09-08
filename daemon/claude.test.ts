@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
-import { createClaudeAdapter } from './claude'
+import { anchorFileRule, createClaudeAdapter } from './claude'
 // gitContext moved to the flow stdlib; the adapter imports it back, so exercising
 // it from here still proves the exact function the adapter's buildTurnContext runs.
 import { gitContext } from 'lander/flow'
@@ -433,5 +433,82 @@ describe('Claude adapter', () => {
       await readFile(path.join(dir, '.claude', 'settings.local.json'), 'utf8'),
     )
     expect(settings.permissions.allow).toEqual(['Bash(npm test)'])
+  })
+
+  it('persists a file grant as an absolute path, and dedupes against it', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'lander-claude-'))
+    tempDirs.push(dir)
+
+    await adapter.persistProjectGrant?.({
+      projectPath: dir,
+      rule: 'Read(/Users/me/other/notes.md)',
+    })
+    // The same grant arriving already spelled `//` must not land twice.
+    await adapter.persistProjectGrant?.({
+      projectPath: dir,
+      rule: 'Read(//Users/me/other/notes.md)',
+    })
+
+    const settings = JSON.parse(
+      await readFile(path.join(dir, '.claude', 'settings.local.json'), 'utf8'),
+    )
+    expect(settings.permissions.allow).toEqual(['Read(//Users/me/other/notes.md)'])
+  })
+
+  it('anchors a task-scope file grant at the filesystem root', () => {
+    const launch = adapter.buildLaunch({
+      task: {
+        allowEdits: false,
+        allow: ['Read(/Users/me/other/notes.md)', 'Bash(cat /etc/hosts)'],
+      },
+      prompt: 'go',
+      root: '/repo',
+      cwd: '/repo',
+      landerEnv: {},
+    })
+
+    const allowed = launch.args.slice(
+      launch.args.indexOf('--allowedTools') + 1,
+      launch.args.indexOf('--settings'),
+    )
+    // The path rule gains the second slash; the Bash rule holds a command, not a
+    // path, and is passed through as written.
+    expect(allowed).toEqual([
+      'Bash(lander:*)',
+      'Read(//Users/me/other/notes.md)',
+      'Bash(cat /etc/hosts)',
+    ])
+  })
+})
+
+describe('anchorFileRule', () => {
+  it('re-anchors an absolute path for the path-taking tools', () => {
+    expect(anchorFileRule('Read(/Users/me/f)')).toBe('Read(//Users/me/f)')
+    expect(anchorFileRule('Edit(/Users/me/f)')).toBe('Edit(//Users/me/f)')
+    expect(anchorFileRule('Write(/repo/src/**)')).toBe('Write(//repo/src/**)')
+    expect(anchorFileRule('MultiEdit(/repo/a.ts)')).toBe('MultiEdit(//repo/a.ts)')
+    expect(anchorFileRule('NotebookEdit(/repo/a.ipynb)')).toBe(
+      'NotebookEdit(//repo/a.ipynb)',
+    )
+    // A path may itself hold parentheses; the rule ends at the last one.
+    expect(anchorFileRule('Read(/Users/me/My (Notes)/f.md)')).toBe(
+      'Read(//Users/me/My (Notes)/f.md)',
+    )
+  })
+
+  it('leaves every other rule as written', () => {
+    // Already absolute, home-relative, or deliberately anchored at the source.
+    expect(anchorFileRule('Read(//Users/me/f)')).toBe('Read(//Users/me/f)')
+    expect(anchorFileRule('Read(~/notes/f.md)')).toBe('Read(~/notes/f.md)')
+    expect(anchorFileRule('Read(src/**/*.ts)')).toBe('Read(src/**/*.ts)')
+    // A Bash rule's argument is a command that happens to start with a slash.
+    expect(anchorFileRule('Bash(/usr/bin/env node)')).toBe('Bash(/usr/bin/env node)')
+    expect(anchorFileRule('Bash(cat /etc/hosts)')).toBe('Bash(cat /etc/hosts)')
+    // Tools whose argument isn't a path at all, and bare tool names.
+    expect(anchorFileRule('WebFetch(domain:example.com)')).toBe(
+      'WebFetch(domain:example.com)',
+    )
+    expect(anchorFileRule('Read')).toBe('Read')
+    expect(anchorFileRule('file_change(/repo/a.ts)')).toBe('file_change(/repo/a.ts)')
   })
 })

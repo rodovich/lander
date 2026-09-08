@@ -195,7 +195,7 @@ function buildClaudeArgs(
     : []
   const tmpDirArgs = scratchRoots.flatMap((dir) => ['--add-dir', dir])
   const allowed: string[] = ['Bash(lander:*)']
-  if (task.allow?.length) allowed.push(...task.allow)
+  if (task.allow?.length) allowed.push(...task.allow.map(anchorFileRule))
   const editArgs = ['--allowedTools', ...allowed]
 
   const hookSettings = JSON.stringify({
@@ -267,6 +267,26 @@ function buildClaudeArgs(
   ]
 }
 
+// The tools whose permission rule takes a file path rather than a command or a
+// query, so `Read(/x)` means a path while `Bash(/x)` means a command.
+const FILE_RULE_TOOLS = ['Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit']
+
+// Re-anchor a file rule at the filesystem root. Claude reads a single leading
+// slash as anchored at whatever defined the rule -- `Read(/Users/me/f)` in a
+// project's settings.local.json means `<project>/Users/me/f`, and the same rule
+// on --allowedTools means `<cwd>/Users/me/f` -- so a grant minted from a tool
+// call's absolute path matches nothing, and the file it names stays blocked
+// after the user allows it. `//` is the CLI's spelling for an absolute path.
+//
+// Only the path-taking tools are touched, and only for a lone leading slash:
+// `//`, `~/` and relative patterns already say where they start.
+export function anchorFileRule(rule: string): string {
+  const match = /^([A-Za-z]+)\((\/[^/].*)\)$/.exec(rule)
+  return match && FILE_RULE_TOOLS.includes(match[1])
+    ? `${match[1]}(/${match[2]})`
+    : rule
+}
+
 // Whether a path sits inside `<root>/.claude/worktrees/`, where EnterWorktree
 // roots the worktrees it creates — so a recorded cwd there is one the agent
 // walked into itself, by name or by hand.
@@ -326,7 +346,8 @@ async function persistClaudeProjectGrant({
   const allow: string[] = Array.isArray(perms.allow)
     ? perms.allow
     : (perms.allow = [])
-  if (!allow.includes(rule)) allow.push(rule)
+  const anchored = anchorFileRule(rule)
+  if (!allow.includes(anchored)) allow.push(anchored)
   await mkdir(dir, { recursive: true })
   await writeFile(file, JSON.stringify(settings, null, 2) + '\n')
 }
