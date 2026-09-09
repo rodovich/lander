@@ -1279,6 +1279,20 @@ async function deliverNotification(
       new Date(Date.parse(at) - 1).toISOString(),
       'system',
     )
+    // Supersedes a rest timer, exactly as a sent message does (POST /messages
+    // carries the reasoning): the fallback a launcher armed against its child
+    // never speaking would otherwise fire later, against a task that has now
+    // heard from it. This is the only delivery path that meets a live timer at
+    // all — deliverScheduledMessages holds its messages back from a task that
+    // has one, while waking the launcher is this one's whole purpose. An
+    // `await` stays armed: it is satisfied by landing, not by a finished turn.
+    if (t.scheduledFor) {
+      t.revived = {
+        ...t.revived,
+        restUntil: new Date(t.scheduledFor).toLocaleString(),
+      }
+      delete t.scheduledFor
+    }
     applyDueMessages(t, [{ text }], at)
     t.status = 'riding'
     t.updatedAt = at

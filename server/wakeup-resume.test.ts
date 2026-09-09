@@ -171,3 +171,56 @@ describe('the prompt a fired wakeup drives', () => {
     expect(await lastPrompt('hand-launched')).toMatch(/^Resumed at /)
   })
 })
+
+// A `--notify` delivery is a message, not a wakeup — it never drives the
+// synthetic prompt. What it shares with a sent message is the arrival, so it has
+// to settle the rest timer that arrival makes moot.
+describe('a notify delivery supersedes the launcher’s rest timer', () => {
+  it('disarms the timer, tells the woken turn, and leaves the await armed', async () => {
+    await seed('notify-launcher', {
+      scheduledFor: LATE,
+      waitingFor: ['notify-child'],
+    })
+    await seed('notify-child', {
+      pendingNotify: { to: 'notify-launcher', at: AT, rideId: 'r0' },
+    })
+
+    const writes = await writesDuring('notify-launcher', launchScheduled)
+
+    const raw = await readRaw('notify-launcher')
+    // The message arrived, carrying the child's closing text.
+    expect(await lastPrompt('notify-launcher')).toBe(
+      'notify-child finished a turn:\n\non it',
+    )
+    // The fallback the launcher armed against the child never speaking is moot
+    // now, and would otherwise fire in 2099 against a task that moved on.
+    expect(raw.scheduledFor).toBeUndefined()
+    // Named to the woken turn, so re-arming is a single actionable step.
+    expect(writes).toContainEqual(
+      expect.objectContaining({
+        revived: { restUntil: new Date(LATE).toLocaleString() },
+      }),
+    )
+    // The await is a dependency on the child LANDING, which finishing a turn is
+    // not — it survives, exactly as it does across a sent message.
+    expect(raw.waitingFor).toEqual(['notify-child'])
+    // One-shot: consumed on delivery so the next sweep doesn't wake it again.
+    expect((await readRaw('notify-child')).pendingNotify).toBeUndefined()
+  })
+
+  it('leaves a launcher with no timer nothing to report', async () => {
+    await seed('notify-plain-launcher', {})
+    await seed('notify-plain-child', {
+      pendingNotify: { to: 'notify-plain-launcher', at: AT, rideId: 'r0' },
+    })
+
+    await launchScheduled()
+
+    await vi.waitFor(async () => {
+      expect(await lastPrompt('notify-plain-launcher')).toContain(
+        'finished a turn',
+      )
+    })
+    expect((await readRaw('notify-plain-launcher')).revived).toBeUndefined()
+  })
+})
