@@ -1449,6 +1449,24 @@ export function applyDueMessages(
   }
 }
 
+// The prompt a wakeup drives into a task that has already run, which names the
+// condition that fired because that is the one thing the resumed session cannot
+// work out for itself: it remembers only its own last act.
+//
+// Only the time arm carries a timestamp — for the others the moment is not the
+// condition that was met. That leaves it as the wording for a launch which
+// fired no trigger at all (the UI's Launch button, ahead of the schedule),
+// where `at` is the actual moment rather than the schedule the human jumped.
+//
+// Awaited tasks go in as bare ids: the client renders each as a chip carrying
+// the task's title as it stands when the conversation is read, so naming them
+// here would both duplicate that and freeze a title that can still change.
+export function resumePrompt(at: string, landed?: string[]): string {
+  if (!landed?.length) return `Resumed at ${new Date(at).toLocaleString()}`
+  const noun = landed.length > 1 ? 'Tasks' : 'Task'
+  return `${noun} landed: ${landed.join(', ')}`
+}
+
 // Arm a scheduled relaunch: stash a relaunch-flagged scheduled message whose own
 // `deliverAt`/`waitFor` trigger seals the session on delivery, and record a
 // pending 'relaunched' event (carrying the launch time, when known) so the UI

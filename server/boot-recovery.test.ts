@@ -21,7 +21,7 @@ vi.mock('./title', async (importOriginal) => ({
 // 2026-08-26: a task awaiting a stalled sibling rode 2.1s after a server boot.
 // The compounding half is why the skip has to be a skip and not a clear: because
 // this path leaves `waitingFor` set, the scheduler fires launchTask later anyway
-// and pushes a spurious "Resumed at …" into a task that already ran.
+// and pushes a spurious resume prompt into a task that already ran.
 
 const AT = '2026-01-01T00:00:00.000Z'
 

@@ -56,6 +56,7 @@ import {
   applyRelaunch,
   applyRetryRecovery,
   applyDueMessages,
+  resumePrompt,
   taskSessionId,
   setTaskSessionId,
   taskTurnContext,
@@ -316,10 +317,11 @@ type Task = {
   // `--date`/`--time`, or later via `lander rest` to re-sleep a running task;
   // the task rests until the scheduler reaches this time, which clears the
   // field, records a "launched" event, and drives the queue (a deferred new
-  // task's opening message, or a generated "Resumed at …" prompt for a rested
-  // one). May coexist with `waitingFor`, in which case whichever fires first
-  // launches the task. Also dropped by an incoming message that wakes the task
-  // early (see the /messages handler) and by landing (recordStatusTransition) —
+  // task's opening message, or the resume prompt for a rested one, which reads
+  // as the moment for this arm — see resumePrompt). May coexist with
+  // `waitingFor`, in which case whichever fires first launches the task. Also
+  // dropped by an incoming message that wakes the task early (see the /messages
+  // handler) and by landing (recordStatusTransition) —
   // both leave nothing for a timer to come back to. Absent on un-scheduled tasks.
   scheduledFor?: string
   // Task ids this task is resting on (`lander new/rest --await`). The scheduler
@@ -1075,10 +1077,14 @@ async function driveClaimedTask(project: Project, id: string): Promise<void> {
 // scheduler when the sweep reaches a due task, the human when they press Launch.
 // Parameterized rather than assumed `system` because both callers are real, and
 // the UI's button is the one a `wedged/human/` hook would care about.
+// `landed` names the awaited tasks whose landing fired this launch, for the
+// resume prompt's wording. Only the sweep's await arm passes it; a hand-launch
+// fired no trigger, so it has no condition to name.
 async function launchTask(
   project: Project,
   id: string,
   by: string,
+  landed?: string[],
 ): Promise<boolean> {
   const file = path.join(project.dataDir, `${id}.json`)
   let go = false
@@ -1093,6 +1099,15 @@ async function launchTask(
     // rested task gets the synthetic resume prompt while a deferred new task drives
     // its still-queued opening message instead.
     everRan = (t.rides?.length ?? 0) > 0
+    // The caller resolved `landed` outside this lock, so the arm being cleared
+    // here is only known to be the one it measured if the two still match; a
+    // task that re-armed in between would otherwise be told a condition nobody
+    // checked was met. Necessarily above the deletes that erase what it reads.
+    const awaited = t.waitingFor ?? []
+    const fired =
+      !!landed?.length &&
+      landed.length === awaited.length &&
+      landed.every((w) => awaited.includes(w))
     delete t.scheduledFor
     delete t.waitingFor
     const at = new Date().toISOString()
@@ -1114,7 +1129,7 @@ async function launchTask(
     // back. A task scheduled at creation (`new --date`) still has its opening
     // message queued and drives that instead, so skip the synthetic prompt.
     if (everRan && !(t.queued && t.queued.length)) {
-      const text = `Resumed at ${new Date(at).toLocaleString()}.`
+      const text = resumePrompt(at, fired ? landed : undefined)
       pushUserItem(t, text, at)
       ;(t.queued ??= []).push(text)
     }
@@ -1199,9 +1214,8 @@ async function deliverScheduledMessages(
 
 // How much of the child's closing message rides along. The point of carrying it
 // at all is that the launcher learns the OUTCOME without spending a turn to go
-// read it — a bare "your child finished" wake costs the turn it was meant to
-// save, since the resume prompt names nothing (see the "Resumed at …" text). A
-// cap because a closing message can be thousands of words and this is a
+// read it: a bare "your child finished" wake costs the turn it was meant to
+// save. A cap because a closing message can be thousands of words and this is a
 // courtesy note, not a transcript; the launcher can always `lander view`.
 const NOTIFY_TEXT_MAX_CHARS = 2000
 
@@ -1312,7 +1326,9 @@ const SWEEP_STUCK_MS = 5 * 60_000
 // at all — silently, since a hold records nothing.
 const MAX_HOOK_DISPATCHES_PER_SWEEP = 4
 
-async function launchScheduled(): Promise<void> {
+// Exported for the same reason recoverQueues is: driving one pass over a seeded
+// data dir is the only way a test can observe what a fired wakeup does.
+export async function launchScheduled(): Promise<void> {
   if (sweeping) {
     if (Date.now() - sweepStartedAt < SWEEP_STUCK_MS) return
     console.warn(
@@ -1397,7 +1413,16 @@ async function sweepOnce(): Promise<void> {
       const awaitDue =
         (task.waitingFor?.length ?? 0) > 0 &&
         (await awaitSatisfied(project, task.waitingFor!))
-      if (timeDue || awaitDue) await launchTask(project, id, 'system')
+      // Both arms can come due in the same sweep, and the await one wins the
+      // wording: a landing is the specific fact, and the timer coming due
+      // alongside it doesn't make that less true.
+      if (timeDue || awaitDue)
+        await launchTask(
+          project,
+          id,
+          'system',
+          awaitDue ? task.waitingFor : undefined,
+        )
     }
   }
 }
@@ -2932,16 +2957,17 @@ app.post('/api/:project/tasks/:id/launch', async (c) => {
 // deferred `new`: it sets scheduledFor and/or waitingFor and records a
 // `scheduled` or `awaiting` event, so the scheduler relaunches it on whichever
 // trigger fires first. Unlike `new`, the task has already run, so launchTask
-// wakes the agent with a generated "Resumed at …" message rather than a queued
-// opening one. Called by the in-task CLI while the agent's turn is in flight, so
-// it goes through mutateTask to avoid clobbering the concurrent streaming writes.
+// wakes the agent with a generated resume prompt naming the trigger that fired
+// (resumePrompt) rather than a queued opening message. Called by the in-task CLI
+// while the agent's turn is in flight, so it goes through mutateTask to avoid
+// clobbering the concurrent streaming writes.
 //
 // `{ clear: true }` (`lander rest --clear`) is the inverse: it disarms whatever
 // triggers a prior rest (or deferred `new`) armed, taking no trigger of its own.
 // The case: the user woke a resting task early (a reply revives it to riding
 // without touching the triggers), so the original wakeup is now stale and would
-// later fire a spurious "Resumed at …". We only drop the triggers — never touch
-// status, and record no event (the past `scheduled`/`awaiting` event stands as
+// later fire a spurious resume. We only drop the triggers — never touch status,
+// and record no event (the past `scheduled`/`awaiting` event stands as
 // history of the rest that did happen). Idempotent: clearing nothing succeeds and
 // reports `cleared: false`.
 app.post('/api/:project/tasks/:id/rest', async (c) => {
@@ -4056,7 +4082,8 @@ app.post('/api/:project/tasks/:id/unread', async (c) => {
 //
 // For the interrupted cases we clear stale `pending` flags and, if nothing is
 // queued, re-supply a prompt so driveTask has a turn to run: a "Resumed at …"
-// nudge (mirroring launchTask) for one that already replied, or — for one whose
+// nudge (an interruption is no condition to name, so it reads as the moment, as
+// a fired timer does) for one that already replied, or — for one whose
 // opening run died before any reply — the original opening message replayed (no
 // session exists yet, so it starts fresh). A task with no assistant turn yet
 // never established its session — start it; otherwise resume.
@@ -4099,7 +4126,7 @@ export async function recoverQueues(): Promise<void> {
       // much as the time arm: a task awaiting a sibling sits with a full queue for
       // as long as that sibling runs, so any restart in that window would launch it
       // early — and, because this path never clears `waitingFor`, launchScheduled
-      // would later fire again and push a spurious "Resumed at …" into a task that
+      // would later fire again and push a spurious resume prompt into a task that
       // had already run.
       if (task.scheduledFor || task.waitingFor?.length) continue
       const everRan = (task.rides?.length ?? 0) > 0
