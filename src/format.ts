@@ -81,6 +81,19 @@ export function formatTokens(n: number): string {
   return `${Math.round(n / 1_000_000)}M`
 }
 
+// An elapsed span for the time readouts, in at most two terms and never in a
+// unit finer than the leading one earns: "12s", "1m 23s", "1h 23m". Seconds are
+// noise beside an hour, so they are dropped rather than shown as a third term.
+// The trailing term is kept even at zero ("1m 0s") so the readout's width
+// doesn't jump as a turn crosses a boundary.
+export function formatDuration(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ${s % 60}s`
+  return `${Math.floor(m / 60)}h ${m % 60}m`
+}
+
 // A dollar cost for the corner readout: two decimals up to $100 ("$0.07",
 // "$1.23"), then whole dollars beyond ("$1,204") where the cents are noise.
 export function formatCost(n: number): string {

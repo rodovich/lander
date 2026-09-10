@@ -6,7 +6,10 @@ import { clipboardImageFiles } from './fileDrop'
 import { useFileDrop, usePersistentState } from './hooks'
 import {
   latestUsage,
+  latestUsageRide,
+  rideElapsedMs,
   taskUsageTelemetry,
+  totalRideMs,
   totalUsage,
 } from './taskMeta'
 import { TelemetryItemView } from './telemetry'
@@ -167,7 +170,21 @@ export const Composer = memo(function Composer({
                 : // Keyed on the capability, not the provider — an open-pr task
                   // reports no cost either, and would have claimed to be Codex.
                   'not reported by this flow'
-          const items = taskUsageTelemetry(u, task.flow ?? task.agent, reportsCost)
+          // Working time on the same scope as the counts, and for the turn scope
+          // off the very ride `latestUsage` read — a footer that timed one turn
+          // and counted another would be describing nothing.
+          const elapsed = usageTotal
+            ? totalRideMs(task)
+            : (() => {
+                const r = latestUsageRide(task)
+                return r ? rideElapsedMs(r) : undefined
+              })()
+          const items = taskUsageTelemetry(
+            u,
+            task.flow ?? task.agent,
+            reportsCost,
+            elapsed,
+          )
           // The model names the whole task, not a scope, so it sits outside
           // the turn/total toggle; the counts + cost are what the toggle flips.
           const model = items.find((i) => i.id === 'model')
@@ -182,6 +199,11 @@ export const Composer = memo(function Composer({
                 title={
                   `${scope} — click to show ` +
                   `${usageTotal ? 'turn' : 'total'}\n` +
+                  // The one stat whose label doesn't say what it measures: this
+                  // is the run working, not the span the task sat open.
+                  (elapsed !== undefined
+                    ? 'time — the agent working, not wall clock\n'
+                    : '') +
                   `uncached input ${u.input.toLocaleString()} ` +
                   `(+ ${u.cacheCreation.toLocaleString()} written to cache)\n` +
                   `cache read ${u.cacheRead.toLocaleString()}\n` +

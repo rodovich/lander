@@ -1,5 +1,5 @@
 import { agentDisplayName, formatAgentModelName } from './agentDisplay'
-import { formatCost } from './format'
+import { formatCost, formatDuration } from './format'
 import type { Ride, Task, TelemetryItem, TokenUsage } from './types'
 
 // The task's currently-open ride (the last one without an `endedAt`), if any —
@@ -67,17 +67,53 @@ export function taskAgentModelName(agent: string | undefined, model?: string): s
   return formatAgentModelName(agentDisplayName(agent), model)
 }
 
-// The token usage of the task's most recent ride that reported any — the last
-// ride carrying a `usage`. A streaming turn reports its usage live (summed across
-// inferences so far, moved onto the open ride), so this tracks the in-flight turn
-// as it grows rather than lagging a turn behind.
-export function latestUsage(task: Task): TokenUsage | undefined {
+// The task's most recent ride that reported any usage. A streaming turn reports
+// its usage live (summed across inferences so far, moved onto the open ride), so
+// this tracks the in-flight turn as it grows rather than lagging a turn behind.
+// The ride rather than the usage, so the footer's other per-turn readouts come
+// off the same turn the counts do.
+export function latestUsageRide(task: Task): Ride | undefined {
   const rides = task.rides ?? []
-  for (let i = rides.length - 1; i >= 0; i--) {
-    const u = rides[i].usage
-    if (u) return u
-  }
+  for (let i = rides.length - 1; i >= 0; i--) if (rides[i].usage) return rides[i]
   return undefined
+}
+
+export function latestUsage(task: Task): TokenUsage | undefined {
+  return latestUsageRide(task)?.usage
+}
+
+// How long a ride worked, in ms. A settled ride reports the daemon's own
+// measurement, or nothing when its run never delivered a done (see
+// Ride.durationMs). An open ride has no measurement yet — nothing has ended —
+// so it is estimated from its start, which is the only clock the client has
+// mid-turn and runs a hand-off ahead of the real one; the measured value
+// replaces the estimate when the turn lands.
+export function rideElapsedMs(
+  ride: Ride,
+  now: number = Date.now(),
+): number | undefined {
+  if (ride.endedAt) return ride.durationMs
+  const started = Date.parse(ride.startedAt)
+  return Number.isNaN(started) ? undefined : Math.max(0, now - started)
+}
+
+// Working time summed across the task's rides. A ride that reported none
+// contributes nothing rather than voiding the sum — the same best effort
+// `totalUsage` makes of a turn that reported no cost — so the total reads as
+// "at least this long", and is undefined only when no ride can be timed at all.
+export function totalRideMs(
+  task: Task,
+  now: number = Date.now(),
+): number | undefined {
+  let total = 0
+  let any = false
+  for (const r of task.rides ?? []) {
+    const ms = rideElapsedMs(r, now)
+    if (ms === undefined) continue
+    total += ms
+    any = true
+  }
+  return any ? total : undefined
 }
 
 // Token usage summed across every ride of the task. The token counts and dollar
@@ -103,16 +139,21 @@ export function totalUsage(task: Task): TokenUsage | undefined {
   return { ...total, model: latestUsage(task)?.model, costUsd: cost }
 }
 
-// The composer footer's token readout as generic telemetry items: the driving
-// model, the turn's uncached input / cache read / output counts, and its cost.
-// Client-derived (this surface stays simple — the daemon doesn't publish it), fed
-// to the same generic item renderer the flow-status panel uses.
+// The composer footer's readout as generic telemetry items: the driving model,
+// the scope's working time, its uncached input / cache read / output counts, and
+// its cost. Client-derived (this surface stays simple — the daemon doesn't
+// publish it), fed to the same generic item renderer the flow-status panel uses.
 export function taskUsageTelemetry(
   u: TokenUsage,
   // The flow name, for the model-name display lookup only — never a behavior
   // branch.
   agent: string | undefined,
   reportsCost: boolean,
+  // The scope's working time, when it is known. Passed in rather than read off
+  // `u` because it isn't token usage: it's measured by the daemon and stored on
+  // the ride, and the caller is the one that knows whether the scope is a turn
+  // or the whole task.
+  elapsedMs?: number,
 ): TelemetryItem[] {
   // Uncached = fresh input processed this turn (regular input + the part written
   // to cache); cache read is the discounted re-read, reported separately.
@@ -130,6 +171,19 @@ export function taskUsageTelemetry(
       type: 'text',
       value: taskAgentModelName(agent, u.model),
     },
+    // Time leads the counts: it is the shape of the work, where the rest are its
+    // price. Omitted entirely when unknown, rather than shown as a placeholder —
+    // an absent measurement is not a pending one.
+    ...(elapsedMs !== undefined
+      ? [
+          {
+            id: 'time',
+            label: 'time',
+            type: 'text',
+            value: formatDuration(elapsedMs),
+          } as const,
+        ]
+      : []),
     { id: 'in', label: 'in', type: 'count', value: uncached },
     { id: 'cache', label: 'cache', type: 'count', value: u.cacheRead },
     { id: 'out', label: 'out', type: 'count', value: u.output },

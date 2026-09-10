@@ -80,6 +80,12 @@ export type Ride = {
   endedAt?: string
   outcome?: 'done' | 'interrupted' | 'error'
   usage?: TokenUsage
+  // How long the run worked, as the daemon measured it — not `endedAt` minus
+  // `startedAt`, which also counts hand-off, a watchdog kill's idle window, and
+  // any server downtime a boot-recovery close absorbed. Absent on a ride whose
+  // run never reported a done; such a turn shows no time, the way a turn without
+  // a result event shows no cost.
+  durationMs?: number
   // Present only on an 'error' outcome: the failure's diagnostics (exit code,
   // the daemon's cause for a synthesized done, the stderr tail).
   error?: { exitCode?: number; cause?: string; idleMs?: number; stderr?: string }
