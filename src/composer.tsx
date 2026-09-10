@@ -197,11 +197,6 @@ export const Composer = memo(function Composer({
                 title={
                   `${scope} — click to show ` +
                   `${usageTotal ? 'turn' : 'total'}\n` +
-                  // The one stat whose label doesn't say what it measures: this
-                  // is the run working, not the span the task sat open.
-                  (elapsed !== undefined
-                    ? 'time — the agent working, not wall clock\n'
-                    : '') +
                   `uncached input ${u.input.toLocaleString()} ` +
                   `(+ ${u.cacheCreation.toLocaleString()} written to cache)\n` +
                   `cache read ${u.cacheRead.toLocaleString()}\n` +
