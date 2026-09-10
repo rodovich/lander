@@ -263,6 +263,34 @@ describe('applyDone', () => {
     ])
   })
 
+  it('records the daemon-measured working time on the ride', () => {
+    const t = task()
+    applyDone(t, done({ durationMs: 92_000 }), {
+      at: '2026-01-01T00:30:00.000Z',
+      askId: 'ask-x-0',
+    })
+    // Stored as measured, not as `endedAt - startedAt` — the ride was open for
+    // thirty minutes and the run worked for ninety-two seconds of it.
+    expect(t.rides![0].durationMs).toBe(92_000)
+  })
+
+  it('leaves a ride untimed when the done carries no measurement', () => {
+    const t = task()
+    applyDone(t, done(), { at: AT, askId: 'ask-x-0' })
+    // A pre-duration daemon, or a done the daemon synthesized before it ever
+    // spawned a host. The ride closes with no time rather than a derived one.
+    expect(t.rides![0]).not.toHaveProperty('durationMs')
+  })
+
+  it('records working time for an interrupted run too', () => {
+    const t = task()
+    applyDone(t, done({ exitCode: 137, interrupted: true, durationMs: 4_000 }), {
+      at: AT,
+      askId: 'ask-x-0',
+    })
+    expect(t.rides![0]).toMatchObject({ outcome: 'interrupted', durationMs: 4_000 })
+  })
+
   it('marks committed true when a reply had begun (a tool ran)', () => {
     const t = task()
     applyUpdate(t, update({ steps: [step({ kind: 'tool_use', tool: 'Bash', toolUseId: 'c1' })], cursor: 1 }))

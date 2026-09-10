@@ -488,6 +488,23 @@ export type DoneMessage = {
   // For cause 'idle-timeout': the idle window that expired, so the retry ask
   // can name the actual duration.
   idleMs?: number
+  // How long the run worked: the daemon's own measurement, from the host spawn
+  // to the host's last output. The elapsed-time twin of `usage`, and measured
+  // here for the same reason cost is — only the process's owner sees the real
+  // start and end. It is timed around the flow host, not inside any adapter, so
+  // every flow reports it on one basis and no provider implements it.
+  //
+  // Deliberately "to the last output" rather than "to the exit": a run the idle
+  // watchdog killed spent its final `idleMs` producing nothing, and billing that
+  // dead air as work would make the killed runs the longest ones on record. The
+  // signal is the same one that arms the watchdog, so the two agree on what
+  // counts as the run doing something by construction.
+  //
+  // Absent when no done reaches the server at all — the daemon lost the run, or
+  // the server closed the ride itself on boot recovery. Such a ride reports no
+  // time rather than a wrong one, the way a turn that never reached its result
+  // event reports no cost.
+  durationMs?: number
 }
 
 // The provider session id learned for a task's first turn. For Claude today, the

@@ -230,6 +230,99 @@ describe('daemon run manager', () => {
     }
   })
 
+  // The run's working time (DoneMessage.durationMs). Measured around the flow
+  // host, so these hold identically for every provider — the fake host below is
+  // the only executor involved.
+  describe('working time', () => {
+    it('times a clean run from spawn to its last output', () => {
+      vi.useFakeTimers()
+      try {
+        const h = harness()
+        h.manager.startRun(makeStart())
+        const host = h.hosts[0]
+
+        vi.advanceTimersByTime(1_500)
+        push(host, {
+          kind: 'update',
+          steps: [],
+          usageChanged: false,
+        } as HostEvent)
+        vi.advanceTimersByTime(500)
+        push(host, { kind: 'done', exitCode: 0, stderr: '' })
+
+        expect(h.messages.at(-1)).toMatchObject({
+          type: 'done',
+          durationMs: 2_000,
+        })
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('stops the clock at the last output, not at an idle kill', () => {
+      vi.useFakeTimers()
+      try {
+        const h = harness()
+        h.manager.startRun(makeStart({ idleTimeoutMs: 60_000 }))
+        const host = h.hosts[0]
+
+        vi.advanceTimersByTime(5_000)
+        push(host, {
+          kind: 'update',
+          steps: [],
+          usageChanged: false,
+        } as HostEvent)
+        // Then it goes quiet, and the watchdog eventually kills it.
+        vi.advanceTimersByTime(60_000)
+        host.emit('close', 137)
+
+        const done = h.messages.at(-1)
+        expect(done).toMatchObject({ cause: 'idle-timeout', idleMs: 60_000 })
+        // 5s of work, not the 65s the ride was open. Billing the idle window
+        // would make the runs that did the least look like the longest.
+        expect(done).toMatchObject({ durationMs: 5_000 })
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('times an interrupted run up to its last output', () => {
+      vi.useFakeTimers()
+      try {
+        const h = harness()
+        h.manager.startRun(makeStart())
+        const host = h.hosts[0]
+
+        vi.advanceTimersByTime(3_000)
+        push(host, {
+          kind: 'update',
+          steps: [],
+          usageChanged: false,
+        } as HostEvent)
+        vi.advanceTimersByTime(10_000)
+        h.manager.interrupt('run-1')
+
+        // An interrupted turn still reports the work it did — the analog of the
+        // partial token counts such a turn keeps, where its cost is lost.
+        expect(h.messages.at(-1)).toMatchObject({
+          interrupted: true,
+          durationMs: 3_000,
+        })
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('reports no duration for a run that never reached a host', () => {
+      const h = harness({ resolveRunPaths: () => { throw new Error('no cwd') } })
+      h.manager.startRun(makeStart())
+
+      // Nothing was spawned, so there is nothing to have timed. The ride will
+      // carry no time rather than a fabricated zero-length one.
+      expect(h.messages.at(-1)).not.toHaveProperty('durationMs')
+    })
+  })
+
   it('synthesizes a failed done naming a host crash when the host closes without a done', () => {
     const h = harness()
     h.manager.startRun(makeStart())
@@ -244,6 +337,9 @@ describe('daemon run manager', () => {
         interrupted: false,
         stderr: '',
         cause: 'host-crash',
+        // A host that never wrote a line worked no time — and reports that,
+        // rather than staying silent about it.
+        durationMs: 0,
       },
     ])
   })
@@ -261,6 +357,7 @@ describe('daemon run manager', () => {
         exitCode: 1,
         interrupted: false,
         stderr: 'error spawning flow host: spawn ENOENT',
+        durationMs: 0,
       },
     ])
   })

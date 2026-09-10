@@ -256,7 +256,14 @@ export function createRunManager({
 
     // Spawn the flow host (its own process group). It reads the HostInput on
     // stdin, runs the adapter, and streams neutral HostEvents back on stdout.
+    const startedAt = performance.now()
     const host = spawnHost()
+    // When the host last produced anything, on the same monotonic clock. This is
+    // the run's working time (see DoneMessage.durationMs): it is advanced by
+    // `arm`, so "the run did something" means exactly what it means to the idle
+    // watchdog, and a run killed after idling reports the work it did rather than
+    // the window it then spent silent.
+    let lastOutputAt = startedAt
 
     // Kill the host's whole process group so the agent grandchild dies with it —
     // falling back to a plain pid kill if the group signal isn't available.
@@ -285,6 +292,7 @@ export function createRunManager({
     let timer: ReturnType<typeof setTimeout> | undefined
     const idleWindowMs = msg.idleTimeoutMs || defaultIdleMs
     const arm = () => {
+      lastOutputAt = performance.now()
       if (timer) clearTimeout(timer)
       timer = setTimeout(() => {
         endCause ??= 'idle-timeout'
@@ -313,6 +321,12 @@ export function createRunManager({
         exitCode: d.exitCode,
         interrupted: d.interrupted,
         stderr: d.stderr,
+        // Measured here rather than at each settle site so all three sources —
+        // the host's own done, an interrupt, an idle/shutdown kill — are timed
+        // the same way. Sent even when it is 0 (a host that produced nothing
+        // still worked no time), so only a run that never reaches this gate at
+        // all is silent about its duration.
+        durationMs: Math.round(lastOutputAt - startedAt),
         ...(d.cause ? { cause: d.cause } : {}),
         ...(d.idleMs ? { idleMs: d.idleMs } : {}),
       }

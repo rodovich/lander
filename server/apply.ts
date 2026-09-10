@@ -81,7 +81,9 @@ export type ApplyUpdate = Pick<
 // `cause`/`idleMs` ride along from a daemon-synthesized done (idle kill, daemon
 // shutdown, host crash) so the wedge can name the failure.
 export type ApplyDone = Pick<DoneMessage, 'exitCode'> &
-  Partial<Pick<DoneMessage, 'interrupted' | 'stderr' | 'cause' | 'idleMs'>>
+  Partial<
+    Pick<DoneMessage, 'interrupted' | 'stderr' | 'cause' | 'idleMs' | 'durationMs'>
+  >
 
 // Side inputs applyDone needs that don't come off the done payload itself: the
 // rate-limit reset time captured during the run (carried onto a wedge's retry),
@@ -346,6 +348,11 @@ export function applyDone(
     }
     delete task.notify
   }
+  // The run's working time, as the daemon measured it. Kept off `closeRide` —
+  // which stamps the ride's *end*, an event the server witnesses — because this
+  // is a measurement the server only relays; a done that carries none leaves the
+  // ride without one (see Ride.durationMs).
+  if (ride && done.durationMs !== undefined) ride.durationMs = done.durationMs
   closeRide(task, outcome, at)
   task.updatedAt = at
   delete task.runId

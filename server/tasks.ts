@@ -92,6 +92,14 @@ export type Ride = {
   outcome?: 'done' | 'interrupted' | 'error'
   // The turn's token usage, moved off the message onto the ride at close time.
   usage?: Usage
+  // How long the run worked, as the daemon measured it (DoneMessage.durationMs).
+  // Stored rather than derived from `startedAt`/`endedAt`, which answer a
+  // different question: those bracket the ride as the *server* saw it, so their
+  // difference also counts the hand-off, the idle window a watchdog kill waited
+  // out, and — when a ride is closed by boot recovery instead of by a done — the
+  // whole span the server was down. Absent on any ride whose run never reported
+  // a done, which is the best-effort silence `usage.costUsd` already has.
+  durationMs?: number
   // Present only on an 'error' outcome: the exit code, the daemon's cause when
   // it synthesized the done itself (idle-timeout / daemon-shutdown / host-crash,
   // plus the expired window for an idle kill), and the tail of the run's stderr.
