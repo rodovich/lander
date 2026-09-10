@@ -263,8 +263,9 @@ export type Task = {
   // Project-scope grants aren't here: they live in the project's settings file.
   allow?: string[]
   // Whether this task's flow reports a per-turn dollar cost (claude does, codex
-  // doesn't), from the same announced meta. The footer reads this instead of
-  // branching on the provider name.
+  // doesn't), from the same announced meta. Nothing on this side reads it: the
+  // readouts state the cost they were given and say nothing when they were given
+  // none, which needs no forecast of whether one is coming.
   reportsCost?: boolean
   title: string
   status: string

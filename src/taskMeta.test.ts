@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest'
 import {
   latestUpdateAt,
   latestUsageRide,
-  taskUsageTelemetry,
+  taskUsageSummary,
   totalRideMs,
+  usageBreakdown,
 } from './taskMeta'
+import type { UsageRow } from './taskMeta'
 import type { Ride, Task, TokenUsage } from './types'
 
 describe('latestUpdateAt', () => {
@@ -107,17 +109,158 @@ describe('latestUsageRide', () => {
   })
 })
 
-describe('taskUsageTelemetry time item', () => {
-  it('places time ahead of the counts', () => {
-    const items = taskUsageTelemetry(usage(), 'claude', true, 83_000)
-    expect(items.map((i) => i.id)).toEqual(['model', 'time', 'in', 'cache', 'out', 'cost'])
-    expect(items[1]).toMatchObject({ type: 'text', value: '1m 23s' })
+describe('taskUsageSummary', () => {
+  it('sums the task: who did the work, how long it took, what it cost', () => {
+    const items = taskUsageSummary(
+      withRides([
+        {
+          id: 'r1',
+          startedAt: '…',
+          endedAt: '…',
+          durationMs: 60_000,
+          usage: usage({ model: 'claude-opus-5', costUsd: 0.5 }),
+        },
+        {
+          id: 'r2',
+          startedAt: '…',
+          endedAt: '…',
+          durationMs: 23_000,
+          usage: usage({ model: 'claude-opus-5', costUsd: 0.25 }),
+        },
+      ]),
+    )
+    expect(items?.map((i) => i.id)).toEqual(['model', 'time', 'cost'])
+    expect(items?.map((i) => 'value' in i && i.value)).toEqual([
+      'Assistant (claude-opus-5)',
+      '1m 23s',
+      '$0.75',
+    ])
   })
 
-  it('omits the item entirely when there is no measurement', () => {
-    // Not a '…' placeholder like an unlanded cost: that would promise a number
-    // is coming, and for an unmeasured ride none ever is.
-    const items = taskUsageTelemetry(usage(), 'claude', true)
-    expect(items.map((i) => i.id)).toEqual(['model', 'in', 'cache', 'out', 'cost'])
+  it('drops the time and the cost from the line when it has no figure', () => {
+    // A riding turn: the counts are climbing, but nothing has measured the ride
+    // or landed its cost. The summary says the model and stops there.
+    const items = taskUsageSummary(withRides([{ id: 'r1', startedAt: '…', usage: usage() }]))
+    expect(items?.map((i) => i.id)).toEqual(['model'])
+  })
+
+  it('drops the cost for a flow that reports none, like any other absence', () => {
+    const free = {
+      ...withRides([
+        { id: 'r1', startedAt: '…', endedAt: '…', durationMs: 1_000, usage: usage() },
+      ]),
+      reportsCost: false,
+    } as Task
+    expect(taskUsageSummary(free)?.map((i) => i.id)).toEqual(['model', 'time'])
+  })
+
+  it('is null until some turn has reported usage', () => {
+    expect(taskUsageSummary(withRides([{ id: 'r1', startedAt: '…' }]))).toBeNull()
+  })
+})
+
+describe('usageBreakdown', () => {
+  const cell = (groups: UsageRow[][], id: string) =>
+    groups.flat().find((r) => r.id === id)
+
+  it('groups the counts apart from what they cost in time and money', () => {
+    const { groups } = usageBreakdown(
+      withRides([{ id: 'r1', startedAt: '…', endedAt: '…', usage: usage() }]),
+    )
+    expect(groups.map((g) => g.map((r) => r.id))).toEqual([
+      ['input', 'cacheWrite', 'cacheRead', 'output'],
+      ['time', 'cost'],
+    ])
+  })
+
+  it('reads the turn off the ride its counts came from, beside the task’s sum', () => {
+    const { groups } = usageBreakdown(
+      withRides([
+        {
+          id: 'r1',
+          startedAt: '…',
+          endedAt: '…',
+          durationMs: 60_000,
+          usage: usage({ input: 100, cacheCreation: 20, cacheRead: 3_000, output: 40 }),
+        },
+        {
+          id: 'r2',
+          startedAt: '…',
+          endedAt: '…',
+          durationMs: 23_000,
+          usage: usage({ input: 5, cacheCreation: 2, cacheRead: 9_000, output: 7 }),
+        },
+      ]),
+    )
+    expect(cell(groups, 'time')).toMatchObject({ turn: '23s', total: '1m 23s' })
+    expect(cell(groups, 'input')).toMatchObject({ turn: '5', total: '105' })
+    expect(cell(groups, 'cacheWrite')).toMatchObject({ turn: '2', total: '22' })
+    expect(cell(groups, 'cacheRead')).toMatchObject({
+      turn: (9_000).toLocaleString(),
+      total: (12_000).toLocaleString(),
+    })
+    expect(cell(groups, 'output')).toMatchObject({ turn: '7', total: '47' })
+  })
+
+  it('marks the in-flight turn’s time absent while its counts climb', () => {
+    // The open ride is measured only at the done, so its column shows no time —
+    // an em dash, not the zero a missing measurement would otherwise read as.
+    const { groups } = usageBreakdown(
+      withRides([
+        { id: 'r1', startedAt: '…', endedAt: '…', durationMs: 1_000, usage: usage() },
+        { id: 'r2', startedAt: '…', usage: usage() },
+      ]),
+    )
+    expect(cell(groups, 'time')).toMatchObject({ turn: '—', total: '1s' })
+  })
+
+  it('reads an absent cost as unmeasured, whatever made it absent', () => {
+    // Nothing has landed a cost yet — the cells take the same em dash the
+    // in-flight turn's time takes.
+    const riding = withRides([{ id: 'r1', startedAt: '…', usage: usage() }])
+    expect(cell(usageBreakdown(riding).groups, 'cost')).toMatchObject({
+      turn: '—',
+      total: '—',
+    })
+    // And a flow that reports no account cost at all (codex, open-pr) reads the
+    // same: the table states what it knows, and here it knows no number.
+    const free = { ...riding, reportsCost: false } as Task
+    expect(cell(usageBreakdown(free).groups, 'cost')).toMatchObject({
+      turn: '—',
+      total: '—',
+    })
+  })
+
+  it('rounds the cost to the penny, as the summary does', () => {
+    const { groups } = usageBreakdown(
+      withRides([
+        { id: 'r1', startedAt: '…', endedAt: '…', usage: usage({ costUsd: 0.4267 }) },
+      ]),
+    )
+    expect(cell(groups, 'cost')).toMatchObject({ turn: '$0.43' })
+  })
+
+  it('carries the turn’s cache miss as a note, since misses do not sum', () => {
+    const { cacheMiss } = usageBreakdown(
+      withRides([
+        {
+          id: 'r1',
+          startedAt: '…',
+          endedAt: '…',
+          usage: usage({ cacheMiss: { reason: 'tools_changed', missedTokens: 24_000 } }),
+        },
+      ]),
+    )
+    expect(cacheMiss).toBe(
+      `cache miss: tools changed (${(24_000).toLocaleString()} tokens missed)`,
+    )
+  })
+
+  it('has no note when the turn’s cache was clean', () => {
+    expect(
+      usageBreakdown(
+        withRides([{ id: 'r1', startedAt: '…', endedAt: '…', usage: usage() }]),
+      ).cacheMiss,
+    ).toBeUndefined()
   })
 })

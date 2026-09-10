@@ -6,6 +6,9 @@
   --border-secondary: rgba(17, 0, 0, 0.06);
   --bg-tinted: rgba(17, 0, 0, 0.03);
   --selected: rgba(17, 0, 0, 0.06);
+  /* The tone the app's drop shadows are cast in — the same near-black the
+     borders and text are tinted with, at the alpha those shadows already use. */
+  --shadow: rgba(17, 0, 0, 0.16);
   /* Task-status palette. Beyond the surfaces that carry a status (pills, count
      chips, section headers, timeline labels, status action buttons), these now
      double as the app's general accents: riding is the UI accent (focus rings,
@@ -2509,48 +2512,108 @@ body.resizing-row {
   opacity: 0.6;
 }
 
-/* Holds the per-turn telemetry readout below the reply composer; the readout
-   pushes itself to the right with margin-left:auto. */
-.allow-row {
-  display: flex;
+/* The row under the reply textarea: the attach control at the left, the usage
+   readout in the right corner. A two-column grid rather than a flex row, so the
+   readout holds the corner by its column even when the attach control isn't
+   rendered at all — an archived task has nothing to attach to. */
+.composer-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
   gap: 20px;
 }
 
-/* The inline telemetry readout: a muted, right-aligned row holding the static
-   model label and, beside it, the turn/total toggle. */
-.telemetry-inline {
-  margin-left: auto;
-  align-self: center;
+/* The corner usage readout: the summary line, in the action row's right-hand
+   column, and the breakdown panel it opens — positioned against this box. */
+.usage-readout {
+  position: relative;
+  grid-column: 2;
+}
+
+/* The summary itself: provider & model, working time, cost. Muted like the bar
+   it sits in until it's hovered — which is also what opens the breakdown. */
+.usage-summary {
   display: flex;
   align-items: baseline;
   gap: 20px;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-/* The scope + counts + cost, which the button flips between turn and total. */
-.telemetry-toggle {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
   padding: 0;
   border: none;
   background: none;
   font: inherit;
-  color: inherit;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.telemetry-toggle:hover {
+.usage-summary:hover,
+.usage-summary[aria-expanded='true'] {
   color: var(--fg);
 }
 
-.telemetry-scope {
+/* The breakdown, hanging above the summary — the composer is the last thing in
+   the pane, so there is no room below it — and right-aligned with it. */
+.usage-details {
+  position: absolute;
+  right: 0;
+  bottom: 2em;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 8px var(--shadow);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.usage-table {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Numbers right-align under their column head; the label column (below) opts
+   back out. The leading gap is the column separation, so the first column sits
+   flush against the panel's padding. */
+.usage-table th,
+.usage-table td {
+  padding: 2px 0 2px 20px;
+  text-align: right;
+  font-weight: inherit;
+}
+
+.usage-table tbody th {
+  padding-left: 0;
+  text-align: left;
+  color: var(--muted);
+}
+
+/* The column heads stand off their numbers by whitespace rather than a rule. */
+.usage-table thead th {
+  padding-bottom: 6px;
+  color: var(--muted);
   text-transform: uppercase;
-  font-size: 0.8em;
+  font-size: 0.85em;
   letter-spacing: 0.04em;
-  opacity: 0.7;
+}
+
+/* The gap between row groups: the counts, then what they cost in time and
+   money. Carried by the second group's first row, since collapsed table rows
+   have no box of their own to space. */
+.usage-table tbody + tbody tr:first-child th,
+.usage-table tbody + tbody tr:first-child td {
+  padding-top: 8px;
+}
+
+/* The turn's cache-miss diagnostic, under the table: a sentence, so it wraps
+   where the table's cells don't. */
+.usage-note {
+  max-width: 240px;
+  color: var(--muted);
+  white-space: normal;
 }
 
 .placeholder {

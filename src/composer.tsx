@@ -3,16 +3,9 @@ import type { Dispatch, SetStateAction } from 'react'
 import { uiHeaders, uploadAttachments } from './api'
 import { AttachButton } from './attachments'
 import { clipboardImageFiles } from './fileDrop'
-import { useFileDrop, usePersistentState } from './hooks'
-import {
-  latestUsage,
-  latestUsageRide,
-  taskUsageTelemetry,
-  totalRideMs,
-  totalUsage,
-} from './taskMeta'
-import { TelemetryItemView } from './telemetry'
+import { useFileDrop } from './hooks'
 import { taskKeyOf } from './taskRef'
+import { UsageReadout } from './usageReadout'
 import type { TaskWithProject } from './types'
 
 // The reply bar under the open conversation: the per-task drafts and their
@@ -45,13 +38,6 @@ export const Composer = memo(function Composer({
 }) {
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const key = taskKeyOf(task)
-
-  // Whether the corner usage readout sums across the whole task or shows just
-  // the latest turn. Clicking it toggles; persisted so the choice sticks.
-  const [usageTotal, setUsageTotal] = usePersistentState(
-    'lander:usageTotal',
-    false,
-  )
 
   // The whole reply panel is one drop target, including its textarea,
   // paperclip, and surrounding action area. Keep the target bound to the
@@ -137,7 +123,7 @@ export const Composer = memo(function Composer({
           }))
         }}
       />
-      <div className="allow-row">
+      <div className="composer-actions">
         {!task.archived && (
           <AttachButton
             files={replyFiles[key] ?? []}
@@ -153,71 +139,7 @@ export const Composer = memo(function Composer({
             disabled={sendingBy[key] ?? false}
           />
         )}
-        {(() => {
-          const u = usageTotal ? totalUsage(task) : latestUsage(task)
-          if (!u) return null
-          const scope = usageTotal ? 'total' : 'turn'
-          // Absent on legacy payloads / fixtures without an agent — treat
-          // as cost-reporting (claude), matching the grants "fully capable"
-          // default.
-          const reportsCost = task.reportsCost ?? true
-          const costText =
-            u.costUsd !== undefined
-              ? `$${u.costUsd.toFixed(4)}`
-              : reportsCost
-                ? '… (available when the turn lands)'
-                : // Keyed on the capability, not the provider — an open-pr task
-                  // reports no cost either, and would have claimed to be Codex.
-                  'not reported by this flow'
-          // Working time on the same scope as the counts, and for the turn scope
-          // off the very ride `latestUsage` read — a footer that timed one turn
-          // and counted another would be describing nothing. Absent while that
-          // ride is still in flight, since its duration is only measured at the
-          // done: the counts climb through a turn, the time appears when it lands.
-          const elapsed = usageTotal
-            ? totalRideMs(task)
-            : latestUsageRide(task)?.durationMs
-          const items = taskUsageTelemetry(
-            u,
-            task.flow ?? task.agent,
-            reportsCost,
-            elapsed,
-          )
-          // The model names the whole task, not a scope, so it sits outside
-          // the turn/total toggle; the counts + cost are what the toggle flips.
-          const model = items.find((i) => i.id === 'model')
-          const stats = items.filter((i) => i.id !== 'model')
-          return (
-            <div className="telemetry-inline">
-              {model && <TelemetryItemView item={model} />}
-              <button
-                type="button"
-                className="telemetry-toggle"
-                onClick={() => setUsageTotal((v) => !v)}
-                title={
-                  `${scope} — click to show ` +
-                  `${usageTotal ? 'turn' : 'total'}\n` +
-                  `uncached input ${u.input.toLocaleString()} ` +
-                  `(+ ${u.cacheCreation.toLocaleString()} written to cache)\n` +
-                  `cache read ${u.cacheRead.toLocaleString()}\n` +
-                  // The turn's cache-miss diagnostic, when the API reported
-                  // one (per-turn only; misses don't sum).
-                  (!usageTotal && u.cacheMiss
-                    ? `cache miss: ${u.cacheMiss.reason.replaceAll('_', ' ')} ` +
-                      `(${u.cacheMiss.missedTokens.toLocaleString()} tokens missed)\n`
-                    : '') +
-                  `output ${u.output.toLocaleString()}\n` +
-                  `cost ${costText}`
-                }
-              >
-                <span className="telemetry-scope">{scope}</span>
-                {stats.map((item) => (
-                  <TelemetryItemView key={item.id} item={item} />
-                ))}
-              </button>
-            </div>
-          )
-        })()}
+        <UsageReadout task={task} />
       </div>
     </div>
   )

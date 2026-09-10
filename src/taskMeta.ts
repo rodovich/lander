@@ -127,54 +127,137 @@ export function totalUsage(task: Task): TokenUsage | undefined {
   return { ...total, model: latestUsage(task)?.model, costUsd: cost }
 }
 
-// The composer footer's readout as generic telemetry items: the driving model,
-// the scope's working time, its uncached input / cache read / output counts, and
-// its cost. Client-derived (this surface stays simple — the daemon doesn't
-// publish it), fed to the same generic item renderer the flow-status panel uses.
-export function taskUsageTelemetry(
-  u: TokenUsage,
-  // The flow name, for the model-name display lookup only — never a behavior
-  // branch.
-  agent: string | undefined,
-  reportsCost: boolean,
-  // The scope's working time, when it is known. Passed in rather than read off
-  // `u` because it isn't token usage: it's measured by the daemon and stored on
-  // the ride, and the caller is the one that knows whether the scope is a turn
-  // or the whole task.
-  elapsedMs?: number,
-): TelemetryItem[] {
-  // Uncached = fresh input processed this turn (regular input + the part written
-  // to cache); cache read is the discounted re-read, reported separately.
-  const uncached = u.input + u.cacheCreation
-  // Claude cost arrives with the turn's result event; a provider that reports no
-  // account cost (codex) shows 'n/a', and a still-streaming turn hasn't landed one
-  // yet. `agent` stays only the model-name display lookup below, never a behavior
-  // branch — the cost decision reads the server-derived capability.
-  const cost =
-    u.costUsd !== undefined ? formatCost(u.costUsd) : reportsCost ? '$…' : 'n/a'
+// The composer footer's summary as generic telemetry items: who did the work
+// (provider & model), how long the task has spent working, and what it has cost.
+// Task-scope throughout — the breakdown behind it is where a single turn is
+// broken out — so the line read at a glance is the enduring number rather than
+// the transient one. Client-derived (this surface stays simple — the daemon
+// doesn't publish it), fed to the same generic item renderer the flow-status
+// panel uses. Null when no turn has reported usage yet.
+export function taskUsageSummary(task: Task): TelemetryItem[] | null {
+  const u = totalUsage(task)
+  if (!u) return null
+  const elapsed = totalRideMs(task)
   return [
     {
       id: 'model',
       label: 'model',
       type: 'text',
-      value: taskAgentModelName(agent, u.model),
+      // The flow name is the model-name display lookup only, never a behavior
+      // branch.
+      value: taskAgentModelName(task.flow ?? task.agent, u.model),
     },
-    // Time leads the counts: it is the shape of the work, where the rest are its
-    // price. Omitted entirely when unknown, rather than shown as a placeholder —
-    // an absent measurement is not a pending one.
-    ...(elapsedMs !== undefined
+    // Time leads cost: it is the shape of the work, where cost is its price.
+    // Either is dropped from the line when it has no figure — whether none has
+    // landed yet or the flow reports none at all — rather than held open by a
+    // placeholder. A summary is read at a glance, and a glance at "$…" learns
+    // nothing the missing item wouldn't have said by its absence.
+    ...(elapsed !== undefined
       ? [
           {
             id: 'time',
             label: 'time',
             type: 'text',
-            value: formatDuration(elapsedMs),
+            value: formatDuration(elapsed),
           } as const,
         ]
       : []),
-    { id: 'in', label: 'in', type: 'count', value: uncached },
-    { id: 'cache', label: 'cache', type: 'count', value: u.cacheRead },
-    { id: 'out', label: 'out', type: 'count', value: u.output },
-    { id: 'cost', label: 'cost', type: 'text', value: cost },
+    ...(u.costUsd !== undefined
+      ? [
+          {
+            id: 'cost',
+            label: 'cost',
+            type: 'text',
+            value: formatCost(u.costUsd),
+          } as const,
+        ]
+      : []),
   ]
+}
+
+// One row of the usage breakdown: a label and its value in each scope. Every
+// cell is preformatted, so the table that renders these knows nothing about
+// tokens, dollars, or which scope a number came from.
+export type UsageRow = { id: string; label: string; turn: string; total: string }
+
+// A scope that reported no number at all: an em dash rather than a zero, so
+// "not measured" can't read as "took no time".
+const NO_VALUE = '—'
+
+const tokens = (n: number | undefined): string =>
+  n === undefined ? NO_VALUE : n.toLocaleString()
+
+// A cost cell. The two ways a scope can have no figure — none has landed yet,
+// and this flow reports none at all — read the same here: the table states what
+// is known, and neither case knows a number.
+const money = (n: number | undefined): string =>
+  n === undefined ? NO_VALUE : formatCost(n)
+
+// The breakdown behind the footer summary: the same quantities the old
+// turn/total toggle flipped between, laid out for both scopes at once — the
+// latest turn that reported usage (the one the counts climb through while it
+// rides) beside the whole task.
+//
+// The turn's working time is read off the very ride its counts came from: a
+// readout that timed one turn and counted another would be describing nothing.
+// It is absent while that ride is still in flight, since a ride's duration is
+// only measured at the done — the counts climb through a turn, the time appears
+// when it lands.
+export function usageBreakdown(task: Task): {
+  // Grouped as the table renders them — the counts, then what they cost in time
+  // and money — so the two are told apart by a gap rather than a rule.
+  groups: UsageRow[][]
+  // The turn's cache-miss diagnostic, when the API reported one. A note rather
+  // than a row: it belongs to the turn column alone, since misses don't sum.
+  cacheMiss?: string
+} {
+  const turnRide = latestUsageRide(task)
+  const turn = turnRide?.usage
+  const total = totalUsage(task)
+  const row = (
+    id: string,
+    label: string,
+    of: (u: TokenUsage) => number,
+  ): UsageRow => ({
+    id,
+    label,
+    turn: tokens(turn && of(turn)),
+    total: tokens(total && of(total)),
+  })
+  const time = (ms: number | undefined) =>
+    ms === undefined ? NO_VALUE : formatDuration(ms)
+  const miss = turn?.cacheMiss
+  return {
+    groups: [
+      [
+        // The two halves of the fresh input a turn processes — what was sent
+        // uncached, and the part of it written to the cache for the next turn —
+        // then the discounted re-read, then what came back.
+        row('input', 'input', (u) => u.input),
+        row('cacheWrite', 'cache write', (u) => u.cacheCreation),
+        row('cacheRead', 'cache read', (u) => u.cacheRead),
+        row('output', 'output', (u) => u.output),
+      ],
+      [
+        {
+          id: 'time',
+          label: 'time',
+          turn: time(turnRide?.durationMs),
+          total: time(totalRideMs(task)),
+        },
+        {
+          id: 'cost',
+          label: 'cost',
+          // The table holds its shape, so an absent cost takes the same em dash
+          // an unmeasured time does rather than dropping the row.
+          turn: money(turn?.costUsd),
+          total: money(total?.costUsd),
+        },
+      ],
+    ],
+    cacheMiss: miss
+      ? `cache miss: ${miss.reason.replaceAll('_', ' ')} ` +
+        `(${miss.missedTokens.toLocaleString()} tokens missed)`
+      : undefined,
+  }
 }
