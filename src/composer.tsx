@@ -7,7 +7,6 @@ import { useFileDrop, usePersistentState } from './hooks'
 import {
   latestUsage,
   latestUsageRide,
-  rideElapsedMs,
   taskUsageTelemetry,
   totalRideMs,
   totalUsage,
@@ -172,13 +171,12 @@ export const Composer = memo(function Composer({
                   'not reported by this flow'
           // Working time on the same scope as the counts, and for the turn scope
           // off the very ride `latestUsage` read — a footer that timed one turn
-          // and counted another would be describing nothing.
+          // and counted another would be describing nothing. Absent while that
+          // ride is still in flight, since its duration is only measured at the
+          // done: the counts climb through a turn, the time appears when it lands.
           const elapsed = usageTotal
             ? totalRideMs(task)
-            : (() => {
-                const r = latestUsageRide(task)
-                return r ? rideElapsedMs(r) : undefined
-              })()
+            : latestUsageRide(task)?.durationMs
           const items = taskUsageTelemetry(
             u,
             task.flow ?? task.agent,

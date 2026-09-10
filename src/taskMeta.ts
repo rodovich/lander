@@ -82,35 +82,23 @@ export function latestUsage(task: Task): TokenUsage | undefined {
   return latestUsageRide(task)?.usage
 }
 
-// How long a ride worked, in ms. A settled ride reports the daemon's own
-// measurement, or nothing when its run never delivered a done (see
-// Ride.durationMs). An open ride has no measurement yet — nothing has ended —
-// so it is estimated from its start, which is the only clock the client has
-// mid-turn and runs a hand-off ahead of the real one; the measured value
-// replaces the estimate when the turn lands.
-export function rideElapsedMs(
-  ride: Ride,
-  now: number = Date.now(),
-): number | undefined {
-  if (ride.endedAt) return ride.durationMs
-  const started = Date.parse(ride.startedAt)
-  return Number.isNaN(started) ? undefined : Math.max(0, now - started)
-}
-
 // Working time summed across the task's rides. A ride that reported none
 // contributes nothing rather than voiding the sum — the same best effort
 // `totalUsage` makes of a turn that reported no cost — so the total reads as
-// "at least this long", and is undefined only when no ride can be timed at all.
-export function totalRideMs(
-  task: Task,
-  now: number = Date.now(),
-): number | undefined {
+// "at least this long", and is undefined only when no ride has been measured.
+//
+// Nothing here consults the clock. A ride is measured by the daemon and the
+// measurement arrives with the turn's done, so the readout advances a turn at a
+// time, in step with the counts beside it, and an in-flight turn contributes
+// nothing until it lands. Estimating the open ride from `startedAt` would put a
+// number on screen that no measurement backs and that climbs on the poll
+// interval rather than on anything the run did.
+export function totalRideMs(task: Task): number | undefined {
   let total = 0
   let any = false
   for (const r of task.rides ?? []) {
-    const ms = rideElapsedMs(r, now)
-    if (ms === undefined) continue
-    total += ms
+    if (r.durationMs === undefined) continue
+    total += r.durationMs
     any = true
   }
   return any ? total : undefined

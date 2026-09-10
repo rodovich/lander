@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   latestUpdateAt,
   latestUsageRide,
-  rideElapsedMs,
   taskUsageTelemetry,
   totalRideMs,
 } from './taskMeta'
@@ -50,44 +49,6 @@ const withRides = (rides: Ride[]): Task =>
     rides,
   }) as Task
 
-// 12:00:00 → the `now` every open-ride case below is measured against.
-const NOW = Date.parse('2026-09-09T12:00:00.000Z')
-
-describe('rideElapsedMs', () => {
-  it('reports a settled ride’s measurement, ignoring the span it was open for', () => {
-    const ride: Ride = {
-      id: 'r1',
-      startedAt: '2026-09-09T11:00:00.000Z',
-      endedAt: '2026-09-09T11:40:00.000Z',
-      outcome: 'done',
-      durationMs: 65_000,
-    }
-    expect(rideElapsedMs(ride, NOW)).toBe(65_000)
-  })
-
-  it('reports nothing for a settled ride that was never measured', () => {
-    // The boot-recovery / lost-run shape: closed by the server, so `endedAt`
-    // exists but carries the moment of the close, which is not a duration.
-    expect(
-      rideElapsedMs(
-        {
-          id: 'r1',
-          startedAt: '2026-09-09T11:00:00.000Z',
-          endedAt: '2026-09-09T11:40:00.000Z',
-          outcome: 'error',
-        },
-        NOW,
-      ),
-    ).toBeUndefined()
-  })
-
-  it('estimates an open ride from its start', () => {
-    expect(
-      rideElapsedMs({ id: 'r1', startedAt: '2026-09-09T11:58:30.000Z' }, NOW),
-    ).toBe(90_000)
-  })
-})
-
 describe('totalRideMs', () => {
   it('sums the rides it can time and skips the ones it cannot', () => {
     const total = totalRideMs(
@@ -97,25 +58,23 @@ describe('totalRideMs', () => {
         { id: 'r2', startedAt: '…', endedAt: '…' },
         { id: 'r3', startedAt: '…', endedAt: '…', durationMs: 5_000 },
       ]),
-      NOW,
     )
     expect(total).toBe(15_000)
   })
 
-  it('counts the in-flight ride, so the total climbs during a turn', () => {
-    const total = totalRideMs(
-      withRides([
-        { id: 'r1', startedAt: '2026-09-09T10:00:00.000Z', endedAt: '…', durationMs: 60_000 },
-        { id: 'r2', startedAt: '2026-09-09T11:59:00.000Z' },
-      ]),
-      NOW,
-    )
-    expect(total).toBe(120_000)
+  it('holds still through an in-flight turn rather than tracking the clock', () => {
+    // The open ride started an hour ago and has been measured by nobody. The
+    // total is the two minutes that landed, and it moves next when a done does.
+    const rides: Ride[] = [
+      { id: 'r1', startedAt: '…', endedAt: '…', durationMs: 120_000 },
+      { id: 'r2', startedAt: '2026-09-09T11:00:00.000Z' },
+    ]
+    expect(totalRideMs(withRides(rides))).toBe(120_000)
   })
 
-  it('is undefined when no ride can be timed at all', () => {
+  it('is undefined when no ride has been measured at all', () => {
     expect(
-      totalRideMs(withRides([{ id: 'r1', startedAt: '…', endedAt: '…' }]), NOW),
+      totalRideMs(withRides([{ id: 'r1', startedAt: '…', endedAt: '…' }])),
     ).toBeUndefined()
   })
 })
@@ -131,6 +90,20 @@ describe('latestUsageRide', () => {
       ]),
     )
     expect(ride?.id).toBe('r1')
+  })
+
+  it('returns the in-flight ride, which reports counts but no time yet', () => {
+    // What the footer reads mid-turn: the counts climb off this ride while its
+    // `durationMs` — measured only at the done — is still absent, so the time
+    // is omitted until the turn lands rather than guessed at from its start.
+    const ride = latestUsageRide(
+      withRides([
+        { id: 'r1', startedAt: '…', endedAt: '…', usage: usage(), durationMs: 1_000 },
+        { id: 'r2', startedAt: '…', usage: usage() },
+      ]),
+    )
+    expect(ride?.id).toBe('r2')
+    expect(ride?.durationMs).toBeUndefined()
   })
 })
 
