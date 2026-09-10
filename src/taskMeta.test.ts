@@ -154,8 +154,14 @@ describe('taskUsageSummary', () => {
     expect(taskUsageSummary(free)?.map((i) => i.id)).toEqual(['model', 'time'])
   })
 
-  it('is null until some turn has reported usage', () => {
-    expect(taskUsageSummary(withRides([{ id: 'r1', startedAt: '…' }]))).toBeNull()
+  it('names the flow before any turn has reported anything', () => {
+    // What a codex task shows for its whole first turn, since its usage lands
+    // only when the turn does: who is working, if not yet on what or for how
+    // long. The flow is known from launch, so it never waits on a measurement.
+    const fresh = { ...withRides([]), flow: 'codex' } as Task
+    expect(taskUsageSummary(fresh)).toEqual([
+      { id: 'model', label: 'model', type: 'text', value: 'Codex' },
+    ])
   })
 })
 

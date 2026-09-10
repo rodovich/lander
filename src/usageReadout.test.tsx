@@ -64,7 +64,14 @@ describe('UsageReadout', () => {
     expect(html).not.toContain('usage-table')
   })
 
-  it('renders nothing at all before any turn has reported usage', () => {
-    expect(render([{ id: 'r1', startedAt: '2026-09-09T11:00:00.000Z' }])).toBe('')
+  it('names the provider through a turn that has reported no usage yet', () => {
+    const html = render([{ id: 'r1', startedAt: '2026-09-09T11:00:00.000Z' }], {
+      flow: 'codex',
+    })
+    expect(html).toContain('Codex')
+    // Nothing measured, so nothing else is claimed — and the breakdown behind it
+    // is still there to be opened, saying the same in its cells.
+    expect(html).not.toContain('$')
+    expect(html).toContain('aria-expanded="false"')
   })
 })

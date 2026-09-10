@@ -37,7 +37,6 @@ export function UsageReadout({ task }: { task: Task }) {
     }
   }, [pinned])
 
-  if (!items) return null
   const open = hovered || pinned
   const { groups, cacheMiss } = usageBreakdown(task)
   return (

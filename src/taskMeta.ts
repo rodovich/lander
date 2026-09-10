@@ -133,10 +133,14 @@ export function totalUsage(task: Task): TokenUsage | undefined {
 // broken out — so the line read at a glance is the enduring number rather than
 // the transient one. Client-derived (this surface stays simple — the daemon
 // doesn't publish it), fed to the same generic item renderer the flow-status
-// panel uses. Null when no turn has reported usage yet.
-export function taskUsageSummary(task: Task): TelemetryItem[] | null {
+// panel uses.
+//
+// The line always names the flow, which a task carries from the moment it is
+// launched — so a task that has never ridden, or one whose provider reports its
+// usage only when the turn lands (codex), still says who is doing the work while
+// it does it. The model qualifies that name once some turn has reported one.
+export function taskUsageSummary(task: Task): TelemetryItem[] {
   const u = totalUsage(task)
-  if (!u) return null
   const elapsed = totalRideMs(task)
   return [
     {
@@ -145,7 +149,7 @@ export function taskUsageSummary(task: Task): TelemetryItem[] | null {
       type: 'text',
       // The flow name is the model-name display lookup only, never a behavior
       // branch.
-      value: taskAgentModelName(task.flow ?? task.agent, u.model),
+      value: taskAgentModelName(task.flow ?? task.agent, u?.model),
     },
     // Time leads cost: it is the shape of the work, where cost is its price.
     // Either is dropped from the line when it has no figure — whether none has
@@ -162,7 +166,7 @@ export function taskUsageSummary(task: Task): TelemetryItem[] | null {
           } as const,
         ]
       : []),
-    ...(u.costUsd !== undefined
+    ...(u?.costUsd !== undefined
       ? [
           {
             id: 'cost',
