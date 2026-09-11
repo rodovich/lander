@@ -1709,25 +1709,56 @@ body {
   margin: 0.6em 0;
 }
 
+/* Collapsed borders so the rule can sit on the row and run unbroken across it;
+   the gap between columns is cell padding rather than border-spacing, which the
+   rule would have shown through. */
 .message-text table {
   border-collapse: collapse;
-  margin: 0.6em 0;
+  margin: 1em 0;
   display: block;
   width: max-content;
   max-width: 100%;
   overflow-x: auto;
 }
 
+/* The 6em floor is a 5em column plus the 1em gap, since border-box sizing counts
+   the padding into min-width. */
 .message-text th,
 .message-text td {
-  border: 1px solid var(--border);
-  padding: 6px 10px;
+  min-width: 6em;
+  padding: 5px 1em 5px 0;
   text-align: left;
+  vertical-align: top;
 }
 
+/* The outer edges stay flush with the body text, so only the inner gaps carry
+   the column spacing — and the last column's floor drops back to the bare 5em. */
+.message-text th:last-child,
+.message-text td:last-child {
+  min-width: 5em;
+  padding-right: 0;
+}
+
+/* The last row closes the table, so it keeps no rule beneath it — the only
+   borders left are the ones that separate two rows. */
+.message-text tr {
+  border-bottom: 1px solid var(--border);
+}
+
+.message-text tbody tr:last-child {
+  border-bottom: none;
+}
+
+/* Headers label the columns rather than carrying content, so they take the same
+   muted gray as the other labels around the transcript. */
 .message-text th {
   background: var(--bg);
+  font-size: 13px;
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  vertical-align: bottom;
 }
 
 /* No padding of its own — it inherits the inset from whatever .message wraps
