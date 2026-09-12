@@ -100,8 +100,9 @@ export function useFileDrop<T extends HTMLElement>(
 // outside-click / Escape dismissal and re-anchoring on scroll/resize. Owns the
 // open state and returns refs to wire up. The popup is measured after it mounts
 // (hidden for one layout tick), so the up/down decision uses its real height.
-// Shared by the blocked-permissions summary and the header grant control.
-export function useAnchoredPopup() {
+// Shared by the actions menus, the blocked-permissions summary, and the header
+// grant control. `gap` is the distance it stands off its trigger.
+export function useAnchoredPopup({ gap = 6 }: { gap?: number } = {}) {
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -116,7 +117,6 @@ export function useAnchoredPopup() {
     const place = () => {
       const r = triggerRef.current?.getBoundingClientRect()
       if (!r) return
-      const gap = 6
       const ph = popupRef.current?.offsetHeight ?? 0
       const spaceBelow = window.innerHeight - r.bottom
       const spaceAbove = r.top
@@ -148,7 +148,7 @@ export function useAnchoredPopup() {
       window.removeEventListener('resize', place)
       window.removeEventListener('scroll', place, true)
     }
-  }, [open])
+  }, [open, gap])
 
   // Until the first layout pass sets a real position, keep the mounted popup
   // hidden so its unplaced frame never flashes at the top-left.

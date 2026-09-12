@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
+import { useAnchoredPopup } from './hooks'
 import { isUnread } from './taskMeta'
 import type { TaskWithProject } from './types'
 
@@ -110,201 +111,49 @@ export function CopyConversationButton({ markdown }: { markdown: () => string })
   )
 }
 
-// The read-only affordance in the detail header: a crossed-out pencil shown
-// only while a task lacks edit permission (a spawner declined to forward it).
-// Its lone menu item grants edits via the same UI-only PATCH the old checkbox
-// used; once granted the parent stops rendering this, so the icon disappears.
-// Mirrors TaskActionsMenu's fixed-anchor popup so the header can't clip it.
-export function ReadOnlyMenu({ onAllowEdits }: { onAllowEdits: () => void }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  const buttonRef = useRef<HTMLButtonElement>(null)
-  const itemRef = useRef<HTMLButtonElement>(null)
-  const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(
-    null,
-  )
-
-  useEffect(() => {
-    if (!open) {
-      setAnchor(null)
-      return
-    }
-    const place = () => {
-      const r = buttonRef.current?.getBoundingClientRect()
-      if (r) setAnchor({ top: r.bottom + 4, left: r.left })
-    }
-    place()
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    window.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKey)
-    window.addEventListener('resize', place)
-    window.addEventListener('scroll', place, true)
-    return () => {
-      window.removeEventListener('mousedown', onDown)
-      window.removeEventListener('keydown', onKey)
-      window.removeEventListener('resize', place)
-      window.removeEventListener('scroll', place, true)
-    }
-  }, [open])
-
-  // Focus the lone item once the popup is placed, so Enter/Escape land somewhere.
-  useEffect(() => {
-    if (open && anchor) itemRef.current?.focus()
-  }, [open, anchor])
-
-  return (
-    <div className="task-menu" ref={ref}>
-      <button
-        ref={buttonRef}
-        type="button"
-        className="edit-title-button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title="Read-only — click to allow edits"
-        aria-label="Read-only — click to allow edits"
-        onClick={() => setOpen((o) => !o)}
-      >
-        <svg
-          width="15"
-          height="15"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden
-        >
-          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-          {/* The slash that reads the pencil as disabled/read-only. */}
-          <line x1="3" y1="3" x2="21" y2="21" />
-        </svg>
-      </button>
-      {open && anchor && (
-        <div
-          className="task-menu-popup"
-          role="menu"
-          style={{ top: anchor.top, left: anchor.left }}
-        >
-          <button
-            ref={itemRef}
-            type="button"
-            role="menuitem"
-            className="task-menu-item"
-            onClick={() => {
-              setOpen(false)
-              onAllowEdits()
-            }}
-          >
-            Allow edits
-          </button>
-        </div>
-      )}
-    </div>
-  )
+// One line of an actions menu: what it says, what it does, and whether a
+// separator rules it off from the item above it.
+export type MenuItem = {
+  key: string
+  label: React.ReactNode
+  className?: string
+  separatorBefore?: boolean
+  onSelect: () => void
 }
 
-// The status actions a task's kebab menu can fire, mirroring the buttons the
-// detail header used to carry, plus archive/restore.
-export type TaskAction =
-  | 'launch'
-  | 'wedge'
-  | 'rest'
-  | 'land'
-  | 'copyId'
-  | 'markUnread'
-  | 'archive'
-  | 'restore'
-
-// The non-status actions that sit below a separator at the foot of the kebab
-// menu. A single divider is drawn before the first of these that appears.
-const FOOTER_ACTIONS = new Set<TaskAction>(['copyId', 'markUnread', 'archive'])
-
-// The kebab (⋮) menu on a task list row. It carries the status actions that
-// used to live as buttons in the detail header, plus Archive/Restore — but only
-// the items that would be both *visible and enabled* for the task's current
-// status, so e.g. a landed task offers Wedge/Rest/Archive but not Land. An
-// archived task collapses to a single Restore. The button stops click
-// propagation so opening the menu doesn't also select the row, and the menu is
-// fixed-positioned (anchored to the button's live rect, re-measured on
-// scroll/resize) so the scrolling task list can't clip it.
-export function TaskActionsMenu({
-  task,
-  onAction,
+// The shell every actions menu wears: a trigger that opens a popup of items,
+// with roving arrow-key navigation inside it. The popup is fixed-anchored to the
+// trigger's live rect (see useAnchoredPopup), so neither the scrolling task list
+// nor the detail header can clip it, and it flips above the trigger when there
+// isn't room below. Clicks and keys are kept from bubbling, because a menu on a
+// task row sits inside a row that selects on click and moves focus on arrows.
+function ActionsMenu({
+  className = 'task-menu',
+  triggerClassName,
+  triggerLabel,
+  triggerTitle,
+  trigger,
+  items,
 }: {
-  task: TaskWithProject
-  onAction: (action: TaskAction) => void
+  className?: string
+  triggerClassName: string
+  // Names the trigger for assistive tech.
+  triggerLabel: string
+  // A hover tooltip, for a trigger whose meaning isn't already on screen. The
+  // kebabs carry none: "⋮" beside a row explains itself.
+  triggerTitle?: string
+  trigger: React.ReactNode
+  items: MenuItem[]
 }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  const buttonRef = useRef<HTMLButtonElement>(null)
+  const { open, setOpen, containerRef, triggerRef, popupRef, popupStyle } =
+    useAnchoredPopup({ gap: 4 })
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
-  const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(
-    null,
-  )
 
-  // Build the items from the same per-status rules the header buttons encoded:
-  //  - launch:  a scheduled task (scheduledFor set, resting or wedged), to run it early
-  //  - wedge:   any task not already wedged
-  //  - rest:    a wedged or landed task, to return it to rest
-  //  - land:       any task not already landed
-  //  - copyId:     any task, to copy its id to the clipboard
-  //  - markUnread: any task that isn't already showing unviewed updates
-  //  - archive:    any non-riding task (a riding one has a live run)
-  const items: { action: TaskAction; label: string }[] = []
-  if (task.archived) {
-    items.push({ action: 'restore', label: 'Restore' })
-  } else {
-    if (task.scheduledFor) items.push({ action: 'launch', label: 'Launch' })
-    if (task.status !== 'wedged') items.push({ action: 'wedge', label: 'Wedge' })
-    if (task.status === 'wedged' || task.status === 'landed')
-      items.push({ action: 'rest', label: 'Rest' })
-    if (task.status !== 'landed') items.push({ action: 'land', label: 'Land' })
-    items.push({ action: 'copyId', label: 'Copy ID' })
-    if (!isUnread(task))
-      items.push({ action: 'markUnread', label: 'Mark unread' })
-    if (task.status !== 'riding')
-      items.push({ action: 'archive', label: 'Archive' })
-  }
-
+  // Move focus into the menu once it opens, so the arrow keys (and Escape) have
+  // somewhere to start.
   useEffect(() => {
-    if (!open) {
-      setAnchor(null)
-      return
-    }
-    const place = () => {
-      const r = buttonRef.current?.getBoundingClientRect()
-      if (r) setAnchor({ top: r.bottom + 4, left: r.left })
-    }
-    place()
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    window.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKey)
-    window.addEventListener('resize', place)
-    window.addEventListener('scroll', place, true)
-    return () => {
-      window.removeEventListener('mousedown', onDown)
-      window.removeEventListener('keydown', onKey)
-      window.removeEventListener('resize', place)
-      window.removeEventListener('scroll', place, true)
-    }
+    if (open) itemRefs.current[0]?.focus()
   }, [open])
-
-  // Move focus into the menu once it's mounted (anchor placed), so the arrow
-  // keys have somewhere to start.
-  useEffect(() => {
-    if (open && anchor) itemRefs.current[0]?.focus()
-  }, [open, anchor])
 
   // Roving arrow-key navigation within the open menu. Each key is stopped from
   // bubbling to the row's own key handler (which would move row focus or select
@@ -342,7 +191,7 @@ export function TaskActionsMenu({
       case 'Escape':
         e.stopPropagation()
         setOpen(false)
-        buttonRef.current?.focus()
+        triggerRef.current?.focus()
         break
     }
   }
@@ -350,14 +199,15 @@ export function TaskActionsMenu({
   if (items.length === 0) return null
 
   return (
-    <div className="task-menu" ref={ref}>
+    <div className={className} ref={containerRef}>
       <button
-        ref={buttonRef}
+        ref={triggerRef}
         type="button"
-        className="task-kebab"
+        className={triggerClassName}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="Task actions"
+        aria-label={triggerLabel}
+        title={triggerTitle}
         onClick={(e) => {
           e.stopPropagation()
           setOpen((o) => !o)
@@ -366,26 +216,22 @@ export function TaskActionsMenu({
         // which would otherwise select the task or move row focus.
         onKeyDown={(e) => e.stopPropagation()}
       >
-        ⋮
+        {trigger}
       </button>
-      {open && anchor && (
+      {open && (
         <div
+          ref={popupRef}
           className="task-menu-popup"
           role="menu"
-          style={{ top: anchor.top, left: anchor.left }}
+          style={popupStyle}
           onClick={(e) => e.stopPropagation()}
           onKeyDown={onMenuKeyDown}
         >
-          {items.map((it, i) => (
-            <Fragment key={it.action}>
-              {/* Set the footer actions (Copy ID, Mark unread, Archive) apart
-                  from the status actions above with a single separator before
-                  the first of them. */}
-              {i > 0 &&
-                FOOTER_ACTIONS.has(it.action) &&
-                !FOOTER_ACTIONS.has(items[i - 1].action) && (
-                  <div className="task-menu-sep" role="separator" />
-                )}
+          {items.map((item, i) => (
+            <Fragment key={item.key}>
+              {item.separatorBefore && i > 0 && (
+                <div className="task-menu-sep" role="separator" />
+              )}
               <button
                 ref={(el) => {
                   itemRefs.current[i] = el
@@ -393,14 +239,14 @@ export function TaskActionsMenu({
                 type="button"
                 role="menuitem"
                 tabIndex={-1}
-                className={`task-menu-item task-menu-item-${it.action}`}
+                className={'task-menu-item' + (item.className ? ` ${item.className}` : '')}
                 onClick={(e) => {
                   e.stopPropagation()
                   setOpen(false)
-                  onAction(it.action)
+                  item.onSelect()
                 }}
               >
-                {it.label}
+                {item.label}
               </button>
             </Fragment>
           ))}
@@ -410,11 +256,116 @@ export function TaskActionsMenu({
   )
 }
 
+// The read-only affordance in the detail header: a crossed-out pencil shown
+// only while a task lacks edit permission (a spawner declined to forward it).
+// Its lone menu item grants edits via the same UI-only PATCH the old checkbox
+// used; once granted the parent stops rendering this, so the icon disappears.
+export function ReadOnlyMenu({ onAllowEdits }: { onAllowEdits: () => void }) {
+  return (
+    <ActionsMenu
+      triggerClassName="edit-title-button"
+      triggerLabel="Read-only — click to allow edits"
+      triggerTitle="Read-only — click to allow edits"
+      trigger={
+        <svg
+          width="15"
+          height="15"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+        >
+          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+          {/* The slash that reads the pencil as disabled/read-only. */}
+          <line x1="3" y1="3" x2="21" y2="21" />
+        </svg>
+      }
+      items={[
+        { key: 'allowEdits', label: 'Allow edits', onSelect: onAllowEdits },
+      ]}
+    />
+  )
+}
+
+// The status actions a task's kebab menu can fire, mirroring the buttons the
+// detail header used to carry, plus archive/restore.
+export type TaskAction =
+  | 'launch'
+  | 'wedge'
+  | 'rest'
+  | 'land'
+  | 'copyId'
+  | 'markUnread'
+  | 'archive'
+  | 'restore'
+
+// The non-status actions that sit below a separator at the foot of the kebab
+// menu. A single divider is drawn before the first of these that appears.
+const FOOTER_ACTIONS = new Set<TaskAction>(['copyId', 'markUnread', 'archive'])
+
+// The kebab (⋮) menu on a task list row. It carries the status actions that
+// used to live as buttons in the detail header, plus Archive/Restore — but only
+// the items that would be both *visible and enabled* for the task's current
+// status, so e.g. a landed task offers Wedge/Rest/Archive but not Land. An
+// archived task collapses to a single Restore.
+export function TaskActionsMenu({
+  task,
+  onAction,
+}: {
+  task: TaskWithProject
+  onAction: (action: TaskAction) => void
+}) {
+  // Build the items from the same per-status rules the header buttons encoded:
+  //  - launch:  a scheduled task (scheduledFor set, resting or wedged), to run it early
+  //  - wedge:   any task not already wedged
+  //  - rest:    a wedged or landed task, to return it to rest
+  //  - land:       any task not already landed
+  //  - copyId:     any task, to copy its id to the clipboard
+  //  - markUnread: any task that isn't already showing unviewed updates
+  //  - archive:    any non-riding task (a riding one has a live run)
+  const actions: { action: TaskAction; label: string }[] = []
+  if (task.archived) {
+    actions.push({ action: 'restore', label: 'Restore' })
+  } else {
+    if (task.scheduledFor) actions.push({ action: 'launch', label: 'Launch' })
+    if (task.status !== 'wedged')
+      actions.push({ action: 'wedge', label: 'Wedge' })
+    if (task.status === 'wedged' || task.status === 'landed')
+      actions.push({ action: 'rest', label: 'Rest' })
+    if (task.status !== 'landed') actions.push({ action: 'land', label: 'Land' })
+    actions.push({ action: 'copyId', label: 'Copy ID' })
+    if (!isUnread(task))
+      actions.push({ action: 'markUnread', label: 'Mark unread' })
+    if (task.status !== 'riding')
+      actions.push({ action: 'archive', label: 'Archive' })
+  }
+
+  return (
+    <ActionsMenu
+      triggerClassName="task-kebab"
+      triggerLabel="Task actions"
+      trigger="⋮"
+      items={actions.map(({ action, label }, i) => ({
+        key: action,
+        label,
+        className: `task-menu-item-${action}`,
+        // Set the footer actions (Copy ID, Mark unread, Archive) apart from the
+        // status actions above with a single separator before the first of them.
+        separatorBefore:
+          FOOTER_ACTIONS.has(action) &&
+          !FOOTER_ACTIONS.has(actions[i - 1]?.action),
+        onSelect: () => onAction(action),
+      }))}
+    />
+  )
+}
+
 // The kebab on a section header (a status, or a date subheader within a split
-// status). Its one action archives every task in that section at once. Shares the
-// row kebab's trigger and popup styling, opening the popup down and to the right
-// from the trigger like the task menu; with a single item it skips the roving
-// navigation.
+// status). Its one action archives every task in that section at once. Shares
+// the row kebab's trigger and popup styling.
 export function SectionActionsMenu({
   count,
   onArchive,
@@ -422,86 +373,20 @@ export function SectionActionsMenu({
   count: number
   onArchive: () => void
 }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  const buttonRef = useRef<HTMLButtonElement>(null)
-  const itemRef = useRef<HTMLButtonElement>(null)
-  const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(
-    null,
-  )
-
-  useEffect(() => {
-    if (!open) {
-      setAnchor(null)
-      return
-    }
-    const place = () => {
-      const r = buttonRef.current?.getBoundingClientRect()
-      if (r) setAnchor({ top: r.bottom + 4, left: r.left })
-    }
-    place()
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    window.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKey)
-    window.addEventListener('resize', place)
-    window.addEventListener('scroll', place, true)
-    return () => {
-      window.removeEventListener('mousedown', onDown)
-      window.removeEventListener('keydown', onKey)
-      window.removeEventListener('resize', place)
-      window.removeEventListener('scroll', place, true)
-    }
-  }, [open])
-
-  // Focus the single item once the popup is placed, so Escape/Enter land on it.
-  useEffect(() => {
-    if (open && anchor) itemRef.current?.focus()
-  }, [open, anchor])
-
   return (
-    <div className="task-menu section-menu" ref={ref}>
-      <button
-        ref={buttonRef}
-        type="button"
-        className="task-kebab"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label="Section actions"
-        onClick={(e) => {
-          e.stopPropagation()
-          setOpen((o) => !o)
-        }}
-      >
-        ⋮
-      </button>
-      {open && anchor && (
-        <div
-          className="task-menu-popup"
-          role="menu"
-          style={{ top: anchor.top, left: anchor.left }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button
-            ref={itemRef}
-            type="button"
-            role="menuitem"
-            tabIndex={-1}
-            className="task-menu-item task-menu-item-archive"
-            onClick={(e) => {
-              e.stopPropagation()
-              setOpen(false)
-              onArchive()
-            }}
-          >
-            Archive {count} {count === 1 ? 'task' : 'tasks'}
-          </button>
-        </div>
-      )}
-    </div>
+    <ActionsMenu
+      className="task-menu section-menu"
+      triggerClassName="task-kebab"
+      triggerLabel="Section actions"
+      trigger="⋮"
+      items={[
+        {
+          key: 'archive',
+          label: `Archive ${count} ${count === 1 ? 'task' : 'tasks'}`,
+          className: 'task-menu-item-archive',
+          onSelect: onArchive,
+        },
+      ]}
+    />
   )
 }
