@@ -103,6 +103,38 @@ export function daemonConnected(): boolean {
   return primary != null
 }
 
+// Close every daemon link, so the API's shutdown can actually finish.
+//
+// The daemon WS is an UPGRADED connection on the API's own http.Server, and an
+// upgraded connection never ends on its own — so `server.close()`'s callback can
+// never fire while one is attached, and the shutdown force-timer becomes the only
+// exit path on every single reload: a measured 4.0s of API downtime per
+// `server/**` edit, ~3s of it that timer. Closing the link lets the drain finish
+// as soon as in-flight requests do — measured at 0.7s.
+//
+// Dropping the link here costs nothing the reload wasn't already going to cost.
+// The daemon keeps its children and its per-run replay buffers, reconnects on its
+// own 1s loop, and re-announces the runs it holds (draining flag included) — the
+// same reattach a restart always took, just three seconds earlier. Nothing on
+// either side distinguishes this from the abrupt peer death it replaces: the
+// server's close and error handlers are the same zero-arg function, and the
+// daemon's close listener ignores the event and reconnects unconditionally.
+export function closeDaemonConnections(): void {
+  for (const ws of daemons) {
+    try {
+      ws.close(1001, 'server shutting down')
+    } catch {
+      // A socket already past closing throws rather than no-oping; force it down
+      // instead, since a live one here is exactly what blocks the drain.
+      try {
+        ws.terminate()
+      } catch {
+        // nothing left to do — it is gone either way
+      }
+    }
+  }
+}
+
 export function daemonServes(slug: string): boolean {
   return registeredSlugs.has(slug)
 }

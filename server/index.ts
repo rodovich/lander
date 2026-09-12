@@ -17,6 +17,7 @@ import { applyStatePatch } from './flowstate'
 import { isAgentKind } from './agent'
 import {
   attachDaemonServer,
+  closeDaemonConnections,
   daemonConnected,
   daemonServes,
   daemonSlugs,
@@ -4343,12 +4344,22 @@ if (process.env.NODE_ENV !== 'test' && process.env.VITEST !== 'true') {
     if (shuttingDown) return
     shuttingDown = true
     clearInterval(scheduler)
+    // A backstop, not the routine exit — and it must stay well under daemon.ts's
+    // RECONNECT_GRACE_MS (15s). Closing the daemon link below arms that grace,
+    // and a process that outlived it would push `crashed` into runs whose daemon
+    // is alive and well: a platform-kill wedge on disk, and the `runId` the fresh
+    // server needs to reattach deleted with it.
     const force = setTimeout(() => process.exit(0), 3_000)
     force.unref()
     server.close(() => {
       clearTimeout(force)
       process.exit(0)
     })
+    // After server.close(), so the listener is already shut. Without this the
+    // callback above never fires at all — the daemon's upgraded socket holds the
+    // drain open forever and the force timer is the only way out. In-flight HTTP
+    // is deliberately untouched: that is what the drain exists to finish.
+    closeDaemonConnections()
   }
   process.on('SIGTERM', shutdown)
   process.on('SIGINT', shutdown)
