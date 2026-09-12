@@ -1,4 +1,5 @@
-import { Fragment, memo, useState, type ReactNode } from 'react'
+import { Fragment, memo, type ReactNode } from 'react'
+import { CopyButton } from './copyButton'
 import { parseBlocks, type Block } from './markdownBlocks'
 import { timed } from './perf'
 
@@ -284,58 +285,12 @@ function renderInline(
   return nodes
 }
 
-// A fenced code block with a clipboard button in its corner, mirroring the
-// message-level copy button. Briefly flips to a checkmark after a copy.
+// A fenced code block with a copy button in its corner, like the one beside a
+// whole message.
 function CodeBlock({ text }: { text: string }): JSX.Element {
-  const [copied, setCopied] = useState(false)
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch {
-      // Clipboard access can be denied (e.g. insecure context); ignore.
-    }
-  }
   return (
     <pre className="code-block">
-      <button
-        type="button"
-        className="code-copy"
-        onClick={copy}
-        title="Copy code"
-        aria-label={copied ? 'Copied' : 'Copy code'}
-      >
-        {copied ? (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-            <path
-              d="M20 6 9 17l-5-5"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        ) : (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-            <rect
-              x="9"
-              y="9"
-              width="11"
-              height="11"
-              rx="2"
-              stroke="currentColor"
-              strokeWidth="2"
-            />
-            <path
-              d="M5 15V5a2 2 0 0 1 2-2h10"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-            />
-          </svg>
-        )}
-      </button>
+      <CopyButton text={text} label="Copy code" className="code-copy" size={14} />
       <code>{text}</code>
     </pre>
   )

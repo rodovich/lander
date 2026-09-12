@@ -70,6 +70,16 @@ describe('findCodeSpans', () => {
 })
 
 describe('Markdown rendering', () => {
+  it('puts a copy button in the corner of a fenced code block', () => {
+    expect(render('```\nnpm test\n```')).toBe(
+      '<pre class="code-block"><button type="button" class="code-copy" title="Copy code" aria-label="Copy code">' +
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+        '<rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="2"></rect>' +
+        '<path d="M5 15V5a2 2 0 0 1 2-2h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>' +
+        '</svg></button><code>npm test</code></pre>',
+    )
+  })
+
   // The block layer declines to open a fence here (markdownBlocks.test.ts);
   // what reaches the page has to be the inline code span that leaves behind.
   it('reads a fence-looking line with a backticked info string as inline code', () => {
