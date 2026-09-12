@@ -1,11 +1,10 @@
 import { memo, useEffect, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { loadFlows, uiHeaders, uploadAttachments } from './api'
-import { AttachButton } from './attachButton'
-import { clipboardImageFiles } from './fileDrop'
+import { ComposerPanel } from './composerPanel'
 import { agentDisplayName } from './agentDisplay'
 import { lastPathComponent } from './format'
-import { useFileDrop, useSessionState } from './hooks'
+import { useSessionState } from './hooks'
 import type { FlowMeta, Project, Task } from './types'
 
 // The sidebar's new-task composer: the draft message and its attachments, the
@@ -50,16 +49,8 @@ export const NewTaskForm = memo(function NewTaskForm({
   const [message, setMessage] = useSessionState('lander:draft:newTask', '')
   // Files attached to the message, held as File objects (not session-persisted
   // — File isn't serializable) and uploaded to the durable store on submit.
-  // The paperclip <AttachButton> owns its own hidden file input.
   const [newFiles, setNewFiles] = useState<File[]>([])
   const [submitting, setSubmitting] = useState(false)
-
-  // The whole panel is one drop target, including its textarea, paperclip, and
-  // surrounding action area.
-  const newMessageDrop = useFileDrop<HTMLFormElement>(
-    (picked) => setNewFiles((prev) => [...prev, ...picked]),
-    submitting,
-  )
 
   // The project a new task is created in: an explicit pick from the form's
   // dropdown if made, else the single shown project, else the project of the
@@ -134,76 +125,52 @@ export const NewTaskForm = memo(function NewTaskForm({
     }
   }
 
-  function onSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    void createTask()
-  }
-
-  function onMessageKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    // Plain Enter creates the task; Shift+Enter / Option(Alt)+Enter inserts a newline.
-    if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
-      e.preventDefault()
-      void createTask()
-    }
-  }
-
   return (
-    <form
-      className={`new-task${newMessageDrop.active ? ' file-drop-active' : ''}`}
-      onSubmit={onSubmit}
-      style={{ height }}
-      {...newMessageDrop.handlers}
-    >
-      <div className="new-task-head">
-        <h2>New task</h2>
-        <select
-          className="new-task-agent"
-          value={flow}
-          // No cast: the option values come from the registry, so there is no
-          // closed union to assert the string into.
-          onChange={(e) => setFlow(e.target.value)}
-        >
-          {flowOptions.map((f) => (
-            <option key={f.name} value={f.name} title={f.description}>
-              {agentDisplayName(f.name)}
-            </option>
-          ))}
-        </select>
-        {projects.length > 1 && (
+    <ComposerPanel
+      as="form"
+      className="new-task"
+      height={height}
+      value={message}
+      onChange={setMessage}
+      onSubmit={() => void createTask()}
+      placeholder="Message"
+      rows={4}
+      busy={submitting}
+      files={newFiles}
+      onAddFiles={(picked) => setNewFiles((prev) => [...prev, ...picked])}
+      onClearFiles={() => setNewFiles([])}
+      head={
+        <div className="new-task-head">
+          <h2>New task</h2>
           <select
-            className="new-task-project"
-            value={targetSlug}
-            onChange={(e) => setNewProject(e.target.value)}
+            className="new-task-agent"
+            value={flow}
+            // No cast: the option values come from the registry, so there is no
+            // closed union to assert the string into.
+            onChange={(e) => setFlow(e.target.value)}
           >
-            {projects.map((p) => (
-              <option key={p.slug} value={p.slug}>
-                {lastPathComponent(p.path)}
+            {flowOptions.map((f) => (
+              <option key={f.name} value={f.name} title={f.description}>
+                {agentDisplayName(f.name)}
               </option>
             ))}
           </select>
-        )}
-      </div>
-      <textarea
-        placeholder="Message"
-        rows={4}
-        value={message}
-        onChange={(e) => setMessage(e.target.value)}
-        onKeyDown={onMessageKeyDown}
-        onPaste={(e) => {
-          if (submitting) return
-          const images = clipboardImageFiles(e.clipboardData)
-          if (images.length === 0) return
-          e.preventDefault()
-          setNewFiles((prev) => [...prev, ...images])
-        }}
-      />
-      <div className="composer-actions">
-        <AttachButton
-          files={newFiles}
-          onAdd={(picked) => setNewFiles((prev) => [...prev, ...picked])}
-          onClear={() => setNewFiles([])}
-          disabled={submitting}
-        />
+          {projects.length > 1 && (
+            <select
+              className="new-task-project"
+              value={targetSlug}
+              onChange={(e) => setNewProject(e.target.value)}
+            >
+              {projects.map((p) => (
+                <option key={p.slug} value={p.slug}>
+                  {lastPathComponent(p.path)}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      }
+      actions={
         <button
           type="submit"
           className="launch-btn"
@@ -211,7 +178,7 @@ export const NewTaskForm = memo(function NewTaskForm({
         >
           {submitting ? 'Launching…' : 'Launch'}
         </button>
-      </div>
-    </form>
+      }
+    />
   )
 })

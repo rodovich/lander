@@ -1,9 +1,7 @@
 import { memo, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { uiHeaders, uploadAttachments } from './api'
-import { AttachButton } from './attachButton'
-import { clipboardImageFiles } from './fileDrop'
-import { useFileDrop } from './hooks'
+import { ComposerPanel } from './composerPanel'
 import { taskKeyOf } from './taskRef'
 import { UsageReadout } from './usageReadout'
 import type { TaskWithProject } from './types'
@@ -38,20 +36,7 @@ export const Composer = memo(function Composer({
 }) {
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const key = taskKeyOf(task)
-
-  // The whole reply panel is one drop target, including its textarea,
-  // paperclip, and surrounding action area. Keep the target bound to the
-  // task currently open so switching tasks cannot leak a dropped file into
-  // another task's draft.
-  const replyDrop = useFileDrop<HTMLDivElement>(
-    (picked) => {
-      setReplyFiles((prev) => ({
-        ...prev,
-        [key]: [...(prev[key] ?? []), ...picked],
-      }))
-    },
-    !!task.archived || (sendingBy[key] ?? false),
-  )
+  const sending = sendingBy[key] ?? false
 
   async function sendReply() {
     const id = task.id
@@ -85,62 +70,31 @@ export const Composer = memo(function Composer({
     }
   }
 
-  function onReplyKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    // Plain Enter sends; Shift+Enter / Option(Alt)+Enter inserts a newline.
-    if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
-      e.preventDefault()
-      void sendReply()
-    }
-  }
-
   return (
-    <div
-      className={`composer-bar${replyDrop.active ? ' file-drop-active' : ''}`}
-      style={{ height }}
-      {...replyDrop.handlers}
-    >
-      <textarea
-        ref={composerRef}
-        className="composer"
-        placeholder={task.archived ? 'Restore this task to reply' : 'Reply…'}
-        rows={3}
-        value={replies[key] ?? ''}
-        disabled={(sendingBy[key] ?? false) || !!task.archived}
-        onChange={(e) =>
-          setReplies((prev) => ({
-            ...prev,
-            [key]: e.target.value,
-          }))
-        }
-        onKeyDown={onReplyKeyDown}
-        onPaste={(e) => {
-          const images = clipboardImageFiles(e.clipboardData)
-          if (images.length === 0) return
-          e.preventDefault()
-          setReplyFiles((prev) => ({
-            ...prev,
-            [key]: [...(prev[key] ?? []), ...images],
-          }))
-        }}
-      />
-      <div className="composer-actions">
-        {!task.archived && (
-          <AttachButton
-            files={replyFiles[key] ?? []}
-            onAdd={(picked) =>
-              setReplyFiles((prev) => ({
-                ...prev,
-                [key]: [...(prev[key] ?? []), ...picked],
-              }))
-            }
-            onClear={() =>
-              setReplyFiles((prev) => ({ ...prev, [key]: [] }))
-            }
-            disabled={sendingBy[key] ?? false}
-          />
-        )}
-        <UsageReadout task={task} />
-      </div>
-    </div>
+    <ComposerPanel
+      className="composer-bar"
+      height={height}
+      value={replies[key] ?? ''}
+      onChange={(value) => setReplies((prev) => ({ ...prev, [key]: value }))}
+      onSubmit={() => void sendReply()}
+      placeholder={task.archived ? 'Restore this task to reply' : 'Reply…'}
+      rows={3}
+      textareaClassName="composer"
+      textareaRef={composerRef}
+      textareaDisabled={sending || !!task.archived}
+      busy={sending || !!task.archived}
+      // Bound to the task currently open, so switching tasks cannot leak a
+      // dropped or pasted file into another task's draft.
+      files={replyFiles[key] ?? []}
+      onAddFiles={(picked) =>
+        setReplyFiles((prev) => ({
+          ...prev,
+          [key]: [...(prev[key] ?? []), ...picked],
+        }))
+      }
+      onClearFiles={() => setReplyFiles((prev) => ({ ...prev, [key]: [] }))}
+      showAttach={!task.archived}
+      actions={<UsageReadout task={task} />}
+    />
   )
 })
