@@ -1,7 +1,7 @@
 import { memo, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { uiHeaders, uploadAttachments } from './api'
-import { AttachButton } from './attachments'
+import { AttachButton } from './attachButton'
 import { clipboardImageFiles } from './fileDrop'
 import { useFileDrop } from './hooks'
 import { taskKeyOf } from './taskRef'

@@ -1,3 +1,4 @@
+import { Collapsible, CollapsibleRow } from './collapsible'
 import type { ToolItem } from './types'
 
 // The before/after hunks of a file-writing tool call, rendered as a unified
@@ -30,53 +31,6 @@ function DiffView({ edits }: { edits: { old: string; new: string }[] }) {
           ))}
         </pre>
       ))}
-    </div>
-  )
-}
-
-// A disclosure: a triangle that rotates open, with revealable content dropping
-// below behind a line down its left that marks the section's scope. The triangle
-// either carries its own `label` (e.g. a turn's "12 STEPS…" summary) or sits
-// beside an independently-clickable `summary` (e.g. a tool chip, which has its
-// own click action). Both the tool detail and the turn fold render through this,
-// so they share one look. `onToggle` gets the click event so a caller can read
-// modifier keys.
-export function Collapsible({
-  open,
-  onToggle,
-  label,
-  summary,
-  toggleTitle,
-  toggleLabel,
-  children,
-}: {
-  open: boolean
-  onToggle: (e: React.MouseEvent) => void
-  label?: React.ReactNode
-  summary?: React.ReactNode
-  toggleTitle?: string
-  toggleLabel?: string
-  children?: React.ReactNode
-}) {
-  return (
-    <div className="collapsible">
-      <div className="collapsible-row">
-        <button
-          type="button"
-          className="collapsible-toggle"
-          aria-expanded={open}
-          aria-label={toggleLabel}
-          title={toggleTitle}
-          onClick={onToggle}
-        >
-          <span className={'step-diff-caret' + (open ? ' open' : '')}>▶</span>
-          {label}
-        </button>
-        {summary}
-      </div>
-      {open && children && (
-        <div className="collapsible-body">{children}</div>
-      )}
     </div>
   )
 }
@@ -183,7 +137,7 @@ export function ToolStep({
           )}
         </Collapsible>
       ) : (
-        <div className="collapsible-row">{chip}</div>
+        <CollapsibleRow>{chip}</CollapsibleRow>
       )}
     </div>
   )

@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react'
+import { Collapsible, CollapsibleRow } from './collapsible'
 import { formatTimestamp } from './format'
 import { taskHref } from './taskRef'
-import { Collapsible } from './toolStep'
 
 // The statuses that have a tint of their own. Anything else — a status this
 // client doesn't know, or one carrying whitespace that would inject a second
@@ -92,9 +92,7 @@ export function TimelineNote({
           <div className="timeline-note-detail">{detail.body}</div>
         </Collapsible>
       ) : (
-        // The same row a disclosure's summary sits on, so a note with
-        // revealable detail and one without share one geometry.
-        <div className="collapsible-row">{head}</div>
+        <CollapsibleRow>{head}</CollapsibleRow>
       )}
       {list && <ul className="timeline-note-list">{list}</ul>}
     </div>

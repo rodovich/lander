@@ -1,7 +1,7 @@
 import { memo, useEffect, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { loadFlows, uiHeaders, uploadAttachments } from './api'
-import { AttachButton } from './attachments'
+import { AttachButton } from './attachButton'
 import { clipboardImageFiles } from './fileDrop'
 import { agentDisplayName } from './agentDisplay'
 import { lastPathComponent } from './format'
