@@ -57,7 +57,22 @@ describe('availableTaskActions', () => {
 
   it('collapses an archived task to a single Restore', () => {
     expect(availableTaskActions(task({ archived: true, status: 'landed' }))).toEqual([
-      { action: 'restore', label: 'Restore' },
+      { action: 'restore', label: 'Restore', group: 'status' },
+    ])
+  })
+
+  // The menu rules a line wherever the group changes, so the status actions
+  // must all come first or it would draw more than one.
+  it('groups the status changes ahead of everything else', () => {
+    const groups = (over: Partial<TaskWithProject>) =>
+      availableTaskActions(task(over)).map((o) => `${o.action}:${o.group}`)
+    expect(groups({ status: 'wedged', scheduledFor: LATER })).toEqual([
+      'launch:status',
+      'rest:status',
+      'land:status',
+      'copyId:other',
+      'markUnread:other',
+      'archive:other',
     ])
   })
 })

@@ -7,6 +7,7 @@ import {
   CopyIdButton,
   TaskActionsMenu,
 } from './menus'
+import { availableTaskActions } from './taskActions'
 import type { TaskAction } from './taskActions'
 import { taskKeyOf } from './taskRef'
 import type { TaskWithProject } from './types'
@@ -133,7 +134,7 @@ export function DetailHeader({
             <AllowEditsMenu onAllowEdits={() => void setAllowEdits(true)} />
           )}
           <TaskActionsMenu
-            task={task}
+            actions={availableTaskActions(task)}
             onAction={(action) => onTaskAction(task, action)}
           />
           <CopyConversationButton markdown={copyMarkdown} />

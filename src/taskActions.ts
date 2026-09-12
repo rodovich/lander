@@ -13,7 +13,14 @@ export type TaskAction =
   | 'archive'
   | 'restore'
 
-export type TaskActionOption = { action: TaskAction; label: string }
+// One action a task offers. `group` says what kind of thing it does — move the
+// task between statuses, or act on it some other way — so a menu can set the
+// two kinds apart without knowing which action is which.
+export type TaskActionOption = {
+  action: TaskAction
+  label: string
+  group: 'status' | 'other'
+}
 
 // What a task offers right now: only the actions that would be both *visible
 // and enabled* for its current status, so e.g. a landed task offers
@@ -28,18 +35,21 @@ export type TaskActionOption = { action: TaskAction; label: string }
 //  - markUnread: any task that isn't already showing unviewed updates
 //  - archive:    any non-riding task (a riding one has a live run the server won't archive)
 //
-// In menu order, which is also the order the labels read in.
+// In menu order: every status action ahead of every other one.
 export function availableTaskActions(task: TaskWithProject): TaskActionOption[] {
-  if (task.archived) return [{ action: 'restore', label: 'Restore' }]
+  if (task.archived)
+    return [{ action: 'restore', label: 'Restore', group: 'status' }]
   const options: TaskActionOption[] = []
-  if (task.scheduledFor) options.push({ action: 'launch', label: 'Launch' })
-  if (task.status !== 'wedged') options.push({ action: 'wedge', label: 'Wedge' })
-  if (task.status === 'wedged' || task.status === 'landed')
-    options.push({ action: 'rest', label: 'Rest' })
-  if (task.status !== 'landed') options.push({ action: 'land', label: 'Land' })
-  options.push({ action: 'copyId', label: 'Copy ID' })
-  if (!isUnread(task)) options.push({ action: 'markUnread', label: 'Mark unread' })
-  if (task.status !== 'riding')
-    options.push({ action: 'archive', label: 'Archive' })
+  const status = (action: TaskAction, label: string) =>
+    options.push({ action, label, group: 'status' })
+  const other = (action: TaskAction, label: string) =>
+    options.push({ action, label, group: 'other' })
+  if (task.scheduledFor) status('launch', 'Launch')
+  if (task.status !== 'wedged') status('wedge', 'Wedge')
+  if (task.status === 'wedged' || task.status === 'landed') status('rest', 'Rest')
+  if (task.status !== 'landed') status('land', 'Land')
+  other('copyId', 'Copy ID')
+  if (!isUnread(task)) other('markUnread', 'Mark unread')
+  if (task.status !== 'riding') other('archive', 'Archive')
   return options
 }

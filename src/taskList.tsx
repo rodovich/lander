@@ -7,6 +7,7 @@ import {
   lastPathComponent,
 } from './format'
 import { SectionActionsMenu, TaskActionsMenu } from './menus'
+import { availableTaskActions } from './taskActions'
 import type { TaskAction } from './taskActions'
 import { tick } from './perf'
 import { isUnread } from './taskMeta'
@@ -403,7 +404,7 @@ export const TaskList = memo(function TaskList({
               </div>
             </div>
             <TaskActionsMenu
-              task={task}
+              actions={availableTaskActions(task)}
               onAction={(action) => onTaskAction(task, action)}
             />
           </li>

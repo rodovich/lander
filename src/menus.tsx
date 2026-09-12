@@ -1,9 +1,7 @@
 import { Fragment, useEffect, useRef } from 'react'
 import { CopyButton } from './copyButton'
 import { useAnchoredPopup } from './hooks'
-import { availableTaskActions } from './taskActions'
-import type { TaskAction } from './taskActions'
-import type { TaskWithProject } from './types'
+import type { TaskAction, TaskActionOption } from './taskActions'
 
 // Copies a task's id, styled to sit beside the title's sparkle and fade in with
 // it on hover. It wears a link, not a clipboard: the id is how one task
@@ -222,35 +220,26 @@ export function AllowEditsMenu({ onAllowEdits }: { onAllowEdits: () => void }) {
   )
 }
 
-// The non-status actions that sit below a separator at the foot of the kebab
-// menu. A single divider is drawn before the first of these that appears.
-const FOOTER_ACTIONS = new Set<TaskAction>(['copyId', 'markUnread', 'archive'])
-
-// The kebab (⋮) menu on a task list row and in the detail header. What it can
-// offer a given task is availableTaskActions'; this only draws it.
+// The kebab (⋮) menu on a task list row and in the detail header. It draws the
+// actions it's handed — which ones a task offers is availableTaskActions' call
+// — with a separator wherever one group of them gives way to the next.
 export function TaskActionsMenu({
-  task,
+  actions,
   onAction,
 }: {
-  task: TaskWithProject
+  actions: TaskActionOption[]
   onAction: (action: TaskAction) => void
 }) {
-  const actions = availableTaskActions(task)
-
   return (
     <ActionsMenu
       triggerClassName="task-kebab"
       triggerLabel="Task actions"
       trigger="⋮"
-      items={actions.map(({ action, label }, i) => ({
+      items={actions.map(({ action, label, group }, i) => ({
         key: action,
         label,
         className: `task-menu-item-${action}`,
-        // Set the footer actions (Copy ID, Mark unread, Archive) apart from the
-        // status actions above with a single separator before the first of them.
-        separatorBefore:
-          FOOTER_ACTIONS.has(action) &&
-          !FOOTER_ACTIONS.has(actions[i - 1]?.action),
+        separatorBefore: i > 0 && actions[i - 1].group !== group,
         onSelect: () => onAction(action),
       }))}
     />
