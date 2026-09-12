@@ -531,8 +531,10 @@ function parseDateArg(flag, value) {
 // (see taskMetadata), even when --text matched inside one. --since/--until
 // filter by createdAt, inclusive. --text searches title + message text,
 // case-insensitively, and also matches a task's exact id; repeat it for an
-// AND, comma-delimit one occurrence for an OR (see matchesText). --archived lists the archived tasks instead of the
-// active ones (the two pools are disjoint); all other filters still apply.
+// AND, comma-delimit one occurrence for an OR (see matchesText). --archived
+// lists the archive alone; otherwise which pools a query reads follows from what
+// it asks for (see poolsFor), and a row read from the archive is marked as one.
+
 // The statuses a served row can carry. `resting` is not one of the three the
 // task file stores: the server derives it for a stored `riding` with no live run
 // (publicTaskStatus), and it is that served value --status compares against. A
@@ -540,6 +542,24 @@ function parseDateArg(flag, value) {
 // with — an unrecognized status and an empty project both print "(no tasks)",
 // and the caller cannot tell which it got.
 const STATUSES = ['landed', 'riding', 'resting', 'wedged']
+
+// Which pools a query reads. Archiving files a finished task away — it moves the
+// record out of tasks/ and out of the scheduler's sweeps — so the pools are not
+// two kinds of task, they are recent work and everything before it, and the
+// second is the larger by far: nine in ten landed tasks sit in the archive.
+// A `landed` query answered from the active pool alone would therefore speak for
+// a tenth of its subject. A live status is the opposite case: a task in the
+// archive has no run, so the archive cannot hold a riding one, and reading it
+// would only cost a round trip.
+// --text is the exception: it searches message bodies, which only the full
+// projection carries, so covering the archive for one would pull tens of
+// megabytes per call. It stays with the active pool until that filter runs
+// server-side and a summary can answer it.
+const poolsFor = ({ archived, status, text }) => {
+  if (archived) return ['archived']
+  if (text) return ['active']
+  return status === 'landed' ? ['active', 'archived'] : ['active']
+}
 
 async function listTasks(args) {
   let status
@@ -573,23 +593,43 @@ async function listTasks(args) {
   // ever prints — the full list is ~99% conversation and runs to tens of
   // megabytes. --text is the exception: matchesText searches message text, so a
   // filtered call still needs the whole thing.
-  const query = [archived ? 'archived=1' : '', textGroups.length ? '' : 'view=summary']
-    .filter(Boolean)
-    .join('&')
-  const res = await call(PROJECT, `/tasks${query ? `?${query}` : ''}`, {
-    method: 'GET',
-  })
-  let tasks = Array.isArray(res) ? res : (res.tasks ?? [])
+  const fetchPool = async (pool) => {
+    const query = [
+      pool === 'archived' ? 'archived=1' : '',
+      textGroups.length ? '' : 'view=summary',
+    ]
+      .filter(Boolean)
+      .join('&')
+    const res = await call(PROJECT, `/tasks${query ? `?${query}` : ''}`, {
+      method: 'GET',
+    })
+    const rows = Array.isArray(res) ? res : (res.tasks ?? [])
+    // Marked from the request rather than the response: this call knows which
+    // pool it asked for, and the mark has to outlive taskMetadata's projection.
+    return pool === 'archived' ? rows.map((t) => ({ ...t, archived: true })) : rows
+  }
+  let tasks = (
+    await Promise.all(
+      poolsFor({ archived, status, text: textGroups.length > 0 }).map(fetchPool),
+    )
+  ).flat()
   if (status) tasks = tasks.filter((t) => t.status === status)
   if (since != null || until != null)
     tasks = tasks.filter((t) => inDateRange(t.createdAt, { since, until }))
   if (textGroups.length) tasks = tasks.filter((t) => matchesText(t, textGroups))
+  // Each pool arrives newest-first, so a read of both has to be reordered on the
+  // key the server sorted each of them by.
+  tasks.sort((a, b) =>
+    (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt),
+  )
   // Flag the caller's own row so an agent scanning the list never mistakes its
   // own task for a separate one (a `sibling`) — the whole list includes the task
   // running the command, and without this marker there's no way to tell which.
-  const meta = tasks.map((t) =>
-    t.id === TASK ? { ...taskMetadata(t), self: true } : taskMetadata(t),
-  )
+  const meta = tasks.map((t) => ({
+    ...taskMetadata(t),
+    ...(t.archived ? { archived: true } : {}),
+    ...(t.id === TASK ? { self: true } : {}),
+  }))
   if (json) return void console.log(JSON.stringify(meta, null, 2))
   if (!meta.length) return void console.log('(no tasks)')
   for (const t of meta) {
@@ -598,8 +638,9 @@ async function listTasks(args) {
     // armed (see hasRepeat) — a `--interval` series still to fire.
     const repeats = t.repeats ? '  🔁' : ''
     const self = t.self ? '  ← this task' : ''
+    const arch = t.archived ? '  (archived)' : ''
     console.log(
-      `${t.id}  ${t.status.padEnd(7)}  ${t.createdAt}  ${t.updatedAt}  ${t.title}${sched}${repeats}${self}`,
+      `${t.id}  ${t.status.padEnd(7)}  ${t.createdAt}  ${t.updatedAt}  ${t.title}${arch}${sched}${repeats}${self}`,
     )
   }
 }
