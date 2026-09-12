@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { StatusTransition } from './statusTransition'
+import { LifecycleNote } from './lifecycleNote'
 import type { EventItem } from './types'
 
 const AT = '2026-08-21T20:00:00.000Z'
@@ -12,12 +12,12 @@ const render = (
     | undefined = () => undefined,
 ) =>
   renderToStaticMarkup(
-    <StatusTransition event={event} slug="proj" linkTask={linkTask} />,
+    <LifecycleNote event={event} slug="proj" linkTask={linkTask} />,
   )
 
 const base = { id: 'e1', at: AT, kind: 'event' } as const
 
-describe('StatusTransition', () => {
+describe('LifecycleNote', () => {
   it('reads as the task’s name followed by the verb', () => {
     const html = render({
       ...base,

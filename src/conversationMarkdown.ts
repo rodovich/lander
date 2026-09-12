@@ -11,7 +11,7 @@
 // collapsed reading is the one a freshly-opened task shows.
 
 import { formatTimestamp } from './format'
-import { EVENT_VERB } from './statusTransition'
+import { EVENT_VERB } from './lifecycleNote'
 import { groupInferences, planTurnCollapse } from './turnCollapse'
 import type { RideItem, TimelineEntry } from './timeline'
 import type {
@@ -62,7 +62,7 @@ const attachmentLine = (files: Attachment[]) =>
 // that stands in for it.
 const refName = (ref: { id: string; title?: string }) => ref.title || ref.id
 
-// What a cross-task action says, matching taskActionTransition's wording minus
+// What a cross-task action says, matching taskActionNote's wording minus
 // the links (a task chip is a name in text).
 function actionSentence(item: TaskActionItem): string {
   const target = refName(item.target)
@@ -88,7 +88,7 @@ function actionSentence(item: TaskActionItem): string {
     : `messaged task ${target}`
 }
 
-// A lifecycle event's sentence, matching statusTransition's.
+// A lifecycle event's sentence, matching lifecycleNote's.
 function eventSentence(
   event: Extract<TimelineEntry, { kind: 'event' }>['event'],
 ): string {

@@ -4,19 +4,19 @@ import { MessageAttachments } from './attachments'
 import { conversationMarkdown } from './conversationMarkdown'
 import { formatTimestamp } from './format'
 import { GrantControl } from './grants'
+import { LifecycleNote } from './lifecycleNote'
 import type { TaskLinkResolver } from './markdown'
 import {
+  AllowEditsMenu,
   CopyConversationButton,
   CopyIdButton,
-  ReadOnlyMenu,
   TaskActionsMenu,
 } from './menus'
 import type { TaskAction } from './menus'
 import { MessageText } from './messageText'
 import { tick, timed } from './perf'
 import { RideTurn } from './rideTurn'
-import { StatusTransition } from './statusTransition'
-import { TaskActionTransition } from './taskActionTransition'
+import { TaskActionNote } from './taskActionNote'
 import { openRide, taskAgentModelName } from './taskMeta'
 import { taskKeyOf } from './taskRef'
 import { buildTimeline } from './timeline'
@@ -278,7 +278,7 @@ export const Conversation = memo(function Conversation({
               />
             )}
             {!task.allowEdits && !task.archived && (
-              <ReadOnlyMenu onAllowEdits={() => void setAllowEdits(true)} />
+              <AllowEditsMenu onAllowEdits={() => void setAllowEdits(true)} />
             )}
             <TaskActionsMenu
               task={task}
@@ -317,7 +317,7 @@ export const Conversation = memo(function Conversation({
         {timeline.map((entry) => {
           if (entry.kind === 'event') {
             return (
-              <StatusTransition
+              <LifecycleNote
                 key={`e-${entry.event.id}`}
                 event={entry.event}
                 slug={task.projectSlug}
@@ -330,7 +330,7 @@ export const Conversation = memo(function Conversation({
             // it acted, or that ride streamed nothing. Everything else reaches
             // the reader inside its RideTurn.
             return (
-              <TaskActionTransition
+              <TaskActionNote
                 key={`ta-${entry.action.id}`}
                 item={entry.action}
                 linkTask={linkTask}

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { TaskActionTransition } from './taskActionTransition'
+import { TaskActionNote } from './taskActionNote'
 import type { TaskActionItem } from './types'
 
 const AT = '2026-08-21T20:00:00.000Z'
@@ -11,9 +11,9 @@ const render = (
   linkTask: (id: string, projectSlug?: string) =>
     | { href: string; title: string; status: string }
     | undefined = () => undefined,
-) => renderToStaticMarkup(<TaskActionTransition item={item} linkTask={linkTask} />)
+) => renderToStaticMarkup(<TaskActionNote item={item} linkTask={linkTask} />)
 
-describe('TaskActionTransition', () => {
+describe('TaskActionNote', () => {
   it('renders an immediate launch with an authoritative pair href and current metadata', () => {
     const linkTask = vi.fn(() => ({
       href: '/wrong/wrong',

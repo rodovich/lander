@@ -2,7 +2,7 @@ import { Fragment } from 'react'
 import { Collapsible } from './collapsible'
 import type { TaskLinkResolver } from './markdown'
 import { MessageText } from './messageText'
-import { TaskActionTransition } from './taskActionTransition'
+import { TaskActionNote } from './taskActionNote'
 import { ToolStep } from './toolStep'
 import { planTurnActions } from './turnActions'
 import { groupInferences, planTurnCollapse } from './turnCollapse'
@@ -22,7 +22,7 @@ function TurnActions({
   return (
     <div className="turn-notes">
       {actions.map((action) => (
-        <TaskActionTransition
+        <TaskActionNote
           key={`ta-${action.id}`}
           item={action}
           inTurn

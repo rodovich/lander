@@ -22,7 +22,7 @@ export const EVENT_VERB: Record<EventItem['eventKind'], string> = {
 // is set apart by weight/color (each verb wears its status color — launched
 // like riding, wedged, landed — plain otherwise). It rides the shared timeline
 // note, so it reads exactly like an attributed task action.
-export function StatusTransition({
+export function LifecycleNote({
   event,
   slug,
   linkTask,

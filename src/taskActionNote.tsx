@@ -103,7 +103,7 @@ function actionCopy(
 // anchor to. The same note a lifecycle transition uses, differing only in that a
 // sent message hangs its text off the row as revealable detail — so the row
 // reads as an account of the exchange, not just that one happened.
-export function TaskActionTransition({
+export function TaskActionNote({
   item,
   inTurn,
   linkTask,

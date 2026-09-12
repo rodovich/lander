@@ -187,11 +187,11 @@ function ActionsMenu({
   )
 }
 
-// The read-only affordance in the detail header: a crossed-out pencil shown
+// The grant-edits affordance in the detail header: a crossed-out pencil shown
 // only while a task lacks edit permission (a spawner declined to forward it).
 // Its lone menu item grants edits via the same UI-only PATCH the old checkbox
 // used; once granted the parent stops rendering this, so the icon disappears.
-export function ReadOnlyMenu({ onAllowEdits }: { onAllowEdits: () => void }) {
+export function AllowEditsMenu({ onAllowEdits }: { onAllowEdits: () => void }) {
   return (
     <ActionsMenu
       triggerClassName="title-action"
