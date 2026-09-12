@@ -846,12 +846,6 @@ body {
   cursor: default;
 }
 
-/* New-task action row: paperclip on the left, Launch on the right. */
-.composer-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
 .new-task .launch-btn {
   margin-left: auto;
   padding: 6px 12px;
@@ -2549,9 +2543,10 @@ body.resizing-row {
   opacity: 0.6;
 }
 
-/* The row under the reply textarea: the attach control at the left, the usage
-   readout in the right corner. A two-column grid rather than a flex row, so the
-   readout holds the corner by its column even when the attach control isn't
+/* The action row under a composer's textarea, shared by the reply bar and the
+   new-task form: the attach control at the left, and the usage readout or the
+   Launch button in the right corner. A two-column grid rather than a flex row,
+   so the right-hand column holds the corner even when the attach control isn't
    rendered at all — an archived task has nothing to attach to. */
 .composer-actions {
   display: grid;
