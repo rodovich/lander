@@ -181,7 +181,7 @@ export function RuleRow({
               <button
                 type="button"
                 role="menuitem"
-                className="task-menu-item"
+                className="rule-row-menu-item"
                 title={
                   canGrantTask
                     ? undefined
@@ -194,7 +194,7 @@ export function RuleRow({
               <button
                 type="button"
                 role="menuitem"
-                className="task-menu-item"
+                className="rule-row-menu-item"
                 disabled={!canGrantProject}
                 title={
                   canGrantProject
@@ -360,7 +360,7 @@ export function GrantControl({
   }, [open])
 
   return (
-    <div className="task-menu" ref={containerRef}>
+    <div className="grant-control" ref={containerRef}>
       <button
         ref={triggerRef}
         type="button"

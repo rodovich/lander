@@ -2168,6 +2168,13 @@ body {
   position: relative;
 }
 
+/* The header's permission stamp and its popup, held to the stamp's width in the
+   title row. No transform: that would contain the fixed .rule-popup and throw
+   off its viewport coordinates. */
+.grant-control {
+  flex-shrink: 0;
+}
+
 /* The muted "N permissions blocked this turn" line — quiet (it's a review
    surface, not an alarm) but clickable, taking the wedged tone to read as a
    gentle flag. */
@@ -2327,8 +2334,8 @@ body {
 }
 
 /* The two-scope grant menu, dropping down from a row's kebab with its left edge
-   aligned to the kebab. Reuses .task-menu-item for its rows; sits within the
-   fixed .rule-popup, so it needs no escape of its own. */
+   aligned to the kebab. Sits within the fixed .rule-popup, so it needs no escape
+   of its own. */
 .rule-row-menu-popup {
   position: absolute;
   top: 100%;
@@ -2354,13 +2361,31 @@ body {
   margin-bottom: 2px;
 }
 
+/* One grant scope in that menu, read like a kebab menu's items. */
+.rule-row-menu-item {
+  padding: 7px 10px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rule-row-menu-item:hover {
+  background: var(--bg-tinted);
+}
+
 /* Codex's unsupported project scope reads disabled, not clickable. */
-.rule-row-menu-popup .task-menu-item:disabled {
+.rule-row-menu-item:disabled {
   opacity: 0.4;
   cursor: default;
 }
 
-.rule-row-menu-popup .task-menu-item:disabled:hover {
+.rule-row-menu-item:disabled:hover {
   background: none;
 }
 
