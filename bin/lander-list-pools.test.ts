@@ -123,6 +123,25 @@ describe('lander list pool selection', () => {
     expect(seen).toEqual(['/api/proj/tasks'])
   })
 
+  it('reads both pools for a date-bounded window', async () => {
+    const { stdout, code } = await execLander(['list', '--since', '2026-08-02'])
+    expect(code).toBe(0)
+    expect(seen.sort()).toEqual([
+      '/api/proj/tasks?archived=1&view=summary',
+      '/api/proj/tasks?view=summary',
+    ])
+    expect(stdout).toContain('arc-mid')
+    expect(stdout).not.toContain('act-old')
+  })
+
+  it('keeps a date-bounded live-status query on the active pool', async () => {
+    // The window narrows the question; it does not change it into one about
+    // tasks that are no longer running.
+    const { code } = await execLander(['list', '--status', 'riding', '--since', '2026-08-01'])
+    expect(code).toBe(0)
+    expect(seen).toEqual(['/api/proj/tasks?view=summary'])
+  })
+
   it('reads only the archive for --archived', async () => {
     const { stdout, code } = await execLander(['list', '--archived'])
     expect(code).toBe(0)
