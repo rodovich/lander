@@ -2,17 +2,11 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { AskForm } from './asks'
 import { MessageAttachments } from './attachments'
 import { conversationMarkdown } from './conversationMarkdown'
-import { formatTimestamp } from './format'
-import { GrantControl } from './grants'
+import { DetailHeader } from './detailHeader'
 import { LifecycleNote } from './lifecycleNote'
 import type { TaskLinkResolver } from './markdown'
-import {
-  AllowEditsMenu,
-  CopyConversationButton,
-  CopyIdButton,
-  TaskActionsMenu,
-} from './menus'
 import type { TaskAction } from './menus'
+import { MessageBubble } from './messageBubble'
 import { MessageText } from './messageText'
 import { tick, timed } from './perf'
 import { RideTurn } from './rideTurn'
@@ -22,13 +16,13 @@ import { taskKeyOf } from './taskRef'
 import { buildTimeline } from './timeline'
 import type { AskItem, TaskWithProject } from './types'
 
-// The open task's pane: the detail header (title editing, grants, kebab) and
-// the scrolling timeline of user bubbles, ride turns, asks, and lifecycle
-// events, pinned to the latest content while the reader is at the bottom.
-// Owns all per-task view state (title edit mode, revealed tool details,
-// expanded folds), reset when the task switches. Memoized: the parent
-// re-renders on every poll and scroll flip, but this only re-renders when the
-// task data (or one of the stable callbacks' rare identities) changes.
+// The open task's pane: its header (see DetailHeader) above the scrolling
+// timeline of user bubbles, ride turns, asks, and lifecycle events, pinned to
+// the latest content while the reader is at the bottom. Owns the timeline's own
+// view state — revealed tool details, expanded folds — and resets it when the
+// task switches. Memoized: the parent re-renders on every poll and scroll flip,
+// but this only re-renders when the task data (or one of the stable callbacks'
+// rare identities) changes.
 export const Conversation = memo(function Conversation({
   task,
   projectLabel,
@@ -65,10 +59,6 @@ export const Conversation = memo(function Conversation({
   // activity means the memo props aren't holding still.
   tick('Conversation.render')
 
-  const [editingTitle, setEditingTitle] = useState(false)
-  const [titleDraft, setTitleDraft] = useState('')
-  const titleInputRef = useRef<HTMLInputElement>(null)
-
   // The set of tool chips whose detail (a diff or captured output) is revealed,
   // keyed by the tool item's stable id. Details start closed and several can be
   // open at once (option/shift-click toggles a whole ride's worth).
@@ -103,39 +93,13 @@ export const Conversation = memo(function Conversation({
     })
   }
 
-  // Reset per-task view state when switching tasks so none of it bleeds across
-  // them: leave title-edit mode and collapse revealed tool details and expanded
-  // turns.
+  // Collapse revealed tool details and expanded turns when switching tasks, so
+  // neither bleeds across them and each task opens with its history folded down
+  // again.
   useEffect(() => {
-    setEditingTitle(false)
     setOpenDetails(new Set())
     setExpandedTurns(new Set())
   }, [task.id, task.projectSlug])
-
-  // Focus and select the title when entering edit mode.
-  useEffect(() => {
-    if (editingTitle) {
-      const el = titleInputRef.current
-      el?.focus()
-      el?.select()
-    }
-  }, [editingTitle])
-
-  function startTitleEdit() {
-    setTitleDraft(task.title)
-    setEditingTitle(true)
-  }
-
-  function onTitleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      setEditingTitle(false)
-      void saveTitle(titleDraft)
-    } else if (e.key === 'Escape') {
-      e.preventDefault()
-      setEditingTitle(false)
-    }
-  }
 
   // The task's conversation as a single stream: user bubbles, ride turns,
   // and lifecycle events in order. The ordering rules (ride grouping, queued
@@ -228,91 +192,19 @@ export const Conversation = memo(function Conversation({
 
   return (
     <>
-      <div className="detail-header">
-        {projectLabel && <div className="detail-project">{projectLabel}</div>}
-        {editingTitle ? (
-          <input
-            ref={titleInputRef}
-            className="title-input"
-            value={titleDraft}
-            onChange={(e) => setTitleDraft(e.target.value)}
-            onKeyDown={onTitleKeyDown}
-            onBlur={() => setEditingTitle(false)}
-          />
-        ) : (
-          <div className="title-row">
-            <h1
-              className="editable-title"
-              title="Click to edit title"
-              onClick={startTitleEdit}
-            >
-              {task.title}
-            </h1>
-            <button
-              className="title-action"
-              title="Regenerate title"
-              aria-label="Regenerate title"
-              disabled={retitling === taskKeyOf(task)}
-              onClick={() => void generateTitle()}
-            >
-              <svg
-                width="15"
-                height="15"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M8 1.5l1.4 3.6 3.6 1.4-3.6 1.4L8 11.5 6.6 7.9 3 6.5l3.6-1.4z" />
-                <path d="M13 10.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z" />
-              </svg>
-            </button>
-            <CopyIdButton id={task.id} />
-            {!task.archived && (
-              <GrantControl
-                grants={task.grants}
-                allow={task.allow}
-                onAllow={allowTool}
-              />
-            )}
-            {!task.allowEdits && !task.archived && (
-              <AllowEditsMenu onAllowEdits={() => void setAllowEdits(true)} />
-            )}
-            <TaskActionsMenu
-              task={task}
-              onAction={(action) => onTaskAction(task, action)}
-            />
-            <CopyConversationButton
-              markdown={() =>
-                conversationMarkdown({
-                  task,
-                  timeline,
-                  openDetails,
-                  expandedTurns,
-                })
-              }
-            />
-          </div>
-        )}
-        <div className="detail-meta">
-          <span
-            className={
-              'task-status' +
-              (task.status === 'wedged' ? ' wedged' : '') +
-              (task.status === 'riding' ? ' riding' : '') +
-              (task.status === 'resting' ? ' resting' : '') +
-              (task.status === 'landed' ? ' landed' : '')
-            }
-          >
-            {task.status}
-          </span>
-          <span className="task-time">
-            {formatTimestamp(task.updatedAt ?? task.createdAt)}
-          </span>
-        </div>
-      </div>
+      <DetailHeader
+        task={task}
+        projectLabel={projectLabel}
+        retitling={retitling}
+        copyMarkdown={() =>
+          conversationMarkdown({ task, timeline, openDetails, expandedTurns })
+        }
+        onTaskAction={onTaskAction}
+        saveTitle={saveTitle}
+        generateTitle={generateTitle}
+        allowTool={allowTool}
+        setAllowEdits={setAllowEdits}
+      />
       <div className="messages" ref={messagesRef} onScroll={onMessagesScroll}>
         {timeline.map((entry) => {
           if (entry.kind === 'event') {
@@ -340,28 +232,21 @@ export const Conversation = memo(function Conversation({
           if (entry.kind === 'ask') {
             // A platform ask, standing where it was raised: its prompt is
             // the account of what happened, and AskForm drops the buttons
-            // once it's no longer open. It carries a head like every other
-            // row because it outlives its form — a bare sentence with no
-            // time on it reads as floating loose in the conversation rather
-            // than as the record of a moment.
+            // once it's no longer open.
             return (
-              <div
-                className="message message-platform"
+              <MessageBubble
                 key={`a-${entry.ask.id}`}
+                role="lander"
+                at={entry.ask.at}
+                variant="message-platform"
               >
-                <div className="message-head">
-                  <span className="message-role">lander</span>
-                  <span className="message-time">
-                    {formatTimestamp(entry.ask.at)}
-                  </span>
-                </div>
                 <AskForm
                   ask={entry.ask}
                   linkTask={linkTask}
                   disabled={answering}
                   onAnswer={(body) => void answerAsk(entry.ask.id, body)}
                 />
-              </div>
+              </MessageBubble>
             )
           }
           if (entry.kind === 'hook') {
@@ -372,15 +257,16 @@ export const Conversation = memo(function Conversation({
             // "could not run" are different answers.
             const h = entry.hook
             return (
-              <div className="message message-platform" key={`h-${h.id}`}>
-                <div className="message-head">
-                  <span className="message-role">hook {h.hook}</span>
-                  <span className="message-time">{formatTimestamp(h.at)}</span>
-                </div>
+              <MessageBubble
+                key={`h-${h.id}`}
+                role={`hook ${h.hook}`}
+                at={h.at}
+                variant="message-platform"
+              >
                 {h.text && <MessageText text={h.text} linkTask={linkTask} />}
                 {h.error && <div className="hook-error">{h.error}</div>}
                 {h.output && <pre className="hook-output">{h.output}</pre>}
-              </div>
+              </MessageBubble>
             )
           }
           if (entry.kind === 'user') {
@@ -390,18 +276,15 @@ export const Conversation = memo(function Conversation({
             // speaking, so it gets its own voice rather than the user's tint.
             const isHook = m.role === 'hook'
             return (
-              <div
-                className={`message message-${isHook ? 'hook' : 'user'}${
-                  m.queued ? ' message-queued' : ''
-                }`}
+              <MessageBubble
                 key={`u-${m.id}`}
+                role={isHook ? `hook ${m.from?.hook ?? ''}`.trim() : 'user'}
+                at={m.at}
+                variant={
+                  `message-${isHook ? 'hook' : 'user'}` +
+                  (m.queued ? ' message-queued' : '')
+                }
               >
-                <div className="message-head">
-                  <span className="message-role">
-                    {isHook ? `hook ${m.from?.hook ?? ''}`.trim() : 'user'}
-                  </span>
-                  <span className="message-time">{formatTimestamp(m.at)}</span>
-                </div>
                 <MessageText text={m.text} linkTask={linkTask} />
                 {m.attachments && m.attachments.length > 0 && (
                   <MessageAttachments
@@ -409,7 +292,7 @@ export const Conversation = memo(function Conversation({
                     slug={task.projectSlug}
                   />
                 )}
-              </div>
+              </MessageBubble>
             )
           }
           // A ride — one assistant turn, carrying all its items.
