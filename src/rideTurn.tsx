@@ -10,7 +10,7 @@ import { TaskActionTransition } from './taskActionTransition'
 import { taskAgentModelName } from './taskMeta'
 import { Collapsible, ToolStep } from './toolStep'
 import { planTurnActions } from './turnActions'
-import { planTurnCollapse } from './turnCollapse'
+import { groupInferences, planTurnCollapse } from './turnCollapse'
 import type { RideItem } from './timeline'
 import type { AskItem, Ride, TaskActionItem, Task } from './types'
 
@@ -130,25 +130,10 @@ export const RideTurn = memo(function RideTurn({
                 : null,
             )
             .filter((k): k is string => k !== null)
-          // Group consecutive main items by the groupId that produced
-          // them: an item whose groupId differs from the last opens a
-          // new group. Items without one stay with the current group.
-          // Each group is one inference — ruled apart from the next.
-          const groupByGroup = (idxs: number[]): number[][] => {
-            const gs: number[][] = []
-            let last: string | undefined
-            for (const j of idxs) {
-              const it = items[j]
-              if (
-                gs.length === 0 ||
-                (it.groupId && last !== undefined && it.groupId !== last)
-              )
-                gs.push([])
-              gs[gs.length - 1].push(j)
-              if (it.groupId) last = it.groupId
-            }
-            return gs
-          }
+          // Group consecutive main items by the groupId that produced them
+          // (see groupInferences). Each group is one inference — ruled apart
+          // from the next.
+          const groupByGroup = (idxs: number[]) => groupInferences(items, idxs)
           // Settled turns fold down by their flow messages, independent of
           // group boundaries: keep the opening prose before the first tool, the
           // longest text sequence, and the last, collapsing the ranges between

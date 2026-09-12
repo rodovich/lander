@@ -3,8 +3,9 @@ import type { TaskLinkResolver } from './markdown'
 import { TaskChip, TimelineNote } from './timelineNote'
 import type { EventItem } from './types'
 
-// How each lifecycle event verb reads in the timeline.
-const EVENT_VERB: Record<EventItem['eventKind'], string> = {
+// How each lifecycle event verb reads in the timeline. Exported so the
+// conversation's markdown copy words an event the way this row does.
+export const EVENT_VERB: Record<EventItem['eventKind'], string> = {
   launched: 'launched',
   scheduled: 'scheduled',
   awaiting: 'awaiting',

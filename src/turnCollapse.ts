@@ -18,6 +18,29 @@ export type TurnCollapsePlan = {
   segments: TurnCollapseSegment[]
 }
 
+// Consecutive items grouped by the groupId that produced them: an item whose
+// groupId differs from the last opens a new group, and one without a groupId
+// stays with the current group. Each group is one inference — what the turn
+// rules apart on screen, and what its fold counts as a "step".
+export function groupInferences(
+  items: readonly { groupId?: string }[],
+  idxs: readonly number[],
+): number[][] {
+  const groups: number[][] = []
+  let last: string | undefined
+  for (const j of idxs) {
+    const it = items[j]
+    if (
+      groups.length === 0 ||
+      (it.groupId && last !== undefined && it.groupId !== last)
+    )
+      groups.push([])
+    groups[groups.length - 1].push(j)
+    if (it.groupId) last = it.groupId
+  }
+  return groups
+}
+
 const textLength = (item: CollapsibleItem) =>
   item.kind === 'message' ? (item.text?.length ?? 0) : 0
 

@@ -112,6 +112,13 @@ describe('Conversation header', () => {
     expect(render(baseTask())).not.toContain('detail-project')
   })
 
+  it('carries both copy buttons — the task id and the conversation', () => {
+    const html = render(baseTask())
+    expect(html).toContain('Copy task ID')
+    expect(html).toContain('Copy conversation as markdown')
+    expect(html).toContain('copy-conversation')
+  })
+
   it('hides the grant and read-only controls on an archived task', () => {
     const active = render(baseTask({ allowEdits: false }))
     expect(active).toContain('Read-only')

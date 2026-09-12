@@ -1360,6 +1360,12 @@ body {
   background: var(--selected);
 }
 
+/* The conversation copy takes the row's slack, sitting at its far right: it
+   acts on the transcript below rather than on the title beside it. */
+.title-row .copy-conversation {
+  margin-left: auto;
+}
+
 /* Keep the sparkle visible and pulsing while haiku is naming the task. */
 .title-row .edit-title-button:disabled {
   opacity: 0.6;

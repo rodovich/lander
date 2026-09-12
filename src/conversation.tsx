@@ -1,10 +1,16 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { AskForm } from './asks'
 import { MessageAttachments } from './attachments'
+import { conversationMarkdown } from './conversationMarkdown'
 import { formatTimestamp } from './format'
 import { GrantControl } from './grants'
 import type { TaskLinkResolver } from './markdown'
-import { CopyIdButton, ReadOnlyMenu, TaskActionsMenu } from './menus'
+import {
+  CopyConversationButton,
+  CopyIdButton,
+  ReadOnlyMenu,
+  TaskActionsMenu,
+} from './menus'
 import type { TaskAction } from './menus'
 import { MessageText } from './messageText'
 import { tick, timed } from './perf'
@@ -288,6 +294,16 @@ export const Conversation = memo(function Conversation({
             <TaskActionsMenu
               task={task}
               onAction={(action) => onTaskAction(task, action)}
+            />
+            <CopyConversationButton
+              markdown={() =>
+                conversationMarkdown({
+                  task,
+                  timeline,
+                  openDetails,
+                  expandedTurns,
+                })
+              }
             />
           </div>
         )}
