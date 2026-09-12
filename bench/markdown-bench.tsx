@@ -17,7 +17,8 @@
 
 import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { Markdown, parseBlocks } from '../src/markdown'
+import { Markdown } from '../src/markdown'
+import { parseBlocks } from '../src/markdownBlocks'
 import type { TaskLinkResolver } from '../src/markdown'
 
 // A resolver that never matches (mirrors the common case: message text rarely
