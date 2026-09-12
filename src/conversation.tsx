@@ -431,7 +431,6 @@ export const Conversation = memo(function Conversation({
               items={entry.items}
               actions={entry.actions}
               agent={task.flow ?? task.agent}
-              taskId={task.id}
               slug={task.projectSlug}
               grants={task.grants}
               linkTask={linkTask}

@@ -67,7 +67,6 @@ const render = (
       items={items}
       actions={[]}
       agent="claude"
-      taskId="task1"
       slug="proj"
       grants={undefined}
       linkTask={() => undefined}
