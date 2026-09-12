@@ -1,17 +1,11 @@
 import { Fragment, memo, useEffect, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
-import {
-  DATE_CATEGORY_LABELS,
-  dateCategory,
-  formatTaskTime,
-  lastPathComponent,
-} from './format'
-import { SectionActionsMenu, TaskActionsMenu } from './menus'
-import { availableTaskActions } from './taskActions'
+import { DATE_CATEGORY_LABELS, dateCategory } from './format'
+import { SectionActionsMenu } from './menus'
 import type { TaskAction } from './taskActions'
 import { tick } from './perf'
-import { isUnread } from './taskMeta'
 import { taskKeyOf } from './taskRef'
+import { TaskRow } from './taskRow'
 import type { TaskListShape } from './taskRows'
 import type { DateCategory, TaskView, TaskWithProject } from './types'
 
@@ -306,108 +300,25 @@ export const TaskList = memo(function TaskList({
             )
           }
           const { task, index } = row
-          const unseen = isUnread(task)
-          // Any armed scheduled message — a deferred relaunch, a plain deferred
-          // send (`lander send --date/--time/--await`), or a repeating relaunch —
-          // shows the clock. Earlier this keyed only off relaunch-flagged
-          // messages, so a plain deferred send (deliverAt/waitFor, no relaunch
-          // flag) armed no indicator at all.
-          const pendingScheduled = task.scheduledMessages?.[0]
           return (
-          <li
-            key={row.key}
-            ref={(el) => {
-              taskItemRefs.current[index] = el
-            }}
-            role="option"
-            aria-selected={taskKeyOf(task) === selected}
-            tabIndex={index === rovingIndex ? 0 : -1}
-            className={
-              'task-item' +
-              (taskKeyOf(task) === selected ? ' selected' : '') +
-              ' ' +
-              task.status +
-              (task.archived ? ' archived' : '') +
-              (unseen ? ' unread' : '')
-            }
-            onClick={() => onSelect(task.id, task.projectSlug)}
-            onKeyDown={(e) => onTaskKeyDown(e, index, task)}
-          >
-            <div className="task-item-main">
-              <div className="task-title-row">
-                {unseen && (
-                  <span
-                    className="unseen-dot"
-                    aria-label="Unviewed updates"
-                    title="Unviewed updates"
-                  />
-                )}
-                <div className="task-title">{task.title}</div>
-                {showProjectLabels && (
-                  <span className="task-project">
-                    {lastPathComponent(
-                      pathBySlug.get(task.projectSlug) ?? task.projectSlug,
-                    )}
-                  </span>
-                )}
-              </div>
-              {task.archived && (
-                <div className="task-meta-row">
-                  <span className="task-archived-tag">archived</span>
-                </div>
-              )}
-              <div className="task-time">
-                {formatTaskTime(task.updatedAt ?? task.createdAt, todayStart)}
-                {(task.scheduledFor ||
-                  (task.waitingFor && task.waitingFor.length > 0) ||
-                  pendingScheduled) && (
-                  <svg
-                    className="scheduled-clock"
-                    width="11"
-                    height="11"
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-label={
-                      task.scheduledFor || pendingScheduled?.deliverAt
-                        ? 'Scheduled'
-                        : 'Awaiting'
-                    }
-                  >
-                    <circle cx="8" cy="8" r="6" />
-                    <path d="M8 4.5V8l2.5 1.5" />
-                  </svg>
-                )}
-                {task.scheduledMessages?.some((m) => m.repeat) && (
-                  <svg
-                    className="repeat-arrow"
-                    width="11"
-                    height="11"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.25"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-label="Repeats"
-                  >
-                    <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
-                    <path d="M21 3v5h-5" />
-                  </svg>
-                )}
-                {task.status === 'riding' && (
-                  <span className="riding-spinner" aria-label="Riding" />
-                )}
-              </div>
-            </div>
-            <TaskActionsMenu
-              actions={availableTaskActions(task)}
+            <TaskRow
+              key={row.key}
+              ref={(el) => {
+                taskItemRefs.current[index] = el
+              }}
+              task={task}
+              selected={taskKeyOf(task) === selected}
+              tabbable={index === rovingIndex}
+              projectPath={
+                showProjectLabels
+                  ? (pathBySlug.get(task.projectSlug) ?? task.projectSlug)
+                  : null
+              }
+              todayStart={todayStart}
+              onSelect={() => onSelect(task.id, task.projectSlug)}
+              onKeyDown={(e) => onTaskKeyDown(e, index, task)}
               onAction={(action) => onTaskAction(task, action)}
             />
-          </li>
           )
         })}
       </ul>
