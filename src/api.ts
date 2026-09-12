@@ -79,6 +79,21 @@ export async function uploadAttachments(
   return (body.attachments ?? []).map((a: { id: string }) => a.id)
 }
 
+// One stored attachment's bytes, or null when the server won't serve them.
+// Fetched through JS because the UI token can't ride a bare media or download
+// URL; blob URLs made from the result can then be handed to the browser's
+// native image, media, and PDF renderers.
+export async function loadAttachment(
+  slug: string,
+  id: string,
+): Promise<Blob | null> {
+  const token = import.meta.env.VITE_LANDER_UI_TOKEN
+  const r = await fetch(`/api/${slug}/attachments/${id}`, {
+    headers: token ? { 'x-lander-ui-token': token } : {},
+  })
+  return r.ok ? r.blob() : null
+}
+
 // The driver flows a project can launch a task with, for the new-task picker.
 // Everything served here is dispatchable — the server unions what the daemon
 // announced with the legacy flows — so a picked flow can't wedge on its first

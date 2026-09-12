@@ -1,25 +1,19 @@
-import { forwardRef, useEffect, useId, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { loadAttachment } from './api'
 import { formatBytes } from './format'
 import type { Attachment } from './types'
 
-type PreviewFile = { file: Attachment; url: string }
 type PreviewKind = 'image' | 'text' | 'pdf' | 'audio' | 'video' | 'unknown'
+
+// Where a gallery's bytes come from: a file's contents, or null when they
+// can't be had. The gallery never learns what serves them. Its identity is an
+// effect dependency, so a caller keeps it stable across renders.
+type LoadFile = (file: Attachment) => Promise<Blob | null>
 
 const MAX_TEXT_PREVIEW_BYTES = 1024 * 1024
 const TEXT_FILE_NAME =
   /(?:^|\.)(?:c|cc|cpp|css|diff|env|go|h|hpp|html|ini|java|js|jsx|log|mjs|patch|py|rb|rs|sh|sql|toml|ts|tsx|xml|ya?ml)$/i
-
-// Fetching through JS is required because the UI token cannot be carried by a
-// bare media or download URL. Blob URLs made from the response can be handed to
-// the browser's native image, media, and PDF renderers afterward.
-async function fetchBlob(url: string): Promise<Blob | null> {
-  const token = import.meta.env.VITE_LANDER_UI_TOKEN
-  const r = await fetch(url, {
-    headers: token ? { 'x-lander-ui-token': token } : {},
-  })
-  return r.ok ? r.blob() : null
-}
 
 export function previewKind(file: Attachment): PreviewKind {
   const mime = file.mime.toLowerCase().split(';', 1)[0].trim()
@@ -79,20 +73,18 @@ export function MessageAttachments({
   attachments: Attachment[]
   slug: string
 }) {
-  return (
-    <FileGallery
-      files={attachments.map((file) => ({
-        file,
-        url: `/api/${slug}/attachments/${file.id}`,
-      }))}
-    />
+  const load = useCallback(
+    (file: Attachment) => loadAttachment(slug, file.id),
+    [slug],
   )
+  return <FileGallery files={attachments} load={load} />
 }
 
-// One modal is shared by all files in a message, so its arrows move within that
-// message rather than across unrelated turns. A portal keeps the fixed backdrop
-// out of the scrolling conversation's stacking and overflow contexts.
-function FileGallery({ files }: { files: PreviewFile[] }) {
+// A row of file chips that open into a shared preview modal. One modal serves
+// all the files in the row, so its arrows move within that row rather than
+// across unrelated turns. A portal keeps the fixed backdrop out of the
+// scrolling conversation's stacking and overflow contexts.
+function FileGallery({ files, load }: { files: Attachment[]; load: LoadFile }) {
   const [selected, setSelected] = useState<number | null>(null)
   const chipRefs = useRef<Array<HTMLButtonElement | null>>([])
   const active = selected === null ? null : files[selected]
@@ -114,14 +106,14 @@ function FileGallery({ files }: { files: PreviewFile[] }) {
   return (
     <>
       <div className="message-attachments">
-        {files.map(({ file, url }, index) => (
+        {files.map((file, index) => (
           <FileChip
             key={file.id}
             ref={(node) => {
               chipRefs.current[index] = node
             }}
             file={file}
-            url={url}
+            load={load}
             onOpen={() => setSelected(index)}
           />
         ))}
@@ -130,7 +122,8 @@ function FileGallery({ files }: { files: PreviewFile[] }) {
         typeof document !== 'undefined' &&
         createPortal(
           <FilePreviewModal
-            entry={active}
+            file={active}
+            load={load}
             index={selected!}
             total={files.length}
             onClose={close}
@@ -142,13 +135,10 @@ function FileGallery({ files }: { files: PreviewFile[] }) {
   )
 }
 
-// `url` is the token-gated endpoint the bytes come from, passed in rather than
-// derived so one chip serves both the files sent to a task and the ones it
-// attached itself.
 const FileChip = forwardRef<
   HTMLButtonElement,
-  { file: Attachment; url: string; onOpen: () => void }
->(function FileChip({ file, url, onOpen }, ref) {
+  { file: Attachment; load: LoadFile; onOpen: () => void }
+>(function FileChip({ file, load, onOpen }, ref) {
   const isImage = file.mime.toLowerCase().startsWith('image/')
   const [thumb, setThumb] = useState<string | null>(null)
 
@@ -156,7 +146,7 @@ const FileChip = forwardRef<
     if (!isImage) return
     let obj: string | null = null
     let canceled = false
-    void fetchBlob(url).then((b) => {
+    void load(file).then((b) => {
       if (b && !canceled) {
         obj = URL.createObjectURL(b)
         setThumb(obj)
@@ -166,8 +156,10 @@ const FileChip = forwardRef<
       canceled = true
       if (obj) URL.revokeObjectURL(obj)
     }
+    // Keyed on the file's id, not the object: a poll hands over a fresh copy of
+    // the same file every 2s, and re-fetching its thumbnail each time would flicker.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url, isImage])
+  }, [file.id, isImage, load])
 
   return (
     <button
@@ -194,19 +186,20 @@ const FileChip = forwardRef<
 })
 
 function FilePreviewModal({
-  entry,
+  file,
+  load,
   index,
   total,
   onClose,
   onMove,
 }: {
-  entry: PreviewFile
+  file: Attachment
+  load: LoadFile
   index: number
   total: number
   onClose: () => void
   onMove: (direction: -1 | 1) => void
 }) {
-  const { file, url } = entry
   const kind = previewKind(file)
   const titleId = useId()
   const modalRef = useRef<HTMLDivElement>(null)
@@ -277,7 +270,7 @@ function FilePreviewModal({
     setCopied(false)
     if (copyTimer.current) clearTimeout(copyTimer.current)
 
-    void fetchBlob(url)
+    void load(file)
       .then(async (blob) => {
         if (!blob) throw new Error('fetch failed')
         const truncated = kind === 'text' && blob.size > MAX_TEXT_PREVIEW_BYTES
@@ -304,7 +297,9 @@ function FilePreviewModal({
       canceled = true
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [kind, url])
+    // Keyed on the file's id for the same reason the chip's thumbnail is.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, file.id, load])
 
   useEffect(
     () => () => {
