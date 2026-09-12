@@ -101,18 +101,6 @@ export function formatCost(n: number): string {
   return `$${Math.round(n).toLocaleString()}`
 }
 
-// The selected task's project is the first path segment, e.g.
-// "/users-me-code-app/task1/" -> "users-me-code-app". Empty on "/".
-export function slugFromPath(): string {
-  return window.location.pathname.split('/').filter(Boolean)[0] ?? ''
-}
-
-// The selected task's id is the second path segment, e.g.
-// "/users-me-code-app/task1/" -> "task1". Empty when no task is in the URL.
-export function taskIdFromPath(): string {
-  return window.location.pathname.split('/').filter(Boolean)[1] ?? ''
-}
-
 // A clock time like "3:45 PM" for when a window resets. The upstream reset
 // moment carries sub-second jitter around its true boundary (e.g. the 03:00:00
 // reset arrives as anything from 02:59:59.98 to 03:00:00.8), so round to the

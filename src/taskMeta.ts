@@ -4,7 +4,7 @@ import type { Ride, Task, TelemetryItem, TokenUsage } from './types'
 
 // The task's currently-open ride (the last one without an `endedAt`), if any —
 // what a riding task is streaming into. Mirrors the server's openRide.
-function openRide(task: { rides?: Ride[] }): Ride | undefined {
+export function openRide(task: { rides?: Ride[] }): Ride | undefined {
   const rides = task.rides
   if (!rides) return undefined
   for (let i = rides.length - 1; i >= 0; i--)

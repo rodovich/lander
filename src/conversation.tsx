@@ -17,21 +17,10 @@ import { tick, timed } from './perf'
 import { RideTurn } from './rideTurn'
 import { StatusTransition } from './statusTransition'
 import { TaskActionTransition } from './taskActionTransition'
-import { taskAgentModelName } from './taskMeta'
+import { openRide, taskAgentModelName } from './taskMeta'
 import { taskKeyOf } from './taskRef'
 import { buildTimeline } from './timeline'
-import type { AskItem, Ride, TaskWithProject } from './types'
-
-// The task's currently-open ride (the last one without an `endedAt`), if any —
-// the in-flight turn. Mirrors the server's openRide; drives the trailing spinner
-// and the stream-pinning signal.
-function openRide(task: { rides?: Ride[] } | null | undefined): Ride | undefined {
-  const rides = task?.rides
-  if (!rides) return undefined
-  for (let i = rides.length - 1; i >= 0; i--)
-    if (!rides[i].endedAt) return rides[i]
-  return undefined
-}
+import type { AskItem, TaskWithProject } from './types'
 
 // The open task's pane: the detail header (title editing, grants, kebab) and
 // the scrolling timeline of user bubbles, ride turns, asks, and lifecycle

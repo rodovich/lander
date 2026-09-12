@@ -1,59 +1,8 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef } from 'react'
+import { CopyButton } from './copyButton'
 import { useAnchoredPopup } from './hooks'
 import { isUnread } from './taskMeta'
 import type { TaskWithProject } from './types'
-
-// The checkmark both copy buttons flip to for a moment after a successful copy,
-// so the click registers.
-const CHECK_ICON = (
-  <path
-    d="M20 6 9 17l-5-5"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  />
-)
-
-// A header copy button: an icon that writes `text()` to the clipboard and
-// briefly becomes a checkmark. The text is a callback because the conversation
-// copy builds a whole document, which is work worth doing on the click rather
-// than on every render of the header.
-function CopyButton({
-  text,
-  label,
-  icon,
-  className,
-}: {
-  text: () => string
-  label: string
-  icon: React.ReactNode
-  className?: string
-}) {
-  const [copied, setCopied] = useState(false)
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(text())
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch {
-      // Clipboard access can be denied (e.g. insecure context); ignore.
-    }
-  }
-  return (
-    <button
-      type="button"
-      className={'edit-title-button' + (className ? ` ${className}` : '')}
-      onClick={copy}
-      title={label}
-      aria-label={copied ? 'Copied' : label}
-    >
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
-        {copied ? CHECK_ICON : icon}
-      </svg>
-    </button>
-  )
-}
 
 // Copies a task's id, styled to sit beside the title's sparkle and fade in with
 // it on hover. It wears a link, not a clipboard: the id is how one task
@@ -61,8 +10,9 @@ function CopyButton({
 export function CopyIdButton({ id }: { id: string }) {
   return (
     <CopyButton
-      text={() => id}
+      text={id}
       label="Copy task ID"
+      className="edit-title-button"
       icon={
         <g
           stroke="currentColor"
@@ -87,26 +37,7 @@ export function CopyConversationButton({ markdown }: { markdown: () => string })
     <CopyButton
       text={markdown}
       label="Copy conversation as markdown"
-      className="copy-conversation"
-      icon={
-        <>
-          <rect
-            x="9"
-            y="9"
-            width="11"
-            height="11"
-            rx="2"
-            stroke="currentColor"
-            strokeWidth="2"
-          />
-          <path
-            d="M5 15V5a2 2 0 0 1 2-2h10"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-        </>
-      }
+      className="edit-title-button copy-conversation"
     />
   )
 }
