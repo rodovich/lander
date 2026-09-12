@@ -533,6 +533,14 @@ function parseDateArg(flag, value) {
 // case-insensitively, and also matches a task's exact id; repeat it for an
 // AND, comma-delimit one occurrence for an OR (see matchesText). --archived lists the archived tasks instead of the
 // active ones (the two pools are disjoint); all other filters still apply.
+// The statuses a served row can carry. `resting` is not one of the three the
+// task file stores: the server derives it for a stored `riding` with no live run
+// (publicTaskStatus), and it is that served value --status compares against. A
+// value outside this set matches no row, so it is rejected rather than filtered
+// with — an unrecognized status and an empty project both print "(no tasks)",
+// and the caller cannot tell which it got.
+const STATUSES = ['landed', 'riding', 'resting', 'wedged']
+
 async function listTasks(args) {
   let status
   let json = false
@@ -542,8 +550,13 @@ async function listTasks(args) {
   const textGroups = []
   for (let i = 0; i < args.length; i++) {
     const a = args[i]
-    if (a === '--status') status = args[++i]
-    else if (a === '--json') json = true
+    if (a === '--status') {
+      status = args[++i]
+      if (!STATUSES.includes(status))
+        die(
+          `--status expects one of ${STATUSES.join(', ')} (one value, not a list), got ${status ?? 'nothing'}`,
+        )
+    } else if (a === '--json') json = true
     else if (a === '--archived') archived = true
     else if (a === '--since') since = parseDateArg('--since', args[++i])
     else if (a === '--until') until = parseDateArg('--until', args[++i])
