@@ -249,7 +249,7 @@ export const Conversation = memo(function Conversation({
               {task.title}
             </h1>
             <button
-              className="edit-title-button"
+              className="title-action"
               title="Regenerate title"
               aria-label="Regenerate title"
               disabled={retitling === taskKeyOf(task)}

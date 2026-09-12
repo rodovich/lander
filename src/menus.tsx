@@ -12,7 +12,7 @@ export function CopyIdButton({ id }: { id: string }) {
     <CopyButton
       text={id}
       label="Copy task ID"
-      className="edit-title-button"
+      className="title-action"
       icon={
         <g
           stroke="currentColor"
@@ -37,7 +37,7 @@ export function CopyConversationButton({ markdown }: { markdown: () => string })
     <CopyButton
       text={markdown}
       label="Copy conversation as markdown"
-      className="edit-title-button copy-conversation"
+      className="title-action copy-conversation"
     />
   )
 }
@@ -194,7 +194,7 @@ function ActionsMenu({
 export function ReadOnlyMenu({ onAllowEdits }: { onAllowEdits: () => void }) {
   return (
     <ActionsMenu
-      triggerClassName="edit-title-button"
+      triggerClassName="title-action"
       triggerLabel="Read-only — click to allow edits"
       triggerTitle="Read-only — click to allow edits"
       trigger={

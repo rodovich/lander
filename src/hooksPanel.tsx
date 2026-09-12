@@ -60,7 +60,7 @@ export function HookRow({
         ) : hook.state === 'approved' ? (
           <button
             type="button"
-            className="hook-action"
+            className="hooks-button"
             disabled={busy}
             onClick={() => onSetApproval(hook, false)}
           >
@@ -69,7 +69,7 @@ export function HookRow({
         ) : (
           <button
             type="button"
-            className="hook-action hook-approve"
+            className="hooks-button hook-approve"
             disabled={busy}
             onClick={() => onSetApproval(hook, true)}
           >
@@ -122,7 +122,7 @@ export function TrustedBranch({
           aria-label="Trusted branch"
           onChange={(e) => setDraft(e.target.value)}
         />
-        <button type="submit" className="hook-action" disabled={busy || !dirty}>
+        <button type="submit" className="hooks-button" disabled={busy || !dirty}>
           Save
         </button>
       </form>
@@ -257,7 +257,7 @@ export function HooksPanel({
             ))}
           </select>
         )}
-        <button type="button" className="hook-action" onClick={onClose}>
+        <button type="button" className="hooks-button" onClick={onClose}>
           Close
         </button>
       </div>

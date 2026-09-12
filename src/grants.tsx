@@ -254,7 +254,7 @@ export function BlockedSummary({
         this turn
       </button>
       {open && (
-        <div ref={popupRef} className="blocked-popup" style={popupStyle}>
+        <div ref={popupRef} className="rule-popup" style={popupStyle}>
           {requests.map((r) => (
             <RuleRow
               key={r.key}
@@ -364,7 +364,7 @@ export function GrantControl({
       <button
         ref={triggerRef}
         type="button"
-        className="edit-title-button"
+        className="title-action"
         aria-haspopup="dialog"
         aria-expanded={open}
         title="Permissions"
@@ -374,7 +374,7 @@ export function GrantControl({
         <StampIcon />
       </button>
       {open && (
-        <div ref={popupRef} className="blocked-popup" style={popupStyle}>
+        <div ref={popupRef} className="rule-popup" style={popupStyle}>
           <GrantedRules rules={allow ?? []} honored={grants?.task ?? true} />
           <div className={'rule-popup-head' + (allow?.length ? ' divided' : '')}>
             Grant a permission rule

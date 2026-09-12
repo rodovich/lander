@@ -1335,7 +1335,10 @@ body {
   background: var(--bg-tinted);
 }
 
-.edit-title-button {
+/* The icon buttons in the detail header's title row: the naming sparkle, the
+   two copies, the permission stamp, the read-only pencil. Muted until hovered,
+   so the row reads as the title with its controls behind it. */
+.title-action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1349,7 +1352,7 @@ body {
   opacity: 0.6;
 }
 
-.edit-title-button:hover {
+.title-action:hover {
   opacity: 1;
   background: var(--selected);
 }
@@ -1361,7 +1364,7 @@ body {
 }
 
 /* Keep the sparkle visible and pulsing while haiku is naming the task. */
-.title-row .edit-title-button:disabled {
+.title-row .title-action:disabled {
   opacity: 0.6;
   cursor: default;
   animation: title-pulse 1s ease-in-out infinite;
@@ -2192,7 +2195,7 @@ body {
    the header stamp). Fixed-positioned (top/left set inline from the trigger's
    measured rect) so the scrolling timeline can't clip it and the composer can't
    paint over it — same escape as the header menus. */
-.blocked-popup {
+.rule-popup {
   position: fixed;
   z-index: 100;
   width: 420px;
@@ -2325,7 +2328,7 @@ body {
 
 /* The two-scope grant menu, dropping down from a row's kebab with its left edge
    aligned to the kebab. Reuses .task-menu-item for its rows; sits within the
-   fixed .blocked-popup, so it needs no escape of its own. */
+   fixed .rule-popup, so it needs no escape of its own. */
 .rule-row-menu-popup {
   position: absolute;
   top: 100%;
@@ -2779,7 +2782,9 @@ body.resizing-row {
   color: var(--muted);
 }
 
-.hook-action {
+/* Every button in the hooks panel — Approve and Withdraw, but Save and Close
+   too. `.hook-approve` is the one variant that tints. */
+.hooks-button {
   font: inherit;
   padding: 4px 10px;
   border: 1px solid var(--border);
@@ -2794,7 +2799,7 @@ body.resizing-row {
   color: var(--riding);
 }
 
-.hook-action:disabled {
+.hooks-button:disabled {
   opacity: 0.5;
   cursor: default;
 }
