@@ -7,7 +7,7 @@ import {
   CopyIdButton,
   TaskActionsMenu,
 } from './menus'
-import type { TaskAction } from './menus'
+import type { TaskAction } from './taskActions'
 import { taskKeyOf } from './taskRef'
 import type { TaskWithProject } from './types'
 

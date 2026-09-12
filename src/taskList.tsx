@@ -7,7 +7,7 @@ import {
   lastPathComponent,
 } from './format'
 import { SectionActionsMenu, TaskActionsMenu } from './menus'
-import type { TaskAction } from './menus'
+import type { TaskAction } from './taskActions'
 import { tick } from './perf'
 import { isUnread } from './taskMeta'
 import { taskKeyOf } from './taskRef'

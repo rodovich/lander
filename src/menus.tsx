@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useRef } from 'react'
 import { CopyButton } from './copyButton'
 import { useAnchoredPopup } from './hooks'
-import { isUnread } from './taskMeta'
+import { availableTaskActions } from './taskActions'
+import type { TaskAction } from './taskActions'
 import type { TaskWithProject } from './types'
 
 // Copies a task's id, styled to sit beside the title's sparkle and fade in with
@@ -221,27 +222,12 @@ export function AllowEditsMenu({ onAllowEdits }: { onAllowEdits: () => void }) {
   )
 }
 
-// The status actions a task's kebab menu can fire, mirroring the buttons the
-// detail header used to carry, plus archive/restore.
-export type TaskAction =
-  | 'launch'
-  | 'wedge'
-  | 'rest'
-  | 'land'
-  | 'copyId'
-  | 'markUnread'
-  | 'archive'
-  | 'restore'
-
 // The non-status actions that sit below a separator at the foot of the kebab
 // menu. A single divider is drawn before the first of these that appears.
 const FOOTER_ACTIONS = new Set<TaskAction>(['copyId', 'markUnread', 'archive'])
 
-// The kebab (⋮) menu on a task list row. It carries the status actions that
-// used to live as buttons in the detail header, plus Archive/Restore — but only
-// the items that would be both *visible and enabled* for the task's current
-// status, so e.g. a landed task offers Wedge/Rest/Archive but not Land. An
-// archived task collapses to a single Restore.
+// The kebab (⋮) menu on a task list row and in the detail header. What it can
+// offer a given task is availableTaskActions'; this only draws it.
 export function TaskActionsMenu({
   task,
   onAction,
@@ -249,30 +235,7 @@ export function TaskActionsMenu({
   task: TaskWithProject
   onAction: (action: TaskAction) => void
 }) {
-  // Build the items from the same per-status rules the header buttons encoded:
-  //  - launch:  a scheduled task (scheduledFor set, resting or wedged), to run it early
-  //  - wedge:   any task not already wedged
-  //  - rest:    a wedged or landed task, to return it to rest
-  //  - land:       any task not already landed
-  //  - copyId:     any task, to copy its id to the clipboard
-  //  - markUnread: any task that isn't already showing unviewed updates
-  //  - archive:    any non-riding task (a riding one has a live run)
-  const actions: { action: TaskAction; label: string }[] = []
-  if (task.archived) {
-    actions.push({ action: 'restore', label: 'Restore' })
-  } else {
-    if (task.scheduledFor) actions.push({ action: 'launch', label: 'Launch' })
-    if (task.status !== 'wedged')
-      actions.push({ action: 'wedge', label: 'Wedge' })
-    if (task.status === 'wedged' || task.status === 'landed')
-      actions.push({ action: 'rest', label: 'Rest' })
-    if (task.status !== 'landed') actions.push({ action: 'land', label: 'Land' })
-    actions.push({ action: 'copyId', label: 'Copy ID' })
-    if (!isUnread(task))
-      actions.push({ action: 'markUnread', label: 'Mark unread' })
-    if (task.status !== 'riding')
-      actions.push({ action: 'archive', label: 'Archive' })
-  }
+  const actions = availableTaskActions(task)
 
   return (
     <ActionsMenu
