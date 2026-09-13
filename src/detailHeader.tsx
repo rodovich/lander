@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { formatTimestamp } from './format'
 import { GrantControl } from './grants'
 import {
@@ -33,9 +33,9 @@ function SparkleIcon() {
 
 // The head of the open task's pane: where it lives, what it is called, the
 // controls that act on it, and its status. Owns only the title's edit mode —
-// everything else it renders acts through a callback, and the conversation
-// below it has no say in any of it.
-export function DetailHeader({
+// everything else it renders acts through a callback. Memoized like the panes
+// beside it, since App re-renders on every poll and scroll flip.
+export const DetailHeader = memo(function DetailHeader({
   task,
   projectLabel,
   retitling,
@@ -158,4 +158,4 @@ export function DetailHeader({
       </div>
     </div>
   )
-}
+})

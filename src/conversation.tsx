@@ -1,11 +1,8 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef } from 'react'
 import { AskForm } from './asks'
 import { MessageAttachments } from './attachments'
-import { conversationMarkdown } from './conversationMarkdown'
-import { DetailHeader } from './detailHeader'
 import { LifecycleNote } from './lifecycleNote'
 import type { TaskLinkResolver } from './markdown'
-import type { TaskAction } from './taskActions'
 import { MessageBubble } from './messageBubble'
 import { MessageText } from './messageText'
 import { tick, timed } from './perf'
@@ -15,40 +12,29 @@ import { openRide, taskAgentModelName } from './taskMeta'
 import { taskKeyOf } from './taskRef'
 import { buildTimeline } from './timeline'
 import type { AskItem, TaskWithProject } from './types'
+import type { TimelineDisclosure } from './useTimelineDisclosure'
 
-// The open task's pane: its header (see DetailHeader) above the scrolling
-// timeline of user bubbles, ride turns, asks, and lifecycle events, pinned to
-// the latest content while the reader is at the bottom. Owns the timeline's own
-// view state — revealed tool details, expanded folds — and resets it when the
-// task switches. Memoized: the parent re-renders on every poll and scroll flip,
-// but this only re-renders when the task data (or one of the stable callbacks'
-// rare identities) changes.
+// The open task's scrolling timeline of user bubbles, ride turns, asks, and
+// lifecycle events, pinned to the latest content while the reader is at the
+// bottom. What the reader has opened on it is `disclosure`, owned above so the
+// header's conversation copy can read it too. Memoized: the parent re-renders
+// on every poll and scroll flip, but this only re-renders when the task data,
+// the disclosure, or one of the stable callbacks' rare identities changes.
 export const Conversation = memo(function Conversation({
   task,
-  projectLabel,
+  disclosure,
   linkTask,
-  retitling,
   answering,
   onAtBottomChange,
-  onTaskAction,
-  saveTitle,
-  generateTitle,
   allowTool,
-  setAllowEdits,
   answerAsk,
 }: {
   task: TaskWithProject
-  // "project • worktree" for the line above the title, or null to omit it.
-  projectLabel: string | null
+  disclosure: TimelineDisclosure
   linkTask: TaskLinkResolver
-  retitling: string | null
   answering: boolean
   onAtBottomChange: (atBottom: boolean) => void
-  onTaskAction: (task: TaskWithProject, action: TaskAction) => void
-  saveTitle: (draft: string) => Promise<void>
-  generateTitle: () => Promise<void>
   allowTool: (rule: string, scope: 'task' | 'project') => Promise<boolean>
-  setAllowEdits: (checked: boolean) => Promise<void>
   answerAsk: (
     askId: string,
     body: { optionId?: string; text?: string },
@@ -58,48 +44,6 @@ export const Conversation = memo(function Conversation({
   // separately from App's own churn — a high count against little task
   // activity means the memo props aren't holding still.
   tick('Conversation.render')
-
-  // The set of tool chips whose detail (a diff or captured output) is revealed,
-  // keyed by the tool item's stable id. Details start closed and several can be
-  // open at once (option/shift-click toggles a whole ride's worth).
-  const [openDetails, setOpenDetails] = useState<Set<string>>(new Set())
-
-  // Toggle one chip's detail, or — when option/shift was held — every detail in
-  // its ride together, driving them all to this chip's new (opposite) state.
-  function toggleDetail(key: string, rideKeys: string[]) {
-    setOpenDetails((prev) => {
-      const next = new Set(prev)
-      const willOpen = !prev.has(key)
-      for (const k of rideKeys) {
-        if (willOpen) next.add(k)
-        else next.delete(k)
-      }
-      return next
-    })
-  }
-
-  // Assistant turns (other than the most recent) collapse their middle stretch of
-  // items behind a disclosure; this holds the fold keys the viewer has expanded.
-  // It's cleared on task switch, so each task opens with its history folded down
-  // again.
-  const [expandedTurns, setExpandedTurns] = useState<Set<string>>(new Set())
-
-  function toggleTurn(segKey: string) {
-    setExpandedTurns((prev) => {
-      const next = new Set(prev)
-      if (next.has(segKey)) next.delete(segKey)
-      else next.add(segKey)
-      return next
-    })
-  }
-
-  // Collapse revealed tool details and expanded turns when switching tasks, so
-  // neither bleeds across them and each task opens with its history folded down
-  // again.
-  useEffect(() => {
-    setOpenDetails(new Set())
-    setExpandedTurns(new Set())
-  }, [task.id, task.projectSlug])
 
   // The task's conversation as a single stream: user bubbles, ride turns,
   // and lifecycle events in order. The ordering rules (ride grouping, queued
@@ -191,144 +135,126 @@ export const Conversation = memo(function Conversation({
   }, [task.id, task.projectSlug, itemCount, streamSignal])
 
   return (
-    <>
-      <DetailHeader
-        task={task}
-        projectLabel={projectLabel}
-        retitling={retitling}
-        copyMarkdown={() =>
-          conversationMarkdown({ task, timeline, openDetails, expandedTurns })
-        }
-        onTaskAction={onTaskAction}
-        saveTitle={saveTitle}
-        generateTitle={generateTitle}
-        allowTool={allowTool}
-        setAllowEdits={setAllowEdits}
-      />
-      <div className="messages" ref={messagesRef} onScroll={onMessagesScroll}>
-        {timeline.map((entry) => {
-          if (entry.kind === 'event') {
-            return (
-              <LifecycleNote
-                key={`e-${entry.event.id}`}
-                event={entry.event}
-                slug={task.projectSlug}
-                linkTask={linkTask}
-              />
-            )
-          }
-          if (entry.kind === 'task-action') {
-            // An action with no turn to sit in — the task had no ride open when
-            // it acted, or that ride streamed nothing. Everything else reaches
-            // the reader inside its RideTurn.
-            return (
-              <TaskActionNote
-                key={`ta-${entry.action.id}`}
-                item={entry.action}
-                linkTask={linkTask}
-              />
-            )
-          }
-          if (entry.kind === 'ask') {
-            // A platform ask, standing where it was raised: its prompt is
-            // the account of what happened, and AskForm drops the buttons
-            // once it's no longer open.
-            return (
-              <MessageBubble
-                key={`a-${entry.ask.id}`}
-                role="lander"
-                at={entry.ask.at}
-                variant="message-platform"
-              >
-                <AskForm
-                  ask={entry.ask}
-                  linkTask={linkTask}
-                  disabled={answering}
-                  onAnswer={(body) => void answerAsk(entry.ask.id, body)}
-                />
-              </MessageBubble>
-            )
-          }
-          if (entry.kind === 'hook') {
-            // A hook's report, in the platform's voice like a standalone ask:
-            // the run had no task and no ride of its own, so this is its only
-            // account of itself. The hook is named because a project may
-            // declare several, and the outcome because "found nothing" and
-            // "could not run" are different answers.
-            const h = entry.hook
-            return (
-              <MessageBubble
-                key={`h-${h.id}`}
-                role={`hook ${h.hook}`}
-                at={h.at}
-                variant="message-platform"
-              >
-                {h.text && <MessageText text={h.text} linkTask={linkTask} />}
-                {h.error && <div className="hook-error">{h.error}</div>}
-                {h.output && <pre className="hook-output">{h.output}</pre>}
-              </MessageBubble>
-            )
-          }
-          if (entry.kind === 'user') {
-            const m = entry.item
-            // A hook's nudge sits in the same slot as a typed message — it was
-            // queued and drove a turn the same way — but it is not the user
-            // speaking, so it gets its own voice rather than the user's tint.
-            const isHook = m.role === 'hook'
-            return (
-              <MessageBubble
-                key={`u-${m.id}`}
-                role={isHook ? `hook ${m.from?.hook ?? ''}`.trim() : 'user'}
-                at={m.at}
-                variant={
-                  `message-${isHook ? 'hook' : 'user'}` +
-                  (m.queued ? ' message-queued' : '')
-                }
-              >
-                <MessageText text={m.text} linkTask={linkTask} />
-                {m.attachments && m.attachments.length > 0 && (
-                  <MessageAttachments
-                    attachments={m.attachments}
-                    slug={task.projectSlug}
-                  />
-                )}
-              </MessageBubble>
-            )
-          }
-          // A ride — one assistant turn, carrying all its items.
+    <div className="messages" ref={messagesRef} onScroll={onMessagesScroll}>
+      {timeline.map((entry) => {
+        if (entry.kind === 'event') {
           return (
-            <RideTurn
-              key={`r-${entry.ride.id}`}
-              ride={entry.ride}
-              items={entry.items}
-              actions={entry.actions}
-              agent={task.flow ?? task.agent}
+            <LifecycleNote
+              key={`e-${entry.event.id}`}
+              event={entry.event}
               slug={task.projectSlug}
-              grants={task.grants}
               linkTask={linkTask}
-              openDetails={openDetails}
-              onToggleDetail={toggleDetail}
-              expandedTurns={expandedTurns}
-              onToggleTurn={toggleTurn}
-              openAsk={openAsk}
-              answering={answering}
-              onAnswerAsk={(askId, body) => void answerAsk(askId, body)}
-              onAllow={allowTool}
             />
           )
-        })}
-        {/* No ride output yet but the task is riding: the assistant has been
-            launched and we're waiting for its first item. The model isn't
-            known until that output arrives, so this stays model-agnostic. */}
-        {task.status === 'riding' && !openRideHasItems && (
-          <div className="message">
-            <div className="message-pending">
-              <span className="spinner" aria-hidden />
-              {`${taskAgentModelName(task.flow ?? task.agent)} is starting…`}
-            </div>
+        }
+        if (entry.kind === 'task-action') {
+          // An action with no turn to sit in — the task had no ride open when
+          // it acted, or that ride streamed nothing. Everything else reaches
+          // the reader inside its RideTurn.
+          return (
+            <TaskActionNote
+              key={`ta-${entry.action.id}`}
+              item={entry.action}
+              linkTask={linkTask}
+            />
+          )
+        }
+        if (entry.kind === 'ask') {
+          // A platform ask, standing where it was raised: its prompt is
+          // the account of what happened, and AskForm drops the buttons
+          // once it's no longer open.
+          return (
+            <MessageBubble
+              key={`a-${entry.ask.id}`}
+              role="lander"
+              at={entry.ask.at}
+              variant="message-platform"
+            >
+              <AskForm
+                ask={entry.ask}
+                linkTask={linkTask}
+                disabled={answering}
+                onAnswer={(body) => void answerAsk(entry.ask.id, body)}
+              />
+            </MessageBubble>
+          )
+        }
+        if (entry.kind === 'hook') {
+          // A hook's report, in the platform's voice like a standalone ask:
+          // the run had no task and no ride of its own, so this is its only
+          // account of itself. The hook is named because a project may
+          // declare several, and the outcome because "found nothing" and
+          // "could not run" are different answers.
+          const h = entry.hook
+          return (
+            <MessageBubble
+              key={`h-${h.id}`}
+              role={`hook ${h.hook}`}
+              at={h.at}
+              variant="message-platform"
+            >
+              {h.text && <MessageText text={h.text} linkTask={linkTask} />}
+              {h.error && <div className="hook-error">{h.error}</div>}
+              {h.output && <pre className="hook-output">{h.output}</pre>}
+            </MessageBubble>
+          )
+        }
+        if (entry.kind === 'user') {
+          const m = entry.item
+          // A hook's nudge sits in the same slot as a typed message — it was
+          // queued and drove a turn the same way — but it is not the user
+          // speaking, so it gets its own voice rather than the user's tint.
+          const isHook = m.role === 'hook'
+          return (
+            <MessageBubble
+              key={`u-${m.id}`}
+              role={isHook ? `hook ${m.from?.hook ?? ''}`.trim() : 'user'}
+              at={m.at}
+              variant={
+                `message-${isHook ? 'hook' : 'user'}` +
+                (m.queued ? ' message-queued' : '')
+              }
+            >
+              <MessageText text={m.text} linkTask={linkTask} />
+              {m.attachments && m.attachments.length > 0 && (
+                <MessageAttachments
+                  attachments={m.attachments}
+                  slug={task.projectSlug}
+                />
+              )}
+            </MessageBubble>
+          )
+        }
+        // A ride — one assistant turn, carrying all its items.
+        return (
+          <RideTurn
+            key={`r-${entry.ride.id}`}
+            ride={entry.ride}
+            items={entry.items}
+            actions={entry.actions}
+            agent={task.flow ?? task.agent}
+            slug={task.projectSlug}
+            grants={task.grants}
+            linkTask={linkTask}
+            disclosure={disclosure}
+            openAsk={openAsk}
+            answering={answering}
+            onAnswerAsk={answerAsk}
+            onAllow={allowTool}
+          />
+        )
+      })}
+      {/* No ride output yet but the task is riding: the assistant has been
+          launched and we're waiting for its first item. The model isn't
+          known until that output arrives, so this stays model-agnostic. */}
+      {task.status === 'riding' && !openRideHasItems && (
+        <div className="message">
+          <div className="message-pending">
+            <span className="spinner" aria-hidden />
+            {`${taskAgentModelName(task.flow ?? task.agent)} is starting…`}
           </div>
-        )}
-      </div>
-    </>
+        </div>
+      )}
+    </div>
   )
 })

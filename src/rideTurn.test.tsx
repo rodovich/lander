@@ -10,6 +10,7 @@ import type {
   TaskActionItem,
   ToolItem,
 } from './types'
+import type { TimelineDisclosure } from './useTimelineDisclosure'
 
 // renderToStaticMarkup gives the initial (effect-free) markup, which is all a
 // turn needs: nesting, grouping, folding, and the footers are all pure renders
@@ -57,6 +58,17 @@ const openAsk = (over: Partial<AskItem> = {}): AskItem => ({
   ...over,
 })
 
+// What the reader has opened: nothing, unless a test names it.
+const disclosure = (
+  over: Partial<TimelineDisclosure> = {},
+): TimelineDisclosure => ({
+  openDetails: new Set(),
+  expandedTurns: new Set(),
+  toggleDetail: () => {},
+  toggleTurn: () => {},
+  ...over,
+})
+
 const render = (
   items: RideItem[],
   over: Partial<ComponentProps<typeof RideTurn>> = {},
@@ -70,10 +82,7 @@ const render = (
       slug="proj"
       grants={undefined}
       linkTask={() => undefined}
-      openDetails={new Set()}
-      onToggleDetail={() => {}}
-      expandedTurns={new Set()}
-      onToggleTurn={() => {}}
+      disclosure={disclosure()}
       openAsk={undefined}
       answering={false}
       onAnswerAsk={() => {}}
@@ -103,7 +112,9 @@ describe('RideTurn subagent nesting', () => {
   })
 
   it('reveals the nested trace when the spawner chip is open', () => {
-    const html = render(trace, { openDetails: new Set(['sp']) })
+    const html = render(trace, {
+      disclosure: disclosure({ openDetails: new Set(['sp']) }),
+    })
     expect(html).toContain('sub-steps')
     expect(html).toContain('read a file')
     expect(html).toContain('subagent-final-reply')
@@ -150,7 +161,9 @@ describe('RideTurn turn-collapse folding', () => {
   })
 
   it('expands a fold whose ride:segment key is in expandedTurns', () => {
-    const html = render(folding, { expandedTurns: new Set(['r1:1']) })
+    const html = render(folding, {
+      disclosure: disclosure({ expandedTurns: new Set(['r1:1']) }),
+    })
     expect(html).toContain('hidden-middle-prose')
   })
 

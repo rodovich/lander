@@ -9,6 +9,7 @@ import { taskAgentModelName } from './taskMeta'
 import { TurnTrace } from './turnTrace'
 import type { RideItem } from './timeline'
 import type { AskItem, Ride, TaskActionItem, Task } from './types'
+import type { TimelineDisclosure } from './useTimelineDisclosure'
 
 // One assistant turn in the conversation: the bubble around a turn's trace (see
 // TurnTrace), carrying the turn's confirmed denials, the in-flight working
@@ -22,10 +23,7 @@ export const RideTurn = memo(function RideTurn({
   slug,
   grants,
   linkTask,
-  openDetails,
-  onToggleDetail,
-  expandedTurns,
-  onToggleTurn,
+  disclosure,
   openAsk,
   answering,
   onAnswerAsk,
@@ -40,11 +38,7 @@ export const RideTurn = memo(function RideTurn({
   slug: string
   grants: Task['grants']
   linkTask: TaskLinkResolver
-  openDetails: Set<string>
-  onToggleDetail: (key: string, keys: string[]) => void
-  // Expanded fold keys, `${rideId}:${segmentIndex}`.
-  expandedTurns: Set<string>
-  onToggleTurn: (key: string) => void
+  disclosure: TimelineDisclosure
   // The task's open ask; rendered as this turn's footer only when this ride
   // raised it.
   openAsk: AskItem | undefined
@@ -74,10 +68,7 @@ export const RideTurn = memo(function RideTurn({
           rideId={ride.id}
           settled={settled}
           linkTask={linkTask}
-          openDetails={openDetails}
-          onToggleDetail={onToggleDetail}
-          expandedTurns={expandedTurns}
-          onToggleTurn={onToggleTurn}
+          disclosure={disclosure}
         />
       </div>
       {denied.length > 0 && (

@@ -8,6 +8,7 @@ import { planTurnActions } from './turnActions'
 import { groupInferences, planTurnCollapse } from './turnCollapse'
 import type { RideItem } from './timeline'
 import type { TaskActionItem } from './types'
+import type { TimelineDisclosure } from './useTimelineDisclosure'
 
 // The cross-task actions anchored at one point in the trace, as one block. They
 // stack unruled: what a turn did to other tasks in one stretch of work reads as
@@ -44,10 +45,7 @@ export function TurnTrace({
   rideId,
   settled,
   linkTask,
-  openDetails,
-  onToggleDetail,
-  expandedTurns,
-  onToggleTurn,
+  disclosure: { openDetails, toggleDetail, expandedTurns, toggleTurn },
 }: {
   items: RideItem[]
   // What this turn did to other tasks, in record order. Anchored into the trace
@@ -60,10 +58,7 @@ export function TurnTrace({
   // settled yet, so there is nothing to fold down.
   settled: boolean
   linkTask: TaskLinkResolver
-  openDetails: Set<string>
-  onToggleDetail: (key: string, keys: string[]) => void
-  expandedTurns: Set<string>
-  onToggleTurn: (key: string) => void
+  disclosure: TimelineDisclosure
 }) {
   // Subagent items (parentId set) don't render inline — they fold into their
   // spawning tool chip. Map each spawning tool id to its direct children's
@@ -125,7 +120,7 @@ export function TurnTrace({
           item={it}
           detailOpen={openDetails.has(it.id)}
           onToggleDetail={(all) =>
-            onToggleDetail(it.id, all ? detailKeys : [it.id])
+            toggleDetail(it.id, all ? detailKeys : [it.id])
           }
           subItems={subItems}
         />
@@ -223,7 +218,7 @@ export function TurnTrace({
             {sep}
             <Collapsible
               open={open}
-              onToggle={() => onToggleTurn(segKey)}
+              onToggle={() => toggleTurn(segKey)}
               label={
                 <span className="collapsible-label">
                   {stepCount} step

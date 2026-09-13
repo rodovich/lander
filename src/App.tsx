@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Composer } from './composer'
 import { Conversation } from './conversation'
+import { conversationMarkdown } from './conversationMarkdown'
+import { DetailHeader } from './detailHeader'
 import { dataTransferHasFiles } from './fileDrop'
 import { detailHeaderLabel } from './format'
 import { usePersistentState, useSessionState } from './hooks'
@@ -12,10 +14,12 @@ import { ResizeHandle } from './resizeHandle'
 import { TaskList } from './taskList'
 import { buildTaskRows } from './taskRows'
 import { TelemetryPanel } from './telemetry'
+import { buildTimeline } from './timeline'
 import { useSeenMarker, useViewingState } from './useSeenMarker'
 import { useTaskActions } from './useTaskActions'
 import { useTaskData } from './useTaskData'
 import { useTaskRouting } from './useTaskRouting'
+import { useTimelineDisclosure } from './useTimelineDisclosure'
 import {
   taskKeyOf,
   migrateLegacyTaskValues,
@@ -214,6 +218,24 @@ export function App() {
       })
     : null
 
+  // What the reader has opened on the open task's timeline, shared by the
+  // timeline that draws it and the header's copy, which writes out what's showing.
+  const disclosure = useTimelineDisclosure(current)
+  // Built on the click, not per render: the whole document is work, and a
+  // fresh `now` places any in-flight turn where it stands at that moment.
+  const copyMarkdown = useCallback(
+    () =>
+      current
+        ? conversationMarkdown({
+            task: current,
+            timeline: buildTimeline(current, new Date().toISOString()).items,
+            openDetails: disclosure.openDetails,
+            expandedTurns: disclosure.expandedTurns,
+          })
+        : '',
+    [current, disclosure],
+  )
+
   // Keep the page title in sync with the project-select label text.
   const labelParts = filterLabelParts(projects, shown, timeFilter, view)
   const filterLabel = [labelParts.base, ...labelParts.suffixes]
@@ -297,18 +319,24 @@ export function App() {
           />
         ) : current ? (
           <>
-            <Conversation
+            <DetailHeader
               task={current}
               projectLabel={projectLabel}
-              linkTask={resolveTaskLink}
               retitling={retitling}
-              answering={answeringBy[taskKeyOf(current)] ?? false}
-              onAtBottomChange={setAtBottom}
+              copyMarkdown={copyMarkdown}
               onTaskAction={runTaskAction}
               saveTitle={saveTitle}
               generateTitle={generateTitle}
               allowTool={allowTool}
               setAllowEdits={setAllowEdits}
+            />
+            <Conversation
+              task={current}
+              disclosure={disclosure}
+              linkTask={resolveTaskLink}
+              answering={answeringBy[taskKeyOf(current)] ?? false}
+              onAtBottomChange={setAtBottom}
+              allowTool={allowTool}
               answerAsk={answerAsk}
             />
             <ResizeHandle

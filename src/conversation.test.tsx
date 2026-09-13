@@ -86,16 +86,16 @@ const render = (
   renderToStaticMarkup(
     <Conversation
       task={task}
-      projectLabel={null}
+      disclosure={{
+        openDetails: new Set(),
+        expandedTurns: new Set(),
+        toggleDetail: () => {},
+        toggleTurn: () => {},
+      }}
       linkTask={() => undefined}
-      retitling={null}
       answering={false}
       onAtBottomChange={() => {}}
-      onTaskAction={() => {}}
-      saveTitle={async () => {}}
-      generateTitle={async () => {}}
       allowTool={async () => true}
-      setAllowEdits={async () => {}}
       answerAsk={async () => {}}
       {...over}
     />,
