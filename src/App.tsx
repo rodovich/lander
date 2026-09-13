@@ -5,7 +5,6 @@ import { dataTransferHasFiles } from './fileDrop'
 import { detailHeaderLabel } from './format'
 import { usePersistentState, useSessionState } from './hooks'
 import { HooksPanel } from './hooksPanel'
-import type { TaskAction } from './taskActions'
 import { NewTaskForm } from './newTaskForm'
 import { tick } from './perf'
 import { ProjectMenu, filterLabelParts } from './projectMenu'
@@ -65,11 +64,8 @@ export function App() {
   const currentRef = useRef<TaskWithProject | null>(null)
   const {
     markSeen,
-    markUnread,
-    setStatus,
-    archiveTask,
+    runTaskAction,
     archiveSection,
-    launchNow,
     allowTool,
     setAllowEdits,
     saveTitle,
@@ -218,24 +214,6 @@ export function App() {
       })
     : null
 
-  // The kebab-menu actions, shared by the list rows and the detail header.
-  // Stable, so the memoized panes receiving it don't re-render on unrelated
-  // App state (the underlying actions are stable).
-  const onTaskAction = useCallback(
-    (task: TaskWithProject, action: TaskAction) => {
-      if (action === 'launch') void launchNow(task)
-      else if (action === 'wedge') void setStatus(task, 'wedged')
-      else if (action === 'rest') void setStatus(task, 'resting')
-      else if (action === 'land') void setStatus(task, 'landed')
-      else if (action === 'copyId')
-        void navigator.clipboard.writeText(task.id).catch(() => {})
-      else if (action === 'markUnread') void markUnread(taskKeyOf(task))
-      else if (action === 'archive') void archiveTask(task, true)
-      else if (action === 'restore') void archiveTask(task, false)
-    },
-    [launchNow, setStatus, markUnread, archiveTask],
-  )
-
   // Keep the page title in sync with the project-select label text.
   const labelParts = filterLabelParts(projects, shown, timeFilter, view)
   const filterLabel = [labelParts.base, ...labelParts.suffixes]
@@ -275,7 +253,7 @@ export function App() {
           selected={selected}
           onSelect={selectTask}
           onFocusChange={setListFocused}
-          onTaskAction={onTaskAction}
+          onTaskAction={runTaskAction}
           onArchiveSection={archiveSection}
         />
 
@@ -326,7 +304,7 @@ export function App() {
               retitling={retitling}
               answering={answeringBy[taskKeyOf(current)] ?? false}
               onAtBottomChange={setAtBottom}
-              onTaskAction={onTaskAction}
+              onTaskAction={runTaskAction}
               saveTitle={saveTitle}
               generateTitle={generateTitle}
               allowTool={allowTool}

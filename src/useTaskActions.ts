@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react'
 import { uiHeaders } from './api'
 import { latestUpdateAt } from './taskMeta'
 import { taskKeyOf } from './taskRef'
+import type { TaskAction } from './taskActions'
 import type { TaskMutationHandle, TaskPatch } from './taskMutationFence'
 import type { TaskWithProject } from './types'
 
@@ -379,13 +380,28 @@ export function useTaskActions(opts: {
     [currentRef, answeringBy, setError, refresh],
   )
 
+  // Fire one of the kebab menu's actions (see availableTaskActions) on a task —
+  // the one entry point the list rows and the detail header share, so neither
+  // they nor App need to know what each action name does.
+  const runTaskAction = useCallback(
+    (task: TaskWithProject, action: TaskAction) => {
+      if (action === 'launch') void launchNow(task)
+      else if (action === 'wedge') void setStatus(task, 'wedged')
+      else if (action === 'rest') void setStatus(task, 'resting')
+      else if (action === 'land') void setStatus(task, 'landed')
+      else if (action === 'copyId')
+        void navigator.clipboard.writeText(task.id).catch(() => {})
+      else if (action === 'markUnread') void markUnread(taskKeyOf(task))
+      else if (action === 'archive') void archiveTask(task, true)
+      else if (action === 'restore') void archiveTask(task, false)
+    },
+    [launchNow, setStatus, markUnread, archiveTask],
+  )
+
   return {
     markSeen,
-    markUnread,
-    setStatus,
-    archiveTask,
+    runTaskAction,
     archiveSection,
-    launchNow,
     allowTool,
     setAllowEdits,
     saveTitle,
