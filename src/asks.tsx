@@ -13,7 +13,7 @@
 import { useState } from 'react'
 import { retryResetTime } from './format'
 import { Markdown } from './markdown'
-import type { TaskLinkResolver } from './markdown'
+import { useTaskLink } from './taskLinkContext'
 import type { AskItem, AskOption } from './types'
 
 // An option's display label, appending its scheduled clock time while that time
@@ -27,17 +27,16 @@ export function askOptionLabel(opt: AskOption): string {
 
 export function AskForm({
   ask,
-  linkTask,
   disabled,
   onAnswer,
 }: {
   ask: AskItem
-  linkTask: TaskLinkResolver
   // True while an answer to this task's ask is in flight (the same per-task
   // in-flight disabling the composer uses), so the buttons can't double-submit.
   disabled: boolean
   onAnswer: (body: { optionId?: string; text?: string }) => void
 }) {
+  const linkTask = useTaskLink()
   // Per-editable-option text, seeded from each option's prefill.
   const [edited, setEdited] = useState<Record<string, string>>(() =>
     Object.fromEntries(

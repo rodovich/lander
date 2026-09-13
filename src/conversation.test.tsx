@@ -92,7 +92,6 @@ const render = (
         toggleDetail: () => {},
         toggleTurn: () => {},
       }}
-      linkTask={() => undefined}
       answering={false}
       onAtBottomChange={() => {}}
       allowTool={async () => true}

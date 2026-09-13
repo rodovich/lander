@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { formatTimestamp } from './format'
-import type { TaskLinkResolver } from './markdown'
+import { useTaskLink } from './taskLinkContext'
 import { statusClass, TaskChip, TimelineNote } from './timelineNote'
 import type {
   TaskActionItem,
@@ -10,14 +10,8 @@ import type {
 
 // A referenced task, named as it stands now: the record snapshots a title only
 // when the action was taken, and the reader wants the task in front of them.
-function RefLink({
-  task,
-  linkTask,
-}: {
-  task: TaskActionRef
-  linkTask: TaskLinkResolver
-}) {
-  const current = linkTask(task.id, task.projectSlug)
+function RefLink({ task }: { task: TaskActionRef }) {
+  const current = useTaskLink()(task.id, task.projectSlug)
   return (
     <TaskChip
       id={task.id}
@@ -30,19 +24,13 @@ function RefLink({
 
 function AwaitCondition({
   trigger,
-  linkTask,
 }: {
   trigger: Extract<TaskActionTrigger, { kind: 'awaiting' }>
-  linkTask: TaskLinkResolver
 }) {
   const single = trigger.tasks.length === 1
   return (
     <>
-      {single ? (
-        <RefLink task={trigger.tasks[0]} linkTask={linkTask} />
-      ) : (
-        `${trigger.tasks.length} tasks`
-      )}
+      {single ? <RefLink task={trigger.tasks[0]} /> : `${trigger.tasks.length} tasks`}
       {trigger.scheduledFor && (
         <span className="timeline-note-when">
           {' '}
@@ -53,11 +41,7 @@ function AwaitCondition({
   )
 }
 
-function actionCopy(
-  item: TaskActionItem,
-  target: ReactNode,
-  linkTask: TaskLinkResolver,
-): ReactNode {
+function actionCopy(item: TaskActionItem, target: ReactNode): ReactNode {
   if (item.action === 'status') {
     return (
       <>
@@ -85,8 +69,7 @@ function actionCopy(
     return (
       <>
         {item.action === 'launch' ? 'task ' : 'message to task '}
-        {target} awaiting{' '}
-        <AwaitCondition trigger={item.trigger} linkTask={linkTask} />
+        {target} awaiting <AwaitCondition trigger={item.trigger} />
       </>
     )
   }
@@ -106,13 +89,11 @@ function actionCopy(
 export function TaskActionNote({
   item,
   inTurn,
-  linkTask,
 }: {
   item: TaskActionItem
   inTurn?: boolean
-  linkTask: TaskLinkResolver
 }) {
-  const target = <RefLink task={item.target} linkTask={linkTask} />
+  const target = <RefLink task={item.target} />
   const trigger = item.action === 'status' ? undefined : item.trigger
   const awaiting = trigger?.kind === 'awaiting' ? trigger : undefined
   const sent = item.action === 'message' ? item.text : undefined
@@ -125,13 +106,13 @@ export function TaskActionNote({
         awaiting.tasks.length > 1 &&
         awaiting.tasks.map((task) => (
           <li key={`${task.projectSlug}/${task.id}`}>
-            <RefLink task={task} linkTask={linkTask} />
+            <RefLink task={task} />
           </li>
         ))
       }
       detail={sent ? { label: 'message', body: sent } : undefined}
     >
-      {actionCopy(item, target, linkTask)}
+      {actionCopy(item, target)}
     </TimelineNote>
   )
 }

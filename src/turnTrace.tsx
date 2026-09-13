@@ -1,6 +1,5 @@
 import { Fragment } from 'react'
 import { Collapsible } from './collapsible'
-import type { TaskLinkResolver } from './markdown'
 import { MessageText } from './messageText'
 import { TaskActionNote } from './taskActionNote'
 import { ToolStep } from './toolStep'
@@ -13,22 +12,11 @@ import type { TimelineDisclosure } from './useTimelineDisclosure'
 // The cross-task actions anchored at one point in the trace, as one block. They
 // stack unruled: what a turn did to other tasks in one stretch of work reads as
 // a single aside, not as a row per action.
-function TurnActions({
-  actions,
-  linkTask,
-}: {
-  actions: TaskActionItem[]
-  linkTask: TaskLinkResolver
-}) {
+function TurnActions({ actions }: { actions: TaskActionItem[] }) {
   return (
     <div className="turn-notes">
       {actions.map((action) => (
-        <TaskActionNote
-          key={`ta-${action.id}`}
-          item={action}
-          inTurn
-          linkTask={linkTask}
-        />
+        <TaskActionNote key={`ta-${action.id}`} item={action} inTurn />
       ))}
     </div>
   )
@@ -44,7 +32,6 @@ export function TurnTrace({
   actions,
   rideId,
   settled,
-  linkTask,
   disclosure: { openDetails, toggleDetail, expandedTurns, toggleTurn },
 }: {
   items: RideItem[]
@@ -57,7 +44,6 @@ export function TurnTrace({
   // Whether the ride has ended. An open ride renders in full: its shape isn't
   // settled yet, so there is nothing to fold down.
   settled: boolean
-  linkTask: TaskLinkResolver
   disclosure: TimelineDisclosure
 }) {
   // Subagent items (parentId set) don't render inline — they fold into their
@@ -130,7 +116,7 @@ export function TurnTrace({
       // A flow message item: its prose. The open ask renders as the whole
       // turn's footer, not inline with whatever prose happened to precede the
       // wedge.
-      return <MessageText key={it.id} text={it.text} linkTask={linkTask} />
+      return <MessageText key={it.id} text={it.text} />
     }
     return null
   }
@@ -145,7 +131,7 @@ export function TurnTrace({
     if (!notes) return renderBody(j)
     return (
       <Fragment key={`anchored-${j}`}>
-        <TurnActions actions={notes} linkTask={linkTask} />
+        <TurnActions actions={notes} />
         {renderBody(j)}
       </Fragment>
     )
@@ -161,7 +147,7 @@ export function TurnTrace({
           {k > 0 && <hr className="turn-sep" />}
           {lead && (
             <>
-              <TurnActions actions={lead} linkTask={linkTask} />
+              <TurnActions actions={lead} />
               <hr className="turn-sep" />
             </>
           )}
@@ -181,7 +167,7 @@ export function TurnTrace({
   const tail = anchored.tail.length > 0 && (
     <>
       {mainIdxs.length > 0 && <hr className="turn-sep" />}
-      <TurnActions actions={anchored.tail} linkTask={linkTask} />
+      <TurnActions actions={anchored.tail} />
     </>
   )
   const folds = settled && collapse.segments.some((seg) => seg.hidden)

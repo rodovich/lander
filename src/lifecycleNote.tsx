@@ -1,5 +1,5 @@
 import { formatTimestamp } from './format'
-import type { TaskLinkResolver } from './markdown'
+import { useTaskLink } from './taskLinkContext'
 import { TaskChip, TimelineNote } from './timelineNote'
 import type { EventItem } from './types'
 
@@ -25,12 +25,11 @@ export const EVENT_VERB: Record<EventItem['eventKind'], string> = {
 export function LifecycleNote({
   event,
   slug,
-  linkTask,
 }: {
   event: EventItem
   slug: string
-  linkTask: TaskLinkResolver
 }) {
+  const linkTask = useTaskLink()
   // The name the task went by at the time, leading the sentence.
   const name = event.title ? `${event.title} ` : ''
 

@@ -3,7 +3,6 @@ import { AskForm } from './asks'
 import { MessageAttachments } from './attachments'
 import { formatTimestamp } from './format'
 import { BlockedSummary } from './grants'
-import type { TaskLinkResolver } from './markdown'
 import { blockedRequests } from './permissions'
 import { taskAgentModelName } from './taskMeta'
 import { TurnTrace } from './turnTrace'
@@ -22,7 +21,6 @@ export const RideTurn = memo(function RideTurn({
   agent,
   slug,
   grants,
-  linkTask,
   disclosure,
   openAsk,
   answering,
@@ -37,7 +35,6 @@ export const RideTurn = memo(function RideTurn({
   agent: string | undefined
   slug: string
   grants: Task['grants']
-  linkTask: TaskLinkResolver
   disclosure: TimelineDisclosure
   // The task's open ask; rendered as this turn's footer only when this ride
   // raised it.
@@ -67,7 +64,6 @@ export const RideTurn = memo(function RideTurn({
           actions={actions}
           rideId={ride.id}
           settled={settled}
-          linkTask={linkTask}
           disclosure={disclosure}
         />
       </div>
@@ -91,7 +87,6 @@ export const RideTurn = memo(function RideTurn({
       {openAsk && openAsk.rideId === ride.id && (
         <AskForm
           ask={openAsk}
-          linkTask={linkTask}
           disabled={answering}
           onAnswer={(body) => onAnswerAsk(openAsk.id, body)}
         />

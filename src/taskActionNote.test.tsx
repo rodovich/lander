@@ -1,17 +1,19 @@
 import { describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
+import type { TaskLinkResolver } from './markdown'
 import { TaskActionNote } from './taskActionNote'
+import { TaskLinkProvider } from './taskLinkContext'
 import type { TaskActionItem } from './types'
 
 const AT = '2026-08-21T20:00:00.000Z'
 const target = { id: 'child-id', projectSlug: 'other', title: 'Stored child' }
 
-const render = (
-  item: TaskActionItem,
-  linkTask: (id: string, projectSlug?: string) =>
-    | { href: string; title: string; status: string }
-    | undefined = () => undefined,
-) => renderToStaticMarkup(<TaskActionNote item={item} linkTask={linkTask} />)
+const render = (item: TaskActionItem, linkTask: TaskLinkResolver = () => undefined) =>
+  renderToStaticMarkup(
+    <TaskLinkProvider value={linkTask}>
+      <TaskActionNote item={item} />
+    </TaskLinkProvider>,
+  )
 
 describe('TaskActionNote', () => {
   it('renders an immediate launch with an authoritative pair href and current metadata', () => {

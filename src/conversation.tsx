@@ -2,7 +2,6 @@ import { memo, useEffect, useMemo, useRef } from 'react'
 import { AskForm } from './asks'
 import { MessageAttachments } from './attachments'
 import { LifecycleNote } from './lifecycleNote'
-import type { TaskLinkResolver } from './markdown'
 import { MessageBubble } from './messageBubble'
 import { MessageText } from './messageText'
 import { tick, timed } from './perf'
@@ -23,7 +22,6 @@ import type { TimelineDisclosure } from './useTimelineDisclosure'
 export const Conversation = memo(function Conversation({
   task,
   disclosure,
-  linkTask,
   answering,
   onAtBottomChange,
   allowTool,
@@ -31,7 +29,6 @@ export const Conversation = memo(function Conversation({
 }: {
   task: TaskWithProject
   disclosure: TimelineDisclosure
-  linkTask: TaskLinkResolver
   answering: boolean
   onAtBottomChange: (atBottom: boolean) => void
   allowTool: (rule: string, scope: 'task' | 'project') => Promise<boolean>
@@ -143,7 +140,6 @@ export const Conversation = memo(function Conversation({
               key={`e-${entry.event.id}`}
               event={entry.event}
               slug={task.projectSlug}
-              linkTask={linkTask}
             />
           )
         }
@@ -152,11 +148,7 @@ export const Conversation = memo(function Conversation({
           // it acted, or that ride streamed nothing. Everything else reaches
           // the reader inside its RideTurn.
           return (
-            <TaskActionNote
-              key={`ta-${entry.action.id}`}
-              item={entry.action}
-              linkTask={linkTask}
-            />
+            <TaskActionNote key={`ta-${entry.action.id}`} item={entry.action} />
           )
         }
         if (entry.kind === 'ask') {
@@ -172,7 +164,6 @@ export const Conversation = memo(function Conversation({
             >
               <AskForm
                 ask={entry.ask}
-                linkTask={linkTask}
                 disabled={answering}
                 onAnswer={(body) => void answerAsk(entry.ask.id, body)}
               />
@@ -193,7 +184,7 @@ export const Conversation = memo(function Conversation({
               at={h.at}
               variant="message-platform"
             >
-              {h.text && <MessageText text={h.text} linkTask={linkTask} />}
+              {h.text && <MessageText text={h.text} />}
               {h.error && <div className="hook-error">{h.error}</div>}
               {h.output && <pre className="hook-output">{h.output}</pre>}
             </MessageBubble>
@@ -215,7 +206,7 @@ export const Conversation = memo(function Conversation({
                 (m.queued ? ' message-queued' : '')
               }
             >
-              <MessageText text={m.text} linkTask={linkTask} />
+              <MessageText text={m.text} />
               {m.attachments && m.attachments.length > 0 && (
                 <MessageAttachments
                   attachments={m.attachments}
@@ -235,7 +226,6 @@ export const Conversation = memo(function Conversation({
             agent={task.flow ?? task.agent}
             slug={task.projectSlug}
             grants={task.grants}
-            linkTask={linkTask}
             disclosure={disclosure}
             openAsk={openAsk}
             answering={answering}

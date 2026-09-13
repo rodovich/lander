@@ -3,7 +3,6 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { AskForm, askOptionLabel } from './asks'
 import type { AskItem } from './types'
 
-const noLink = () => undefined
 const AT = '2026-01-01T00:00:00.000Z'
 const FUTURE = '2099-01-01T00:00:00.000Z'
 
@@ -19,7 +18,7 @@ const ask = (over: Partial<AskItem> = {}): AskItem => ({
 
 const render = (a: AskItem, disabled = false) =>
   renderToStaticMarkup(
-    <AskForm ask={a} linkTask={noLink} disabled={disabled} onAnswer={() => {}} />,
+    <AskForm ask={a} disabled={disabled} onAnswer={() => {}} />,
   )
 
 describe('askOptionLabel', () => {

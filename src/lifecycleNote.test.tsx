@@ -1,18 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { LifecycleNote } from './lifecycleNote'
+import type { TaskLinkResolver } from './markdown'
+import { TaskLinkProvider } from './taskLinkContext'
 import type { EventItem } from './types'
 
 const AT = '2026-08-21T20:00:00.000Z'
 
-const render = (
-  event: EventItem,
-  linkTask: (id: string, projectSlug?: string) =>
-    | { href: string; title: string; status: string }
-    | undefined = () => undefined,
-) =>
+const render = (event: EventItem, linkTask: TaskLinkResolver = () => undefined) =>
   renderToStaticMarkup(
-    <LifecycleNote event={event} slug="proj" linkTask={linkTask} />,
+    <TaskLinkProvider value={linkTask}>
+      <LifecycleNote event={event} slug="proj" />
+    </TaskLinkProvider>,
   )
 
 const base = { id: 'e1', at: AT, kind: 'event' } as const

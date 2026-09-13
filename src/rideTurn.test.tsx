@@ -81,7 +81,6 @@ const render = (
       agent="claude"
       slug="proj"
       grants={undefined}
-      linkTask={() => undefined}
       disclosure={disclosure()}
       openAsk={undefined}
       answering={false}

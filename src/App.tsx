@@ -12,6 +12,7 @@ import { tick } from './perf'
 import { ProjectMenu, filterLabelParts } from './projectMenu'
 import { ResizeHandle } from './resizeHandle'
 import { TaskList } from './taskList'
+import { TaskLinkProvider } from './taskLinkContext'
 import { buildTaskRows } from './taskRows'
 import { TelemetryPanel } from './telemetry'
 import { buildTimeline } from './timeline'
@@ -318,7 +319,7 @@ export function App() {
             onClose={() => setHooksProject(null)}
           />
         ) : current ? (
-          <>
+          <TaskLinkProvider value={resolveTaskLink}>
             <DetailHeader
               task={current}
               projectLabel={projectLabel}
@@ -333,7 +334,6 @@ export function App() {
             <Conversation
               task={current}
               disclosure={disclosure}
-              linkTask={resolveTaskLink}
               answering={answeringBy[taskKeyOf(current)] ?? false}
               onAtBottomChange={setAtBottom}
               allowTool={allowTool}
@@ -358,7 +358,7 @@ export function App() {
               replyFiles={replyFiles}
               setReplyFiles={setReplyFiles}
             />
-          </>
+          </TaskLinkProvider>
         ) : (
           <div className="placeholder">Select a task</div>
         )}
