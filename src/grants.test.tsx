@@ -37,9 +37,8 @@ describe('RuleRow', () => {
         grants={{ task: true, project: true }}
         menuOpen={false}
         onToggleMenu={() => {}}
-        onAllow={noop}
         granted={null}
-        onGranted={() => {}}
+        onGrant={() => {}}
         {...props}
       />,
     )
@@ -68,18 +67,32 @@ describe('RuleRow', () => {
     expect(html).toContain('disabled')
   })
 
+  const grantedAs = { scope: 'task', rule: 'Bash(git push)' }
+
   it('shows a checkmark and no kebab once granted', () => {
-    const html = render({ granted: 'task' })
+    const html = render({ granted: grantedAs })
     expect(html).toContain('rule-row-granted')
     expect(html).not.toContain('rule-row-kebab')
   })
 
   it('renders the rule read-only (not click-to-edit) once granted', () => {
-    const html = render({ granted: 'task' })
+    const html = render({ granted: grantedAs })
     expect(html).toContain('rule-row-rule readonly')
     expect(html).not.toContain('Click to edit')
     const ungranted = render()
     expect(ungranted).toContain('Click to edit')
+  })
+
+  // A denial row reopened after its rule was edited and granted: the row is
+  // freshly mounted with the denied text, but what it records is what was allowed.
+  it('names the rule as granted, not as it was first seeded', () => {
+    const html = render({
+      rule: 'Bash(git log --oneline)',
+      granted: { scope: 'project', rule: 'Bash(git:*)' },
+    })
+    expect(html).toContain('Bash(git:*)')
+    expect(html).not.toContain('git log')
+    expect(html).toContain('title="Allowed in project"')
   })
 
   it('starts in edit mode with a placeholder for an empty authoring row', () => {
