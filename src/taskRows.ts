@@ -12,14 +12,28 @@ import type {
 // (when a status's tasks span more than one date bucket), or a task. Each task
 // row keeps its orderedTasks index so the roving-tabindex refs and keyboard
 // navigation stay aligned with that array.
+//
+// A header carries the tasks under it, so the list never has to re-derive a
+// section's membership from the bucketing rule. A status header that `split`s
+// into date subheaders still carries all of its status's tasks; the section a
+// header's archive menu acts on is its leaf — a date subheader, or a status
+// header that didn't split.
 export type TaskRow =
-  | { kind: 'status'; key: string; status: string; first: boolean }
+  | {
+      kind: 'status'
+      key: string
+      status: string
+      first: boolean
+      split: boolean
+      tasks: TaskWithProject[]
+    }
   | {
       kind: 'date'
       key: string
       category: DateCategory
       status: string
       first: boolean
+      tasks: TaskWithProject[]
     }
   | { kind: 'task'; key: string; task: TaskWithProject; index: number }
 
@@ -34,17 +48,8 @@ export type TaskListShape = {
   // left-to-right as the reverse of the list (landed, resting, riding, wedged
   // — STATUS_RANK descending). Only statuses present after filtering appear.
   statusCounts: [string, number][]
-  countByStatus: Map<string, number>
-  // Tasks per status+date bucket, keyed `${status}|${category}`, for the count
-  // a date subheader's archive menu shows (and archives).
-  countByStatusDate: Map<string, number>
-  // The date buckets each status's tasks span; a status splits into date
-  // subheaders only when it spans more than one.
-  dateCatsByStatus: Map<string, Set<DateCategory>>
-  // Start of today / this week (Sunday) in local-time ms, for date bucketing
-  // and time formatting downstream.
+  // Start of today in local-time ms, for formatting each row's time.
   todayStart: number
-  weekStart: number
 }
 
 // Group tasks by status — wedged (needs the user) first, then riding,
@@ -146,55 +151,53 @@ export function buildTaskRows(
     return s.getTime()
   })()
 
+  const categoryOf = (t: TaskWithProject) =>
+    dateCategory(t.updatedAt ?? t.createdAt, todayStart, weekStart)
   const dateCatsByStatus = new Map<string, Set<DateCategory>>()
-  const countByStatusDate = new Map<string, number>()
   for (const t of orderedTasks) {
-    const cat = dateCategory(t.updatedAt ?? t.createdAt, todayStart, weekStart)
     const set = dateCatsByStatus.get(t.status) ?? new Set<DateCategory>()
-    set.add(cat)
+    set.add(categoryOf(t))
     dateCatsByStatus.set(t.status, set)
-    const k = `${t.status}|${cat}`
-    countByStatusDate.set(k, (countByStatusDate.get(k) ?? 0) + 1)
   }
 
   // Flatten orderedTasks into a list of rows interleaved with sticky headers:
   // a status header at every status change and, within a status whose tasks
   // span more than one date bucket, a date subheader at every bucket change.
+  // Each header collects the tasks that follow it until the next header of its
+  // own kind.
   const taskRows: TaskRow[] = []
-  let rowStatus: string | null = null
-  let rowCategory: DateCategory | null = null
+  let statusRow: Extract<TaskRow, { kind: 'status' }> | null = null
+  let dateRow: Extract<TaskRow, { kind: 'date' }> | null = null
   orderedTasks.forEach((task, index) => {
-    if (task.status !== rowStatus) {
-      taskRows.push({
+    if (task.status !== statusRow?.status) {
+      statusRow = {
         kind: 'status',
         key: `status-${task.status}`,
         status: task.status,
         // The first section gets no leading gap (nothing precedes it).
-        first: rowStatus === null,
-      })
-      rowStatus = task.status
-      rowCategory = null
+        first: statusRow === null,
+        split: (dateCatsByStatus.get(task.status)?.size ?? 0) > 1,
+        tasks: [],
+      }
+      taskRows.push(statusRow)
+      dateRow = null
     }
-    const category = dateCategory(
-      task.updatedAt ?? task.createdAt,
-      todayStart,
-      weekStart,
-    )
-    if (
-      (dateCatsByStatus.get(task.status)?.size ?? 0) > 1 &&
-      category !== rowCategory
-    ) {
-      taskRows.push({
+    const category = categoryOf(task)
+    if (statusRow.split && category !== dateRow?.category) {
+      dateRow = {
         kind: 'date',
         key: `date-${task.status}-${category}`,
         category,
         status: task.status,
         // The first date in a status sits directly under the status header
-        // (rowCategory is reset to null at each status change).
-        first: rowCategory === null,
-      })
-      rowCategory = category
+        // (dateRow is reset to null at each status change).
+        first: dateRow === null,
+        tasks: [],
+      }
+      taskRows.push(dateRow)
     }
+    statusRow.tasks.push(task)
+    dateRow?.tasks.push(task)
     taskRows.push({ kind: 'task', key: taskKeyOf(task), task, index })
   })
 
@@ -207,16 +210,6 @@ export function buildTaskRows(
       (a, b) => (STATUS_RANK[b[0]] ?? 3) - (STATUS_RANK[a[0]] ?? 3),
     ) as [string, number][]
   })()
-  const countByStatus = new Map(statusCounts)
 
-  return {
-    orderedTasks,
-    taskRows,
-    statusCounts,
-    countByStatus,
-    countByStatusDate,
-    dateCatsByStatus,
-    todayStart,
-    weekStart,
-  }
+  return { orderedTasks, taskRows, statusCounts, todayStart }
 }

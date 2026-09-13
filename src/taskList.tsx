@@ -1,13 +1,79 @@
-import { Fragment, memo, useEffect, useRef } from 'react'
+import { memo, useEffect, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
-import { DATE_CATEGORY_LABELS, dateCategory } from './format'
+import { DATE_CATEGORY_LABELS } from './format'
 import { SectionActionsMenu } from './menus'
 import type { TaskAction } from './taskActions'
 import { tick } from './perf'
 import { taskKeyOf } from './taskRef'
 import { TaskRow } from './taskRow'
-import type { TaskListShape } from './taskRows'
-import type { DateCategory, TaskView, TaskWithProject } from './types'
+import type { TaskListShape, TaskRow as ListRow } from './taskRows'
+import type { TaskView, TaskWithProject } from './types'
+
+// A sticky header over a run of tasks: a status, or a date bucket within a
+// status split into dates. Faint rules bracket each contiguous run of task rows
+// around the headers. The header→tasks rule (rule-below) rides on the header so
+// it pins with it in sticky mode. The tasks→header rule rides in the flow just
+// above the header as its own <li>, so it scrolls up and out of view as the
+// header pins (no separator between stacked sticky headers) and keeps clear of
+// the header text below it.
+function SectionHeader({
+  row,
+  ruleAbove,
+  ruleBelow,
+  archivable,
+  onArchiveSection,
+  anchorRef,
+}: {
+  row: Exclude<ListRow, { kind: 'task' }>
+  ruleAbove: boolean
+  ruleBelow: boolean
+  // False in the archived view, which is already the archive.
+  archivable: boolean
+  onArchiveSection: (targets: TaskWithProject[]) => void
+  // A status header's scroll anchor, for the count chips (see TaskList).
+  anchorRef: (el: HTMLLIElement | null) => void
+}) {
+  const split = row.kind === 'status' && row.split
+  // The archive menu rides the leaf header — a date subheader, or a status
+  // that isn't broken out into dates — and archives just the tasks under it. A
+  // riding task has a live run the server won't archive, so that section gets
+  // none.
+  const menu = archivable && !split && row.status !== 'riding'
+  return (
+    <>
+      {row.kind === 'status' && (
+        <li
+          ref={anchorRef}
+          className={'task-section-anchor' + (row.first ? ' first' : '')}
+          role="presentation"
+          aria-hidden="true"
+        />
+      )}
+      {ruleAbove && (
+        <li className="task-rule" role="presentation" aria-hidden="true" />
+      )}
+      <li
+        role="presentation"
+        className={
+          `task-group-header ${row.kind} ${row.status}` +
+          (row.first ? ' first' : '') +
+          (split ? ' split' : '') +
+          (ruleBelow ? ' rule-below' : '')
+        }
+      >
+        <span className="task-group-label">
+          {row.kind === 'status' ? row.status : DATE_CATEGORY_LABELS[row.category]}
+        </span>
+        {menu && (
+          <SectionActionsMenu
+            count={row.tasks.length}
+            onArchive={() => onArchiveSection(row.tasks)}
+          />
+        )}
+      </li>
+    </>
+  )
+}
 
 // The sidebar's task list: the toolbar (status-count chips, search), the rows
 // with their sticky status/date headers, section scroll anchors, and the
@@ -50,16 +116,7 @@ export const TaskList = memo(function TaskList({
   // Opt-in profiling (see perf.ts): count re-renders of the list pane
   // separately from App's own churn.
   tick('TaskList.render')
-  const {
-    orderedTasks,
-    taskRows,
-    statusCounts,
-    countByStatus,
-    countByStatusDate,
-    dateCatsByStatus,
-    todayStart,
-    weekStart,
-  } = shape
+  const { orderedTasks, taskRows, statusCounts, todayStart } = shape
 
   const searchInputRef = useRef<HTMLInputElement>(null)
 
@@ -134,18 +191,6 @@ export const TaskList = memo(function TaskList({
     }
   }
 
-  // Resolve a section (a status, or a single status+date bucket when the
-  // status is broken out into dates) to the tasks its archive menu targets.
-  function sectionTargets(status: string, category?: DateCategory) {
-    return orderedTasks.filter(
-      (t) =>
-        t.status === status &&
-        (category == null ||
-          dateCategory(t.updatedAt ?? t.createdAt, todayStart, weekStart) ===
-            category),
-    )
-  }
-
   return (
     <>
       <div className="task-toolbar">
@@ -202,101 +247,20 @@ export const TaskList = memo(function TaskList({
           const prevIsTask = ri > 0 && taskRows[ri - 1].kind === 'task'
           const nextIsTask =
             ri < taskRows.length - 1 && taskRows[ri + 1].kind === 'task'
-          if (row.kind === 'status') {
+          if (row.kind !== 'task') {
             return (
-              <Fragment key={row.key}>
-                <li
-                  ref={(el) => {
-                    if (el) sectionAnchorRefs.current.set(row.status, el)
-                    else sectionAnchorRefs.current.delete(row.status)
-                  }}
-                  className={
-                    'task-section-anchor' + (row.first ? ' first' : '')
-                  }
-                  role="presentation"
-                  aria-hidden="true"
-                />
-                {prevIsTask && (
-                  <li
-                    className="task-rule"
-                    role="presentation"
-                    aria-hidden="true"
-                  />
-                )}
-                <li
-                  role="presentation"
-                  className={
-                    'task-group-header status ' +
-                    row.status +
-                    (row.first ? ' first' : '') +
-                    ((dateCatsByStatus.get(row.status)?.size ?? 0) > 1
-                      ? ' split'
-                      : '') +
-                    (nextIsTask ? ' rule-below' : '')
-                  }
-                >
-                  <span className="task-group-label">{row.status}</span>
-                  {/* The archive menu rides the leaf header: here only when the
-                      status isn't broken out into dates (otherwise each date
-                      subheader carries its own, below). A riding task has a live
-                      run the server won't archive, so that section gets none;
-                      the archived view is already the archive, so it gets none
-                      either. */}
-                  {view !== 'archived' &&
-                    row.status !== 'riding' &&
-                    (dateCatsByStatus.get(row.status)?.size ?? 0) <= 1 && (
-                      <SectionActionsMenu
-                        count={countByStatus.get(row.status) ?? 0}
-                        onArchive={() =>
-                          onArchiveSection(sectionTargets(row.status))
-                        }
-                      />
-                    )}
-                </li>
-              </Fragment>
-            )
-          }
-          if (row.kind === 'date') {
-            return (
-              <Fragment key={row.key}>
-                {prevIsTask && (
-                  <li
-                    className="task-rule"
-                    role="presentation"
-                    aria-hidden="true"
-                  />
-                )}
-                <li
-                  role="presentation"
-                  className={
-                    'task-group-header date ' +
-                    row.status +
-                    (row.first ? ' first' : '') +
-                    (nextIsTask ? ' rule-below' : '')
-                  }
-                >
-                  <span className="task-group-label">
-                    {DATE_CATEGORY_LABELS[row.category]}
-                  </span>
-                  {/* The leaf header for a date-broken status: its menu
-                      archives only this status+date bucket. Riding never breaks
-                      out a menu (live runs); archived view shows none. */}
-                  {view !== 'archived' && row.status !== 'riding' && (
-                    <SectionActionsMenu
-                      count={
-                        countByStatusDate.get(
-                          `${row.status}|${row.category}`,
-                        ) ?? 0
-                      }
-                      onArchive={() =>
-                        onArchiveSection(
-                          sectionTargets(row.status, row.category),
-                        )
-                      }
-                    />
-                  )}
-                </li>
-              </Fragment>
+              <SectionHeader
+                key={row.key}
+                row={row}
+                ruleAbove={prevIsTask}
+                ruleBelow={nextIsTask}
+                archivable={view !== 'archived'}
+                onArchiveSection={onArchiveSection}
+                anchorRef={(el) => {
+                  if (el) sectionAnchorRefs.current.set(row.status, el)
+                  else sectionAnchorRefs.current.delete(row.status)
+                }}
+              />
             )
           }
           const { task, index } = row

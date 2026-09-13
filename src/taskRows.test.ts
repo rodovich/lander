@@ -108,10 +108,22 @@ describe('buildTaskRows', () => {
       's:resting', 'single',
       's:landed', 'd:today', 'today1', 'today2', 'd:week', 'week',
     ])
-    expect(shape.dateCatsByStatus.get('landed')?.size).toBe(2)
-    expect(shape.dateCatsByStatus.get('resting')?.size).toBe(1)
-    expect(shape.countByStatusDate.get('landed|today')).toBe(2)
-    expect(shape.countByStatusDate.get('landed|week')).toBe(1)
+    // Each header carries the tasks under it: a split status all of its own,
+    // each date subheader just its bucket's.
+    const headers = shape.taskRows.flatMap((r) =>
+      r.kind === 'task'
+        ? []
+        : [
+            `${r.kind === 'status' ? `s:${r.status}${r.split ? '/split' : ''}` : `d:${r.category}`}` +
+              `=${r.tasks.map((t) => t.id).join(',')}`,
+          ],
+    )
+    expect(headers).toEqual([
+      's:resting=single',
+      's:landed/split=today1,today2,week',
+      'd:today=today1,today2',
+      'd:week=week',
+    ])
   })
 
   it('filters by the time window', () => {
@@ -239,6 +251,5 @@ describe('buildTaskRows', () => {
       ['landed', 2],
       ['wedged', 1],
     ])
-    expect(shape.countByStatus.get('landed')).toBe(2)
   })
 })
