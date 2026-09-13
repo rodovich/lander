@@ -19,11 +19,11 @@ import { buildTimeline } from './timeline'
 import { useSeenMarker, useViewingState } from './useSeenMarker'
 import { useTaskActions } from './useTaskActions'
 import { useTaskData } from './useTaskData'
+import { useReplyDrafts } from './useReplyDrafts'
 import { useTaskRouting } from './useTaskRouting'
 import { useTimelineDisclosure } from './useTimelineDisclosure'
 import {
   taskKeyOf,
-  migrateLegacyTaskValues,
   taskRefFromPath,
   type TaskRef,
 } from './taskRef'
@@ -94,16 +94,6 @@ export function App() {
   // the app should still be in tomorrow.
   const [hooksProject, setHooksProject] = useState<string | null>(null)
 
-  // Reply ownership stays above the conditionally-mounted composer. Keys are
-  // project-qualified, so equal task ids in different projects never share a
-  // draft, attachment set, or in-flight send flag.
-  const [replies, setReplies] = useSessionState<Record<string, string>>(
-    'lander:draft:replies',
-    {},
-  )
-  const [sendingBy, setSendingBy] = useState<Record<string, boolean>>({})
-  const [replyFiles, setReplyFiles] = useState<Record<string, File[]>>({})
-
   // The new-task form's agent/project picks. Session-scoped like the form's
   // draft message (which lives in the form): two tabs keep independent picks,
   // and since these drive the submission, a shared newProject could even send
@@ -158,14 +148,6 @@ export function App() {
     [projects],
   )
 
-  // Drafts saved by an older client were keyed only by id. Migrate one only
-  // when the global projection proves that id belongs to exactly one project;
-  // an ambiguous legacy draft is left untouched rather than guessed onto the
-  // wrong task.
-  useEffect(() => {
-    if (!taskLinksLoaded) return
-    setReplies((prev) => migrateLegacyTaskValues(prev, taskLinks))
-  }, [taskLinks, taskLinksLoaded, setReplies])
   // Tag each task row with its project's leaf only when more than one project's
   // tasks can be intermixed; with a single project shown it's just noise.
   const showProjectLabels = shown.length > 1
@@ -222,6 +204,14 @@ export function App() {
   // What the reader has opened on the open task's timeline, shared by the
   // timeline that draws it and the header's copy, which writes out what's showing.
   const disclosure = useTimelineDisclosure(current)
+  // The open task's reply in progress; every task's draft is kept above the
+  // composer, which unmounts when no task is open.
+  const draft = useReplyDrafts(current, {
+    setError,
+    refresh,
+    taskLinks,
+    taskLinksLoaded,
+  })
   // Built on the click, not per render: the whole document is work, and a
   // fresh `now` places any in-flight turn where it stands at that moment.
   const copyMarkdown = useCallback(
@@ -346,18 +336,9 @@ export function App() {
               reserveTop={200}
               label="Resize reply area"
             />
-            <Composer
-              task={current}
-              height={composerHeight}
-              setError={setError}
-              refresh={refresh}
-              replies={replies}
-              setReplies={setReplies}
-              sendingBy={sendingBy}
-              setSendingBy={setSendingBy}
-              replyFiles={replyFiles}
-              setReplyFiles={setReplyFiles}
-            />
+            {draft && (
+              <Composer task={current} height={composerHeight} draft={draft} />
+            )}
           </TaskLinkProvider>
         ) : (
           <div className="placeholder">Select a task</div>
