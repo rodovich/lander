@@ -1724,12 +1724,12 @@ body {
   overflow-x: auto;
 }
 
-/* The 6em floor is a 5em column plus the 1em gap, since border-box sizing counts
+/* The 7em floor is a 5em column plus the 2em gap, since border-box sizing counts
    the padding into min-width. */
 .message-text th,
 .message-text td {
-  min-width: 6em;
-  padding: 5px 1em 5px 0;
+  min-width: 7em;
+  padding: 5px 2em 5px 0;
   text-align: left;
   vertical-align: top;
 }
@@ -1755,7 +1755,6 @@ body {
 /* Headers label the columns rather than carrying content, so they take the same
    muted gray as the other labels around the transcript. */
 .message-text th {
-  background: var(--bg);
   font-size: 13px;
   font-weight: 600;
   text-transform: uppercase;
