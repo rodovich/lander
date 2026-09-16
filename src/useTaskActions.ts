@@ -99,18 +99,29 @@ export function useTaskActions(opts: {
     [tasksRef, setTasks],
   )
 
-  const setStatus = useCallback(
-    async (task: TaskWithProject, status: string) => {
-      const id = task.id
+  // Write one task through the mutation fence: apply `patch` optimistically,
+  // send the request, then settle on the task the server returns — or roll back
+  // to the server's copy on failure. The fence keeps a poll issued before the
+  // write from painting the old state back over the new. With no `action` the
+  // patch itself is PATCHed to the task; with one, it is a bodiless POST to
+  // that sub-route and the patch is only the local prediction of its effect
+  // (possibly empty, when the result can't be predicted).
+  const writeTask = useCallback(
+    async (task: TaskWithProject, patch: TaskPatch, action?: string) => {
       const proj = task.projectSlug
       setError(null)
-      const mutation = beginTaskMutation(task, { status })
+      const mutation = beginTaskMutation(task, patch)
       try {
-        const r = await fetch(`/api/${proj}/tasks/${id}`, {
-          method: 'PATCH',
-          headers: uiHeaders(),
-          body: JSON.stringify({ status }),
-        })
+        const r = await fetch(
+          `/api/${proj}/tasks/${task.id}${action ? `/${action}` : ''}`,
+          action
+            ? { method: 'POST', headers: uiHeaders() }
+            : {
+                method: 'PATCH',
+                headers: uiHeaders(),
+                body: JSON.stringify(patch),
+              },
+        )
         const body = await r.json().catch(() => ({}))
         if (!r.ok) throw new Error(body.error ?? r.statusText)
         finishTaskMutation(mutation, {
@@ -123,6 +134,11 @@ export function useTaskActions(opts: {
       }
     },
     [setError, beginTaskMutation, finishTaskMutation],
+  )
+
+  const setStatus = useCallback(
+    (task: TaskWithProject, status: string) => writeTask(task, { status }),
+    [writeTask],
   )
 
   // Archive (or restore) a task by moving it between the project's tasks/ and
@@ -191,36 +207,12 @@ export function useTaskActions(opts: {
 
   // Launch a scheduled task now, ahead of its time (the header's "launch"
   // button). The server clears the schedule, records the launch, and starts the
-  // agent; polling reconciles the new status.
+  // agent. Optimistically drop the schedule and flip to riding so the launch
+  // button gives way to the resting one at once.
   const launchNow = useCallback(
-    async (task: TaskWithProject) => {
-      const id = task.id
-      const proj = task.projectSlug
-      const key = taskKeyOf(task)
-      setError(null)
-      // Optimistic: drop the schedule and flip to riding so the button clears at
-      // once and the launch button gives way to the resting one.
-      setTasks((prev) =>
-        prev.map((t) =>
-          taskKeyOf(t) === key
-            ? { ...t, status: 'riding', scheduledFor: undefined }
-            : t,
-        ),
-      )
-      try {
-        const r = await fetch(`/api/${proj}/tasks/${id}/launch`, {
-          method: 'POST',
-          headers: uiHeaders(),
-        })
-        if (!r.ok) {
-          const body = await r.json()
-          throw new Error(body.error ?? r.statusText)
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
-      }
-    },
-    [setError, setTasks],
+    (task: TaskWithProject) =>
+      writeTask(task, { status: 'riding', scheduledFor: undefined }, 'launch'),
+    [writeTask],
   )
 
   // Grant a permission rule: "task" scope persists the rule on the task (used on
@@ -260,30 +252,9 @@ export function useTaskActions(opts: {
     async (checked: boolean) => {
       const current = currentRef.current
       if (!current) return
-      const id = current.id
-      const proj = current.projectSlug
-      const key = taskKeyOf(current)
-      // Optimistic; the PATCH persists it and polling will reconcile.
-      setTasks((prev) =>
-        prev.map((t) =>
-          taskKeyOf(t) === key ? { ...t, allowEdits: checked } : t,
-        ),
-      )
-      try {
-        const r = await fetch(`/api/${proj}/tasks/${id}`, {
-          method: 'PATCH',
-          headers: uiHeaders(),
-          body: JSON.stringify({ allowEdits: checked }),
-        })
-        if (!r.ok) {
-          const body = await r.json()
-          throw new Error(body.error ?? r.statusText)
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
-      }
+      await writeTask(current, { allowEdits: checked })
     },
-    [currentRef, setError, setTasks],
+    [currentRef, writeTask],
   )
 
   // Rename the open task; the edit-mode state stays with the caller. A blank
@@ -292,61 +263,27 @@ export function useTaskActions(opts: {
     async (draft: string) => {
       const current = currentRef.current
       if (!current) return
-      const id = current.id
-      const proj = current.projectSlug
-      const key = taskKeyOf(current)
       const next = draft.trim()
       if (!next || next === current.title) return
-      // Optimistic; the PATCH persists it and polling will reconcile.
-      setTasks((prev) =>
-        prev.map((t) =>
-          taskKeyOf(t) === key ? { ...t, title: next } : t,
-        ),
-      )
-      try {
-        const r = await fetch(`/api/${proj}/tasks/${id}`, {
-          method: 'PATCH',
-          headers: uiHeaders(),
-          body: JSON.stringify({ title: next }),
-        })
-        if (!r.ok) {
-          const body = await r.json()
-          throw new Error(body.error ?? r.statusText)
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
-      }
+      await writeTask(current, { title: next })
     },
-    [currentRef, setError, setTasks],
+    [currentRef, writeTask],
   )
 
-  // Ask haiku (server-side) to name the task from its conversation.
+  // Ask haiku (server-side) to name the task from its conversation. The new
+  // title can't be predicted, so the patch is empty: the fence only keeps a poll
+  // issued before the answer from reverting the title it brings.
   const generateTitle = useCallback(async () => {
     const current = currentRef.current
     if (!current || retitling === taskKeyOf(current)) return
-    const id = current.id
-    const proj = current.projectSlug
     const key = taskKeyOf(current)
     setRetitling(key)
-    setError(null)
     try {
-      const r = await fetch(`/api/${proj}/tasks/${id}/retitle`, {
-        method: 'POST',
-      })
-      const body = await r.json()
-      if (!r.ok) throw new Error(body.error ?? r.statusText)
-      const updated = body as TaskWithProject
-      setTasks((prev) =>
-        prev.map((t) =>
-          taskKeyOf(t) === key ? { ...t, title: updated.title } : t,
-        ),
-      )
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      await writeTask(current, {}, 'retitle')
     } finally {
       setRetitling((prev) => (prev === key ? null : prev))
     }
-  }, [currentRef, retitling, setError, setTasks])
+  }, [currentRef, retitling, writeTask])
 
   // Answer an ask (a choice option, confirm yes/no, or free text). The server
   // stamps the answer and un-wedges — or schedules the delivery for a future
