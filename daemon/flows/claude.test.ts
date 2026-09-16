@@ -3,7 +3,13 @@ import { execFileSync } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
-import { makeFlow, onGrant, resolveLaunchDir, type ClaudeFlowDeps } from './claude'
+import {
+  anchorFileRule,
+  makeFlow,
+  onGrant,
+  resolveLaunchDir,
+  type ClaudeFlowDeps,
+} from './claude'
 import { captureDriverTurn, type DriverTurnFixture } from './testCtx'
 import { gitContext } from 'lander/flow'
 
@@ -391,4 +397,32 @@ describe('Claude flow', () => {
     expect(settings.permissions.allow).toEqual(['Bash(npm test)'])
   })
 
+})
+
+describe('anchorFileRule', () => {
+  it('re-anchors an absolute path for the path-taking tools', () => {
+    expect(anchorFileRule('Read(/Users/me/f)')).toBe('Read(//Users/me/f)')
+    expect(anchorFileRule('Edit(/Users/me/f)')).toBe('Edit(//Users/me/f)')
+    expect(anchorFileRule('Write(/repo/a.ts)')).toBe('Write(//repo/a.ts)')
+    expect(anchorFileRule('MultiEdit(/repo/a.ts)')).toBe('MultiEdit(//repo/a.ts)')
+    expect(anchorFileRule('NotebookEdit(/repo/a.ipynb)')).toBe(
+      'NotebookEdit(//repo/a.ipynb)',
+    )
+    // A path may itself hold parentheses; the rule ends at the last one.
+    expect(anchorFileRule('Read(/Users/me/My (Notes)/f.md)')).toBe(
+      'Read(//Users/me/My (Notes)/f.md)',
+    )
+  })
+
+  it('leaves every other rule as written', () => {
+    expect(anchorFileRule('Read(//Users/me/f)')).toBe('Read(//Users/me/f)')
+    // A subagent can pass a relative path, which already resolves at the root.
+    expect(anchorFileRule('Read(app/models/a.rb)')).toBe('Read(app/models/a.rb)')
+    // A Bash rule's argument is a command that happens to start with a slash.
+    expect(anchorFileRule('Bash(/usr/bin/env node)')).toBe('Bash(/usr/bin/env node)')
+    expect(anchorFileRule('WebFetch(domain:example.com)')).toBe(
+      'WebFetch(domain:example.com)',
+    )
+    expect(anchorFileRule('Read')).toBe('Read')
+  })
 })

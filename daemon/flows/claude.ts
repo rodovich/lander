@@ -197,7 +197,9 @@ export function makeFlow({
               ...(step.inputFull !== undefined
                 ? { inputFull: step.inputFull }
                 : {}),
-              ...(step.rule !== undefined ? { rule: step.rule } : {}),
+              ...(step.rule !== undefined
+                ? { rule: anchorFileRule(step.rule) }
+                : {}),
               ...(step.edits !== undefined ? { edits: step.edits } : {}),
               ...(groupFor(step.inferenceId) !== undefined
                 ? { group: groupFor(step.inferenceId) }
@@ -275,6 +277,29 @@ export function makeFlow({
       return { exitCode, stderr: stderrText.trim() }
     },
   }
+}
+
+// The tools whose permission rule takes a file path rather than a command or a
+// query, so `Read(/x)` names a path while `Bash(/x)` names a command.
+const FILE_RULE_TOOLS = ['Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit']
+
+// Spell a denied call's rule the way Claude will match it once granted. Claude
+// reads a single leading slash as anchored at whatever defined the rule — the
+// project for settings.local.json, the cwd for --allowedTools — so a rule built
+// from a tool call's absolute `file_path` matches nothing. `//` is the CLI's
+// spelling for an absolute path.
+//
+// Applied here, where the rule is minted from the call, rather than when a grant
+// is saved: a rule the user types or edits in the grant popup can mean a
+// project-relative `/src/**` on purpose, while a call's own path cannot. Doing it
+// once here also keeps the popup showing the rule the grant will save. Relative
+// paths (a subagent can pass one) already resolve against the launch root, and
+// pass through untouched.
+export function anchorFileRule(rule: string): string {
+  const match = /^([A-Za-z]+)\((\/[^/].*)\)$/.exec(rule)
+  return match && FILE_RULE_TOOLS.includes(match[1])
+    ? `${match[1]}(/${match[2]})`
+    : rule
 }
 
 // The dynamic per-turn context block. Dynamic facts belong at the cache-friendly

@@ -146,10 +146,15 @@ export function fullToolInput(input: unknown): string {
 }
 
 // Render a tool call as a settings.json-style permission rule, e.g.
-// `Bash(npm run build)` or `Read(/path/to/file)`. Keys off the same identifying
-// field as summarizeToolInput but leaves it untruncated, so the popup can show —
-// and let the user grant — the exact invocation. A tool with no obvious
-// specifier becomes a bare tool name.
+// `Bash(npm run build)`. Keys off the same identifying field as
+// summarizeToolInput but leaves it untruncated, so the popup can show — and let
+// the user grant — the exact invocation. A tool with no obvious specifier becomes
+// a bare tool name.
+//
+// A path is copied as the call gave it, so an absolute one comes out
+// `Read(/path/to/file)` — which Claude reads as relative to the rule's source,
+// not the filesystem root. The Claude flow re-spells it before it reaches the
+// timeline (anchorFileRule in daemon/flows/claude.ts).
 export function toolRule(name: string, input: unknown): string {
   if (!input || typeof input !== 'object') return name
   const i = input as Record<string, unknown>
