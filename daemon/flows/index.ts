@@ -78,10 +78,9 @@ export function announcedFlows(): FlowAnnouncement[] {
   }))
 }
 
-// What the daemon needs to know about a provider BEFORE a host exists: where to
+// What the daemon needs to know about a flow BEFORE a host exists: where to
 // launch, whether images go to vision natively, and whether it owns the global
-// usage panel. The run manager is written against this one shape, so a cutover
-// is a change of source here rather than a change of shape there.
+// usage panel.
 export type ProviderCaps = {
   resolveLaunchDir(input: AgentLaunchDirInput): AgentLaunchDir
   // The manifest block words image attachments differently depending on whether

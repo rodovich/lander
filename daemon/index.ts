@@ -1,8 +1,7 @@
-// The host daemon: owns the agent children the server used to spawn as detached
-// `bin/lander run` runners, reduces their stream-json, and relays structured
-// updates to the server over a WebSocket.
-// It holds the project host paths (its own argv), resolves each run's cwd
-// locally, and runs the agent CLI natively — so the server can stay host-agnostic and
+// The host daemon: supervises a flow-host subprocess per run and a hook-host
+// subprocess per hook fire, and relays their results to the server over a
+// WebSocket. It holds the project host paths (its own argv) and resolves each
+// run's launch directory locally, so the server can stay host-agnostic and
 // (later) move into a container. Phase 1: same host, same user, same credentials.
 //
 // Usage: node daemon/index.ts /path/to/project [/path/to/another ...]
@@ -447,10 +446,7 @@ function handleMessage(msg: ServerToDaemon): void {
       break
     case 'project-grant': {
       const projectPath = pathBySlug.get(msg.project)
-      // Every lookup in this block is keyed by a name that is now `string`, so
-      // each one can miss. They were safe only while AgentKind was a closed
-      // union; an unguarded miss here throws inside the WS message listener,
-      // which is uncaught — killing the daemon and dropping every run it holds.
+      // Flow names are open-ended, so every lookup below can miss.
       const flowName = msg.flow ?? msg.agent
       const caps = flowName ? CAPS[flowName] : undefined
       // A project grant arrives outside any run, so there is no host to route it
@@ -477,13 +473,8 @@ function handleMessage(msg: ServerToDaemon): void {
           type: 'project-grant-result',
           requestId: msg.requestId,
           ok: false,
-          // Source the reason from the provider rather than branching on the
-          // agent name; codex carries the exact current text, so this is
-          // byte-identical. The generic fallback is dead until a third
-          // non-granting provider exists.
-          // `caps?` because this is the branch an UNKNOWN flow reaches — it has
-          // no caps at all, making this the likeliest of the four sites to
-          // deref undefined, not the least.
+          // A flow may word its own refusal; one that doesn't, and a flow this
+          // daemon doesn't know, get the generic reason.
           error:
             caps?.projectGrantsUnsupportedReason ??
             `Project permission grants are not supported for ${flowName ?? 'unknown'} tasks.`,
@@ -638,9 +629,9 @@ process.on('SIGINT', () => {
 })
 
 // Graceful handoff: the dev supervisor sends SIGUSR2 on a daemon source edit
-// instead of killing us (SIGUSR1 is reserved by Node for the inspector). The
-// state machine (drain.ts) stops the watch timers, keeps only our riding runs,
-// and exits once drained.
+// instead of killing us (SIGUSR1 is reserved by Node for the inspector). Once
+// draining, start-run and hook-run are refused, and drain.ts exits as soon as no
+// run or hook fire is held.
 process.on('SIGUSR2', () => {
   if (drain.draining()) return
   console.log(`draining ${runManager.size()} run(s) before handoff`)
@@ -666,10 +657,9 @@ function connect(): void {
       // losing them to the fresh primary.
       draining: drain.draining(),
       runs: runManager.heldRunIds(),
-      // Everything we can drive, so the server knows what it may dispatch. All
-      // bundled at step 4; the scope envelope is here because resolution
-      // precedence (bundled → user → project) is already committed to, and a
-      // flat list would need a second wire change one step later.
+      // Everything we can drive, so the server knows what it may dispatch. Every
+      // flow is bundled today; the scope envelope leaves room for user- and
+      // project-scoped flows without another wire change.
       flows: announcedFlows(),
     })
     // Prime the server's snapshot: re-push the last one we hold (so a reconnect

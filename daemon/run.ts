@@ -14,8 +14,8 @@ import type { MaterializedFiles } from './attachments'
 import { ROOT } from './paths'
 import type { HostEvent, HostInput } from './host-protocol'
 
-// Spawn a flow host for one run. Injectable so tests substitute a fake host
-// without spawning a real `tsx`; the default runs the compiled-in host entry.
+// Spawn a flow host for one run. Injectable so tests substitute a fake host;
+// the default spawns daemon/flow-host.ts.
 export type SpawnHostLike = () => ChildProcess
 
 // The host entry, resolved absolutely so the host process's own cwd is free to be
@@ -92,10 +92,6 @@ export type RunManagerOptions = {
   refreshUsage?: () => void | Promise<void>
   defaultIdleMs?: number
   runBufferTtlMs?: number
-  // Execution now lives in a per-run flow-host subprocess; the daemon supervises
-  // it (seq, buffer, resume, idle, interrupt, done gate) but no longer spawns the
-  // agent, mints sessions, or reduces streams itself — the host does. Session
-  // minting and stream timestamps belong to the flow runtime.
   spawnHost?: SpawnHostLike
   onEmpty?: () => void
 }
@@ -144,8 +140,8 @@ export function createRunManager({
       // The host lives in its own process group (detached) so interrupt / idle /
       // killChildren signal the *group* (`process.kill(-pid)`) and take the agent
       // grandchild down with it — no orphans. cwd is the repo root; the agent's
-      // real cwd rides in the HostInput. The host inherits the daemon env (env
-      // scrubbing is a later step).
+      // real cwd rides in the HostInput. The host inherits the daemon env, which
+      // scrubProcessEnv has already stripped of lander's own credentials.
       cwd: ROOT,
       detached: true,
       stdio: ['pipe', 'pipe', 'pipe'],

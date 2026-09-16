@@ -324,16 +324,12 @@ function buildCodexArgs(
   // whether this thread still needs it and, when it does, leads `prompt` with it.
   const managedPrompt = prompt
   // One `-i <path>` per image (the repeatable short form), then `--`, then the
-  // prompt. The terminator is what makes the placement uniform across both
-  // paths: without it a fresh `exec`'s variadic --image swallows a trailing
-  // positional, which is why the flags used to sit AFTER the prompt there.
-  // Everything past `--` is positional, so the flags must precede it — and a
-  // prompt that begins with `-` stops being parsed as argv. Today the prompt
-  // always leads with the task-management template, so no user text can reach
-  // argv position 1; the terminator is what keeps that a property of the argv
-  // rather than of the prompt's contents (confirmed Codex v0.144.5: a bare
-  // `- bullet…` prompt errors with "unexpected argument", and codex's own tip
-  // is to pass it after `--`).
+  // prompt. Without the terminator a fresh `exec`'s variadic --image swallows a
+  // trailing positional, so the flags must precede it. It also keeps a prompt
+  // that begins with `-` out of argv parsing, which matters because a turn that
+  // has already delivered the task prompt leads with the user's own text
+  // (confirmed Codex v0.144.5: a bare `- bullet…` prompt errors with "unexpected
+  // argument", and codex's own tip is to pass it after `--`).
   const imageArgs = ctx.turn.images.flatMap((p) => ['-i', p])
   if (sessionId)
     return [
@@ -413,8 +409,7 @@ function resolveGitCommonDirWithGit(cwd: string): string | undefined {
 
 function codexShellEnvConfigOverrides(): string[] {
   // Let Lander vars flow from the child process env so LANDER_TOKEN stays out of
-  // argv. This stays a CLI config quirk, not a host-side env filter — scrubbing
-  // the spawn env is a later step.
+  // argv, and keep everything else in the host env out of Codex's shells.
   return [
     'shell_environment_policy.inherit=all',
     'shell_environment_policy.ignore_default_excludes=true',

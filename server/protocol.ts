@@ -540,9 +540,9 @@ export type ProjectGrantResultMessage = {
 }
 
 // A fresh telemetry snapshot for one flow's status panel, pushed whenever the
-// producing adapter refreshes it (per-turn, on the reset timer, at boot). Not tied
-// to any run; the server caches it keyed by `agent` and serves the items verbatim,
-// never learning what they mean. An adapter that publishes nothing (Codex) simply
+// producing flow refreshes it (per-turn, on the reset timer, at boot). Not tied
+// to any run; the server caches it keyed by flow and serves the items verbatim,
+// never learning what they mean. A flow that publishes nothing (Codex) simply
 // never sends this, so its panel stays empty.
 export type TelemetryMessage = {
   type: 'telemetry'

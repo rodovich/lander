@@ -260,11 +260,9 @@ export type Ctx = {
   state: CtxState
   scratch: CtxScratch
   spawn(cmd: string, args: string[], opts?: SpawnOpts): SpawnedChild
-  // Reserved at v1. Every live supervisor kill path SIGKILLs the host process
-  // GROUP, so nothing currently sends the host a SIGTERM and this never fires on
-  // interrupt. Flows must tolerate abrupt kill — that is today's behavior. It
-  // ships wired to host SIGTERM so a future TERM-then-KILL escalation in the
-  // supervisor lights it up with no API change.
+  // Reserved at v1 and never aborted. Every supervisor kill path SIGKILLs the
+  // host process group, so there is no graceful stop to announce; flows must
+  // tolerate an abrupt kill.
   signal: AbortSignal
   telemetry: CtxTelemetry
   attachments: CtxAttachments
