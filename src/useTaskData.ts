@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { loadShownTasks, loadTaskLinks, type FlowTelemetry } from './api'
 import { useSessionState } from './hooks'
 import type { TaskLinkResolver } from './markdown'
+import { startPoll } from './poll'
 import { MonotonicRequestGate } from './requestOrder'
 import { taskHref } from './taskRef'
 import {
@@ -15,6 +16,11 @@ import {
   type TaskPatch,
 } from './taskMutationFence'
 import type { Project, TaskLink, TaskView, TaskWithProject } from './types'
+
+// The gap between one poll's answer and the next poll's question. Measured
+// from the answer (see startPoll), so this is the cadence at rest and the
+// floor under load — never a schedule that keeps firing into a backlog.
+const POLL_GAP_MS = 2000
 
 // The client's task data: the displayed task list and its polling, the
 // installation-wide compact index used for link resolution, per-flow telemetry, and the
@@ -146,15 +152,15 @@ export function useTaskData(
 
   useEffect(() => {
     if (shownKey === '') return
-    const tick = () =>
-      refresh().catch((e) => onError(e.message ?? String(e)))
-    tick()
     // Poll so assistant replies appear once the server appends them.
-    const timer = setInterval(tick, 2000)
+    const stop = startPoll(
+      () => refresh().catch((e) => onError(e.message ?? String(e))),
+      POLL_GAP_MS,
+    )
     return () => {
       epochRef.current++
       refreshOrderRef.current.invalidate()
-      clearInterval(timer)
+      stop()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refresh])
@@ -179,12 +185,11 @@ export function useTaskData(
         // Link resolution is presentational; keep the last good projection.
       }
     }
-    refreshLinks()
-    const timer = setInterval(refreshLinks, 2000)
+    const stop = startPoll(refreshLinks, POLL_GAP_MS)
     return () => {
       canceled = true
       requestOrder.invalidate()
-      clearInterval(timer)
+      stop()
     }
   }, [])
 

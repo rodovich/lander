@@ -8,7 +8,7 @@ A web UI for spawning and managing coding agents against target project director
 - The host daemon launches `claude` or `codex` as a CLI subprocess **in the target project directory**, passing your message as the prompt.
 - The agent's stream is reduced into activity steps and appended back to the task with the assistant reply.
 - You can keep **replying** in a task; follow-up turns resume the same provider session, so context is preserved across the conversation.
-- Activity streams into the task as it happens; the UI polls every 2s, so steps and the final reply surface within a couple seconds.
+- Activity streams into the task as it happens; the UI re-polls 2s after each answer, so steps and the final reply surface within a couple seconds.
 
 ## Usage
 

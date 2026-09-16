@@ -15,22 +15,46 @@ export type TaskLinkResponse =
   | { notModified: true; etag: string | null }
   | { notModified: false; etag: string | null; links: TaskLink[] }
 
+// How long a poll-shaped read may run, headers and body together, before the
+// client gives up on it. Nothing else bounds one: the dev proxy can strand a
+// response mid-body when the server restarts, and `fetch` alone would wait
+// until the OS dropped the socket — and the poll loop waiting on it would stop
+// with it. Generous on purpose: an idle full-list answer is ~200ms and under
+// load the point is to outlast seconds, not to police them.
+export const READ_TIMEOUT_MS = 30_000
+
+// The abort that enforces READ_TIMEOUT_MS, and the error it surfaces as. The
+// DOMException's own message ("signal timed out") names neither the request nor
+// the bound, and it is what the poll's error banner would show.
+const readTimeout = () => AbortSignal.timeout(READ_TIMEOUT_MS)
+function describeTimeout(e: unknown, url: string): unknown {
+  return e instanceof DOMException && e.name === 'TimeoutError'
+    ? new Error(`no response from ${url} within ${READ_TIMEOUT_MS / 1000}s`)
+    : e
+}
+
 // One installation-wide link projection, conditionally fetched. After the
 // first response an unchanged poll is a bodyless 304; the server serves it from
 // memory, so this neither repeats task conversations over the wire nor scans
 // task files on disk.
 export async function loadTaskLinks(etag?: string): Promise<TaskLinkResponse> {
-  const r = await fetch('/api/task-links', {
-    headers: etag ? { 'if-none-match': etag } : undefined,
-  })
-  if (r.status === 304)
-    return { notModified: true, etag: r.headers.get('etag') ?? etag ?? null }
-  const body = await r.json().catch(() => ({}))
-  if (!r.ok) throw new Error(body.error ?? r.statusText)
-  return {
-    notModified: false,
-    etag: r.headers.get('etag'),
-    links: (body.links ?? []) as TaskLink[],
+  const url = '/api/task-links'
+  try {
+    const r = await fetch(url, {
+      headers: etag ? { 'if-none-match': etag } : undefined,
+      signal: readTimeout(),
+    })
+    if (r.status === 304)
+      return { notModified: true, etag: r.headers.get('etag') ?? etag ?? null }
+    const body = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(body.error ?? r.statusText)
+    return {
+      notModified: false,
+      etag: r.headers.get('etag'),
+      links: (body.links ?? []) as TaskLink[],
+    }
+  } catch (e) {
+    throw describeTimeout(e, url)
   }
 }
 
@@ -168,12 +192,17 @@ export async function loadShownTasks(
     .join('&')
   const lists = await Promise.all(
     slugs.map(async (slug) => {
-      const r = await fetch(`/api/${slug}/tasks${query ? `?${query}` : ''}`)
-      const body = await r.json()
-      if (!r.ok) throw new Error(body.error ?? r.statusText)
-      return {
-        tasks: (body.tasks as Task[]).map((t) => ({ ...t, projectSlug: slug })),
-        telemetry: (body.telemetry ?? {}) as FlowTelemetry,
+      const url = `/api/${slug}/tasks${query ? `?${query}` : ''}`
+      try {
+        const r = await fetch(url, { signal: readTimeout() })
+        const body = await r.json()
+        if (!r.ok) throw new Error(body.error ?? r.statusText)
+        return {
+          tasks: (body.tasks as Task[]).map((t) => ({ ...t, projectSlug: slug })),
+          telemetry: (body.telemetry ?? {}) as FlowTelemetry,
+        }
+      } catch (e) {
+        throw describeTimeout(e, url)
       }
     }),
   )

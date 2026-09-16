@@ -99,6 +99,43 @@ describe('loadTaskLinks conditional requests', () => {
     })
     expect(fetcher).toHaveBeenCalledWith('/api/task-links', {
       headers: { 'if-none-match': '"epoch-1"' },
+      signal: expect.any(AbortSignal),
     })
+  })
+})
+
+// Both poll-shaped reads carry the abort that bounds them, and a bound that
+// trips reads as a sentence naming the request — not the DOMException's
+// "signal timed out".
+describe('read timeouts', () => {
+  it('bounds the displayed-list read', async () => {
+    const fetcher = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ tasks: [], telemetry: {} }),
+    }))
+    vi.stubGlobal('fetch', fetcher)
+    await loadShownTasks(['p'], false)
+    expect(fetcher).toHaveBeenCalledWith('/api/p/tasks', {
+      signal: expect.any(AbortSignal),
+    })
+  })
+
+  it('names the request and the bound when the timeout trips', async () => {
+    vi.stubGlobal('fetch', async () => {
+      throw new DOMException('signal timed out', 'TimeoutError')
+    })
+    await expect(loadShownTasks(['p'], false)).rejects.toThrow(
+      'no response from /api/p/tasks within 30s',
+    )
+    await expect(loadTaskLinks()).rejects.toThrow(
+      'no response from /api/task-links within 30s',
+    )
+  })
+
+  it('passes every other failure through untouched', async () => {
+    vi.stubGlobal('fetch', async () => {
+      throw new TypeError('Failed to fetch')
+    })
+    await expect(loadShownTasks(['p'], false)).rejects.toThrow('Failed to fetch')
   })
 })
