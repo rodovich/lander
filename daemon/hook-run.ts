@@ -9,29 +9,24 @@
 // explicitly not the precedent: flow-inversion records that as acceptable only
 // while flows are compiled-in and trusted, which a project's hook is not.
 //
-// Three things about the spawn are load-bearing and were each got wrong first:
-//
-//   - **The event stream is on fd 3**, not stdout, so a body's `console.log` —
-//     or an `inherit`-stdio grandchild it spawns without going through
-//     ctx.spawn — cannot land in the middle of a JSON line. A line parser drops
-//     what it cannot parse, so sharing fd 1 would fail as a *lost report*,
-//     which is the hardest kind to diagnose. Separating the descriptors is
-//     structural where a `process.stdout.write` monkeypatch is not: it does
-//     nothing to the file descriptor.
-//   - **Spawned as `node --import tsx <entry>`, not through the `tsx` bin.**
-//     The bin is a wrapper process that re-spawns Node with three stdio
-//     entries, so fd 3 on the child is not the pipe opened here. daemon-watch
-//     records the same wrapper as a lesson already learned for signals.
-//   - **`cwd` is lander's own root**, because `--import tsx` resolves against
-//     the child's cwd. Spawning at the project root works in this repository
-//     and fails with ERR_MODULE_NOT_FOUND in every other project — silently,
-//     since the failure is an exit code and an empty fd 3. The directory the
-//     work happens in travels in the input instead, exactly as daemon/run.ts
-//     does for the flow host.
+// The event stream is on fd 3, not stdout, so a body's `console.log` — or an
+// `inherit`-stdio grandchild it spawns without going through ctx.spawn — cannot
+// land in the middle of a JSON line. A line parser drops what it cannot parse,
+// so sharing fd 1 would fail as a *lost report*, which is the hardest kind to
+// diagnose. Separating the descriptors is structural where a
+// `process.stdout.write` monkeypatch is not: it does nothing to the file
+// descriptor. (The fd only reaches the host because of how spawnHostProcess
+// starts it.)
 
-import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 import path from 'node:path'
 import { ROOT } from './paths'
+import {
+  endStdin,
+  killProcessGroup,
+  onLines,
+  spawnHostProcess,
+} from './processes'
 import type { HookRunMessage, HookRunReport } from '../server/protocol'
 
 const HOOK_HOST_ENTRY = path.join(ROOT, 'daemon', 'hook-host.ts')
@@ -118,16 +113,7 @@ export function runHook(
   const spawnHost =
     deps.spawnHost ??
     (() =>
-      nodeSpawn(process.execPath, ['--import', 'tsx', HOOK_HOST_ENTRY], {
-        // Lander's own root: `--import tsx` resolves against the child's cwd.
-        // The project and the target's checkout ride in the input line.
-        cwd: ROOT,
-        // Its own process group, so the kill below reaches whatever the body
-        // spawned rather than just the host.
-        detached: true,
-        stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
-        env: { ...process.env },
-      }))
+      spawnHostProcess(HOOK_HOST_ENTRY, ['pipe', 'pipe', 'pipe', 'pipe']))
 
   return new Promise<HookRunReport>((resolve) => {
     const input: HookHostInput = {
@@ -157,16 +143,7 @@ export function runHook(
     let killCause: 'timeout' | undefined
     let settled = false
 
-    const killHost = (): void => {
-      try {
-        if (host.pid) process.kill(-host.pid, 'SIGKILL')
-        else host.kill('SIGKILL')
-      } catch {
-        try {
-          host.kill('SIGKILL')
-        } catch {}
-      }
-    }
+    const killHost = (): void => killProcessGroup(host)
 
     // The single place a report leaves this function, whichever of the three
     // sources fires first: the host's own report, the kill timer, or a close
@@ -196,11 +173,7 @@ export function runHook(
 
     deps.onSpawn?.(killHost)
 
-    host.stdin?.on('error', () => {})
-    try {
-      host.stdin?.write(JSON.stringify(input) + '\n')
-      host.stdin?.end()
-    } catch {}
+    endStdin(host, JSON.stringify(input) + '\n')
 
     // The body's own output — its stdout and stderr both, kept only as the tail.
     const capture = (chunk: Buffer): void => {
@@ -210,33 +183,23 @@ export function runHook(
     host.stderr?.on('data', capture)
 
     // fd 3: the host's event stream, one JSON line carrying its report.
-    const events = host.stdio[3]
-    let buf = ''
-    if (events && 'on' in events) {
-      events.on('data', (d: Buffer) => {
-        buf += d.toString()
-        let nl: number
-        while ((nl = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, nl).trim()
-          buf = buf.slice(nl + 1)
-          if (!line) continue
-          try {
-            const parsed = JSON.parse(line) as HookRunReport
-            reported = {
-              outcome: parsed.outcome,
-              reports: (parsed.reports ?? [])
-                .slice(0, MAX_REPORTS)
-                .map((r) => tail(String(r), MAX_REPORT_BYTES)),
-              ...(parsed.error ? { error: parsed.error } : {}),
-            }
-          } catch {
-            // Not our line. The body cannot write here (its output goes to
-            // fd 1/2), so this is a malformed host, which `close` will settle.
-          }
+    const events = host.stdio[3] as NodeJS.ReadableStream | null | undefined
+    onLines(events, (line) => {
+      try {
+        const parsed = JSON.parse(line) as HookRunReport
+        reported = {
+          outcome: parsed.outcome,
+          reports: (parsed.reports ?? [])
+            .slice(0, MAX_REPORTS)
+            .map((r) => tail(String(r), MAX_REPORT_BYTES)),
+          ...(parsed.error ? { error: parsed.error } : {}),
         }
-      })
-      events.on('error', () => {})
-    }
+      } catch {
+        // Not our line. The body cannot write here (its output goes to fd 1/2),
+        // so this is a malformed host, which `close` will settle.
+      }
+    })
+    events?.on('error', () => {})
 
     host.on('error', (e) => {
       settle({

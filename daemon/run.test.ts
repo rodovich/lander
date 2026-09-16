@@ -24,7 +24,9 @@ class FakeHost extends EventEmitter {
       this.writes.push(String(chunk))
       return true
     },
-    end() {},
+    end(chunk?: string) {
+      if (chunk !== undefined) this.writes.push(String(chunk))
+    },
     on() {},
   }
   kill = vi.fn(() => true)

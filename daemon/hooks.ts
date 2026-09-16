@@ -18,6 +18,7 @@
 //     executing, and it must not precede an approval check.
 
 import { execFile } from 'node:child_process'
+import { endStdin } from './processes'
 import type {
   HookDeclaration,
   HookPair,
@@ -77,8 +78,9 @@ export const gitExec: GitExec = (cwd, args, input) =>
     const child = execFile(
       'git',
       ['-C', cwd, ...args],
-      // Large enough for a hooks-directory listing and a bounded rev-list; git
-      // exceeding it fails the call rather than truncating the answer.
+      // Large enough for a hooks-directory listing, a bounded rev-list, or a
+      // hook module's source; git exceeding it fails the call rather than
+      // truncating the answer.
       { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
       (err, stdout, stderr) =>
         resolve({
@@ -89,14 +91,7 @@ export const gitExec: GitExec = (cwd, args, input) =>
     )
     // Always closed, including when there is no input: `cat-file --batch-check`
     // reads until EOF, and an open stdin would hang it forever.
-    //
-    // Listened first, because closing races git's own exit: a git that has
-    // already finished has already dropped the read end, and the write then
-    // fails EPIPE. This runs in the daemon, which installs no
-    // `uncaughtException` handler, so an unlistened one would take down the
-    // owner of every in-flight agent run.
-    child.stdin?.on('error', () => {})
-    child.stdin?.end(input ?? '')
+    endStdin(child, input)
   })
 
 // `.lander/hooks/<trigger>/<by>/<name>.js`, exactly. A deeper path, a file that

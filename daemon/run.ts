@@ -13,6 +13,7 @@ import type {
 import type { MaterializedFiles } from './attachments'
 import { ROOT } from './paths'
 import type { HostEvent, HostInput } from './host-protocol'
+import { endStdin, killProcessGroup, onLines } from './processes'
 
 // Spawn a flow host for one run. Injectable so tests substitute a fake host;
 // the default spawns daemon/flow-host.ts.
@@ -226,18 +227,8 @@ export function createRunManager({
     // the window it then spent silent.
     let lastOutputAt = startedAt
 
-    // Kill the host's whole process group so the agent grandchild dies with it —
-    // falling back to a plain pid kill if the group signal isn't available.
-    const killHost = (): void => {
-      try {
-        if (host.pid) process.kill(-host.pid, 'SIGKILL')
-        else host.kill('SIGKILL')
-      } catch {
-        try {
-          host.kill('SIGKILL')
-        } catch {}
-      }
-    }
+    // Kill the host's whole process group so the agent grandchild dies with it.
+    const killHost = (): void => killProcessGroup(host)
 
     let seq = 0
     const buffer: UpdateMessage[] = []
@@ -392,32 +383,20 @@ export function createRunManager({
     runs.set(msg.runId, rec)
 
     // Hand the host its input as one JSON line on stdin, then close the pipe.
-    host.stdin?.on('error', () => {})
-    try {
-      host.stdin?.write(JSON.stringify(hostInput) + '\n')
-      host.stdin?.end()
-    } catch {}
+    endStdin(host, JSON.stringify(hostInput) + '\n')
 
     // Parse the host's stdout as line-JSON HostEvents; every chunk (stdout or the
     // relayed agent stderr) arms the idle watchdog. Route each event into the same
     // supervisor wiring, seq-assigning and buffering updates.
-    let buf = ''
-    host.stdout?.on('data', (d: Buffer) => {
-      sawOutput()
-      buf += d.toString()
-      let nl: number
-      while ((nl = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, nl).trim()
-        buf = buf.slice(nl + 1)
-        if (!line) continue
-        let event: HostEvent
-        try {
-          event = JSON.parse(line) as HostEvent
-        } catch {
-          continue
-        }
-        emit(event)
+    host.stdout?.on('data', sawOutput)
+    onLines(host.stdout, (line) => {
+      let event: HostEvent
+      try {
+        event = JSON.parse(line) as HostEvent
+      } catch {
+        return
       }
+      emit(event)
     })
     host.stderr?.on('data', (d: Buffer) => {
       sawOutput()

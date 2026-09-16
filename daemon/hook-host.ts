@@ -24,15 +24,16 @@
 // A throw is a report, not a state: there is no ride to exit non-zero, so no
 // applyDone wedge and no invisible task holding an unanswerable ask.
 
-import { execFile } from 'node:child_process'
 import { spawn as nodeSpawn } from 'node:child_process'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import net from 'node:net'
 import path from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { pathToFileURL } from 'node:url'
 import type { HookRunReport } from '../server/protocol'
 import { isAssistProvider, runAssist, type AssistResult } from './assist'
+import { gitExec } from './hooks'
+import { endStdin, isEntry, readInputLine } from './processes'
 import type { HookHostInput } from './hook-run'
 
 // The API version a body declares in `meta`. Bumped when the ctx contract
@@ -85,27 +86,6 @@ async function report(report: HookRunReport): Promise<void> {
 }
 
 // ── Steps ──────────────────────────────────────────────────────────────────
-
-function git(cwd: string, args: string[]): Promise<{ ok: boolean; stdout: string }> {
-  return new Promise((resolve) => {
-    const child = execFile(
-      'git',
-      ['-C', cwd, ...args],
-      // A hook module is a source file; this is generous for one.
-      { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 },
-      (err, stdout) => resolve({ ok: !err, stdout: stdout ?? '' }),
-    )
-    // The write below races git's own exit: if the parent is descheduled long
-    // enough for git to finish, the read end of that pipe is gone and the write
-    // fails EPIPE. Unlistened, that becomes an uncaughtException — which the
-    // `fatal` handler reports as a hook that errored, for a blob it read fine.
-    // Ignoring it is the right answer rather than a suppression: the close is
-    // only here so git cannot block on stdin, and a read end already gone is
-    // that same guarantee arriving early.
-    child.stdin?.on('error', () => {})
-    child.stdin?.end('')
-  })
-}
 
 // Ask the server whether this exact pair may still run. Three answers, and the
 // difference between the first two is why this is not a boolean: a revoked
@@ -339,8 +319,7 @@ function buildCtx(input: HookHostInput, reports: string[]) {
         })
         child.on('error', (e) => resolve({ code: -1, stdout, stderr: String(e) }))
         child.on('close', (code) => resolve({ code: code ?? -1, stdout, stderr }))
-        child.stdin?.on('error', () => {})
-        child.stdin?.end(opts.input ?? '')
+        endStdin(child, opts.input)
       })
     },
     // Append a finding to the target and drive a turn, without the side effects
@@ -481,19 +460,8 @@ function buildCtx(input: HookHostInput, reports: string[]) {
 
 // ── Main ───────────────────────────────────────────────────────────────────
 
-async function readInput(): Promise<HookHostInput> {
-  const chunks: Buffer[] = []
-  for await (const chunk of process.stdin) chunks.push(chunk as Buffer)
-  const line = Buffer.concat(chunks)
-    .toString('utf8')
-    .split('\n')
-    .find((l) => l.trim())
-  if (!line) throw new Error('hook-host: no input on stdin')
-  return JSON.parse(line) as HookHostInput
-}
-
 async function main(): Promise<void> {
-  const input = await readInput()
+  const input = await readInputLine<HookHostInput>('hook-host')
   const { run } = input
 
   const approval = await checkApproval(input)
@@ -504,7 +472,7 @@ async function main(): Promise<void> {
 
   // A worktree shares its repository's object store, so the blob reads from the
   // project root regardless of which tree the target was working in.
-  const blob = await git(input.projectRoot, ['cat-file', 'blob', run.hook.runs])
+  const blob = await gitExec(input.projectRoot, ['cat-file', 'blob', run.hook.runs])
   if (!blob.ok) {
     await report({
       outcome: 'error',
@@ -574,10 +542,7 @@ async function main(): Promise<void> {
 }
 
 // Run only when executed as the entry, not when imported by a test.
-if (
-  process.argv[1] &&
-  fileURLToPath(import.meta.url) === path.resolve(process.argv[1])
-) {
+if (isEntry(import.meta.url)) {
   // A body can throw asynchronously or reject a floating promise, either of
   // which terminates Node by default — and would take the report with it. These
   // turn both into the report they should have been.

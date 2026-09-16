@@ -23,6 +23,7 @@
 
 import { spawn } from 'node:child_process'
 import { codexConfigArgs, codexOptionsFromEnv } from './codex-config'
+import { endStdin } from './processes'
 
 export type AssistProvider = 'claude' | 'codex'
 
@@ -176,7 +177,6 @@ export function runAssist(input: AssistInput): Promise<AssistResult> {
     })
     // Nothing to say on stdin: the prompt is argv. Closing it stops a provider
     // that waits on it from hanging until the timeout.
-    child.stdin?.on('error', () => {})
-    child.stdin?.end()
+    endStdin(child)
   })
 }

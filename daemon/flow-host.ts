@@ -1,9 +1,8 @@
 // One subprocess per turn: read HostInput, run a flow, emit HostEvents.
 
 import { spawn as nodeSpawn } from 'node:child_process'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { ROOT } from './paths'
+import { isEntry, readInputLine } from './processes'
 import type { HostEvent, HostInput, SpawnLike } from './host-protocol'
 import { createCtxRuntime } from './flows/ctx'
 import { buildFlows, type BundledFlow } from './flows/index'
@@ -46,21 +45,8 @@ export function runHost(input: HostInput, deps: RunHostDeps): { kill: () => void
   return { kill: () => runtime.killChildren() }
 }
 
-// Read stdin to end and parse the first non-empty line as the HostInput. The
-// daemon writes exactly one line and ends the pipe; a trailing newline is harmless.
-async function readInput(): Promise<HostInput> {
-  const chunks: Buffer[] = []
-  for await (const chunk of process.stdin) chunks.push(chunk as Buffer)
-  const line = Buffer.concat(chunks)
-    .toString('utf8')
-    .split('\n')
-    .find((l) => l.trim())
-  if (!line) throw new Error('flow-host: no HostInput on stdin')
-  return JSON.parse(line) as HostInput
-}
-
 async function main(): Promise<void> {
-  const input = await readInput()
+  const input = await readInputLine<HostInput>('flow-host')
   const handle = runHost(input, {
     emit: emitLine,
     spawn: nodeSpawn,
@@ -74,12 +60,8 @@ async function main(): Promise<void> {
   // so the host exits on its own — no explicit exit needed on the happy path.
 }
 
-// Run only when executed as the entry (spawned as `tsx daemon/flow-host.ts`), not
-// when imported by a test.
-if (
-  process.argv[1] &&
-  fileURLToPath(import.meta.url) === path.resolve(process.argv[1])
-) {
+// Run only when executed as the entry, not when imported by a test.
+if (isEntry(import.meta.url)) {
   main().catch((e) => {
     emitLine({
       kind: 'done',
