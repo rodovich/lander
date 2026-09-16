@@ -344,6 +344,30 @@ describe('daemon run manager', () => {
     ])
   })
 
+  it('does not count the spawn and its setup as working time', () => {
+    vi.useFakeTimers()
+    try {
+      // A real spawn takes milliseconds (and a loaded test machine can stretch the
+      // fake one past a rounding boundary); the fake clock makes that deterministic.
+      const hosts: FakeHost[] = []
+      const h = harness({
+        spawnHost: () => {
+          const host = new FakeHost()
+          hosts.push(host)
+          vi.advanceTimersByTime(7)
+          return host as unknown as ChildProcess
+        },
+      })
+      h.manager.startRun(makeStart())
+
+      hosts[0].emit('close', 1)
+
+      expect(h.messages.at(-1)).toMatchObject({ cause: 'host-crash', durationMs: 0 })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('reports a host spawn error as a failed done', () => {
     const h = harness()
     h.manager.startRun(makeStart())

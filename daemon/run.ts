@@ -259,9 +259,9 @@ export function createRunManager({
     const startedAt = performance.now()
     const host = spawnHost()
     // When the host last produced anything, on the same monotonic clock. This is
-    // the run's working time (see DoneMessage.durationMs): it is advanced by
-    // `arm`, so "the run did something" means exactly what it means to the idle
-    // watchdog, and a run killed after idling reports the work it did rather than
+    // the run's working time (see DoneMessage.durationMs): it is advanced by the
+    // same host output that re-arms the idle watchdog, so "the run did something"
+    // means exactly what it means to the watchdog, and a run killed after idling reports the work it did rather than
     // the window it then spent silent.
     let lastOutputAt = startedAt
 
@@ -292,13 +292,18 @@ export function createRunManager({
     let timer: ReturnType<typeof setTimeout> | undefined
     const idleWindowMs = msg.idleTimeoutMs || defaultIdleMs
     const arm = () => {
-      lastOutputAt = performance.now()
       if (timer) clearTimeout(timer)
       timer = setTimeout(() => {
         endCause ??= 'idle-timeout'
         killHost()
       }, idleWindowMs)
       timer.unref?.()
+    }
+    // Host output: the run did something. Kept apart from `arm` so the initial arm
+    // at the end of this setup doesn't bill the spawn and wiring as working time.
+    const sawOutput = () => {
+      lastOutputAt = performance.now()
+      arm()
     }
 
     // The settle-once `done` gate — the sole place a done reaches the server,
@@ -437,7 +442,7 @@ export function createRunManager({
     // supervisor wiring, seq-assigning and buffering updates.
     let buf = ''
     host.stdout?.on('data', (d: Buffer) => {
-      arm()
+      sawOutput()
       buf += d.toString()
       let nl: number
       while ((nl = buf.indexOf('\n')) >= 0) {
@@ -454,7 +459,7 @@ export function createRunManager({
       }
     })
     host.stderr?.on('data', (d: Buffer) => {
-      arm()
+      sawOutput()
       // The host relays agent stderr here (idle activity + diagnostics).
       process.stderr.write(d)
     })
