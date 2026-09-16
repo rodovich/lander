@@ -26,12 +26,11 @@ import type {
   StartRunMessage,
   HooksResolveMessage,
   HookRunMessage,
+  ProjectGrantMessage,
   RegisterMessage,
   TelemetryMessage,
-  ProjectGrantResultMessage,
-  HooksResolveResultMessage,
-  HookRunResultMessage,
 } from '../server/protocol'
+import { createReply, type ReplyBody, type ReplyMessage } from './reply'
 import { gitExec, resolveHooks } from './hooks'
 import { createHookRuns, runHook } from './hook-run'
 import { statSync } from 'node:fs'
@@ -88,13 +87,7 @@ const CAPS = providerCaps()
 let ws: WebSocket | null = null
 
 function send(
-  msg:
-    | RunManagerMessage
-    | RegisterMessage
-    | TelemetryMessage
-    | ProjectGrantResultMessage
-    | HooksResolveResultMessage
-    | HookRunResultMessage,
+  msg: RunManagerMessage | RegisterMessage | TelemetryMessage | ReplyMessage,
 ): void {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
 }
@@ -344,6 +337,31 @@ const drain = createDrain({
   },
 })
 
+const reply = createReply(send)
+
+// Handle a message about one run. The server holds no reply open for these, so
+// a throw is caught here rather than escaping the WebSocket listener and
+// crashing the daemon along with every run it holds. When `fail` is set, the run
+// is also settled as failed. Logging alone would be worse than the crash: the
+// daemon stays connected, so the server keeps the run owned and no crash grace
+// ever fires, and the task rides forever.
+function forRun(
+  msg: { type: string; runId: string },
+  handle: () => void,
+  { fail }: { fail: boolean },
+): void {
+  try {
+    handle()
+  } catch (e) {
+    console.error(`daemon: error handling ${msg.type} for run ${msg.runId}:`, e)
+    if (fail)
+      runManager.failRun(
+        msg.runId,
+        `daemon error: ${e instanceof Error ? e.message : String(e)}`,
+      )
+  }
+}
+
 function onMessage(raw: string): void {
   let msg: ServerToDaemon
   try {
@@ -351,261 +369,135 @@ function onMessage(raw: string): void {
   } catch {
     return
   }
-  try {
-    handleMessage(msg)
-  } catch (e) {
-    // A synchronous throw in here would otherwise be uncaught inside the WS
-    // message listener, killing the daemon and dropping every run it holds.
-    //
-    // But it must RESPOND, never merely swallow. A bare catch is strictly worse
-    // than the crash it replaces: on a crash the server's drop() releases the
-    // daemon's runs, unownedOpenRuns() finds them, and reconcileGrace() crashes
-    // them after the 15s grace, so each task settles with an error and a retry
-    // ask. Swallowing keeps the daemon connected, so the run stays owned, no
-    // crash-grace fires, and — no host having been spawned — no idle watchdog
-    // exists either: the task sits `riding` with an open ride forever.
-    const err = e instanceof Error ? e.message : String(e)
-    console.error(`daemon: error handling ${msg.type}:`, e)
-    switch (msg.type) {
-      case 'start-run':
-        // Through runManager, so the settle-once gate and the run's release
-        // both happen. See failRun.
-        runManager.failRun(msg.runId, `daemon error: ${err}`)
-        break
-      case 'project-grant':
-        // Otherwise the server's grantRequests entry hangs to its 15s timeout.
-        send({
-          type: 'project-grant-result',
-          requestId: msg.requestId,
-          ok: false,
-          error: `daemon error: ${err}`,
-          status: 500,
-        })
-        break
-      case 'resume-from':
-        // The one case with no server-side timeout: the server is waiting on a
-        // replay that will now never come. Let the run fall to the crash grace
-        // rather than look healthy.
-        console.error(
-          `daemon: resume-from failed for run ${msg.runId}; releasing it to the crash grace`,
-        )
-        runManager.failRun(msg.runId, `daemon error during resume: ${err}`)
-        break
-      case 'hooks-resolve':
-        // Same reasoning as project-grant: the server is holding a correlated
-        // request that would otherwise hang to its timeout.
-        send({
-          type: 'hooks-resolve-result',
-          requestId: msg.requestId,
-          ok: false,
-          error: `daemon error: ${err}`,
-          status: 500,
-        })
-        break
-      case 'hook-run':
-        // Belt for a synchronous throw before runHook's own .catch is attached
-        // (resolveHooksCwd throws for an unknown slug). The run is released
-        // here too, since the .finally never ran.
-        hookRuns.release(msg.fireId)
-        send({
-          type: 'hook-run-result',
-          requestId: msg.requestId,
-          ok: false,
-          error: `daemon error: ${err}`,
-          status: 500,
-        })
-        break
-      case 'interrupt':
-      case 'ack':
-        // Nothing is waiting on a reply for these, but they must not be silent.
-        break
-    }
+  switch (msg.type) {
+    case 'start-run':
+      return forRun(msg, () => startRun(msg), { fail: true })
+    // No server-side timeout covers a resume: the server waits on a replay that
+    // would never come, so a failed one settles the run.
+    case 'resume-from':
+      return forRun(msg, () => runManager.resumeFrom(msg.runId, msg.seq), {
+        fail: true,
+      })
+    case 'interrupt':
+      return forRun(msg, () => runManager.interrupt(msg.runId), { fail: false })
+    case 'ack':
+      return forRun(msg, () => runManager.ack(msg.runId), { fail: false })
+    case 'project-grant':
+      void reply('project-grant-result', msg.requestId, () => grantProject(msg))
+      return
+    case 'hooks-resolve':
+      void reply('hooks-resolve-result', msg.requestId, () => resolveHooksFor(msg))
+      return
+    case 'hook-run':
+      return runHookFire(msg)
   }
 }
 
-function handleMessage(msg: ServerToDaemon): void {
-  switch (msg.type) {
-    case 'start-run':
-      if (drain.draining()) {
-        // We're handing off; the server routes new runs to the fresh primary, so
-        // this shouldn't arrive — but if it does, abort cleanly rather than start
-        // work we'd interrupt at exit.
-        send({
-          type: 'done',
-          runId: msg.runId,
-          exitCode: 1,
-          interrupted: false,
-          stderr: 'daemon draining; run not started',
-        })
-        break
-      }
-      runManager.startRun(msg)
-      break
-    case 'project-grant': {
-      const projectPath = pathBySlug.get(msg.project)
-      // Flow names are open-ended, so every lookup below can miss.
-      const flowName = msg.flow ?? msg.agent
-      const caps = flowName ? CAPS[flowName] : undefined
-      // A project grant arrives outside any run, so there is no host to route it
-      // through. Bundled flow hooks run in-process; loading third-party hooks
-      // would require an isolation boundary.
-      const onGrant = flowName ? FLOW_MODULES[flowName]?.onGrant : undefined
-      const persist =
-        caps?.projectGrants && onGrant
-          ? (input: { projectPath: string; rule: string }) =>
-              onGrant(undefined, input)
-          : undefined
-      if (!projectPath) {
-        send({
-          type: 'project-grant-result',
-          requestId: msg.requestId,
-          ok: false,
-          error: `daemon serves no project for slug ${msg.project}`,
-          status: 404,
-        })
-        break
-      }
-      if (!persist) {
-        send({
-          type: 'project-grant-result',
-          requestId: msg.requestId,
-          ok: false,
-          // A flow may word its own refusal; one that doesn't, and a flow this
-          // daemon doesn't know, get the generic reason.
-          error:
-            caps?.projectGrantsUnsupportedReason ??
-            `Project permission grants are not supported for ${flowName ?? 'unknown'} tasks.`,
-          status: 400,
-        })
-        break
-      }
-      persist({ projectPath, rule: msg.rule })
-        .then(() =>
-          send({
-            type: 'project-grant-result',
-            requestId: msg.requestId,
-            ok: true,
-          }),
-        )
-        .catch((e) =>
-          send({
-            type: 'project-grant-result',
-            requestId: msg.requestId,
-            ok: false,
-            error: e instanceof Error ? e.message : String(e),
-            status: 500,
-          }),
-        )
-      break
-    }
-    case 'hook-run': {
-      // Refused while draining, unlike hooks-resolve: this one spawns a host
-      // that may run for minutes, and a daemon on its way out must not accept
-      // work it would have to abandon. The server treats the refusal as a hold —
-      // no attempt counted, no report item — and retries once the successor is
-      // primary, which is seconds away.
-      //
-      // This is the only mechanism, not a race-closer on top of one: the server
-      // keeps no per-socket draining state and a SIGUSR2'd daemon never
-      // re-registers, so its `primary` still points here for the whole handoff
-      // window.
-      if (drain.draining()) {
-        send({
-          type: 'hook-run-result',
-          requestId: msg.requestId,
-          ok: false,
-          error: 'daemon draining; hook not run',
-          status: 503,
-        })
-        break
-      }
-      // A fire already running here is not run again. Two live bodies for one
-      // fire is a strictly stronger hazard than the retry-after-death that
-      // bodies are asked to tolerate.
-      if (hookRuns.has(msg.fireId)) {
-        send({
-          type: 'hook-run-result',
-          requestId: msg.requestId,
-          ok: true,
-          report: { outcome: 'already-running', reports: [] },
-        })
-        break
-      }
-      const { root, cwd } = resolveHooksCwd(msg.project, msg.target)
-      // Registered before the spawn so a shutdown in the gap still counts it;
-      // the real kill replaces this as soon as the host exists.
-      hookRuns.hold(msg.fireId)
-      // `.catch` INSIDE the handler, like project-grant and hooks-resolve:
-      // onMessage's try/catch covers only a synchronous throw, and a floating
-      // rejection here would leave the server holding the exchange to its
-      // timeout — the swallow that the note in onMessage calls strictly worse
-      // than a crash.
-      runHook(msg, {
-        projectRoot: root,
-        targetCwd: cwd,
-        stateDir: hookStateDir(msg.project),
-        onSpawn: (kill) => hookRuns.arm(msg.fireId, kill),
-      })
-        .then((report) =>
-          send({ type: 'hook-run-result', requestId: msg.requestId, ok: true, report }),
-        )
-        .catch((e) =>
-          send({
-            type: 'hook-run-result',
-            requestId: msg.requestId,
-            ok: false,
-            error: e instanceof Error ? e.message : String(e),
-            status: 500,
-          }),
-        )
-        .finally(() => {
-          // Released only once runHook has settled, which it does on the host's
-          // `close` — so a host still tearing down still holds the drain.
-          hookRuns.release(msg.fireId)
-          drain.check()
-        })
-      break
-    }
-    case 'hooks-resolve': {
-      // Read-only and answerable while draining: it spawns no run and holds
-      // nothing, so a daemon on its way out can still answer one.
-      const { root, cwd } = resolveHooksCwd(msg.project, msg)
-      resolveHooks(gitExec, {
-        root,
-        cwd,
-        ...(msg.trustRoot ? { trustRoot: msg.trustRoot } : {}),
-        ...(msg.declare ? { declare: msg.declare } : {}),
-        ...(msg.history ? { history: msg.history } : {}),
-      })
-        .then((resolution) =>
-          send({
-            type: 'hooks-resolve-result',
-            requestId: msg.requestId,
-            ok: true,
-            resolution,
-          }),
-        )
-        .catch((e) =>
-          send({
-            type: 'hooks-resolve-result',
-            requestId: msg.requestId,
-            ok: false,
-            error: e instanceof Error ? e.message : String(e),
-            status: 500,
-          }),
-        )
-      break
-    }
-    case 'interrupt':
-      runManager.interrupt(msg.runId)
-      break
-    case 'resume-from':
-      runManager.resumeFrom(msg.runId, msg.seq)
-      break
-    case 'ack':
-      runManager.ack(msg.runId)
-      break
+function startRun(msg: StartRunMessage): void {
+  if (drain.draining()) {
+    // We're handing off; the server routes new runs to the fresh primary, so
+    // this shouldn't arrive — but if it does, abort cleanly rather than start
+    // work we'd interrupt at exit.
+    send({
+      type: 'done',
+      runId: msg.runId,
+      exitCode: 1,
+      interrupted: false,
+      stderr: 'daemon draining; run not started',
+    })
+    return
   }
+  runManager.startRun(msg)
+}
+
+async function grantProject(
+  msg: ProjectGrantMessage,
+): Promise<ReplyBody<'project-grant-result'>> {
+  const projectPath = pathBySlug.get(msg.project)
+  if (!projectPath)
+    return {
+      ok: false,
+      error: `daemon serves no project for slug ${msg.project}`,
+      status: 404,
+    }
+  const flowName = msg.flow ?? msg.agent
+  const caps = flowName ? CAPS[flowName] : undefined
+  const onGrant = flowName ? FLOW_MODULES[flowName]?.onGrant : undefined
+  if (!caps?.projectGrants || !onGrant)
+    return {
+      ok: false,
+      // A flow may word its own refusal; one that doesn't, and a flow this
+      // daemon doesn't know, get the generic reason.
+      error:
+        caps?.projectGrantsUnsupportedReason ??
+        `Project permission grants are not supported for ${flowName ?? 'unknown'} tasks.`,
+      status: 400,
+    }
+  // A project grant arrives outside any run, so there is no host to route it
+  // through. Bundled flow hooks run in-process; loading third-party hooks would
+  // require an isolation boundary.
+  await onGrant(undefined, { projectPath, rule: msg.rule })
+  return { ok: true }
+}
+
+// Read-only and answerable while draining: it spawns no run and holds nothing,
+// so a daemon on its way out can still answer one.
+async function resolveHooksFor(
+  msg: HooksResolveMessage,
+): Promise<ReplyBody<'hooks-resolve-result'>> {
+  const { root, cwd } = resolveHooksCwd(msg.project, msg)
+  const resolution = await resolveHooks(gitExec, {
+    root,
+    cwd,
+    ...(msg.trustRoot ? { trustRoot: msg.trustRoot } : {}),
+    ...(msg.declare ? { declare: msg.declare } : {}),
+    ...(msg.history ? { history: msg.history } : {}),
+  })
+  return { ok: true, resolution }
+}
+
+function runHookFire(msg: HookRunMessage): void {
+  let held = false
+  const run = async (): Promise<ReplyBody<'hook-run-result'>> => {
+    // Refused while draining, unlike hooks-resolve: this one spawns a host that
+    // may run for minutes, and a daemon on its way out must not accept work it
+    // would have to abandon. The server treats the refusal as a hold — no
+    // attempt counted, no report item — and retries once the successor is
+    // primary, which is seconds away.
+    //
+    // This is the only mechanism, not a race-closer on top of one: the server
+    // keeps no per-socket draining state and a SIGUSR2'd daemon never
+    // re-registers, so its `primary` still points here for the whole handoff
+    // window.
+    if (drain.draining())
+      return { ok: false, error: 'daemon draining; hook not run', status: 503 }
+    // A fire already running here is not run again. Two live bodies for one
+    // fire is a strictly stronger hazard than the retry-after-death that bodies
+    // are asked to tolerate.
+    if (hookRuns.has(msg.fireId))
+      return { ok: true, report: { outcome: 'already-running', reports: [] } }
+    const { root, cwd } = resolveHooksCwd(msg.project, msg.target)
+    // Registered before the spawn, and synchronously with this message, so a
+    // shutdown in the gap still counts it and a duplicate fire finds it held;
+    // the real kill replaces this as soon as the host exists.
+    hookRuns.hold(msg.fireId)
+    held = true
+    const report = await runHook(msg, {
+      projectRoot: root,
+      targetCwd: cwd,
+      stateDir: hookStateDir(msg.project),
+      onSpawn: (kill) => hookRuns.arm(msg.fireId, kill),
+    })
+    return { ok: true, report }
+  }
+  void reply('hook-run-result', msg.requestId, run).finally(() => {
+    // Released once runHook has settled, which it does on the host's `close`
+    // (so a host still tearing down holds the drain), and after the reply is
+    // sent (so a drain exit can't beat it out).
+    if (!held) return
+    hookRuns.release(msg.fireId)
+    drain.check()
+  })
 }
 
 // Kill any live agent children — best effort, on our own termination — so a
