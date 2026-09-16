@@ -30,6 +30,7 @@ import type { Step, Usage } from '../../server/stream'
 import type { HostEvent, HostInput, SpawnLike } from '../host-protocol'
 import { isAssistProvider, runAssist } from '../assist'
 import { buildRevivedBlock } from '../task-management'
+import { taskApiHeaders } from '../task-api'
 
 // ── Handles ────────────────────────────────────────────────────────────────
 
@@ -820,12 +821,13 @@ export function createCtxRuntime(
   const api = start.env.LANDER_API
   const apiProject = start.env.LANDER_PROJECT
   const apiTask = start.env.LANDER_TASK
-  const apiToken = start.env.LANDER_TOKEN
 
+  // `body` goes as JSON; `form` as multipart, for the routes that parse a file
+  // part.
   async function apiCall(
     path: string,
-    init?: { method?: string; body?: unknown },
-  ): Promise<unknown> {
+    init?: { method?: string; body?: unknown; form?: FormData },
+  ): Promise<Record<string, unknown>> {
     if (!api) throw new Error('ctx: LANDER_API is unset; no server to call')
     // BOTH buffers, before every call. This is correctness, not hygiene.
     //
@@ -848,14 +850,14 @@ export function createCtxRuntime(
     const res = await fetch(`${api}/api/${apiProject}${path}`, {
       method: init?.method ?? 'GET',
       headers: {
-        'content-type': 'application/json',
-        ...(apiTask ? { 'x-lander-task': apiTask } : {}),
-        ...(apiProject ? { 'x-lander-project': apiProject } : {}),
-        ...(apiToken ? { 'x-lander-token': apiToken } : {}),
+        ...(init?.form ? {} : { 'content-type': 'application/json' }),
+        ...taskApiHeaders(start.env),
       },
-      ...(init?.body !== undefined
-        ? { body: JSON.stringify(init.body) }
-        : {}),
+      ...(init?.form
+        ? { body: init.form }
+        : init?.body !== undefined
+          ? { body: JSON.stringify(init.body) }
+          : {}),
     })
     const body = (await res.json().catch(() => ({}))) as Record<string, unknown>
     // Thrown, never process.exit — the v1 contract. runFlowTurn turns a
@@ -870,35 +872,17 @@ export function createCtxRuntime(
     return body
   }
 
-  // The route takes MULTIPART, not JSON — `parseBody()` with a `file` part — so
-  // this can't go through apiCall. Emissions flush first, so anything the flow has
-  // already said is the item the ref lands on.
+  // The route takes MULTIPART, not JSON — `parseBody()` with a `file` part.
+  // apiCall's flush means anything the flow has already said is the item the ref
+  // lands on.
   async function putAttachment(name: string, content: string): Promise<unknown> {
-    if (!api) throw new Error('ctx: LANDER_API is unset; no server to call')
-    flush()
-    flushState()
-    const fd = new FormData()
-    fd.append('file', new Blob([content], { type: guessArtifactMime(name) }), name)
-    fd.append('name', name)
-    const res = await fetch(
-      `${api}/api/${apiProject}/tasks/${apiTask}/attachments`,
-      {
-        method: 'POST',
-        headers: {
-          ...(apiTask ? { 'x-lander-task': apiTask } : {}),
-          ...(apiProject ? { 'x-lander-project': apiProject } : {}),
-          ...(apiToken ? { 'x-lander-token': apiToken } : {}),
-        },
-        body: fd,
-      },
-    )
-    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>
-    if (!res.ok)
-      throw new Error(
-        typeof body.error === 'string'
-          ? body.error
-          : `${res.status} ${res.statusText}`,
-      )
+    const form = new FormData()
+    form.append('file', new Blob([content], { type: guessArtifactMime(name) }), name)
+    form.append('name', name)
+    const body = await apiCall(`/tasks/${apiTask}/attachments`, {
+      method: 'POST',
+      form,
+    })
     return body.attachment
   }
 

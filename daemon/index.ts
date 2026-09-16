@@ -31,6 +31,7 @@ import type {
   TelemetryMessage,
 } from '../server/protocol'
 import { createReply, type ReplyBody, type ReplyMessage } from './reply'
+import { taskApiHeaders } from './task-api'
 import { gitExec, resolveHooks } from './hooks'
 import { createHookRuns, runHook } from './hook-run'
 import { statSync } from 'node:fs'
@@ -273,13 +274,9 @@ async function fetchAttachmentBytes(
   const project = env.LANDER_PROJECT
   if (!api || !project)
     throw new Error('run env lacks LANDER_API/LANDER_PROJECT for attachment fetch')
-  const headers: Record<string, string> = {}
-  if (env.LANDER_TASK) headers['x-lander-task'] = env.LANDER_TASK
-  headers['x-lander-project'] = project
-  if (env.LANDER_TOKEN) headers['x-lander-token'] = env.LANDER_TOKEN
   const res = await fetch(
     `${api}/api/${project}/attachments/${encodeURIComponent(ref.id)}`,
-    { headers },
+    { headers: taskApiHeaders(env) },
   )
   if (!res.ok)
     throw new Error(`attachment ${ref.id}: ${res.status} ${res.statusText}`)

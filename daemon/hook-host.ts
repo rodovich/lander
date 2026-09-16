@@ -87,6 +87,28 @@ async function report(report: HookRunReport): Promise<void> {
 
 // ── Steps ──────────────────────────────────────────────────────────────────
 
+// A request to lander's API as this fire, authenticated by its hook credential.
+// `body` goes as JSON.
+function callServer(
+  run: HookHostInput['run'],
+  path: string,
+  init: { method?: string; body?: unknown } = {},
+): Promise<Response> {
+  return fetch(
+    `${run.callback.api}/api/${encodeURIComponent(run.callback.project)}${path}`,
+    {
+      method: init.method ?? 'GET',
+      headers: {
+        ...(init.body !== undefined
+          ? { 'content-type': 'application/json' }
+          : {}),
+        'x-lander-hook-token': run.callback.token,
+      },
+      ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
+    },
+  )
+}
+
 // Ask the server whether this exact pair may still run. Three answers, and the
 // difference between the first two is why this is not a boolean: a revoked
 // approval is a human's act, while an unknown credential just means the server
@@ -97,21 +119,10 @@ async function checkApproval(
   const { run } = input
   let res: Response
   try {
-    res = await fetch(
-      `${run.callback.api}/api/${encodeURIComponent(run.callback.project)}/hooks/materialize`,
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-lander-hook-token': run.callback.token,
-        },
-        body: JSON.stringify({
-          fireId: run.fireId,
-          path: run.hook.path,
-          blob: run.hook.runs,
-        }),
-      },
-    )
+    res = await callServer(run, '/hooks/materialize', {
+      method: 'POST',
+      body: { fireId: run.fireId, path: run.hook.path, blob: run.hook.runs },
+    })
   } catch (e) {
     return {
       ok: false,
@@ -174,6 +185,7 @@ export type HookActionResult =
 
 function buildCtx(input: HookHostInput, reports: string[]) {
   const { run } = input
+  const targetPath = `/tasks/${encodeURIComponent(run.target.id)}`
   let cached: unknown
 
   // The dedupe key's ordinal, per kind, per INVOCATION — and it advances only
@@ -250,10 +262,7 @@ function buildCtx(input: HookHostInput, reports: string[]) {
   // ctx is doing something ordinary, and would otherwise get a TypeError.
   async function readTarget(): Promise<unknown> {
     if (cached !== undefined) return cached
-    const res = await fetch(
-      `${run.callback.api}/api/${encodeURIComponent(run.callback.project)}/tasks/${encodeURIComponent(run.target.id)}`,
-      { headers: { 'x-lander-hook-token': run.callback.token } },
-    )
+    const res = await callServer(run, targetPath)
     if (!res.ok) throw new Error(`could not read the target (${res.status})`)
     cached = await res.json()
     return cached
@@ -332,17 +341,10 @@ function buildCtx(input: HookHostInput, reports: string[]) {
     // found nothing" if the body can tell them apart too.
     nudge(text: string, opts: { key?: string } = {}): Promise<HookActionResult> {
       return act('nudge', opts.key, (key) =>
-        fetch(
-          `${run.callback.api}/api/${encodeURIComponent(run.callback.project)}/tasks/${encodeURIComponent(run.target.id)}/messages`,
-          {
-            method: 'POST',
-            headers: {
-              'content-type': 'application/json',
-              'x-lander-hook-token': run.callback.token,
-            },
-            body: JSON.stringify({ message: String(text), key }),
-          },
-        ),
+        callServer(run, `${targetPath}/messages`, {
+          method: 'POST',
+          body: { message: String(text), key },
+        }),
       )
     },
     // Reason over inputs the body has already assembled, with the target's own
@@ -409,19 +411,15 @@ function buildCtx(input: HookHostInput, reports: string[]) {
       opts: { edits?: boolean; title?: string; flow?: string; key?: string } = {},
     ): Promise<HookActionResult> {
       return act('launch', opts.key, (key) =>
-        fetch(`${run.callback.api}/api/${encodeURIComponent(run.callback.project)}/tasks`, {
+        callServer(run, '/tasks', {
           method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            'x-lander-hook-token': run.callback.token,
-          },
-          body: JSON.stringify({
+          body: {
             message: String(message),
             key,
             ...(opts.edits ? { allowEdits: true } : {}),
             ...(opts.title ? { title: String(opts.title) } : {}),
             ...(opts.flow ? { flow: String(opts.flow) } : {}),
-          }),
+          },
         }),
       )
     },
@@ -437,17 +435,10 @@ function buildCtx(input: HookHostInput, reports: string[]) {
     // here.
     land(opts: { key?: string } = {}): Promise<HookActionResult> {
       return act('land', opts.key, (key) =>
-        fetch(
-          `${run.callback.api}/api/${encodeURIComponent(run.callback.project)}/tasks/${encodeURIComponent(run.target.id)}`,
-          {
-            method: 'PATCH',
-            headers: {
-              'content-type': 'application/json',
-              'x-lander-hook-token': run.callback.token,
-            },
-            body: JSON.stringify({ status: 'landed', key }),
-          },
-        ),
+        callServer(run, targetPath, {
+          method: 'PATCH',
+          body: { status: 'landed', key },
+        }),
       )
     },
     // What happened, for the target's timeline. A body that reports nothing

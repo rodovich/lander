@@ -809,11 +809,17 @@ describe('ctx runtime — orchestration', () => {
 
   // Capture requests and answer them, standing in for the server.
   function fakeFetch(reply: unknown = { ok: true }) {
-    const calls: { url: string; method: string; body: unknown }[] = []
+    const calls: {
+      url: string
+      method: string
+      headers: Record<string, string>
+      body: unknown
+    }[] = []
     const fn = vi.fn(async (url: string, init?: RequestInit) => {
       calls.push({
         url,
         method: init?.method ?? 'GET',
+        headers: (init?.headers ?? {}) as Record<string, string>,
         body:
           typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body,
       })
@@ -930,6 +936,53 @@ describe('ctx runtime — orchestration', () => {
         flowConfig: { pr: 12 },
         allowEdits: true,
       })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('calls as the task, in JSON', async () => {
+    const h = withApi()
+    const calls = fakeFetch({ id: 'task-1', items: [] })
+    try {
+      await runFlow(h, async (ctx) => {
+        await ctx.view()
+        return { exitCode: 0 }
+      })
+      expect(calls[0].headers).toEqual({
+        'content-type': 'application/json',
+        'x-lander-task': 'task-1',
+        'x-lander-project': 'proj',
+        'x-lander-token': 'tok',
+      })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('puts an attachment as multipart and returns the stored ref', async () => {
+    const h = withApi()
+    const calls = fakeFetch({ attachment: { id: 'att-1', name: 'diff.patch' } })
+    try {
+      await runFlow(h, async (ctx) => {
+        ctx.emit.message('attached the diff')
+        const ref = await ctx.attachments.put('diff.patch', '+added')
+        expect(ref).toEqual({ id: 'att-1', name: 'diff.patch' })
+        // Flushed first, so the ref lands on the message already said.
+        expect(updates(h.events).length).toBeGreaterThan(0)
+        return { exitCode: 0 }
+      })
+      expect(calls[0].url).toBe(`${API}/api/proj/tasks/task-1/attachments`)
+      expect(calls[0].method).toBe('POST')
+      // No JSON content type: fetch sets the multipart boundary itself.
+      expect(calls[0].headers).toEqual({
+        'x-lander-task': 'task-1',
+        'x-lander-project': 'proj',
+        'x-lander-token': 'tok',
+      })
+      const form = calls[0].body as FormData
+      expect(form.get('name')).toBe('diff.patch')
+      expect(await (form.get('file') as Blob).text()).toBe('+added')
     } finally {
       vi.unstubAllGlobals()
     }
