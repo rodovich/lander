@@ -1,4 +1,4 @@
-import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 import path from 'node:path'
 import type { ProviderCaps } from './flows/index'
 import type {
@@ -13,14 +13,19 @@ import type {
 import type { MaterializedFiles } from './attachments'
 import { ROOT } from './paths'
 import type { HostEvent, HostInput } from './host-protocol'
-import { endStdin, killProcessGroup, onLines } from './processes'
+import {
+  endStdin,
+  killProcessGroup,
+  onLines,
+  spawnHostProcess,
+} from './processes'
 
 // Spawn a flow host for one run. Injectable so tests substitute a fake host;
 // the default spawns daemon/flow-host.ts.
 export type SpawnHostLike = () => ChildProcess
 
-// The host entry, resolved absolutely so the host process's own cwd is free to be
-// the repo root while the *agent* runs in the run's cwd (carried in the HostInput).
+// The host runs at lander's root (see spawnHostProcess); the agent's own cwd
+// rides in the HostInput.
 const HOST_ENTRY = path.join(ROOT, 'daemon', 'flow-host.ts')
 
 export type RunManagerMessage =
@@ -106,18 +111,7 @@ export function createRunManager({
   materialize,
   refreshUsage = () => {},
   runBufferTtlMs = DEFAULT_RUN_BUFFER_TTL_MS,
-  spawnHost = () =>
-    nodeSpawn('tsx', [HOST_ENTRY], {
-      // The host lives in its own process group (detached) so interrupt / idle /
-      // killChildren signal the *group* (`process.kill(-pid)`) and take the agent
-      // grandchild down with it — no orphans. cwd is the repo root; the agent's
-      // real cwd rides in the HostInput. The host inherits the daemon env, which
-      // scrubProcessEnv has already stripped of lander's own credentials.
-      cwd: ROOT,
-      detached: true,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env },
-    }),
+  spawnHost = () => spawnHostProcess(HOST_ENTRY),
   onEmpty = () => {},
 }: RunManagerOptions): RunManager {
   const runs = new Map<string, Run>()
