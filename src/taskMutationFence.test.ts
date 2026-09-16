@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  admitTask,
   beginTaskPatch,
   createTaskMutationFence,
+  insertTask,
   mergeTaskRefresh,
   patchTask,
   replaceTask,
@@ -91,5 +93,40 @@ describe('task mutation fence', () => {
     ])
     expect(merged[0]).toBe(updated)
     expect(merged[1].status).toBe('landed')
+  })
+
+  it('keeps an admitted task through a refresh that predates it, until one carries it', () => {
+    const fence = createTaskMutationFence()
+    const existing = task('a', 'riding')
+    const issuedBefore = fence.clock
+    const created = task('new', 'riding')
+    admitTask(fence, created)
+    const current = insertTask([existing], created)
+    expect(current.map((t) => t.id)).toEqual(['new', 'a'])
+
+    // A poll issued before the POST answered omits the task; the row stays.
+    const stale = mergeTaskRefresh(fence, issuedBefore, current, [
+      task('a', 'landed'),
+    ])
+    expect(stale.map(({ id, status }) => ({ id, status }))).toEqual([
+      { id: 'a', status: 'landed' },
+      { id: 'new', status: 'riding' },
+    ])
+
+    // A poll issued afterwards is authoritative: its copy replaces the admitted
+    // one, and were it to omit the task, the omission would stand.
+    const issuedAfter = fence.clock
+    const named = task('new', 'riding', { title: 'Named by haiku' })
+    const fresh = mergeTaskRefresh(fence, issuedAfter, stale, [named, task('a', 'landed')])
+    expect(fresh[0]).toBe(named)
+    expect(
+      mergeTaskRefresh(fence, issuedAfter, stale, [task('a', 'landed')]).map((t) => t.id),
+    ).toEqual(['a'])
+  })
+
+  it('replaces rather than duplicates a task admitted twice', () => {
+    const first = task('new', 'riding')
+    const again = task('new', 'riding', { title: 'again' })
+    expect(insertTask(insertTask([], first), again)).toEqual([again])
   })
 })

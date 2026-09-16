@@ -59,6 +59,7 @@ export function App() {
     refresh,
     beginTaskMutation,
     finishTaskMutation,
+    admitTask,
     hasLoadedRef,
     resolveTaskLink,
     taskLinks,
@@ -287,7 +288,7 @@ export function App() {
           setNewProject={setNewProject}
           height={newTaskHeight}
           setError={setError}
-          refresh={refresh}
+          admit={admitTask}
           onCreated={selectTask}
         />
 

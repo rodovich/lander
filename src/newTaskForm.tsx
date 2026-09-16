@@ -5,7 +5,7 @@ import { ComposerPanel } from './composerPanel'
 import { agentDisplayName } from './agentDisplay'
 import { lastPathComponent } from './format'
 import { useSessionState } from './hooks'
-import type { FlowMeta, Project, Task } from './types'
+import type { FlowMeta, Project, Task, TaskWithProject } from './types'
 
 // The sidebar's new-task composer: the draft message and its attachments, the
 // agent/project pickers, and task creation. The agent and project picks are
@@ -22,7 +22,7 @@ export const NewTaskForm = memo(function NewTaskForm({
   setNewProject,
   height,
   setError,
-  refresh,
+  admit,
   onCreated,
 }: {
   projects: Project[]
@@ -39,7 +39,9 @@ export const NewTaskForm = memo(function NewTaskForm({
   setNewProject: Dispatch<SetStateAction<string>>
   height: number
   setError: (message: string | null) => void
-  refresh: () => Promise<void>
+  // Puts the created task into the displayed list from the POST's own answer,
+  // so the form never waits on a whole-list refetch to show it.
+  admit: (task: TaskWithProject) => void
   onCreated: (id: string, slug: string) => void
 }) {
   // The draft message persists across reloads so a half-composed task isn't
@@ -114,7 +116,7 @@ export const NewTaskForm = memo(function NewTaskForm({
       const body = await r.json()
       if (!r.ok) throw new Error(body.error ?? r.statusText)
       const created = body as Task
-      await refresh()
+      admit({ ...created, projectSlug: targetSlug })
       onCreated(created.id, targetSlug)
       setMessage('')
       setNewFiles([])

@@ -109,6 +109,27 @@ export function mergeTaskRefresh(
   return merged
 }
 
+// Admit a task the client learned of from a write's own answer — the POST that
+// created it — without waiting for a poll to carry it. There is no optimistic
+// phase to open, so this sets only the closing boundary settleTaskPatch would:
+// a refresh issued before this moment cannot know the task, and mergeTaskRefresh
+// keeps a locally-invalidated omission, so the row survives until a later poll
+// brings the server's own copy. The list edit itself is insertTask.
+export function admitTask(
+  fence: TaskMutationFence,
+  task: TaskWithProject,
+): void {
+  fence.boundaryByKey.set(taskKeyOf(task), ++fence.clock)
+}
+
+export function insertTask(
+  tasks: TaskWithProject[],
+  task: TaskWithProject,
+): TaskWithProject[] {
+  const key = taskKeyOf(task)
+  return [task, ...tasks.filter((t) => taskKeyOf(t) !== key)]
+}
+
 // Close the latest mutation of a task. Success supplies the authoritative task
 // returned by the write; failure omits it and restores the newest server base
 // seen beneath the overlay. The closing boundary also protects that result from

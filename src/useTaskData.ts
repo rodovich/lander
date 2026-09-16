@@ -6,8 +6,10 @@ import { startPoll } from './poll'
 import { MonotonicRequestGate } from './requestOrder'
 import { taskHref } from './taskRef'
 import {
+  admitTask as admitToFence,
   beginTaskPatch,
   createTaskMutationFence,
+  insertTask,
   mergeTaskRefresh,
   patchTask,
   replaceTask,
@@ -81,7 +83,6 @@ export function useTaskData(
     },
     [],
   )
-
   // Load the project list once. Reconcile the session-restored project filter
   // against it — keeping the picked slugs that still exist, and falling back to
   // "show all" only when nothing valid was restored (first visit, or every
@@ -109,6 +110,23 @@ export function useTaskData(
   const refreshScope = `${shownKey}\n${archived}`
   const refreshScopeRef = useRef(refreshScope)
   refreshScopeRef.current = refreshScope
+
+  // Show a task the server just created from its own answer, ahead of any poll
+  // — but only into a list that would carry it: a task created in a project
+  // that isn't shown, or while the archived pool is displayed, is one the next
+  // poll would rightly omit, so admitting it would paint a row that vanishes
+  // two seconds later. The fence boundary is set outside the state updater: an
+  // updater may run twice under StrictMode, and the clock must advance exactly
+  // once per admit.
+  const admitTask = useCallback(
+    (task: TaskWithProject) => {
+      if (archived || !shown.includes(task.projectSlug)) return
+      admitToFence(taskMutationFenceRef.current, task)
+      setTasks((prev) => insertTask(prev, task))
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [shownKey, archived],
+  )
 
   // Load the shown tasks (and the telemetry snapshot that rides along) and
   // commit them. Shared by the 2s poll and the action paths that reconcile
@@ -274,6 +292,7 @@ export function useTaskData(
     refresh,
     beginTaskMutation,
     finishTaskMutation,
+    admitTask,
     hasLoadedRef,
     resolveTaskLink,
     taskLinks,
