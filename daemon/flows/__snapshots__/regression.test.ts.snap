@@ -1,0 +1,5447 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`claude transcript regressions > agent stderr is aggregated into the done 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "warning: something",
+  },
+  "launch": [
+    {
+      "args": [
+        "--session-id",
+        "minted-session-id",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "minted-session-id",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "all done",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "ok",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "kind": "text",
+          "text": "ok",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "all done",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`claude transcript regressions > attachment manifest rides the prompt with an --add-dir 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--session-id",
+        "minted-session-id",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--add-dir",
+        "/tmp",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-attachments>
+shot.png, notes.txt
+</task-attachments>
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_FILES_DIR": "/tmp",
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "minted-session-id",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "all done",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "ok",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "kind": "text",
+          "text": "ok",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "all done",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`claude transcript regressions > blocked call via permission_denials 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--session-id",
+        "minted-session-id",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "minted-session-id",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "tool:ride-1:0",
+        "input": "rm -rf /",
+        "kind": "tool",
+        "name": "Bash",
+        "output": "refused",
+        "rideId": "ride-1",
+        "rule": "Bash(rm -rf /)",
+        "status": "blocked",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "itm-mjuohs00-1",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "I was blocked",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": undefined,
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "input": "rm -rf /",
+          "kind": "tool_use",
+          "rule": "Bash(rm -rf /)",
+          "tool": "Bash",
+          "toolUseId": "tool:ride-1:0",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": undefined,
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "isError": false,
+          "kind": "tool_result",
+          "text": "refused",
+          "toolUseId": "tool:ride-1:0",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [
+        "tool:ride-1:0",
+      ],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "I was blocked",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`claude transcript regressions > edit access adds acceptEdits and scratch roots 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--session-id",
+        "minted-session-id",
+        "--permission-mode",
+        "acceptEdits",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--add-dir",
+        "/tmp",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have permission for editing files, and can forward that to a spawned task.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": true,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "minted-session-id",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have permission for editing files, and can forward that to a spawned task.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "all done",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "ok",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "kind": "text",
+          "text": "ok",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "all done",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`claude transcript regressions > edit and write produce diff hunks 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--session-id",
+        "minted-session-id",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "minted-session-id",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "edits": [
+          {
+            "new": "const a = 2",
+            "old": "const a = 1",
+          },
+        ],
+        "groupId": "group:ride-1:0",
+        "id": "tool:ride-1:0",
+        "input": "/repo/a.ts",
+        "kind": "tool",
+        "name": "Edit",
+        "output": "ok",
+        "rideId": "ride-1",
+        "rule": "Edit(/repo/a.ts)",
+        "status": "ok",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "edits": [
+          {
+            "new": "export const x = 1
+",
+            "old": "",
+          },
+        ],
+        "groupId": "group:ride-1:0",
+        "id": "tool:ride-1:1",
+        "input": "/repo/new.ts",
+        "kind": "tool",
+        "name": "Write",
+        "output": "ok",
+        "rideId": "ride-1",
+        "rule": "Write(/repo/new.ts)",
+        "status": "ok",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "itm-mjuohs00-2",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "all done",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": undefined,
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "edits": [
+            {
+              "new": "const a = 2",
+              "old": "const a = 1",
+            },
+          ],
+          "inferenceId": "group:ride-1:0",
+          "input": "/repo/a.ts",
+          "kind": "tool_use",
+          "rule": "Edit(/repo/a.ts)",
+          "tool": "Edit",
+          "toolUseId": "tool:ride-1:0",
+        },
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "edits": [
+            {
+              "new": "export const x = 1
+",
+              "old": "",
+            },
+          ],
+          "inferenceId": "group:ride-1:0",
+          "input": "/repo/new.ts",
+          "kind": "tool_use",
+          "rule": "Write(/repo/new.ts)",
+          "tool": "Write",
+          "toolUseId": "tool:ride-1:1",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "all done",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "isError": false,
+          "kind": "tool_result",
+          "text": "ok",
+          "toolUseId": "tool:ride-1:0",
+        },
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "isError": false,
+          "kind": "tool_result",
+          "text": "ok",
+          "toolUseId": "tool:ride-1:1",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`claude transcript regressions > errored result event carries no in-stream terminal error 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--session-id",
+        "minted-session-id",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "minted-session-id",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "starting",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "starting",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "kind": "text",
+          "text": "starting",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`claude transcript regressions > legacy top-level session resumes without minting 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--resume",
+        "sess-legacy-only",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "flowStateRev": 1,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "all done",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "sessionId": "sess-legacy-only",
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "legacy resumed",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "kind": "text",
+          "text": "legacy resumed",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "all done",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`claude transcript regressions > manual cd hint from a hand-entered worktree names EnterWorktree 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--session-id",
+        "minted-session-id",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+
+Note: your previous turn's shell ended in .claude/worktrees/feature, but this turn starts at the project root (a manual cd isn't carried across turns) — cd back if you still need to work there. That is a git worktree you entered by hand. To keep working there across turns, enter it with EnterWorktree instead, passing the worktree's \`path\` — later turns then start inside it, and it shows against this task. Entering by path borrows the worktree rather than owning it, so exiting will not remove it.
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "minted-session-id",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+
+Note: your previous turn's shell ended in .claude/worktrees/feature, but this turn starts at the project root (a manual cd isn't carried across turns) — cd back if you still need to work there. That is a git worktree you entered by hand. To keep working there across turns, enter it with EnterWorktree instead, passing the worktree's \`path\` — later turns then start inside it, and it shows against this task. Entering by path borrows the worktree rather than owning it, so exiting will not remove it.
+</task-context>",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "all done",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "ok",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "kind": "text",
+          "text": "ok",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "all done",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`claude transcript regressions > manual cd hint when the recorded cwd differs from the landed dir 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--session-id",
+        "minted-session-id",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+
+Note: your previous turn's shell ended in sub/dir, but this turn starts at the project root (a manual cd isn't carried across turns) — cd back if you still need to work there.
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "minted-session-id",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+
+Note: your previous turn's shell ended in sub/dir, but this turn starts at the project root (a manual cd isn't carried across turns) — cd back if you still need to work there.
+</task-context>",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "all done",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "ok",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "kind": "text",
+          "text": "ok",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "all done",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`claude transcript regressions > no edit access omits acceptEdits and scratch roots 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--session-id",
+        "minted-session-id",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "minted-session-id",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "all done",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "ok",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "kind": "text",
+          "text": "ok",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "all done",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`claude transcript regressions > nonexistent filesDir still sets the env var but adds no --add-dir 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--session-id",
+        "minted-session-id",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_FILES_DIR": "/definitely/not/here/xyz",
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "minted-session-id",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "all done",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "ok",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "kind": "text",
+          "text": "ok",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "all done",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`claude transcript regressions > parallel batch in one inference 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--session-id",
+        "minted-session-id",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "minted-session-id",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "tool:ride-1:0",
+        "input": "/repo/a.ts",
+        "kind": "tool",
+        "name": "Read",
+        "output": "aaa",
+        "rideId": "ride-1",
+        "rule": "Read(/repo/a.ts)",
+        "status": "ok",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "tool:ride-1:1",
+        "input": "/repo/b.ts",
+        "kind": "tool",
+        "name": "Read",
+        "output": "bbb",
+        "rideId": "ride-1",
+        "rule": "Read(/repo/b.ts)",
+        "status": "ok",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "itm-mjuohs00-2",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "all done",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": undefined,
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "input": "/repo/a.ts",
+          "kind": "tool_use",
+          "rule": "Read(/repo/a.ts)",
+          "tool": "Read",
+          "toolUseId": "tool:ride-1:0",
+        },
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "input": "/repo/b.ts",
+          "kind": "tool_use",
+          "rule": "Read(/repo/b.ts)",
+          "tool": "Read",
+          "toolUseId": "tool:ride-1:1",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": undefined,
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "isError": false,
+          "kind": "tool_result",
+          "text": "aaa",
+          "toolUseId": "tool:ride-1:0",
+        },
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "isError": false,
+          "kind": "tool_result",
+          "text": "bbb",
+          "toolUseId": "tool:ride-1:1",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "all done",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`claude transcript regressions > plain text reply 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--session-id",
+        "minted-session-id",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "minted-session-id",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "hello there",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "hello there",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "kind": "text",
+          "text": "hello there",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "hello there",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`claude transcript regressions > rejecting rate limit event 1`] = `
+{
+  "done": {
+    "exitCode": 1,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--session-id",
+        "minted-session-id",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "minted-session-id",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 2,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "rate limited",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "eventKind": "wedged",
+        "id": "itm-mjuohs00-1",
+        "kind": "event",
+        "title": "Parity task",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "blocking": "task",
+        "form": {
+          "options": [
+            {
+              "id": "retry-now",
+              "label": "Retry now",
+            },
+            {
+              "at": "2027-01-15T08:00:00.000Z",
+              "id": "retry-at-reset",
+              "label": "Retry when the limit resets",
+              "style": "primary",
+            },
+          ],
+          "type": "choice",
+        },
+        "id": "ask-1",
+        "kind": "ask",
+        "origin": "retry",
+        "prompt": "Usage limit reached.",
+        "state": "open",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "system",
+        "id": "fire-1-mjuohs00",
+        "trigger": "wedged",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "system",
+        "id": "fire-2-mjuohs00",
+        "outcome": "error",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "retry": {
+      "committed": true,
+      "prompts": [],
+      "resetsAt": "2027-01-15T08:00:00.000Z",
+    },
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "error": {
+          "exitCode": 1,
+        },
+        "id": "ride-1",
+        "outcome": "error",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "wedged",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "rate limited",
+      "kind": "update",
+      "rateLimitResetsAt": "2027-01-15T08:00:00.000Z",
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`claude transcript regressions > resume of an existing session 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--resume",
+        "sess-existing",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "sess-existing",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "flowStateRev": 1,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "resumed",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "sessionId": "sess-existing",
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "resumed",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "kind": "text",
+          "text": "resumed",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "resumed",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`claude transcript regressions > revival notice names a cleared rest timer 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--session-id",
+        "minted-session-id",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-revived>
+You were resting until 3:00:00 PM when this message arrived; the message changed your status to riding and cleared that wakeup. Re-arm it with \`lander rest\` if you still want it.
+</task-revived>
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "minted-session-id",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "all done",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "ok",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "kind": "text",
+          "text": "ok",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "all done",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`claude transcript regressions > revival notice rides the prompt of the reviving turn 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--session-id",
+        "minted-session-id",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-revived>
+You were wedged when this message arrived; the message changed your status to riding.
+</task-revived>
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "minted-session-id",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "all done",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "ok",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "kind": "text",
+          "text": "ok",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "all done",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`claude transcript regressions > second ride seeded with a nonzero flowStateRev 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--session-id",
+        "minted-session-id",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-2",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "phase": "reviewing",
+      "sessionId": "minted-session-id",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "flowStateRev": 8,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-2:0",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-2",
+        "role": "flow",
+        "text": "all done",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-2",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-2",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "second ride",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-2:0",
+          "kind": "text",
+          "text": "second ride",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "all done",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`claude transcript regressions > single tool call and result in one chunk 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--session-id",
+        "minted-session-id",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "minted-session-id",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "tool:ride-1:0",
+        "input": "ls -la",
+        "kind": "tool",
+        "name": "Bash",
+        "output": "a.ts
+b.ts",
+        "rideId": "ride-1",
+        "rule": "Bash(ls -la)",
+        "status": "ok",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:1",
+        "id": "itm-mjuohs00-1",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "all done",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": undefined,
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "input": "ls -la",
+          "kind": "tool_use",
+          "rule": "Bash(ls -la)",
+          "tool": "Bash",
+          "toolUseId": "tool:ride-1:0",
+        },
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "isError": false,
+          "kind": "tool_result",
+          "text": "a.ts
+b.ts",
+          "toolUseId": "tool:ride-1:0",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "all done",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:1",
+          "kind": "text",
+          "text": "listed",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`claude transcript regressions > subagent trace with sub-subagent nesting 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--session-id",
+        "minted-session-id",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "minted-session-id",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "tool:ride-1:0",
+        "input": "Explore: find the reducer",
+        "kind": "tool",
+        "name": "Agent",
+        "output": "found it",
+        "rideId": "ride-1",
+        "rule": "Agent",
+        "status": "ok",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:1",
+        "id": "itm-mjuohs00-1",
+        "kind": "message",
+        "parentId": "tool:ride-1:0",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "looking around",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:1",
+        "id": "tool:ride-1:1",
+        "input": "reduce",
+        "kind": "tool",
+        "name": "Grep",
+        "output": "server/stream.ts",
+        "parentId": "tool:ride-1:0",
+        "rideId": "ride-1",
+        "rule": "Grep(reduce)",
+        "status": "ok",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "itm-mjuohs00-3",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "all done",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": undefined,
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "input": "Explore: find the reducer",
+          "kind": "tool_use",
+          "rule": "Agent",
+          "tool": "Agent",
+          "toolUseId": "tool:ride-1:0",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": undefined,
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:1",
+          "kind": "text",
+          "parentToolUseId": "tool:ride-1:0",
+          "text": "looking around",
+        },
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:1",
+          "input": "reduce",
+          "kind": "tool_use",
+          "parentToolUseId": "tool:ride-1:0",
+          "rule": "Grep(reduce)",
+          "tool": "Grep",
+          "toolUseId": "tool:ride-1:1",
+        },
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "isError": false,
+          "kind": "tool_result",
+          "text": "server/stream.ts",
+          "toolUseId": "tool:ride-1:1",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "all done",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "isError": false,
+          "kind": "tool_result",
+          "text": "found it",
+          "toolUseId": "tool:ride-1:0",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`claude transcript regressions > task allow rules extend allowedTools 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--session-id",
+        "minted-session-id",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "Bash(npm test)",
+        "Bash(npm run build)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "minted-session-id",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "all done",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "ok",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "kind": "text",
+          "text": "ok",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "all done",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`claude transcript regressions > unchanged turn context is not re-sent 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--resume",
+        "sess-existing",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "sess-existing",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "all done",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "sessionId": "sess-existing",
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "same context",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "kind": "text",
+          "text": "same context",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "all done",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`claude transcript regressions > usage across inferences with cache miss and final total 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--session-id",
+        "minted-session-id",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "minted-session-id",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "first",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "itm-mjuohs00-1",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "first",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:1",
+        "id": "itm-mjuohs00-2",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "all done",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+        "usage": {
+          "cacheCreation": 0,
+          "cacheMiss": {
+            "missedTokens": 48815,
+            "reason": "system_changed",
+          },
+          "cacheRead": 5,
+          "costUsd": 0.0421,
+          "input": 140,
+          "model": "claude-opus-4-8",
+          "output": 17,
+        },
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "first",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "kind": "text",
+          "text": "first",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "second",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "kind": "text",
+          "text": "first",
+        },
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:1",
+          "kind": "text",
+          "text": "second",
+        },
+      ],
+      "usage": {
+        "cacheCreation": 0,
+        "cacheMiss": {
+          "missedTokens": 48815,
+          "reason": "system_changed",
+        },
+        "cacheRead": 5,
+        "costUsd": undefined,
+        "input": 140,
+        "model": undefined,
+        "output": 17,
+      },
+      "usageChanged": true,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "all done",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": {
+        "cacheCreation": 0,
+        "cacheMiss": {
+          "missedTokens": 48815,
+          "reason": "system_changed",
+        },
+        "cacheRead": 5,
+        "costUsd": 0.0421,
+        "input": 140,
+        "model": undefined,
+        "output": 17,
+      },
+      "usageChanged": true,
+    },
+  ],
+}
+`;
+
+exports[`claude transcript regressions > worktree task re-enters via argv and snapshots the worktree 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--session-id",
+        "minted-session-id",
+        "--worktree",
+        "feature",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "minted-session-id",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "all done",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "ok",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "kind": "text",
+          "text": "ok",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "all done",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`codex transcript regressions > agent message reply 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "exec",
+        "--json",
+        "--config",
+        "default_permissions="lander-read-only"",
+        "--config",
+        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "--config",
+        "shell_environment_policy.inherit=all",
+        "--config",
+        "shell_environment_policy.ignore_default_excludes=true",
+        "--config",
+        "shell_environment_policy.include_only=["PATH","LANDER_*"]",
+        "--cd",
+        "/repo",
+        "--",
+        "Prompt: As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+
+do the thing",
+      ],
+      "command": "codex",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "thread-1",
+      "taskPrompt": "sha256:0ea953f9109ca38d64f99a28a78e694b30a52f7ecf750037c2f704927134bdda",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "codex says hi",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": undefined,
+      "finalText": "codex says hi",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "kind": "text",
+          "text": "codex says hi",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`codex transcript regressions > command execution started and completed in one chunk 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "exec",
+        "--json",
+        "--config",
+        "default_permissions="lander-read-only"",
+        "--config",
+        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "--config",
+        "shell_environment_policy.inherit=all",
+        "--config",
+        "shell_environment_policy.ignore_default_excludes=true",
+        "--config",
+        "shell_environment_policy.include_only=["PATH","LANDER_*"]",
+        "--cd",
+        "/repo",
+        "--",
+        "Prompt: As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+
+do the thing",
+      ],
+      "command": "codex",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "thread-1",
+      "taskPrompt": "sha256:0ea953f9109ca38d64f99a28a78e694b30a52f7ecf750037c2f704927134bdda",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "tool:ride-1:0",
+        "input": "ls -la",
+        "kind": "tool",
+        "name": "command_execution",
+        "output": "a.ts
+b.ts",
+        "rideId": "ride-1",
+        "rule": "command_execution(ls -la)",
+        "status": "ok",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "itm-mjuohs00-1",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "listed the files",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": undefined,
+      "finalText": undefined,
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "input": "ls -la",
+          "kind": "tool_use",
+          "rule": "command_execution(ls -la)",
+          "tool": "command_execution",
+          "toolUseId": "tool:ride-1:0",
+        },
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "isError": false,
+          "kind": "tool_result",
+          "text": "a.ts
+b.ts",
+          "toolUseId": "tool:ride-1:0",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": undefined,
+      "finalText": "listed the files",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "kind": "text",
+          "text": "listed the files",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`codex transcript regressions > edit access synthesizes the scoped workspace profile 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "exec",
+        "--json",
+        "--config",
+        "default_permissions="lander-edit"",
+        "--config",
+        "permissions.lander-edit={description="Lander workspace edit access",extends=":workspace",workspace_roots={"/repo"=true},filesystem={":workspace_roots"={".git"="write"},"/repo/.git"="write"},network={enabled=true,allow_local_binding=true}}",
+        "--config",
+        "shell_environment_policy.inherit=all",
+        "--config",
+        "shell_environment_policy.ignore_default_excludes=true",
+        "--config",
+        "shell_environment_policy.include_only=["PATH","LANDER_*"]",
+        "--cd",
+        "/repo",
+        "--",
+        "Prompt: As of this message, this task runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+
+do the thing",
+      ],
+      "command": "codex",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": true,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "thread-1",
+      "taskPrompt": "sha256:5dfd1dbd8b974657f515f3d22e6561f6b09d4170cacfa5b46a6c1ab23569cd64",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "ok",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": undefined,
+      "finalText": "ok",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "kind": "text",
+          "text": "ok",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`codex transcript regressions > error event folds into a failed done on a clean exit 1`] = `
+{
+  "done": {
+    "exitCode": 1,
+    "kind": "done",
+    "stderr": "upstream blew up",
+  },
+  "launch": [
+    {
+      "args": [
+        "exec",
+        "--json",
+        "--config",
+        "default_permissions="lander-read-only"",
+        "--config",
+        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "--config",
+        "shell_environment_policy.inherit=all",
+        "--config",
+        "shell_environment_policy.ignore_default_excludes=true",
+        "--config",
+        "shell_environment_policy.include_only=["PATH","LANDER_*"]",
+        "--cd",
+        "/repo",
+        "--",
+        "Prompt: As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+
+do the thing",
+      ],
+      "command": "codex",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "thread-1",
+    },
+    "flowStateRev": 1,
+    "hookFireSeq": 2,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "error running assistant: exited 1
+upstream blew up",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "eventKind": "wedged",
+        "id": "itm-mjuohs00-1",
+        "kind": "event",
+        "title": "Parity task",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "blocking": "task",
+        "form": {
+          "options": [
+            {
+              "id": "retry-now",
+              "label": "Resend",
+            },
+          ],
+          "type": "choice",
+        },
+        "id": "ask-1",
+        "kind": "ask",
+        "origin": "retry",
+        "prompt": "The assistant run failed: upstream blew up",
+        "state": "open",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "system",
+        "id": "fire-1-mjuohs00",
+        "trigger": "wedged",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "system",
+        "id": "fire-2-mjuohs00",
+        "outcome": "error",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "retry": {
+      "committed": false,
+      "prompts": [],
+    },
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "error": {
+          "exitCode": 1,
+          "stderr": "upstream blew up",
+        },
+        "id": "ride-1",
+        "outcome": "error",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "wedged",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [],
+}
+`;
+
+exports[`codex transcript regressions > failed command execution 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "exec",
+        "--json",
+        "--config",
+        "default_permissions="lander-read-only"",
+        "--config",
+        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "--config",
+        "shell_environment_policy.inherit=all",
+        "--config",
+        "shell_environment_policy.ignore_default_excludes=true",
+        "--config",
+        "shell_environment_policy.include_only=["PATH","LANDER_*"]",
+        "--cd",
+        "/repo",
+        "--",
+        "Prompt: As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+
+do the thing",
+      ],
+      "command": "codex",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "thread-1",
+      "taskPrompt": "sha256:0ea953f9109ca38d64f99a28a78e694b30a52f7ecf750037c2f704927134bdda",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "tool:ride-1:0",
+        "input": "false",
+        "kind": "tool",
+        "name": "command_execution",
+        "output": "boom",
+        "rideId": "ride-1",
+        "rule": "command_execution(false)",
+        "status": "failed",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": undefined,
+      "finalText": undefined,
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "input": "false",
+          "kind": "tool_use",
+          "rule": "command_execution(false)",
+          "tool": "command_execution",
+          "toolUseId": "tool:ride-1:0",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": undefined,
+      "finalText": undefined,
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "isError": true,
+          "kind": "tool_result",
+          "text": "boom",
+          "toolUseId": "tool:ride-1:0",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`codex transcript regressions > file change item 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "exec",
+        "--json",
+        "--config",
+        "default_permissions="lander-read-only"",
+        "--config",
+        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "--config",
+        "shell_environment_policy.inherit=all",
+        "--config",
+        "shell_environment_policy.ignore_default_excludes=true",
+        "--config",
+        "shell_environment_policy.include_only=["PATH","LANDER_*"]",
+        "--cd",
+        "/repo",
+        "--",
+        "Prompt: As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+
+do the thing",
+      ],
+      "command": "codex",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "thread-1",
+      "taskPrompt": "sha256:0ea953f9109ca38d64f99a28a78e694b30a52f7ecf750037c2f704927134bdda",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "tool:ride-1:0",
+        "input": "modify /repo/a.ts",
+        "kind": "tool",
+        "name": "file_change",
+        "rideId": "ride-1",
+        "rule": "file_change(/repo/a.ts)",
+        "status": "running",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "itm-mjuohs00-1",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "edited it",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": undefined,
+      "finalText": undefined,
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "input": "modify /repo/a.ts",
+          "kind": "tool_use",
+          "rule": "file_change(/repo/a.ts)",
+          "tool": "file_change",
+          "toolUseId": "tool:ride-1:0",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": undefined,
+      "finalText": "edited it",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "kind": "text",
+          "text": "edited it",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`codex transcript regressions > image turn places -i after the prompt on a fresh exec 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "exec",
+        "--json",
+        "--config",
+        "default_permissions="lander-read-only"",
+        "--config",
+        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "--config",
+        "shell_environment_policy.inherit=all",
+        "--config",
+        "shell_environment_policy.ignore_default_excludes=true",
+        "--config",
+        "shell_environment_policy.include_only=["PATH","LANDER_*"]",
+        "--cd",
+        "/repo",
+        "-i",
+        "/tmp/img1",
+        "--",
+        "Prompt: As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+
+look at this
+
+<task-attachments>
+p.png
+
+The image(s) above are already attached to your vision.
+</task-attachments>",
+      ],
+      "command": "codex",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_FILES_DIR": "/tmp",
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "thread-1",
+      "taskPrompt": "sha256:0ea953f9109ca38d64f99a28a78e694b30a52f7ecf750037c2f704927134bdda",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "looked",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": undefined,
+      "finalText": "looked",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "kind": "text",
+          "text": "looked",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`codex transcript regressions > image turn places -i before the prompt on resume 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "exec",
+        "--json",
+        "--config",
+        "default_permissions="lander-read-only"",
+        "--config",
+        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "--config",
+        "shell_environment_policy.inherit=all",
+        "--config",
+        "shell_environment_policy.ignore_default_excludes=true",
+        "--config",
+        "shell_environment_policy.include_only=["PATH","LANDER_*"]",
+        "--cd",
+        "/repo",
+        "resume",
+        "thread-1",
+        "-i",
+        "/tmp/img1",
+        "--",
+        "Prompt: As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+
+look at this
+
+<task-attachments>
+p.png
+
+The image(s) above are already attached to your vision.
+</task-attachments>",
+      ],
+      "command": "codex",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_FILES_DIR": "/tmp",
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "thread-1",
+      "taskPrompt": "sha256:0ea953f9109ca38d64f99a28a78e694b30a52f7ecf750037c2f704927134bdda",
+    },
+    "flowStateRev": 1,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "looked",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "sessionId": "thread-1",
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": undefined,
+      "finalText": "looked",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "kind": "text",
+          "text": "looked",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`codex transcript regressions > later ride reusing the same local item ids 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "exec",
+        "--json",
+        "--config",
+        "default_permissions="lander-read-only"",
+        "--config",
+        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "--config",
+        "shell_environment_policy.inherit=all",
+        "--config",
+        "shell_environment_policy.ignore_default_excludes=true",
+        "--config",
+        "shell_environment_policy.include_only=["PATH","LANDER_*"]",
+        "--cd",
+        "/repo",
+        "--",
+        "Prompt: As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+
+do the thing",
+      ],
+      "command": "codex",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-9",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "thread-3",
+      "taskPrompt": "sha256:0ea953f9109ca38d64f99a28a78e694b30a52f7ecf750037c2f704927134bdda",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "tool:ride-9:0",
+        "input": "echo again",
+        "kind": "tool",
+        "name": "command_execution",
+        "output": "ok",
+        "rideId": "ride-9",
+        "rule": "command_execution(echo again)",
+        "status": "ok",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-9",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-9",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": undefined,
+      "finalText": undefined,
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "input": "echo again",
+          "kind": "tool_use",
+          "rule": "command_execution(echo again)",
+          "tool": "command_execution",
+          "toolUseId": "tool:ride-9:0",
+        },
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "isError": false,
+          "kind": "tool_result",
+          "text": "ok",
+          "toolUseId": "tool:ride-9:0",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`codex transcript regressions > read-only access synthesizes the read-only profile 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "exec",
+        "--json",
+        "--config",
+        "default_permissions="lander-read-only"",
+        "--config",
+        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "--config",
+        "shell_environment_policy.inherit=all",
+        "--config",
+        "shell_environment_policy.ignore_default_excludes=true",
+        "--config",
+        "shell_environment_policy.include_only=["PATH","LANDER_*"]",
+        "--cd",
+        "/repo",
+        "--",
+        "Prompt: As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+
+do the thing",
+      ],
+      "command": "codex",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "thread-1",
+      "taskPrompt": "sha256:0ea953f9109ca38d64f99a28a78e694b30a52f7ecf750037c2f704927134bdda",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "ok",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": undefined,
+      "finalText": "ok",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "kind": "text",
+          "text": "ok",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`codex transcript regressions > recorded cwd becomes the launch dir 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "exec",
+        "--json",
+        "--config",
+        "default_permissions="lander-read-only"",
+        "--config",
+        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "--config",
+        "shell_environment_policy.inherit=all",
+        "--config",
+        "shell_environment_policy.ignore_default_excludes=true",
+        "--config",
+        "shell_environment_policy.include_only=["PATH","LANDER_*"]",
+        "--cd",
+        "/repo/sub",
+        "--",
+        "Prompt: As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+
+do the thing",
+      ],
+      "command": "codex",
+      "cwd": "/repo/sub",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "thread-1",
+      "taskPrompt": "sha256:0ea953f9109ca38d64f99a28a78e694b30a52f7ecf750037c2f704927134bdda",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "ok",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": undefined,
+      "finalText": "ok",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "kind": "text",
+          "text": "ok",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`codex transcript regressions > result-only failed command with no observed start 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "exec",
+        "--json",
+        "--config",
+        "default_permissions="lander-read-only"",
+        "--config",
+        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "--config",
+        "shell_environment_policy.inherit=all",
+        "--config",
+        "shell_environment_policy.ignore_default_excludes=true",
+        "--config",
+        "shell_environment_policy.include_only=["PATH","LANDER_*"]",
+        "--cd",
+        "/repo",
+        "--",
+        "Prompt: As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+
+do the thing",
+      ],
+      "command": "codex",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "thread-1",
+      "taskPrompt": "sha256:0ea953f9109ca38d64f99a28a78e694b30a52f7ecf750037c2f704927134bdda",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "tool:ride-1:0",
+        "input": "",
+        "kind": "tool",
+        "name": "",
+        "output": "command not found",
+        "rideId": "ride-1",
+        "status": "failed",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": undefined,
+      "finalText": undefined,
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "input": "",
+          "kind": "tool_use",
+          "tool": "",
+          "toolUseId": "tool:ride-1:0",
+        },
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "isError": true,
+          "kind": "tool_result",
+          "text": "command not found",
+          "toolUseId": "tool:ride-1:0",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`codex transcript regressions > resumed turn re-emitting thread.started writes no duplicate session 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "exec",
+        "--json",
+        "--config",
+        "default_permissions="lander-read-only"",
+        "--config",
+        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "--config",
+        "shell_environment_policy.inherit=all",
+        "--config",
+        "shell_environment_policy.ignore_default_excludes=true",
+        "--config",
+        "shell_environment_policy.include_only=["PATH","LANDER_*"]",
+        "--cd",
+        "/repo",
+        "resume",
+        "thread-1",
+        "--",
+        "Prompt: As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+
+do the thing",
+      ],
+      "command": "codex",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "thread-1",
+      "taskPrompt": "sha256:0ea953f9109ca38d64f99a28a78e694b30a52f7ecf750037c2f704927134bdda",
+    },
+    "flowStateRev": 1,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "resumed",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "sessionId": "thread-1",
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": undefined,
+      "finalText": "resumed",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "kind": "text",
+          "text": "resumed",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`codex transcript regressions > revival notice rides the prompt of the reviving turn 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "exec",
+        "--json",
+        "--config",
+        "default_permissions="lander-read-only"",
+        "--config",
+        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "--config",
+        "shell_environment_policy.inherit=all",
+        "--config",
+        "shell_environment_policy.ignore_default_excludes=true",
+        "--config",
+        "shell_environment_policy.include_only=["PATH","LANDER_*"]",
+        "--cd",
+        "/repo",
+        "--",
+        "Prompt: As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+
+do the thing
+
+<task-revived>
+You were landed when this message arrived; the message changed your status to riding.
+</task-revived>",
+      ],
+      "command": "codex",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "thread-1",
+      "taskPrompt": "sha256:0ea953f9109ca38d64f99a28a78e694b30a52f7ecf750037c2f704927134bdda",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "ok",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": undefined,
+      "finalText": "ok",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "kind": "text",
+          "text": "ok",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`codex transcript regressions > second ride seeded with a nonzero flowStateRev 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "exec",
+        "--json",
+        "--config",
+        "default_permissions="lander-read-only"",
+        "--config",
+        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "--config",
+        "shell_environment_policy.inherit=all",
+        "--config",
+        "shell_environment_policy.ignore_default_excludes=true",
+        "--config",
+        "shell_environment_policy.include_only=["PATH","LANDER_*"]",
+        "--cd",
+        "/repo",
+        "--",
+        "Prompt: As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+
+do the thing",
+      ],
+      "command": "codex",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-2",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "phase": "reviewing",
+      "sessionId": "thread-2",
+      "taskPrompt": "sha256:0ea953f9109ca38d64f99a28a78e694b30a52f7ecf750037c2f704927134bdda",
+    },
+    "flowStateRev": 8,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-2",
+        "role": "flow",
+        "text": "second ride",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-2",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-2",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": undefined,
+      "finalText": "second ride",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "kind": "text",
+          "text": "second ride",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`codex transcript regressions > turn.failed folds into a failed done 1`] = `
+{
+  "done": {
+    "exitCode": 1,
+    "kind": "done",
+    "stderr": "model refused",
+  },
+  "launch": [
+    {
+      "args": [
+        "exec",
+        "--json",
+        "--config",
+        "default_permissions="lander-read-only"",
+        "--config",
+        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "--config",
+        "shell_environment_policy.inherit=all",
+        "--config",
+        "shell_environment_policy.ignore_default_excludes=true",
+        "--config",
+        "shell_environment_policy.include_only=["PATH","LANDER_*"]",
+        "--cd",
+        "/repo",
+        "--",
+        "Prompt: As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+
+do the thing",
+      ],
+      "command": "codex",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "thread-1",
+    },
+    "flowStateRev": 1,
+    "hookFireSeq": 2,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "error running assistant: exited 1
+model refused",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "eventKind": "wedged",
+        "id": "itm-mjuohs00-1",
+        "kind": "event",
+        "title": "Parity task",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "blocking": "task",
+        "form": {
+          "options": [
+            {
+              "id": "retry-now",
+              "label": "Resend",
+            },
+          ],
+          "type": "choice",
+        },
+        "id": "ask-1",
+        "kind": "ask",
+        "origin": "retry",
+        "prompt": "The assistant run failed: model refused",
+        "state": "open",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "system",
+        "id": "fire-1-mjuohs00",
+        "trigger": "wedged",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "system",
+        "id": "fire-2-mjuohs00",
+        "outcome": "error",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "retry": {
+      "committed": false,
+      "prompts": [],
+    },
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "error": {
+          "exitCode": 1,
+          "stderr": "model refused",
+        },
+        "id": "ride-1",
+        "outcome": "error",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "wedged",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [],
+}
+`;
+
+exports[`codex transcript regressions > usage on turn.completed 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "exec",
+        "--json",
+        "--config",
+        "default_permissions="lander-read-only"",
+        "--config",
+        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "--config",
+        "shell_environment_policy.inherit=all",
+        "--config",
+        "shell_environment_policy.ignore_default_excludes=true",
+        "--config",
+        "shell_environment_policy.include_only=["PATH","LANDER_*"]",
+        "--cd",
+        "/repo",
+        "--",
+        "Prompt: As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+
+do the thing",
+      ],
+      "command": "codex",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "thread-1",
+      "taskPrompt": "sha256:0ea953f9109ca38d64f99a28a78e694b30a52f7ecf750037c2f704927134bdda",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "done",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+        "usage": {
+          "cacheCreation": 0,
+          "cacheRead": 120,
+          "input": 380,
+          "output": 42,
+        },
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": undefined,
+      "finalText": "done",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "kind": "text",
+          "text": "done",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": undefined,
+      "finalText": undefined,
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": {
+        "cacheCreation": 0,
+        "cacheRead": 120,
+        "input": 380,
+        "output": 42,
+      },
+      "usageChanged": true,
+    },
+  ],
+}
+`;
