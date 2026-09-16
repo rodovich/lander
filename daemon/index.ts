@@ -9,7 +9,6 @@
 //        LANDER_DAEMON_TOKEN (must match the server's; read once at startup and
 //          then deleted from the environment, so it is not inherited by the flow
 //          hosts and agent children this process spawns — see server/secrets.ts)
-//        LANDER_IDLE_TIMEOUT_MS (idle-kill fallback, default 15m — start-run wins)
 
 import path from 'node:path'
 import { ROOT } from './paths'
@@ -37,7 +36,7 @@ import { gitExec, resolveHooks } from './hooks'
 import { createHookRuns, runHook } from './hook-run'
 import { statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { createRunManager, idleFallbackMs, type RunManagerMessage } from './run'
+import { createRunManager, type RunManagerMessage } from './run'
 import { createDrain } from './drain'
 import {
   materializeAttachments,
@@ -83,7 +82,6 @@ const TOKEN = process.env.LANDER_DAEMON_TOKEN?.trim() || ''
 // handoff. Here rather than at the spawn sites: a new spawn site can forget a
 // filter, but it cannot un-inherit what is no longer in the environment.
 scrubProcessEnv()
-const DEFAULT_IDLE_MS = idleFallbackMs(process.env)
 // Flow capabilities needed before a per-turn host exists.
 const CAPS = providerCaps()
 
@@ -321,7 +319,6 @@ const runManager = createRunManager({
   resolveFilesDir: (msg) => taskFilesDir(FILES_ROOT, msg.project, msg.taskId),
   materialize,
   refreshUsage,
-  defaultIdleMs: DEFAULT_IDLE_MS,
   onEmpty: () => drain.check(),
 })
 

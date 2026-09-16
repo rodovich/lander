@@ -144,14 +144,11 @@ export function makeFlow({
       // precede the user's — each layer able to be read in light of the one
       // before it.
       if (sendDoc && doc !== undefined) promptParts.unshift(projectDocBlock(doc))
-      // Leads the prompt, matching what promptWithTaskManagement used to build,
-      // so a delivering turn's argv is byte-identical to the pre-change one.
       if (sendTaskPrompt) promptParts.unshift(rendered)
 
       const args = [
         ...ctx.task.reentryArgs,
         ...buildCodexArgs(ctx, promptParts.join('\n\n'), sessionId, {
-          taskPromptTemplate,
           profile,
           configOverrides,
           gitCommonDir: ctx.task.allowEdits
@@ -300,12 +297,10 @@ function buildCodexArgs(
   prompt: string,
   sessionId: string | undefined,
   {
-    taskPromptTemplate,
     profile,
     configOverrides,
     gitCommonDir,
   }: {
-    taskPromptTemplate: string
     profile?: string
     configOverrides: string[]
     gitCommonDir?: string
@@ -320,9 +315,6 @@ function buildCodexArgs(
     ),
     ...codexShellEnvConfigOverrides(),
   ]
-  // The task-management prompt is no longer spliced in here: onTurn decides
-  // whether this thread still needs it and, when it does, leads `prompt` with it.
-  const managedPrompt = prompt
   // One `-i <path>` per image (the repeatable short form), then `--`, then the
   // prompt. Without the terminator a fresh `exec`'s variadic --image swallows a
   // trailing positional, so the flags must precede it. It also keeps a prompt
@@ -342,7 +334,7 @@ function buildCodexArgs(
       sessionId,
       ...imageArgs,
       '--',
-      managedPrompt,
+      prompt,
     ]
   return [
     'exec',
@@ -352,7 +344,7 @@ function buildCodexArgs(
     ctx.task.cwd,
     ...imageArgs,
     '--',
-    managedPrompt,
+    prompt,
   ]
 }
 

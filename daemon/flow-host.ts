@@ -66,13 +66,10 @@ async function main(): Promise<void> {
     spawn: nodeSpawn,
     onStderr: (chunk) => process.stderr.write(chunk),
   })
-  // A control signal from the daemon (interrupt / idle-kill / drain) or any exit
-  // kills whatever the turn left running — belt-and-suspenders against orphans on
-  // top of the daemon's process-group kill. This reaches every ctx.spawn child.
-  const kill = () => handle.kill()
-  process.on('SIGTERM', kill)
-  process.on('SIGINT', kill)
-  process.on('exit', kill)
+  // The daemon stops a host only by SIGKILLing its process group, which takes
+  // every ctx.spawn child with it. This covers the host exiting on its own with
+  // a turn still running.
+  process.on('exit', () => handle.kill())
   // The event loop drains once the agent child closes (its `done` already emitted),
   // so the host exits on its own — no explicit exit needed on the happy path.
 }

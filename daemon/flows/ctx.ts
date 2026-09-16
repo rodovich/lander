@@ -360,9 +360,8 @@ export type CtxRuntime = {
   // flushes, and emits the natural done. The single place the done contract is
   // enforced.
   runTurn(flow: { onTurn(ctx: Ctx): Promise<TurnResult> }): Promise<void>
-  // SIGKILL every child this runtime spawned. The host's exit/SIGTERM belt binds
-  // to this, so a killed host leaves no orphan even when the flow, not the
-  // child, is what ended.
+  // SIGKILL every child this runtime spawned. The host calls this on exit, so a
+  // host that ends mid-turn leaves no orphan.
   killChildren(): void
 }
 
