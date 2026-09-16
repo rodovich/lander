@@ -1,7 +1,6 @@
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process'
 import path from 'node:path'
 import type { ProviderCaps } from './flows/index'
-import type { AgentKind } from '../server/protocol'
 import type {
   DoneCause,
   DoneMessage,
@@ -12,8 +11,8 @@ import type {
   UpdateMessage,
 } from '../server/protocol'
 import type { MaterializedFiles } from './attachments'
-import { ROOT } from './adapters'
-import type { HostEvent, HostInput } from './run-agent'
+import { ROOT } from './paths'
+import type { HostEvent, HostInput } from './host-protocol'
 
 // Spawn a flow host for one run. Injectable so tests substitute a fake host
 // without spawning a real `tsx`; the default runs the compiled-in host entry.
@@ -51,7 +50,7 @@ type Run = {
   // drain.check() would never fire — pinning a draining daemon to the 12h
   // supervisor backstop.
   fail: (stderr: string) => void
-  // Kill the executor (the agent child in-process today; the host group later).
+  // Kill the flow host and its process group.
   kill: () => void
   buffer: UpdateMessage[]
   mintedSession?: string
@@ -70,11 +69,7 @@ type Run = {
 }
 
 export type RunManagerOptions = {
-  // What the supervisor needs to know about a provider before the host starts:
-  // where to launch, how images reach vision, whether it owns the usage panel.
-  // Answered by a flow or by a compiled adapter — the supervisor is written
-  // against the one shape either way, so a cutover never reaches in here.
-  // Keyed by flow name — an adapter-less flow has no AgentKind to be keyed by.
+  // Flow capabilities needed before starting a host, keyed by flow name.
   caps: Partial<Record<string, ProviderCaps>>
   resolveRunPaths: (
     msg: StartRunMessage,
@@ -100,7 +95,7 @@ export type RunManagerOptions = {
   // Execution now lives in a per-run flow-host subprocess; the daemon supervises
   // it (seq, buffer, resume, idle, interrupt, done gate) but no longer spawns the
   // agent, mints sessions, or reduces streams itself — the host does. Session
-  // minting and stream timestamps moved into the host with runAgent.
+  // minting and stream timestamps belong to the flow runtime.
   spawnHost?: SpawnHostLike
   onEmpty?: () => void
 }
@@ -255,7 +250,7 @@ export function createRunManager({
     }
 
     // Spawn the flow host (its own process group). It reads the HostInput on
-    // stdin, runs the adapter, and streams neutral HostEvents back on stdout.
+    // stdin, runs the flow, and streams neutral HostEvents back on stdout.
     const startedAt = performance.now()
     const host = spawnHost()
     // When the host last produced anything, on the same monotonic clock. This is

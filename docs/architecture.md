@@ -50,8 +50,8 @@ capability metadata. The server and client do not branch on a provider's name:
 instead, the server derives per-task flags from the flow's declaration and serves
 them on the task; the client reads the flags.
 
-Provider-specific mechanics live in the daemon's adapters, so the two sections
-below describe adapter behavior rather than a shape the rest of the system knows
+Provider-specific mechanics live in the daemon's bundled flows, so the two sections
+below describe flow behavior rather than a shape the rest of the system knows
 about. When a change needs the server or the client to care about a provider
 difference, that difference belongs in the capability declaration.
 

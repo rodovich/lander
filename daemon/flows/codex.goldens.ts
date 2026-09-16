@@ -1,11 +1,4 @@
-// The codex golden corpus, captured against the CURRENT adapter: the reducer now
-// preserves real tool names (command_execution / file_change rather than the old
-// Bash / FileChange aliases), and args carry scoped permission profiles rather
-// than a --sandbox mode.
-//
-// Note what is absent by design: there is no blocked-call golden. Codex's public
-// stream omits sandbox-denied shell items entirely, so no refused call ever
-// reaches the reducer and there is no blocked-status folding to reproduce.
+// Codex stream transcripts, grouped by stdout chunk.
 
 import type { Golden } from './testCtx'
 
@@ -145,7 +138,7 @@ export const CODEX_GOLDENS: Golden[] = [
   },
   {
     // The §5.2 guard: a resumed turn re-emits thread.started, and persisting it
-    // again would produce a state-patch the adapter never sends.
+    // again would produce a redundant state-patch.
     name: 'resumed turn re-emitting thread.started writes no duplicate session',
     chunks: [[threadStarted('thread-1'), agentMessage('resumed')]],
     start: {

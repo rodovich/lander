@@ -1,10 +1,4 @@
-// The claude golden corpus, captured against the CURRENT adapter — post-step-2
-// arg and reducer changes make any earlier capture stale (acceptEdits + scratch
-// root --add-dirs, ride-scoped result folding).
-//
-// Chunk structure is meaningful, not incidental: each inner array is one stdout
-// `data` event. Several goldens deliberately pack multiple lines into one chunk
-// so the per-chunk flush cadence is actually under test.
+// Claude stream transcripts, grouped by stdout chunk.
 
 import type { Golden } from './testCtx'
 
@@ -225,7 +219,7 @@ export const CLAUDE_GOLDENS: Golden[] = [
     chunks: [[init(), assistantText('resumed')], [result({ result: 'resumed' })]],
     // Both fields, because that is what runTurn actually sends: the top-level
     // wire field is filled from the accessor's union read, so a task storing its
-    // session in flowState still hands the legacy field to the compiled adapter.
+    // session in flowState also carries the legacy field on the wire.
     start: {
       sessionId: 'sess-existing',
       flowState: { sessionId: 'sess-existing' },

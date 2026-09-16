@@ -1,10 +1,8 @@
 import { EventEmitter } from 'node:events'
 import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import { describe, expect, it, vi } from 'vitest'
-import { createClaudeAdapter } from './claude'
-import { createCodexAdapter } from './codex'
 import type { StartRunMessage } from '../server/protocol'
-import type { HostEvent, HostInput } from './run-agent'
+import type { HostEvent, HostInput } from './host-protocol'
 import { runHost } from './flow-host'
 import { makeFlow as makeClaudeFlow } from './flows/claude'
 import { makeFlow as makeCodexFlow } from './flows/codex'
@@ -53,23 +51,6 @@ function makeInput(
   return { start: makeStart(over), root: '/repo', cwd: '/repo', ...input }
 }
 
-// Test-configured adapters (a fixed prompt template + a stub git snapshot), so the
-// arg assertions don't depend on the real task-prompt.md or the host's git tree.
-function testAdapters() {
-  return {
-    claude: createClaudeAdapter({
-      landerBin: '/repo/bin/lander',
-      taskPromptTemplate: 'Prompt: {{forwardable}}.',
-      readGitContext: () => 'Git status as of this message:\n\non branch test',
-    }),
-    codex: createCodexAdapter({
-      taskPromptTemplate: 'Prompt: {{forwardable}}.',
-    }),
-  }
-}
-
-// Test-configured flows matching the adapters above, so a claude assertion reads
-// the same whether it is served by the flow or the adapter.
 function testFlows(readProjectDoc: (dir: string) => string | undefined = () => undefined) {
   return {
     claude: makeClaudeFlow({
@@ -86,9 +67,7 @@ function testFlows(readProjectDoc: (dir: string) => string | undefined = () => u
   }
 }
 
-// The turn-context values a run recorded, however they were plumbed: a cut-over
-// provider writes them through ctx.state, one still on its adapter sends a
-// TurnContextMessage.
+// Read the context baseline persisted by a flow turn.
 function turnContextWrites(events: HostEvent[]): string[] {
   return events.flatMap((e) =>
     e.kind === 'turn-context'
@@ -117,26 +96,40 @@ function harness(readProjectDoc: (dir: string) => string | undefined = () => und
     runHost(input, {
       emit: (e) => events.push(e),
       spawn,
-      mintSessionId: () => 'minted-session',
       now: () => '2026-01-01T00:00:00.000Z',
       onStderr: (c) => stderr.push(c),
-      // Both halves, test-configured: claude has cut over and runs as a flow,
-      // codex still runs as its compiled adapter. The expectations below are the
-      // same either way, which is the point of the cutover being invisible.
-      adapters: testAdapters(),
       flows: testFlows(readProjectDoc),
     })
   return { events, spawns, stderr, run }
 }
 
 describe('flow host selection', () => {
-  it('drives a flow that has no compiled adapter', async () => {
-    // The other half of C5's adapter-less regression check (the first is in
-    // flows/index.test.ts, over providerCaps). Selection used to be
-    // `LIVE_FLOWS.has(start.agent)` — a set of legacy provider names, which no
-    // adapter-less flow can ever be in, so such a flow fell through to the
-    // adapter path and died on `adapters['open-pr']`. Selection is now
-    // membership in the flow map, keyed off `flow ?? agent`.
+  it('rejects a missing flow without launching the task agent as a fallback', () => {
+    const events: HostEvent[] = []
+    const spawn = vi.fn()
+    runHost(makeInput({ flow: 'missing', agent: 'codex' }), {
+      emit: (event) => events.push(event),
+      spawn,
+      flows: testFlows(),
+    })
+    expect(spawn).not.toHaveBeenCalled()
+    expect(events).toEqual([{ kind: 'done', exitCode: 1, stderr: 'unsupported flow: missing' }])
+  })
+
+  it('reports a flow failure without retrying through another executor', async () => {
+    const events: HostEvent[] = []
+    const spawn = vi.fn()
+    runHost(makeInput({ agent: 'codex' }), {
+      emit: (event) => events.push(event),
+      spawn,
+      flows: { codex: { meta: testFlows().codex.meta, onTurn: async () => { throw new Error('flow failed') } } },
+    })
+    await settle()
+    expect(spawn).not.toHaveBeenCalled()
+    expect(events).toEqual([{ kind: 'done', exitCode: 1, stderr: 'flow failed' }])
+  })
+
+  it('drives an orchestration flow by name', async () => {
     const events: HostEvent[] = []
     let sawCtxFlowConfig: unknown
     const synthetic = {
@@ -150,14 +143,13 @@ describe('flow host selection', () => {
     runHost(
       makeInput({
         // No `agent` at all — exactly what the server sends for a non-legacy
-        // flow, and what an adapter lookup has nothing to key on.
+        // flow independently of the task's legacy agent field.
         agent: undefined,
         flow: 'synthetic',
         flowConfig: { dryRun: false, attempts: 3 },
       }),
       {
         emit: (e) => events.push(e),
-        adapters: testAdapters(),
         flows: { synthetic } as never,
       },
     )
@@ -167,8 +159,6 @@ describe('flow host selection', () => {
     expect(sawCtxFlowConfig).toEqual({ dryRun: false, attempts: 3 })
     const done = events.find((e) => e.kind === 'done')
     expect(done).toMatchObject({ kind: 'done', exitCode: 0 })
-    // And it never fell through to the adapter path, which would have emitted
-    // an `unsupported agent` done instead.
     expect(JSON.stringify(events)).not.toContain('unsupported')
   })
 
@@ -185,7 +175,6 @@ describe('flow host selection', () => {
         })
         return c as unknown as ChildProcess
       }) as never,
-      adapters: testAdapters(),
       flows: testFlows(),
     })
     await settle()
@@ -259,10 +248,7 @@ describe('flow host', () => {
       ],
       options: { cwd: '/repo' },
     })
-    // Claude has cut over, so it persists thread identity through ctx.state —
-    // state-patch batches rather than the SessionMessage / TurnContextMessage the
-    // adapter path still sends. Both plumbings land in the same place on the
-    // server, which is what made the switch invisible.
+    // Thread identity is persisted through flow state patches.
     expect(h.events).toContainEqual({
       kind: 'state-patch',
       ops: [{ op: 'set', path: ['sessionId'], value: 'minted-session' }],
@@ -281,7 +267,7 @@ describe('flow host', () => {
   it('omits an unchanged turn context and appends a changed one', () => {
     const h = harness()
 
-    // Resume with the baseline matching what the adapter regenerates: the prompt
+    // Resume with the baseline matching what the flow regenerates: the prompt
     // goes out bare and no turn-context is emitted.
     h.run(makeInput({ agent: 'claude', prompt: 'follow-up', sessionId: 'sess-1' }))
     const unchanged = h.spawns[0].args.at(-1)!
@@ -372,9 +358,7 @@ describe('flow host', () => {
   // turn's message and replays on every later one. The flow therefore delivers
   // it once per thread and re-delivers only when the rendered text changes.
   //
-  // These are flow-only by necessity: the compiled adapter has no durable state
-  // channel, so parity cannot express suppression, and a symmetrically-wrong
-  // gate would leave the oracle green. See parity.ts's forCompare note.
+
   describe('codex deliver-once', () => {
     const TEMPLATE = 'Prompt: {{forwardable}}.'
     const digestFor = (allowEdits: boolean) =>
@@ -688,10 +672,7 @@ describe('flow host', () => {
     ])
   })
 
-  // Claude runs as a flow now, and a flow consumes its child's stdout through an
-  // async iterator — so the events land on a later turn of the event loop rather
-  // than inside the emit call. The adapter-path tests around this one stay
-  // synchronous because runAgent still reduces inline.
+  // The async stdout iterator consumes events on the next event-loop turn.
   it('keeps the streamed cache miss on the result event usage replacement', async () => {
     const h = harness()
     h.run(makeInput({ agent: 'claude' }))
@@ -791,7 +772,7 @@ describe('flow host', () => {
     )
   })
 
-  it('builds the real compiled-in adapters when none are injected', () => {
+  it('builds the bundled flows when none are injected', () => {
     const events: HostEvent[] = []
     const spawns: SpawnCall[] = []
     runHost(makeInput({ agent: 'codex', prompt: 'x' }), {
@@ -801,7 +782,6 @@ describe('flow host', () => {
         spawns.push({ command, args, options, child })
         return child as unknown as ChildProcess
       },
-      mintSessionId: () => 'm',
       now: () => '2026-01-01T00:00:00.000Z',
     })
 

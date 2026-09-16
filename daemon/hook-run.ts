@@ -31,7 +31,7 @@
 
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process'
 import path from 'node:path'
-import { ROOT } from './adapters'
+import { ROOT } from './paths'
 import type { HookRunMessage, HookRunReport } from '../server/protocol'
 
 const HOOK_HOST_ENTRY = path.join(ROOT, 'daemon', 'hook-host.ts')

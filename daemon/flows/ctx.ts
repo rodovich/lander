@@ -1,9 +1,4 @@
-// The driver `ctx` runtime: the object a flow's `onTurn(ctx)` is handed, and the
-// machinery that turns its calls back into the neutral HostEvents the supervisor
-// already understands. This is the seam the whole inversion turns on — a flow
-// emitting through `ctx` must be indistinguishable on the wire from the compiled
-// adapter it replaces, so most of the care here is about reproducing runAgent's
-// exact wire behavior rather than about the API's ergonomics.
+// The driver runtime turns flow calls into host events and owns child cleanup.
 //
 // Three properties are load-bearing and easy to break:
 //
@@ -13,14 +8,14 @@
 //     collision that forced ride-scoping in apply.ts — inexpressible at the API
 //     level rather than merely guarded downstream.
 //
-//  2. THE FLUSH CADENCE IS PER STDOUT CHUNK, not per line. runAgent flushes once
-//     per `data` event; a per-line flush would put many more UpdateMessages on
+//  2. THE FLUSH CADENCE IS PER STDOUT CHUNK, not per line.
+//     A per-line flush would put many more UpdateMessages on
 //     the wire (and many more serialized task writes) for identical content. The
 //     cadence here falls out of `lines()`: emissions batch until the consumer
 //     drains the queue and has to wait for the next chunk, and the flush happens
 //     at that suspension point. An `await` inserted mid-loop by a flow therefore
 //     changes wire granularity — that is a real part of the contract, and the
-//     parity harness's wire-sequence assert is what pins it.
+//     transcript regression suite is what pins it.
 //
 //  3. STATE REVISIONS SEED FROM THE SERVER'S. applyStatePatch drops any batch
 //     with `rev <= task.flowStateRev`, so a counter restarting at 1 per run would
@@ -32,7 +27,7 @@ import { existsSync } from 'node:fs'
 import type { ChildProcess } from 'node:child_process'
 import type { FlowMeta, StatePatchOp } from '../../server/protocol'
 import type { Step, Usage } from '../../server/stream'
-import type { HostEvent, HostInput, SpawnLike } from '../run-agent'
+import type { HostEvent, HostInput, SpawnLike } from '../host-protocol'
 import { isAssistProvider, runAssist } from '../assist'
 import { buildRevivedBlock } from '../task-management'
 
@@ -62,7 +57,7 @@ export type ToolResult = {
 
 const handleIds = new WeakMap<object, string>()
 
-// The durable-state size cap, owed since step 3. Enforced at the write in the
+// The durable-state size cap. Enforced at the write in the
 // host (see mutate): the server cannot enforce it, because dropping a batch
 // there leaves flowStateRev unadvanced, so the next batch applies on top of the
 // hole while the host reasons over state the server never received.
@@ -122,14 +117,13 @@ export type CtxTurn = {
   revivedBlock?: string
   // The per-task attachment store. UNGATED on purpose: LANDER_FILES_DIR is set
   // from it with no existence check (the daemon always supplies it), so gating
-  // here would diverge from the adapter on every task without attachments.
+  // here would leave tasks without a stable attachment destination.
   filesDir?: string
   // The existence gate, which applies to --add-dir ONLY. One gated field cannot
   // express both values, hence the pair.
   filesDirExists: boolean
   // Set as LANDER_RUN, so a file the agent attaches carries the turn that
-  // produced it. Ungated for the same reason as filesDir: the adapter always sets
-  // it, so gating here would diverge from it.
+  // produced it, including turns with no incoming attachments.
   run?: string
 }
 
@@ -368,26 +362,10 @@ export type CtxRuntime = {
   // flushes, and emits the natural done. The single place the done contract is
   // enforced.
   runTurn(flow: { onTurn(ctx: Ctx): Promise<TurnResult> }): Promise<void>
-  // The compiled-adapter bridge's entry point (see adapter-bridge.ts).
-  bridge: BridgeApi
   // SIGKILL every child this runtime spawned. The host's exit/SIGTERM belt binds
   // to this, so a killed host leaves no orphan even when the flow, not the
   // child, is what ended.
   killChildren(): void
-}
-
-// The privileged surface the adapter bridge needs and flows must not have:
-// verbatim createdAt (so bridging an adapter's steps changes ids and NOTHING
-// else) and a manual flush (the adapter path has already chunked its own
-// batches, so the bridge flushes once per incoming update event).
-export type BridgeApi = {
-  emitToolAt(opts: EmitToolOpts, createdAt: string): ToolHandle
-  emitMessageAt(text: string, opts: EmitMessageOpts, createdAt: string): void
-  resultAt(h: ToolHandle, result: ToolResult, createdAt: string): void
-  replyAt(text: string): void
-  meter(opts: MeterOpts): void
-  group(): GroupHandle
-  flush(): void
 }
 
 export function createCtxRuntime(
@@ -420,7 +398,7 @@ export function createCtxRuntime(
 
   function flush(): void {
     // The empty-batch rule: a chunk that reduced to nothing puts nothing on the
-    // wire (runAgent's flush does the same).
+    // wire.
     if (
       !steps.length &&
       finalText === undefined &&
@@ -451,8 +429,8 @@ export function createCtxRuntime(
   // Seed the in-memory copy from flowState, falling back to the legacy top-level
   // wire fields for thread identity. This fallback is not a nicety: a task whose
   // session predates the storage flip keeps its sessionId at the legacy level
-  // forever (the union read serves it, and the set-once guard means adapter
-  // turns never copy it across). A flow reading only flowState would find
+  // until a new identity is written (the union read serves it). A flow reading
+  // only flowState would find
   // nothing, mint fresh, and silently abandon the conversation — while the
   // correct id rode in unused on the wire.
   const stateCopy: Record<string, unknown> = { ...(start.flowState ?? {}) }
@@ -474,12 +452,8 @@ export function createCtxRuntime(
     pendingOps = []
   }
 
-  // The two thread-identity keys flush the instant they're written rather than
-  // riding the chunk cadence — matching where runAgent emits `session` and
-  // `turn-context` today (at spawn time, and mid-chunk for a provider that
-  // reports its session in-stream). Both exist precisely so a crash or restart
-  // cannot lose them: a turnContext baseline lost to a crash makes the next turn
-  // re-send the whole block for nothing.
+  // Persist thread identity immediately, even before the first stdout chunk.
+  // A crash must not lose the session to resume or its context baseline.
   const IMMEDIATE_KEYS = new Set(['sessionId', 'turnContext'])
 
   function pushOp(op: StatePatchOp): void {
@@ -737,8 +711,7 @@ export function createCtxRuntime(
   ): SpawnedChild {
     const child = spawnFn(cmd, args, {
       cwd: opts.cwd ?? cwd,
-      // Merge over the host's own env, exactly as runAgent spawns today. Env
-      // scrubbing is deliberately a later step.
+      // Task-specific values override the host's inherited environment.
       env: { ...process.env, ...(opts.env ?? {}) },
       // Never detached: the supervisor's group SIGKILL (interrupt / idle /
       // shutdown) reaches a spawned child only through group membership.
@@ -759,8 +732,7 @@ export function createCtxRuntime(
       stdoutQ.wake()
     })
     child.stdout?.on('end', () => {
-      // A trailing partial line still counts — runAgent's final flush(true)
-      // takes whatever is left in its buffer.
+      // Process the final line even when the child omitted its newline.
       if (buf) stdoutQ.push(buf)
       buf = ''
       stdoutQ.close()
@@ -1088,12 +1060,8 @@ export function createCtxRuntime(
         stderr: e instanceof Error ? e.message : String(e),
       }
     }
-    // Settling reaps. Today `done ⇒ child dead` holds because runAgent only ever
-    // emits done on child close — but a flow can throw mid-loop or return before
-    // its child exits, and nothing downstream would reap it: the supervisor
-    // clears the idle timer on settle and never kills after a natural done, the
-    // run record drops after the buffer TTL, and the host group is detached. An
-    // unkilled child would be a permanent orphan.
+    // Reap before reporting done: a flow may return or throw with children
+    // still running, and the supervisor disarms its watchdog on completion.
     killChildren()
     flush()
     flushState()
@@ -1108,15 +1076,7 @@ export function createCtxRuntime(
     ctx,
     runTurn: runFlowTurn,
     killChildren,
-    bridge: {
-      emitToolAt,
-      emitMessageAt,
-      resultAt,
-      replyAt: emit.reply,
-      meter: emit.meter,
-      group: emit.group,
-      flush,
-    },
+
   }
 }
 

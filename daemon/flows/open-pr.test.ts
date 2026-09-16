@@ -1,13 +1,10 @@
-// The open-PR flow's decision logic, driven against the real ctx runtime with
-// fake edges (spawn, fetch). It has no compiled adapter and so no parity
-// oracle — the parity harness is per-provider old-vs-new and correctly doesn't
-// cover it — so these are its only coverage.
+// Exercise the bundled open-PR flow through the real runtime with fake edges.
 
 import { EventEmitter } from 'node:events'
 import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import { describe, expect, it, vi } from 'vitest'
 import type { StartRunMessage } from '../../server/protocol'
-import type { HostEvent, HostInput } from '../run-agent'
+import type { HostEvent, HostInput } from '../host-protocol'
 import { createCtxRuntime } from './ctx'
 import {
   classifyChecks,

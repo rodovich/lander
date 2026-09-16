@@ -1,13 +1,10 @@
-// The façade's contract: `lander/flow` hands out the *same function objects* the
-// source modules do. That identity is what makes flow-vs-adapter parity trivially
-// true while both call sites coexist — a copy that drifted would be invisible to
-// a behavioral test but is caught here.
+// Public exports retain the identity of their source helpers.
 
 import { describe, expect, it } from 'vitest'
 import * as flow from 'lander/flow'
 import * as stream from '../server/stream'
 import * as attachments from '../daemon/attachments'
-import * as codex from '../daemon/codex'
+import * as codex from './codex-stream'
 import * as taskManagement from '../daemon/task-management'
 import { gitContext } from './git'
 
@@ -45,8 +42,6 @@ describe('lander/flow stdlib façade', () => {
     )
   })
 
-  // gitContext is the one member that physically lives here rather than being
-  // re-exported from an adapter.
   it('serves gitContext from its new stdlib home', () => {
     expect(flow.gitContext).toBe(gitContext)
   })

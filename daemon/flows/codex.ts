@@ -11,13 +11,9 @@
 // What it does carry that claude doesn't is an in-stream error channel — codex
 // reports failures as `error` / `turn.failed` events, which fold into the turn's
 // exit rather than arriving as a non-zero exit code.
-//
-// The reducer and session extractor are imported from the stdlib rather than
-// absorbed: their source stays in daemon/codex.ts behind the façade until the
-// compiled adapters are deleted, so the flow and its parity oracle call the
-// identical function.
 
 import path from 'node:path'
+import { codexConfigArgs } from '../codex-config'
 import { execFileSync } from 'node:child_process'
 import {
   addUsage,
@@ -30,6 +26,8 @@ import {
   type Usage,
 } from 'lander/flow'
 import type { Ctx, FlowMeta, ToolHandle, TurnResult } from './ctx'
+
+export { codexOptionsFromEnv } from '../codex-config'
 
 export const meta: FlowMeta = {
   api: 1,
@@ -123,7 +121,7 @@ export function makeFlow({
       const promptParts = [ctx.turn.prompts.join('\n\n')]
       if (ctx.turn.manifestBlock) promptParts.push(ctx.turn.manifestBlock)
       // Codex has no turn-context block to hide this in, which is half of why the
-      // revival notice is a prompt part rather than an adapter concern.
+      // revival notice is part of the user prompt.
       if (ctx.turn.revivedBlock) promptParts.push(ctx.turn.revivedBlock)
       // ── Project doc ──────────────────────────────────────────────────────
       // The project's optional LANDER.md, delivered through the same
@@ -195,7 +193,7 @@ export function makeFlow({
 
         // Only the first thread.started of a genuinely new thread is a write. A
         // resumed turn re-emits the event, and persisting it again would produce
-        // a state-patch the adapter never sends.
+        // a redundant state-patch on every resumed turn.
         if (!announced) {
           const found = extractCodexSession(trimmed)
           if (found) {
@@ -411,31 +409,6 @@ function resolveGitCommonDirWithGit(cwd: string): string | undefined {
   } catch {
     return undefined
   }
-}
-
-export function codexOptionsFromEnv(env: {
-  LANDER_CODEX_PROFILE?: string | undefined
-  LANDER_CODEX_CONFIG?: string | undefined
-}): Pick<CodexFlowDeps, 'profile' | 'configOverrides'> {
-  const profile = env.LANDER_CODEX_PROFILE?.trim() || undefined
-  const configOverrides =
-    env.LANDER_CODEX_CONFIG?.split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean) ?? []
-  return {
-    ...(profile ? { profile } : {}),
-    ...(configOverrides.length ? { configOverrides } : {}),
-  }
-}
-
-function codexConfigArgs(
-  profile: string | undefined,
-  configOverrides: string[],
-): string[] {
-  return [
-    ...(profile ? ['--profile', profile] : []),
-    ...configOverrides.flatMap((entry) => ['--config', entry]),
-  ]
 }
 
 function codexShellEnvConfigOverrides(): string[] {

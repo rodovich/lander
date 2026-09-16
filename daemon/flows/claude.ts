@@ -1,17 +1,4 @@
-// Claude as a driver flow — the same turn the compiled adapter runs, expressed
-// against the public ctx surface instead of the AgentAdapter interface.
-//
-// What was spread across buildSession / buildTurnContext / buildLaunch / the run
-// manager's reduce loop is one linear onTurn here: resolve the session, build the
-// per-turn context block, assemble the prompt, spawn, reduce the stream into
-// emissions, and map the exit into the turn's result. Thread identity that used
-// to travel as its own SessionMessage / TurnContextMessage now persists through
-// ctx.state, which is why the compiled adapter stays compiled in until step 5:
-// it is the parity oracle for exactly this file.
-//
-// The pure pieces (the stream reducer, usage accumulation, the git snapshot, the
-// task-prompt helpers) come from the stdlib, so what remains below is genuinely
-// claude's own: its CLI argv, its hook settings, and how it words a turn.
+// Claude task driver: assemble context and argv, run the CLI, and emit its turn.
 
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -78,7 +65,7 @@ export type ClaudeFlowDeps = {
   gitContext?: (cwd: string) => string | undefined
   mint?: () => string
   // The project's optional LANDER.md. REQUIRED, with no default on purpose: a
-  // default would make the parity goldens pass only because their fake root
+  // default would make the transcript fixtures pass only because their fake root
   // happens not to exist on the host, which is how an earlier revision of this
   // was green by luck. Required makes every construction site decide.
   readProjectDoc: (dir: string) => string | undefined

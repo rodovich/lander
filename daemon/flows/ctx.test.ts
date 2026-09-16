@@ -6,7 +6,7 @@ import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { assistArgv } from '../assist'
 import type { StartRunMessage } from '../../server/protocol'
-import type { HostEvent, HostInput } from '../run-agent'
+import type { HostEvent, HostInput } from '../host-protocol'
 import {
   createCtxRuntime,
   STATE_MAX_BYTES,
@@ -532,7 +532,7 @@ describe('ctx runtime — turn inputs', () => {
     )
     await runFlow(h, async (ctx) => {
       // LANDER_FILES_DIR is set from filesDir with no existence check today, so
-      // gating this field would diverge from the adapter on every task without
+      // gating this field would lose the attachment destination on a task without
       // attachments. --add-dir is the one that needs the gate.
       expect(ctx.turn.filesDir).toBe('/definitely/not/a/real/dir/xyz')
       expect(ctx.turn.filesDirExists).toBe(false)

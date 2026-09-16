@@ -1,8 +1,6 @@
 // The neutral git-snapshot helper for the flow stdlib. It reads branch / default
 // branch / working tree / recent commits from a cwd — nothing provider-specific —
-// so it belongs to every driver, not to Claude. It lived in daemon/claude.ts until
-// the stdlib existed; the claude-specific part (the `<task-context>` block that
-// weaves the live permission grants around this snapshot) stays with claude.
+// so it belongs to every driver. Claude weaves it into its task-context block.
 
 import { execFileSync } from 'node:child_process'
 

@@ -1,24 +1,10 @@
-// The edge kit the parity harness (and, later, third-party flow tests) drives
-// flows through.
-//
-// The one rule that makes this worth having: it instantiates the REAL ctx runtime
-// and swaps only its edges. A recording double that reimplemented rev seeding,
-// the legacy thread-identity fallback, id minting, or the flush cadence would let
-// the corpus's hard cases go green against the double while the shipped runtime
-// lacked the behavior entirely — certifying away the exact silent-thread-reset
-// and dropped-write bugs those cases exist to catch. So: real createCtxRuntime,
-// fake spawn / clock / stderr sink.
-//
-// Goldens are CHUNK-structured — an array of stdout chunks, each holding one or
-// more lines — and the fake child delivers them one `data` event per chunk. Line
-// fed fakes would make the cadence assert vacuous: with one line per chunk,
-// per-chunk and per-line flushing are indistinguishable, so a runtime that
-// flushed per line would pass offline and be chattier on the live wire.
+// Transcript fixtures run through the real flow runtime with fake subprocesses.
+// Each inner array of lines is one stdout chunk, preserving flush cadence.
 
 import { EventEmitter } from 'node:events'
 import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import type { StartRunMessage } from '../../server/protocol'
-import type { HostEvent, HostInput } from '../run-agent'
+import type { HostEvent, HostInput } from '../host-protocol'
 import { createCtxRuntime, type Ctx, type TurnResult } from './ctx'
 
 export class FakeChild extends EventEmitter {
@@ -37,14 +23,12 @@ export type SpawnCapture = {
   cwd?: string
   // Only the vars the code under test ADDS — comparing whole environments would
   // drown the assert in the ambient process env.
+  env: Record<string, string>
   envDelta: Record<string, string>
   child: FakeChild
 }
 
-// A recording spawn shared by both parity paths, so the launch itself is
-// comparable. Task-JSON and wire-sequence equality are blind to the launch: a
-// flow that dropped the --settings hooks, acceptEdits, an --add-dir, or
-// misplaced an image flag would pass both and fail only live.
+// Capture launch arguments and environment independently of emitted events.
 export function recordingSpawn(baseEnv: NodeJS.ProcessEnv = process.env) {
   const calls: SpawnCapture[] = []
   const spawn = (
@@ -61,6 +45,7 @@ export function recordingSpawn(baseEnv: NodeJS.ProcessEnv = process.env) {
       command,
       args,
       cwd: options.cwd as string | undefined,
+      env,
       envDelta,
       child,
     })
@@ -102,10 +87,7 @@ export function goldenInput(g: Golden): HostInput {
   }
 }
 
-// A clock pinned to a constant. Both parity paths call now() a different number
-// of times — runAgent stamps once per line, the runtime once per emission — so a
-// stepping sequence would desync them for reasons that have nothing to do with
-// behavior. Timestamp *granularity* is not what this harness is testing.
+// Keep transcript timestamps independent of the wall clock.
 export const FIXED_NOW = '2026-01-01T00:00:00.000Z'
 
 export type FlowDriveResult = {
@@ -169,4 +151,49 @@ export async function feed(child: FakeChild, g: Golden): Promise<void> {
 // awaiting new data has actually parked before the next chunk lands.
 export function settle(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+// A concise turn fixture for driver argv/context tests. Execution still goes
+// through the real runtime; this only translates fixture fields into HostInput.
+export type DriverTurnFixture = {
+  task: StartRunMessage['task'] & { sessionId?: string }
+  prompt?: string
+  root: string
+  cwd: string
+  effectiveCwd?: string
+  recordedCwd?: string
+  env?: Record<string, string>
+  images?: string[]
+  filesDir?: string
+}
+
+export async function captureDriverTurn(
+  flow: Parameters<typeof driveFlow>[1],
+  fixture: DriverTurnFixture,
+) {
+  const result = await driveFlow({
+    name: 'driver turn',
+    chunks: [],
+    start: {
+      task: fixture.task,
+      recordedCwd: fixture.recordedCwd,
+      sessionId: fixture.task.sessionId,
+      prompt: fixture.prompt ?? 'go',
+      env: fixture.env ?? {},
+    },
+    input: {
+      root: fixture.root,
+      cwd: fixture.cwd,
+      effectiveCwd: fixture.effectiveCwd,
+      filesDir: fixture.filesDir,
+      materialized: fixture.images ? {
+        images: fixture.images,
+        filesDir: fixture.filesDir ?? '/files',
+        manifestBlock: '',
+      } : undefined,
+    },
+  }, flow)
+  const context = result.events.flatMap((e) => e.kind === 'state-patch' ? e.ops : [])
+    .find((op) => op.path.join('.') === 'turnContext')?.value
+  return { ...result.spawns[0], context, events: result.events }
 }

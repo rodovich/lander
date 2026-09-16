@@ -1,7 +1,7 @@
 # Codex support
 
-Lander hosts multiple local coding-agent CLIs through a provider adapter layer.
-Codex is intended as a first-class target; tasks runs through Codex when Codex
+Lander hosts multiple local coding-agent CLIs through bundled driver flows.
+Codex is intended as a first-class target; tasks run through Codex when Codex
 is selected in the UI, when it is launched with `lander launch --flow codex`,
 or when `LANDER_FLOW=codex` sets the instance default.
 
@@ -20,23 +20,22 @@ daemon WebSocket. That message contains the project slug, prompt, stored provide
 session id when one exists, permission flags, cwd/worktree hints, and the
 `LANDER_*` environment needed by in-task `lander` commands.
 
-The host daemon owns local process execution. It maps project slugs back to host
-paths, resolves the launch cwd, selects the provider adapter, builds provider
-argv, starts the child process, reduces streamed output, enforces the idle
-timeout, and keeps a short replay buffer so a restarted API process can reattach
-without rerunning the turn.
+The host daemon resolves project paths and launch directories, starts a flow-host
+subprocess for each turn, enforces the idle timeout, and buffers events for API
+reattachment. Inside that host, the selected flow builds provider argv, spawns the
+agent CLI through the shared runtime, and reduces its output into host events.
 
-The Claude adapter launches `claude` with Claude-specific session, permission,
-hook, worktree, and stream-json options. The Codex adapter launches
+The Claude flow launches `claude` with Claude-specific session, permission,
+hook, worktree, and stream-json options. The Codex flow launches
 `codex exec --json --cd <cwd>`, captures the emitted thread id as the provider
 session id, and resumes with `codex exec --json --cd <cwd> resume <session-id>`.
-Both adapters reduce provider output into Lander's normalized update shape:
+Both flows reduce provider output into Lander's normalized update shape:
 activity steps, final assistant text, usage, terminal errors, and provider
 session announcements.
 
 In-task self-management is shared. The daemon injects `LANDER_API`,
 `LANDER_PROJECT`, `LANDER_TASK`, `LANDER_TOKEN`, and a `PATH` that finds
-`bin/lander`. The adapter passes Codex config overrides so `LANDER_*` and `PATH`
+`bin/lander`. The flow passes Codex config overrides so `LANDER_*` and `PATH`
 are visible to shell commands without putting the task token in argv.
 
 Codex receives the task-management instructions in the user message, because it
@@ -80,7 +79,7 @@ Codex tasks can be created from the new-task form or selected as the default wit
 `LANDER_AGENT=codex`. The server persists that provider choice on the task and
 uses it for follow-up turns.
 
-The Codex adapter supports first turns and resumed turns, including explicit
+The Codex flow supports first turns and resumed turns, including explicit
 `--cd` handling so resumed Codex turns launch from the daemon-resolved cwd. It
 maps Lander's edit flag to named Codex permission profiles:
 
@@ -121,12 +120,12 @@ repository's Git metadata so Git runs as an ordinary shell command. It cannot be
 narrowed the way a Claude project's `.claude` settings narrow git.
 
 Project permission grants are unsupported for Codex. A project-scope grant for a
-Codex task is routed to the daemon, and the Codex adapter reports that project
+Codex task is routed to the daemon, and the Codex flow reports that project
 permission grants are not supported yet.
 
 Codex worktree integration is cwd-based only. Lander can keep provider-neutral
-cwd/worktree metadata on the task, and the Codex adapter passes the resolved cwd
-with `--cd`. When that cwd is already in a linked Git worktree, the adapter
+cwd/worktree metadata on the task, and the Codex flow passes the resolved cwd
+with `--cd`. When that cwd is already in a linked Git worktree, the flow
 grants its resolved Git common directory to the edit profile. Codex still does
 not use Claude's `--worktree` flag, `.claude/worktrees` session convention, or
 EnterWorktree/ExitWorktree hook flow.

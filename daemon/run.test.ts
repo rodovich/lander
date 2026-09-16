@@ -1,10 +1,8 @@
 import { EventEmitter } from 'node:events'
 import type { ChildProcess } from 'node:child_process'
 import { describe, expect, it, vi } from 'vitest'
-import { createClaudeAdapter } from './claude'
-import { createCodexAdapter } from './codex'
 import type { StartRunMessage } from '../server/protocol'
-import type { HostEvent, HostInput } from './run-agent'
+import type { HostEvent, HostInput } from './host-protocol'
 import {
   createRunManager,
   DEFAULT_IDLE_MS,
@@ -60,18 +58,8 @@ function harness(opts: Partial<RunManagerOptions> = {}) {
     return host as unknown as ChildProcess
   }
   const manager = createRunManager({
-    // The supervisor sees only a provider's capability view — never a flow or an
-    // adapter — so these are the real ones the daemon builds, whichever side is
-    // currently answering them.
-    caps: providerCaps({
-      claude: createClaudeAdapter({
-        landerBin: '/repo/bin/lander',
-        taskPromptTemplate: 'Prompt: {{forwardable}}.',
-      }),
-      codex: createCodexAdapter({
-        taskPromptTemplate: 'Prompt: {{forwardable}}.',
-      }),
-    }),
+    // Use the same flow capabilities as the live supervisor.
+    caps: providerCaps(),
     resolveRunPaths: () => ({ root: '/repo', cwd: '/repo', reentryArgs: [] }),
     send: (msg) => messages.push(msg),
     resolveFilesDir: (msg) => `/files/${msg.project}/${msg.taskId}`,

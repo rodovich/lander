@@ -1,18 +1,27 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
-import { anchorFileRule, createClaudeAdapter } from './claude'
-// gitContext moved to the flow stdlib; the adapter imports it back, so exercising
-// it from here still proves the exact function the adapter's buildTurnContext runs.
+import { makeFlow, onGrant, resolveLaunchDir, type ClaudeFlowDeps } from './claude'
+import { captureDriverTurn, type DriverTurnFixture } from './testCtx'
 import { gitContext } from 'lander/flow'
 
-const adapter = createClaudeAdapter({
-  landerBin: '/repo/bin/lander',
-  taskPromptTemplate: 'Prompt: {{forwardable}}.',
-  readGitContext: (cwd) => `Git status as of this message:\n\ncwd ${cwd}`,
+vi.mock('node:fs', async (original) => {
+  const fs = await original<typeof import('node:fs')>()
+  return { ...fs, existsSync: (p: string) => p === '/files/proj/t' || fs.existsSync(p) }
 })
+
+function runClaude(input: DriverTurnFixture, overrides: Partial<ClaudeFlowDeps> = {}) {
+  return captureDriverTurn(makeFlow({
+    landerBin: '/repo/bin/lander',
+    taskPromptTemplate: 'Prompt: {{forwardable}}.',
+    gitContext: (cwd) => `Git status as of this message:\n\ncwd ${cwd}`,
+    mint: () => 'minted',
+    readProjectDoc: () => undefined,
+    ...overrides,
+  }), input)
+}
 
 // Every --add-dir value in argv order, so a test can assert the granted roots
 // without pinning their position among the other flags.
@@ -28,9 +37,9 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
-describe('Claude adapter', () => {
-  it('builds the existing Claude launch argv behind the adapter', () => {
-    const launch = adapter.buildLaunch({
+describe('Claude flow', () => {
+  it('builds Claude launch arguments', async () => {
+    const launch = await runClaude({
       task: {
         allowEdits: true,
         allow: ['Bash(npm test)'],
@@ -39,10 +48,10 @@ describe('Claude adapter', () => {
       prompt: '-starts-with-dash',
       root: '/repo',
       cwd: '/repo',
-      landerEnv: { LANDER_TASK: 'task-1' },
+      env: { LANDER_TASK: 'task-1' },
     })
 
-    expect(launch.env).toEqual({ LANDER_TASK: 'task-1' })
+    expect(launch.env).toMatchObject({ LANDER_TASK: 'task-1' })
     // The --worktree re-entry argv is no longer built here — it moved to
     // resolveLaunchDir().reentryArgs (asserted separately). buildLaunch ignores
     // task.worktree entirely now.
@@ -50,7 +59,7 @@ describe('Claude adapter', () => {
     // Edit access rides --permission-mode, not the allowlist: only Bash(lander:*)
     // and the per-task allow rule ride --allowedTools. git and other Bash follow
     // the project's .claude permissions.
-    expect(launch.args.slice(0, 6)).toEqual([
+    expect(launch.args.slice(2, 8)).toEqual([
       '--permission-mode',
       'acceptEdits',
       '--allowedTools',
@@ -60,15 +69,15 @@ describe('Claude adapter', () => {
     ])
     // The scratch roots ride along with edit access.
     expect(addDirsOf(launch.args)).toEqual(SCRATCH_ROOTS)
-    expect(launch.args.slice(-6)).toEqual([
+    expect(launch.args.slice(-6, -1)).toEqual([
       '--output-format',
       'stream-json',
       '--verbose',
       '-p',
       '--',
-      '-starts-with-dash',
     ])
 
+    expect(launch.args.at(-1)).toContain('-starts-with-dash')
     const settings = JSON.parse(launch.args[launch.args.indexOf('--settings') + 1])
     expect(settings.hooks.PreToolUse[0].hooks[0].command).toBe(
       '/repo/bin/lander bash-guard',
@@ -98,13 +107,13 @@ describe('Claude adapter', () => {
     expect(settings.includeGitInstructions).toBe(false)
   })
 
-  it('adds the files dir as a Read workspace root when one exists', () => {
-    const launch = adapter.buildLaunch({
+  it('adds the files dir as a Read workspace root when one exists', async () => {
+    const launch = await runClaude({
       task: { allowEdits: false },
       prompt: 'look at this',
       root: '/repo',
       cwd: '/repo',
-      landerEnv: { LANDER_TASK: 't', LANDER_FILES_DIR: '/files/proj/t' },
+      env: { LANDER_TASK: 't', LANDER_FILES_DIR: '/files/proj/t' },
       images: ['/files/proj/t/img1'],
       filesDir: '/files/proj/t',
     })
@@ -114,13 +123,13 @@ describe('Claude adapter', () => {
     expect(launch.args[i + 1]).toBe('/files/proj/t')
   })
 
-  it('omits --add-dir when a read-only task has no attachment store', () => {
-    const launch = adapter.buildLaunch({
+  it('omits --add-dir when a read-only task has no attachment store', async () => {
+    const launch = await runClaude({
       task: { allowEdits: false },
       prompt: 'no files',
       root: '/repo',
       cwd: '/repo',
-      landerEnv: { LANDER_TASK: 't' },
+      env: { LANDER_TASK: 't' },
     })
     expect(launch.args).not.toContain('--add-dir')
     expect(launch.args).not.toContain('--permission-mode')
@@ -131,33 +140,33 @@ describe('Claude adapter', () => {
   // would be the one way it could still mutate the filesystem. Both roots are
   // granted because os.tmpdir() is not /tmp on macOS — it resolves $TMPDIR to a
   // per-user /var/folders/<hash>/T — and agents write to the literal /tmp.
-  it('grants both scratch roots with edit access even without attachments', () => {
-    const launch = adapter.buildLaunch({
+  it('grants both scratch roots with edit access even without attachments', async () => {
+    const launch = await runClaude({
       task: { allowEdits: true },
       prompt: 'no files',
       root: '/repo',
       cwd: '/repo',
-      landerEnv: { LANDER_TASK: 't' },
+      env: { LANDER_TASK: 't' },
     })
     expect(addDirsOf(launch.args)).toEqual(SCRATCH_ROOTS)
-    expect(launch.args.slice(0, 2)).toEqual(['--permission-mode', 'acceptEdits'])
+    expect(launch.args.slice(2, 4)).toEqual(['--permission-mode', 'acceptEdits'])
   })
 
-  it('grants the scratch roots alongside the attachment store', () => {
-    const launch = adapter.buildLaunch({
+  it('grants the scratch roots alongside the attachment store', async () => {
+    const launch = await runClaude({
       task: { allowEdits: true },
       prompt: 'look at this',
       root: '/repo',
       cwd: '/repo',
-      landerEnv: { LANDER_TASK: 't', LANDER_FILES_DIR: '/files/proj/t' },
+      env: { LANDER_TASK: 't', LANDER_FILES_DIR: '/files/proj/t' },
       images: ['/files/proj/t/img1'],
       filesDir: '/files/proj/t',
     })
     expect(addDirsOf(launch.args)).toEqual(['/files/proj/t', ...SCRATCH_ROOTS])
   })
 
-  it('builds the per-turn context block from grants and the git snapshot', () => {
-    const context = adapter.buildTurnContext?.({
+  it('builds the per-turn context block from grants and the git snapshot', async () => {
+    const { context } = await runClaude({
       task: { allowEdits: true },
       root: '/repo',
       cwd: '/repo/worktree',
@@ -170,17 +179,12 @@ describe('Claude adapter', () => {
     expect(context).toContain('</task-context>')
   })
 
-  it('degrades the context block to just the grants outside a git repo', () => {
-    const noGit = createClaudeAdapter({
-      landerBin: '/repo/bin/lander',
-      taskPromptTemplate: 'Prompt: {{forwardable}}.',
-      readGitContext: () => undefined,
-    })
-    const context = noGit.buildTurnContext?.({
+  it('degrades the context block to just the grants outside a git repo', async () => {
+    const { context } = await runClaude({
       task: { allowEdits: false },
       root: '/repo',
       cwd: '/repo',
-    })
+    }, { gitContext: () => undefined })
     expect(context).toContain('You currently have no edit permission')
     expect(context).not.toContain('Git status')
   })
@@ -188,15 +192,15 @@ describe('Claude adapter', () => {
   describe('resolveLaunchDir', () => {
     const yes = () => true
 
-    it('launches at root with no re-entry when the task has no worktree', () => {
+    it('launches at root with no re-entry when the task has no worktree', async () => {
       expect(
-        adapter.resolveLaunchDir({ root: '/repo', isDir: yes }),
+        resolveLaunchDir({ root: '/repo', isDir: yes }),
       ).toEqual({ cwd: '/repo', reentryArgs: [] })
     })
 
-    it('launches at root and re-enters a worktree via argv', () => {
+    it('launches at root and re-enters a worktree via argv', async () => {
       expect(
-        adapter.resolveLaunchDir({
+        resolveLaunchDir({
           root: '/repo',
           worktree: 'feature',
           isDir: yes,
@@ -208,9 +212,9 @@ describe('Claude adapter', () => {
       })
     })
 
-    it('ignores a wandered recordedCwd — it never becomes the launch dir', () => {
+    it('ignores a wandered recordedCwd — it never becomes the launch dir', async () => {
       expect(
-        adapter.resolveLaunchDir({
+        resolveLaunchDir({
           root: '/repo',
           recordedCwd: '/tmp',
           isDir: yes,
@@ -220,8 +224,8 @@ describe('Claude adapter', () => {
   })
 
   describe('manual-cd hint in the context block', () => {
-    it('warns when the previous shell ended somewhere this turn will not restore', () => {
-      const context = adapter.buildTurnContext?.({
+    it('warns when the previous shell ended somewhere this turn will not restore', async () => {
+      const { context } = await runClaude({
         task: { allowEdits: false },
         root: '/repo',
         cwd: '/repo',
@@ -231,9 +235,9 @@ describe('Claude adapter', () => {
       expect(context).toContain('this turn starts at the project root')
     })
 
-    it('stays silent on an EnterWorktree re-entry (landed == recorded)', () => {
+    it('stays silent on an EnterWorktree re-entry (landed == recorded)', async () => {
       const wt = '/repo/.claude/worktrees/feature'
-      const context = adapter.buildTurnContext?.({
+      const { context } = await runClaude({
         task: { allowEdits: false, worktree: 'feature' },
         root: '/repo',
         cwd: '/repo',
@@ -243,8 +247,8 @@ describe('Claude adapter', () => {
       expect(context).not.toContain("previous turn's shell ended")
     })
 
-    it('stays silent on a plain root-to-root turn', () => {
-      const context = adapter.buildTurnContext?.({
+    it('stays silent on a plain root-to-root turn', async () => {
+      const { context } = await runClaude({
         task: { allowEdits: false },
         root: '/repo',
         cwd: '/repo',
@@ -253,8 +257,8 @@ describe('Claude adapter', () => {
       expect(context).not.toContain("previous turn's shell ended")
     })
 
-    it('points a hand-entered worktree at EnterWorktree', () => {
-      const context = adapter.buildTurnContext?.({
+    it('points a hand-entered worktree at EnterWorktree', async () => {
+      const { context } = await runClaude({
         task: { allowEdits: false },
         root: '/repo',
         cwd: '/repo',
@@ -265,8 +269,8 @@ describe('Claude adapter', () => {
       expect(context).toContain('borrows the worktree rather than owning it')
     })
 
-    it('points a subdirectory of a hand-entered worktree there too', () => {
-      const context = adapter.buildTurnContext?.({
+    it('points a subdirectory of a hand-entered worktree there too', async () => {
+      const { context } = await runClaude({
         task: { allowEdits: false },
         root: '/repo',
         cwd: '/repo',
@@ -275,8 +279,8 @@ describe('Claude adapter', () => {
       expect(context).toContain('enter it with EnterWorktree')
     })
 
-    it('does not suggest EnterWorktree for a plain subdirectory cd', () => {
-      const context = adapter.buildTurnContext?.({
+    it('does not suggest EnterWorktree for a plain subdirectory cd', async () => {
+      const { context } = await runClaude({
         task: { allowEdits: false },
         root: '/repo',
         cwd: '/repo',
@@ -288,8 +292,8 @@ describe('Claude adapter', () => {
 
     // The task is already bound: the shell wandering within its worktree is an
     // ordinary cd, and telling it to enter the worktree it is in would be noise.
-    it('does not suggest EnterWorktree when a worktree is already recorded', () => {
-      const context = adapter.buildTurnContext?.({
+    it('does not suggest EnterWorktree when a worktree is already recorded', async () => {
+      const { context } = await runClaude({
         task: { allowEdits: false, worktree: 'feature' },
         root: '/repo',
         cwd: '/repo',
@@ -298,50 +302,6 @@ describe('Claude adapter', () => {
       })
       expect(context).toContain("previous turn's shell ended")
       expect(context).not.toContain('EnterWorktree')
-    })
-  })
-
-  it('builds Claude start and resume session arguments', () => {
-    expect(
-      adapter.buildSession({
-        sessionId: 'existing',
-        mintSessionId: () => 'new',
-      }),
-    ).toEqual({
-      args: ['--resume', 'existing'],
-      sessionId: 'existing',
-      announceSession: false,
-    })
-
-    expect(
-      adapter.buildSession({
-        mintSessionId: () => 'minted',
-      }),
-    ).toEqual({
-      args: ['--session-id', 'minted'],
-      sessionId: 'minted',
-      announceSession: true,
-    })
-  })
-
-  it('wraps the Claude stream-json reducer', () => {
-    expect(
-      adapter.reduceLine(
-        JSON.stringify({
-          type: 'assistant',
-          message: { content: [{ type: 'text', text: 'hello' }] },
-        }),
-        '2026-01-01T00:00:00.000Z',
-      ),
-    ).toMatchObject({
-      steps: [
-        {
-          kind: 'text',
-          text: 'hello',
-          createdAt: '2026-01-01T00:00:00.000Z',
-        },
-      ],
-      finalText: 'hello',
     })
   })
 
@@ -395,16 +355,12 @@ describe('Claude adapter', () => {
     // and lands in the worktree via --worktree; the daemon threads that landed
     // dir back as effectiveCwd, and the block must describe the worktree the
     // agent actually edits, not root.
-    const realGit = createClaudeAdapter({
-      landerBin: '/repo/bin/lander',
-      taskPromptTemplate: 'Prompt: {{forwardable}}.',
-    })
-    const context = realGit.buildTurnContext?.({
+    const { context } = await runClaude({
       task: { allowEdits: true, worktree: 'feature' },
       root,
       cwd: root,
       effectiveCwd: wtPath,
-    })
+    }, { gitContext })
     expect(context).toContain('Current branch: feature')
     expect(context).toContain('?? wt-only.txt')
     expect(context).not.toContain('Current branch: main')
@@ -420,11 +376,11 @@ describe('Claude adapter', () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'lander-claude-'))
     tempDirs.push(dir)
 
-    await adapter.persistProjectGrant?.({
+    await onGrant(undefined, {
       projectPath: dir,
       rule: 'Bash(npm test)',
     })
-    await adapter.persistProjectGrant?.({
+    await onGrant(undefined, {
       projectPath: dir,
       rule: 'Bash(npm test)',
     })
@@ -435,80 +391,4 @@ describe('Claude adapter', () => {
     expect(settings.permissions.allow).toEqual(['Bash(npm test)'])
   })
 
-  it('persists a file grant as an absolute path, and dedupes against it', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'lander-claude-'))
-    tempDirs.push(dir)
-
-    await adapter.persistProjectGrant?.({
-      projectPath: dir,
-      rule: 'Read(/Users/me/other/notes.md)',
-    })
-    // The same grant arriving already spelled `//` must not land twice.
-    await adapter.persistProjectGrant?.({
-      projectPath: dir,
-      rule: 'Read(//Users/me/other/notes.md)',
-    })
-
-    const settings = JSON.parse(
-      await readFile(path.join(dir, '.claude', 'settings.local.json'), 'utf8'),
-    )
-    expect(settings.permissions.allow).toEqual(['Read(//Users/me/other/notes.md)'])
-  })
-
-  it('anchors a task-scope file grant at the filesystem root', () => {
-    const launch = adapter.buildLaunch({
-      task: {
-        allowEdits: false,
-        allow: ['Read(/Users/me/other/notes.md)', 'Bash(cat /etc/hosts)'],
-      },
-      prompt: 'go',
-      root: '/repo',
-      cwd: '/repo',
-      landerEnv: {},
-    })
-
-    const allowed = launch.args.slice(
-      launch.args.indexOf('--allowedTools') + 1,
-      launch.args.indexOf('--settings'),
-    )
-    // The path rule gains the second slash; the Bash rule holds a command, not a
-    // path, and is passed through as written.
-    expect(allowed).toEqual([
-      'Bash(lander:*)',
-      'Read(//Users/me/other/notes.md)',
-      'Bash(cat /etc/hosts)',
-    ])
-  })
-})
-
-describe('anchorFileRule', () => {
-  it('re-anchors an absolute path for the path-taking tools', () => {
-    expect(anchorFileRule('Read(/Users/me/f)')).toBe('Read(//Users/me/f)')
-    expect(anchorFileRule('Edit(/Users/me/f)')).toBe('Edit(//Users/me/f)')
-    expect(anchorFileRule('Write(/repo/src/**)')).toBe('Write(//repo/src/**)')
-    expect(anchorFileRule('MultiEdit(/repo/a.ts)')).toBe('MultiEdit(//repo/a.ts)')
-    expect(anchorFileRule('NotebookEdit(/repo/a.ipynb)')).toBe(
-      'NotebookEdit(//repo/a.ipynb)',
-    )
-    // A path may itself hold parentheses; the rule ends at the last one.
-    expect(anchorFileRule('Read(/Users/me/My (Notes)/f.md)')).toBe(
-      'Read(//Users/me/My (Notes)/f.md)',
-    )
-  })
-
-  it('leaves every other rule as written', () => {
-    // Already absolute, home-relative, or deliberately anchored at the source.
-    expect(anchorFileRule('Read(//Users/me/f)')).toBe('Read(//Users/me/f)')
-    expect(anchorFileRule('Read(~/notes/f.md)')).toBe('Read(~/notes/f.md)')
-    expect(anchorFileRule('Read(src/**/*.ts)')).toBe('Read(src/**/*.ts)')
-    // A Bash rule's argument is a command that happens to start with a slash.
-    expect(anchorFileRule('Bash(/usr/bin/env node)')).toBe('Bash(/usr/bin/env node)')
-    expect(anchorFileRule('Bash(cat /etc/hosts)')).toBe('Bash(cat /etc/hosts)')
-    // Tools whose argument isn't a path at all, and bare tool names.
-    expect(anchorFileRule('WebFetch(domain:example.com)')).toBe(
-      'WebFetch(domain:example.com)',
-    )
-    expect(anchorFileRule('Read')).toBe('Read')
-    expect(anchorFileRule('file_change(/repo/a.ts)')).toBe('file_change(/repo/a.ts)')
-  })
 })

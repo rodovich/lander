@@ -36,7 +36,7 @@ export type ManifestEntry = AttachmentRef & { run?: string }
 export type MaterializedFiles = {
   // The per-task dir, injected to the child as LANDER_FILES_DIR.
   filesDir: string
-  // Absolute paths of this turn's image blobs, for the adapter's vision channel.
+  // Absolute paths of this turn's image blobs, for the flow's vision channel.
   images: string[]
   // The prompt-facing manifest block to append to the outgoing message.
   manifestBlock: string

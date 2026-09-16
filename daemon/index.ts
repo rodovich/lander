@@ -13,8 +13,7 @@
 //        LANDER_IDLE_TIMEOUT_MS (idle-kill fallback, default 15m — start-run wins)
 
 import path from 'node:path'
-import type { AgentAdapter } from './agent'
-import { buildAdapters, ROOT } from './adapters'
+import { ROOT } from './paths'
 import { projectSlug } from '../server/projects'
 import {
   FLOW_MODULES,
@@ -86,12 +85,8 @@ const TOKEN = process.env.LANDER_DAEMON_TOKEN?.trim() || ''
 // filter, but it cannot un-inherit what is no longer in the environment.
 scrubProcessEnv()
 const DEFAULT_IDLE_MS = idleFallbackMs(process.env)
-const ADAPTERS = buildAdapters({ root: ROOT, env: process.env })
-// What the daemon needs to know about each provider before a host exists —
-// answered by its flow once it has cut over, by its compiled adapter until then.
-// The run manager is written against this single shape, so flipping a provider is
-// a change of source here, not a change of shape there.
-const CAPS = providerCaps(ADAPTERS)
+// Flow capabilities needed before a per-turn host exists.
+const CAPS = providerCaps()
 
 let ws: WebSocket | null = null
 
@@ -194,7 +189,7 @@ function isDir(p: string): boolean {
 
 // Resolve a start-run's launch directories from the project slug + cwd hints. The
 // cwd rule (launch at root + re-enter a worktree, or resume from the recorded cwd)
-// belongs to the provider — its flow once cut over, its adapter until then — and
+// belongs to the flow, and
 // the daemon just launches where it says, threading the re-entry argv + landed
 // dir on to the host. It runs here rather than in the host because it stats
 // directories on the daemon's own filesystem to make the call.
@@ -256,7 +251,7 @@ function resolveHooksCwd(
 
 // Root under which each task's materialized attachment blobs live (cached across
 // turns). Overridable for tests/containers; defaults to the OS temp dir.
-// (Claude reads attached images from here via the adapter's --add-dir grant.)
+// (Claude reads attached images from here via the flow's --add-dir grant.)
 const FILES_ROOT = process.env.LANDER_FILES_ROOT?.trim() || defaultFilesRoot()
 
 // Where a hook body may keep durable state, per project. A NEW convention, not
@@ -459,20 +454,14 @@ function handleMessage(msg: ServerToDaemon): void {
       const flowName = msg.flow ?? msg.agent
       const caps = flowName ? CAPS[flowName] : undefined
       // A project grant arrives outside any run, so there is no host to route it
-      // through — the daemon calls the flow's hook in-process, exactly as it
-      // called the adapter's method. Bundled flows are compiled-in TypeScript,
-      // as trusted as the adapters they replace; third-party installation has to
-      // re-decide this boundary before it opens.
+      // through. Bundled flow hooks run in-process; loading third-party hooks
+      // would require an isolation boundary.
       const onGrant = flowName ? FLOW_MODULES[flowName]?.onGrant : undefined
-      const persist = caps?.projectGrants
-        ? onGrant
+      const persist =
+        caps?.projectGrants && onGrant
           ? (input: { projectPath: string; rule: string }) =>
               onGrant(undefined, input)
-          : // Optional-chained: reached when a flow declares projectGrants but
-            // exports no onGrant, which for an adapter-less flow would be
-            // `undefined.persistProjectGrant`.
-            ADAPTERS[flowName as AgentKind]?.persistProjectGrant
-        : undefined
+          : undefined
       if (!projectPath) {
         send({
           type: 'project-grant-result',

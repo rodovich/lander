@@ -1,25 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-import {
-  codexOptionsFromEnv,
-  createCodexAdapter,
-  extractCodexSession,
-  reduceCodexStreamLine,
-} from './codex'
-
-const AT = '2026-01-01T00:00:00.000Z'
-const FIXTURES = path.join(
-  path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'server'),
-  'fixtures',
-  'codex',
-)
+import { makeFlow, resolveLaunchDir, codexOptionsFromEnv, type CodexFlowDeps } from './codex'
+import { captureDriverTurn, type DriverTurnFixture } from './testCtx'
 
 const TASK_PROMPT_TEMPLATE = 'Task prompt: {{forwardable}}.'
-const adapter = createCodexAdapter({
-  taskPromptTemplate: TASK_PROMPT_TEMPLATE,
-})
+function runCodex(input: DriverTurnFixture, overrides: Partial<CodexFlowDeps> = {}) {
+  return captureDriverTurn(makeFlow({
+    taskPromptTemplate: TASK_PROMPT_TEMPLATE,
+    readProjectDoc: () => undefined,
+    resolveGitCommonDir: () => undefined,
+    ...overrides,
+  }), input)
+}
 
 function permissionArgs(
   allowEdits: boolean,
@@ -43,50 +34,17 @@ function permissionArgs(
   ]
 }
 
-function fixtureLines(name: string): string[] {
-  return readFileSync(path.join(FIXTURES, name), 'utf8').trim().split('\n')
-}
-
-function reduceFixture(name: string) {
-  const lines = fixtureLines(name)
-  const updates = lines.map((line) => adapter.reduceLine(line, AT))
-  return {
-    lines,
-    updates,
-    steps: updates.flatMap((u) => u.steps),
-    finalText: lastDefined(updates.map((u) => u.finalText)),
-    usage: lastDefined(updates.map((u) => u.usage)),
-    usageFinal: lastDefined(updates.map((u) => u.usageFinal)),
-    terminalErrors: updates
-      .map((u) => u.terminalError)
-      .filter((e): e is string => typeof e === 'string'),
-    blockedIds: updates.flatMap((u) => u.blockedIds ?? []),
-  }
-}
-
-function lastDefined<T>(values: (T | undefined)[]): T | undefined {
-  return values.filter((v): v is T => v !== undefined).at(-1)
-}
-
 function managedPrompt(prompt: string, forwardable: string): string {
   return `Task prompt: ${forwardable}.\n\n${prompt}`
 }
 
-describe('Codex adapter reducer', () => {
-  it('exposes Codex adapter capabilities', () => {
-    expect(adapter.kind).toBe('codex')
-    expect(adapter.command).toBe('codex')
-    expect(adapter.supportsProjectGrants).toBe(false)
-    expect(adapter.supportsUsageSnapshot).toBe(false)
-    expect(adapter.supportsRateLimitRetryScheduling).toBe(false)
-  })
-
+describe('Codex flow launch', () => {
   describe('resolveLaunchDir', () => {
     const yes = () => true
 
-    it('resumes from the recorded cwd when it still exists', () => {
+    it('resumes from the recorded cwd when it still exists', async () => {
       expect(
-        adapter.resolveLaunchDir({
+        resolveLaunchDir({
           root: '/repo',
           recordedCwd: '/repo/sub',
           isDir: yes,
@@ -94,9 +52,9 @@ describe('Codex adapter reducer', () => {
       ).toEqual({ cwd: '/repo/sub', reentryArgs: [] })
     })
 
-    it('falls back to root when the recorded cwd is gone', () => {
+    it('falls back to root when the recorded cwd is gone', async () => {
       expect(
-        adapter.resolveLaunchDir({
+        resolveLaunchDir({
           root: '/repo',
           recordedCwd: '/repo/sub',
           isDir: () => false,
@@ -104,29 +62,29 @@ describe('Codex adapter reducer', () => {
       ).toEqual({ cwd: '/repo', reentryArgs: [] })
     })
 
-    it('falls back to root when the recorded cwd is root or absent', () => {
+    it('falls back to root when the recorded cwd is root or absent', async () => {
       expect(
-        adapter.resolveLaunchDir({
+        resolveLaunchDir({
           root: '/repo',
           recordedCwd: '/repo',
           isDir: yes,
         }),
       ).toEqual({ cwd: '/repo', reentryArgs: [] })
       expect(
-        adapter.resolveLaunchDir({ root: '/repo', isDir: yes }),
+        resolveLaunchDir({ root: '/repo', isDir: yes }),
       ).toEqual({ cwd: '/repo', reentryArgs: [] })
     })
   })
 
-  it('builds first-turn Codex exec args with workspace-scoped read access', () => {
-    const launch = adapter.buildLaunch({
+  it('builds first-turn Codex exec args with workspace-scoped read access', async () => {
+    const launch = await runCodex({
       task: {
         allowEdits: false,
       },
       prompt: 'hello codex',
       root: '/repo',
       cwd: '/repo/subdir',
-      landerEnv: {
+      env: {
         PATH: '/repo/bin:/usr/bin',
         LANDER_API: 'http://localhost:6181',
         LANDER_PROJECT: 'proj',
@@ -135,7 +93,7 @@ describe('Codex adapter reducer', () => {
       },
     })
 
-    expect(launch.env).toEqual({
+    expect(launch.env).toMatchObject({
       PATH: '/repo/bin:/usr/bin',
       LANDER_API: 'http://localhost:6181',
       LANDER_PROJECT: 'proj',
@@ -167,15 +125,15 @@ describe('Codex adapter reducer', () => {
     expect(launch.args.join('\0')).toContain('extends=":read-only"')
   })
 
-  it('maps editable first-turn Codex tasks to a workspace edit profile', () => {
-    const launch = adapter.buildLaunch({
+  it('maps editable first-turn Codex tasks to a workspace edit profile', async () => {
+    const launch = await runCodex({
       task: {
         allowEdits: true,
       },
       prompt: 'edit files',
       root: '/repo',
       cwd: '/repo',
-      landerEnv: {},
+      env: {},
     })
 
     expect(launch.args).toEqual([
@@ -200,22 +158,22 @@ describe('Codex adapter reducer', () => {
     expect(launch.args.join('\0')).toContain('":workspace_roots"={".git"="write"}')
   })
 
-  it('grants editable worktrees access to the resolved Git common directory', () => {
-    const worktreeAdapter = createCodexAdapter({
+  it('grants editable worktrees access to the resolved Git common directory', async () => {
+    const options: Partial<CodexFlowDeps> = {
       taskPromptTemplate: TASK_PROMPT_TEMPLATE,
       resolveGitCommonDir: (cwd) => {
         expect(cwd).toBe('/worktrees/feature')
         return '/repo/.git'
       },
-    })
+    }
 
-    const launch = worktreeAdapter.buildLaunch({
+    const launch = await runCodex({
       task: { allowEdits: true },
       prompt: 'edit worktree',
       root: '/worktrees/feature',
       cwd: '/worktrees/feature',
-      landerEnv: {},
-    })
+      env: {},
+    }, options)
 
     expect(launch.args).toEqual([
       'exec',
@@ -237,8 +195,8 @@ describe('Codex adapter reducer', () => {
     ])
   })
 
-  it('builds Codex resume args from the provider session id', () => {
-    const launch = adapter.buildLaunch({
+  it('builds Codex resume args from the provider session id', async () => {
+    const launch = await runCodex({
       task: {
         sessionId: '019f0000-0000-7000-8000-000000000001',
         allowEdits: false,
@@ -246,7 +204,7 @@ describe('Codex adapter reducer', () => {
       prompt: 'follow up',
       root: '/repo',
       cwd: '/repo/subdir',
-      landerEnv: { LANDER_TASK: 'task-1' },
+      env: { LANDER_TASK: 'task-1' },
     })
 
     expect(launch.args).toEqual([
@@ -271,8 +229,8 @@ describe('Codex adapter reducer', () => {
     ])
   })
 
-  it('maps editable Codex resume tasks to the same workspace edit profile', () => {
-    const launch = adapter.buildLaunch({
+  it('maps editable Codex resume tasks to the same workspace edit profile', async () => {
+    const launch = await runCodex({
       task: {
         sessionId: '019f0000-0000-7000-8000-000000000001',
         allowEdits: true,
@@ -280,7 +238,7 @@ describe('Codex adapter reducer', () => {
       prompt: 'follow up with edits',
       root: '/repo',
       cwd: '/repo',
-      landerEnv: {},
+      env: {},
     })
 
     expect(launch.args).toEqual([
@@ -305,13 +263,13 @@ describe('Codex adapter reducer', () => {
     ])
   })
 
-  it('adds optional Codex profile and config flags before resume', () => {
-    const configured = createCodexAdapter({
+  it('adds optional Codex profile and config flags before resume', async () => {
+    const options: Partial<CodexFlowDeps> = {
       taskPromptTemplate: TASK_PROMPT_TEMPLATE,
       profile: 'lander-codex',
       configOverrides: ['model="gpt-5-codex"', 'approval_policy="never"'],
-    })
-    const launch = configured.buildLaunch({
+    }
+    const launch = await runCodex({
       task: {
         sessionId: '019f0000-0000-7000-8000-000000000001',
         allowEdits: true,
@@ -319,8 +277,8 @@ describe('Codex adapter reducer', () => {
       prompt: 'configured follow up',
       root: '/repo',
       cwd: '/repo/subdir',
-      landerEnv: { LANDER_TASK: 'task-1' },
-    })
+      env: { LANDER_TASK: 'task-1' },
+    }, options)
 
     expect(launch.args).toEqual([
       'exec',
@@ -350,21 +308,21 @@ describe('Codex adapter reducer', () => {
     ])
   })
 
-  it('adds optional Codex profile and config flags before per-run env config', () => {
-    const configured = createCodexAdapter({
+  it('adds optional Codex profile and config flags before per-run env config', async () => {
+    const options: Partial<CodexFlowDeps> = {
       taskPromptTemplate: TASK_PROMPT_TEMPLATE,
       profile: 'lander-codex',
       configOverrides: ['model="gpt-5-codex"', 'approval_policy="never"'],
-    })
-    const launch = configured.buildLaunch({
+    }
+    const launch = await runCodex({
       task: {
         allowEdits: true,
       },
       prompt: 'use configured codex',
       root: '/repo',
       cwd: '/repo',
-      landerEnv: { LANDER_TASK: 'task-1' },
-    })
+      env: { LANDER_TASK: 'task-1' },
+    }, options)
 
     expect(launch.args).toEqual([
       'exec',
@@ -398,21 +356,21 @@ describe('Codex adapter reducer', () => {
   // task-management template currently leads every prompt, so no user text can
   // reach argv position 1 — these assertions keep that a property of the argv
   // rather than an accident of what the template happens to start with.
-  it('terminates flag parsing before the prompt on a fresh exec', () => {
-    const launch = adapter.buildLaunch({
+  it('terminates flag parsing before the prompt on a fresh exec', async () => {
+    const launch = await runCodex({
       task: { allowEdits: false },
       prompt: '- bullet one\n- bullet two',
       root: '/repo',
       cwd: '/repo',
-      landerEnv: {},
+      env: {},
     })
 
     expect(launch.args.at(-2)).toBe('--')
     expect(launch.args.at(-1)).toContain('- bullet one')
   })
 
-  it('terminates flag parsing before the prompt on resume', () => {
-    const launch = adapter.buildLaunch({
+  it('terminates flag parsing before the prompt on resume', async () => {
+    const launch = await runCodex({
       task: {
         sessionId: '019f0000-0000-7000-8000-000000000001',
         allowEdits: false,
@@ -420,7 +378,7 @@ describe('Codex adapter reducer', () => {
       prompt: '--help me',
       root: '/repo',
       cwd: '/repo',
-      landerEnv: {},
+      env: {},
     })
 
     expect(launch.args.at(-2)).toBe('--')
@@ -431,13 +389,13 @@ describe('Codex adapter reducer', () => {
   // is positional, so the repeatable `-i` flags must precede it. Before the
   // terminator they had to trail the prompt on a fresh exec, because the
   // variadic form would otherwise swallow it.
-  it('places image flags before the terminator on a fresh exec', () => {
-    const launch = adapter.buildLaunch({
+  it('places image flags before the terminator on a fresh exec', async () => {
+    const launch = await runCodex({
       task: { allowEdits: false },
       prompt: 'look at this',
       root: '/repo',
       cwd: '/repo',
-      landerEnv: {},
+      env: {},
       images: ['/files/img1', '/files/img2'],
     })
 
@@ -451,7 +409,7 @@ describe('Codex adapter reducer', () => {
     ])
   })
 
-  it('parses optional Codex profile and config overrides from env', () => {
+  it('parses optional Codex profile and config overrides from env', async () => {
     expect(
       codexOptionsFromEnv({
         LANDER_CODEX_PROFILE: ' lander-codex ',
@@ -466,164 +424,8 @@ describe('Codex adapter reducer', () => {
     )
   })
 
-  it('does not pre-mint Codex sessions in the daemon session prelude', () => {
-    expect(
-      adapter.buildSession({
-        sessionId: 'existing-thread',
-        mintSessionId: () => 'minted',
-      }),
-    ).toEqual({
-      args: [],
-      announceSession: false,
-    })
-
-    expect(
-      adapter.buildSession({
-        mintSessionId: () => 'minted',
-      }),
-    ).toEqual({
-      args: [],
-      announceSession: false,
-    })
-  })
-
-  it('returns no steps for invalid JSON', () => {
-    expect(reduceCodexStreamLine('not json', AT)).toEqual({ steps: [] })
-  })
-
-  it('extracts Codex thread ids as provider session ids', () => {
-    const [line] = fixtureLines('text-only-success.jsonl')
-    expect(extractCodexSession(line)).toBe(
-      '019f0000-0000-7000-8000-000000000001',
-    )
-    expect(extractCodexSession(JSON.stringify({ type: 'turn.started' }))).toBeUndefined()
-  })
-
-  it('reduces a text-only successful turn and final usage', () => {
-    const r = reduceFixture('text-only-success.jsonl')
-    expect(r.steps).toEqual([
-      {
-        kind: 'text',
-        text: 'codex-fixture-ok',
-        createdAt: AT,
-      },
-    ])
-    expect(r.finalText).toBe('codex-fixture-ok')
-    expect(r.usage).toEqual({
-      input: 1886,
-      output: 33,
-      cacheRead: 10112,
-      cacheCreation: 0,
-    })
-    expect(r.usageFinal).toBe(true)
-  })
-
-  it('reduces command executions using Codex\'s reported tool name', () => {
-    const r = reduceFixture('command-execution.jsonl')
-    expect(r.steps).toEqual([
-      {
-        kind: 'tool_use',
-        tool: 'command_execution',
-        input: "/bin/zsh -lc 'printf codex-command-fixture'",
-        toolUseId: 'item_0',
-        rule: "command_execution(/bin/zsh -lc 'printf codex-command-fixture')",
-        createdAt: AT,
-      },
-      {
-        kind: 'tool_result',
-        text: 'codex-command-fixture',
-        toolUseId: 'item_0',
-        isError: false,
-        createdAt: AT,
-      },
-      {
-        kind: 'text',
-        text: 'done',
-        createdAt: AT,
-      },
-    ])
-    expect(r.finalText).toBe('done')
-  })
-
-  it('carries inputFull for a multi-line command, omitting it for short single-line ones', () => {
-    const multi = reduceCodexStreamLine(
-      JSON.stringify({
-        type: 'item.started',
-        item: { type: 'command_execution', id: 'item_0', command: 'echo one\necho two' },
-      }),
-      AT,
-    )
-    expect(multi.steps[0]).toEqual({
-      kind: 'tool_use',
-      tool: 'command_execution',
-      input: 'echo one\necho two',
-      inputFull: 'echo one\necho two',
-      toolUseId: 'item_0',
-      rule: 'command_execution(echo one\necho two)',
-      createdAt: AT,
-    })
-    const short = reduceCodexStreamLine(
-      JSON.stringify({
-        type: 'item.started',
-        item: { type: 'command_execution', id: 'item_1', command: 'ls' },
-      }),
-      AT,
-    )
-    expect(short.steps[0].inputFull).toBeUndefined()
-  })
-
-  it('marks failed command executions without treating them as permission blocks', () => {
-    const r = reduceFixture('failed-command.jsonl')
-    expect(r.steps[1]).toEqual({
-      kind: 'tool_result',
-      text: 'codex-failed-command',
-      toolUseId: 'item_0',
-      isError: true,
-      createdAt: AT,
-    })
-    expect(r.blockedIds).toEqual([])
-    expect(r.finalText).toContain('Command failed with exit code `7`')
-  })
-
-  it('reduces file changes using Codex\'s reported tool name without inventing edit hunks', () => {
-    const r = reduceFixture('file-change.jsonl')
-    expect(r.steps).toEqual([
-      {
-        kind: 'tool_use',
-        tool: 'file_change',
-        input: 'add /repo/codex_patch_fixture.txt',
-        toolUseId: 'item_0',
-        rule: 'file_change(/repo/codex_patch_fixture.txt)',
-        createdAt: AT,
-      },
-      {
-        kind: 'text',
-        text: 'done',
-        createdAt: AT,
-      },
-    ])
-  })
-
-  it('surfaces top-level error and turn.failed events as terminal errors', () => {
-    const r = reduceFixture('turn-failed.jsonl')
-    expect(r.steps).toEqual([])
-    expect([...new Set(r.terminalErrors)]).toEqual([
-      "The 'definitely-not-a-real-model' model is not supported when using Codex with a ChatGPT account.",
-    ])
-  })
-
-  it('extracts the same session id from resumed sessions', () => {
-    const r = reduceFixture('resumed-session.jsonl')
-    expect(adapter.extractSession?.(r.lines[0])).toBe(
-      '019f0000-0000-7000-8000-000000000001',
-    )
-    expect(r.finalText).toBe('codex-resume-ok')
-  })
-
-  it('does not invent blocked tool ids for sandbox denial prose', () => {
-    const r = reduceFixture('sandbox-denial-message.jsonl')
-    expect(r.finalText).toContain('workspace is read-only')
-    expect(r.blockedIds).toEqual([])
-    expect(r.terminalErrors).toEqual([])
+  it('does not mint a session before Codex reports its thread', async () => {
+    const launch = await runCodex({ task: { allowEdits: false }, root: '/repo', cwd: '/repo' })
+    expect(launch.events.filter((e) => e.kind === 'state-patch')).toEqual([])
   })
 })

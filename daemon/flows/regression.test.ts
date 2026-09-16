@@ -8,8 +8,8 @@ import { makeFlow as makeClaudeFlow } from './claude'
 import { makeFlow as makeCodexFlow } from './codex'
 import { CLAUDE_GOLDENS } from './claude.goldens'
 import { CODEX_GOLDENS } from './codex.goldens'
-import type { HostEvent } from '../run-agent'
-import { applyEvents } from './parity'
+import type { HostEvent } from '../host-protocol'
+import { applyEvents } from './testTask'
 import { driveFlow, goldenInput, type Golden } from './testCtx'
 
 const TASK_PROMPT = 'Prompt: {{forwardable}}.'
@@ -143,9 +143,7 @@ describe('claude thread identity', () => {
 
 describe('codex session and identity', () => {
   it('writes no session patch when a resumed turn re-emits thread.started', async () => {
-    // The adapter's `!sessionId && !announced` guard: a resumed turn re-emits
-    // the event, and persisting it again would put a state-patch on the wire
-    // that the oracle never sends.
+    // Resuming an existing thread must not rewrite its identity.
     const g = CODEX_GOLDENS.find(
       (x) =>
         x.name ===
@@ -153,8 +151,8 @@ describe('codex session and identity', () => {
     )!
     const flow = await driveFlow(g, codexFlow())
     // Narrowed to sessionId ops: the flow also commits its deliver-once record
-    // (`taskPrompt`) on a turn that produced output, which the adapter has no
-    // state channel to mirror. This assertion is about the session id only.
+    // (`taskPrompt`) on a turn that produced output. This assertion is about
+    // the session id only.
     const sessionOps = flow.events
       .filter((e) => e.kind === 'state-patch')
       .flatMap((e) => (e as { ops?: { path?: string[] }[] }).ops ?? [])

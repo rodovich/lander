@@ -1,24 +1,8 @@
-// Shared construction of the bundled driver flows, and the capability view the
-// daemon reads before any host exists.
-//
-// Mirrors daemon/adapters.ts deliberately: one constructor serves both the
-// daemon (which needs a flow's meta and its out-of-turn hooks) and the flow host
-// (which needs its onTurn), so the two cannot drift on landerBin, the task-prompt
-// template, or codexOptionsFromEnv.
-//
-// The step-3 cutover switch (LIVE_FLOWS) is gone. It was a per-provider revert
-// lever, meaningful only for a provider that HAS a compiled oracle to revert to;
-// both have flipped, and keeping it as a gate would have excluded every future
-// flow by construction, since an adapter-less flow can never be in it.
-// Membership in FLOW_MODULES is now what makes a flow runnable.
-// RunHostDeps.liveFlows survives as a test-only seam for reaching the still-live
-// adapter bridge.
-
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { readProjectDoc } from 'lander/flow'
-import type { AgentKind, FlowAnnouncement } from '../../server/protocol'
-import type { AgentAdapter, AgentLaunchDir, AgentLaunchDirInput } from '../agent'
+import type { FlowAnnouncement } from '../../server/protocol'
+import type { AgentLaunchDir, AgentLaunchDirInput } from '../agent'
 import { makeFlow as makeClaudeFlow, meta as claudeMeta } from './claude'
 import {
   makeFlow as makeCodexFlow,
@@ -62,17 +46,13 @@ export function buildFlows({
       readProjectDoc,
       ...codexOptionsFromEnv(env),
     }),
-    // The first bundled flow with no compiled adapter — which is what C5's
-    // enumeration fix exists to make reachable at all.
     'open-pr': makeOpenPrFlow(),
   }
 }
 
-// Every flow this daemon can drive, keyed by flow name. The key is `string`, not
-// AgentKind: a flow need not have a compiled adapter, and from C5 on nothing
-// requires it to. This map is the single registration point — it decides what
-// runs (flow-host selection), what the daemon knows before a host exists
-// (providerCaps), and what the server is told (announcedFlows).
+// Metadata and out-of-turn hooks for bundled flows. Keep these names aligned
+// with the executable factories in buildFlows; orchestration flows need not
+// drive an agent CLI.
 export const FLOW_MODULES: Record<
   string,
   {
@@ -90,12 +70,7 @@ export const FLOW_MODULES: Record<
   'open-pr': openPrFlowModule,
 }
 
-// What this daemon can drive, as the server's flow registry consumes it. Built
-// from FLOW_MODULES so registering a flow module is the single act that makes it
-// both runnable and announced — the two cannot drift.
-//
-// Everything is `bundled` at step 4. Step 5 adds the user- and project-scoped
-// entries the envelope already has room for.
+// Announce bundled flow metadata to the server's registry.
 export function announcedFlows(): FlowAnnouncement[] {
   return Object.values(FLOW_MODULES).map((mod) => ({
     scope: 'bundled' as const,
@@ -117,23 +92,8 @@ export type ProviderCaps = {
   projectGrantsUnsupportedReason?: string
 }
 
-// Per flow, answered by the flow module. Enumerated from FLOW_MODULES — NOT
-// from the adapter set, which is the difference between a registry that can
-// carry a new flow and one that structurally cannot.
-//
-// Both halves of that mattered. Enumerating `Object.keys(adapters)` gave an
-// adapter-less flow no entry at all; and the `LIVE_FLOWS.has(agent) ? fromFlow
-// : fromAdapter` ternary that used to sit below would then have sent such a
-// flow down fromAdapter, dereferencing `adapters[name]` — undefined — for a
-// TypeError. Changing only the enumeration source reproduces the second bug
-// exactly, so the ternary goes with it. Both providers have flipped, so
-// fromAdapter has no live caller left; the adapters survive as the parity
-// oracle until step 5.
-//
-// `adapters` stays in the signature for the parity harness's lookup only.
-export function providerCaps(
-  _adapters: Record<AgentKind, AgentAdapter>,
-): Record<string, ProviderCaps> {
+// Capabilities used by the daemon before a per-turn host exists.
+export function providerCaps(): Record<string, ProviderCaps> {
   const fromFlow = (name: string): ProviderCaps => {
     const mod = FLOW_MODULES[name]
     return {
