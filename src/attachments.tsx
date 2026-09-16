@@ -4,7 +4,7 @@ import { loadAttachment } from './api'
 import { formatBytes } from './format'
 import type { Attachment } from './types'
 
-type PreviewKind = 'image' | 'text' | 'pdf' | 'audio' | 'video' | 'unknown'
+type PreviewKind = 'image' | 'html' | 'text' | 'pdf' | 'audio' | 'video' | 'unknown'
 
 // Where a gallery's bytes come from: a file's contents, or null when they
 // can't be had. The gallery never learns what serves them. Its identity is an
@@ -13,11 +13,19 @@ type LoadFile = (file: Attachment) => Promise<Blob | null>
 
 const MAX_TEXT_PREVIEW_BYTES = 1024 * 1024
 const TEXT_FILE_NAME =
-  /(?:^|\.)(?:c|cc|cpp|css|diff|env|go|h|hpp|html|ini|java|js|jsx|log|mjs|patch|py|rb|rs|sh|sql|toml|ts|tsx|xml|ya?ml)$/i
+  /(?:^|\.)(?:c|cc|cpp|css|diff|env|go|h|hpp|ini|java|js|jsx|log|mjs|patch|py|rb|rs|sh|sql|toml|ts|tsx|xml|ya?ml)$/i
+const HTML_FILE_NAME = /\.html?$/i
 
 export function previewKind(file: Attachment): PreviewKind {
   const mime = file.mime.toLowerCase().split(';', 1)[0].trim()
   if (mime.startsWith('image/')) return 'image'
+  if (
+    mime === 'text/html' ||
+    mime === 'application/xhtml+xml' ||
+    ((mime === 'application/octet-stream' || mime === 'text/plain') &&
+      HTML_FILE_NAME.test(file.name))
+  )
+    return 'html'
   if (mime.startsWith('audio/')) return 'audio'
   if (mime.startsWith('video/')) return 'video'
   if (mime === 'application/pdf') return 'pdf'
@@ -33,6 +41,54 @@ export function previewKind(file: Attachment): PreviewKind {
   )
     return 'text'
   return 'unknown'
+}
+
+// Agent-written HTML runs in an iframe sandboxed without `allow-same-origin`, so
+// it gets an opaque origin and can't reach the lander page or its UI token. The
+// CSP closes the network: the page can't load the dev server's modules (which
+// carry the token) or call the API, so a preview must be one self-contained file.
+// A meta CSP only takes effect ahead of the content it governs, so it goes first
+// — after any doctype, which must stay first to keep the page out of quirks mode.
+export const HTML_PREVIEW_SANDBOX = 'allow-scripts'
+const HTML_PREVIEW_CSP = [
+  "default-src 'none'",
+  "script-src 'unsafe-inline' 'unsafe-eval' data: blob:",
+  "style-src 'unsafe-inline' data: blob:",
+  'img-src data: blob:',
+  'font-src data: blob:',
+  'media-src data: blob:',
+  'connect-src data: blob:',
+  'worker-src data: blob:',
+  'frame-src data: blob:',
+  "form-action 'none'",
+  "base-uri 'none'",
+].join('; ')
+
+export function sandboxedHtml(source: string): string {
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_CSP}">`
+  const doctype = /^﻿?\s*<!doctype[^>]*>/i.exec(source)
+  return doctype
+    ? doctype[0] + meta + source.slice(doctype[0].length)
+    : meta + source
+}
+
+// Show an HTML preview in its own tab, for pages that need more room than the
+// modal. The tab is a blank same-origin page holding only the sandboxed frame,
+// cut loose from its opener once built.
+function openHtmlInTab(name: string, source: string) {
+  const tab = window.open('about:blank', '_blank')
+  if (!tab) return
+  const doc = tab.document
+  doc.title = name
+  doc.body.style.margin = '0'
+  const frame = doc.createElement('iframe')
+  frame.setAttribute('sandbox', HTML_PREVIEW_SANDBOX)
+  frame.setAttribute('referrerpolicy', 'no-referrer')
+  frame.title = name
+  frame.style.cssText = 'display:block;width:100vw;height:100vh;border:none;background:white'
+  frame.srcdoc = sandboxedHtml(source)
+  doc.body.appendChild(frame)
+  tab.opener = null
 }
 
 export function adjacentFileIndex(
@@ -276,9 +332,11 @@ function FilePreviewModal({
         const truncated = kind === 'text' && blob.size > MAX_TEXT_PREVIEW_BYTES
         const text = kind === 'text'
           ? await blob.slice(0, MAX_TEXT_PREVIEW_BYTES).text()
-          : null
+          : kind === 'html'
+            ? await blob.text()
+            : null
         if (canceled) return
-        if (kind !== 'text' && kind !== 'unknown')
+        if (kind !== 'text' && kind !== 'html' && kind !== 'unknown')
           objectUrl = URL.createObjectURL(blob)
         setPreview({ status: 'ready', blob, objectUrl, text, truncated })
       })
@@ -403,6 +461,14 @@ function FilePreviewModal({
                 src={preview.objectUrl!}
                 alt={file.name}
               />
+            ) : kind === 'html' ? (
+              <iframe
+                className="attachment-preview-document"
+                sandbox={HTML_PREVIEW_SANDBOX}
+                referrerPolicy="no-referrer"
+                srcDoc={sandboxedHtml(preview.text!)}
+                title={file.name}
+              />
             ) : kind === 'pdf' ? (
               <iframe
                 className="attachment-preview-document"
@@ -448,6 +514,15 @@ function FilePreviewModal({
             {formatBytes(file.size)} · {file.mime}
           </span>
           <div className="attachment-preview-actions">
+            {kind === 'html' && (
+              <button
+                type="button"
+                disabled={preview.text === null}
+                onClick={() => openHtmlInTab(file.name, preview.text!)}
+              >
+                Open in tab
+              </button>
+            )}
             <button type="button" disabled={!preview.blob} onClick={() => void copy()}>
               {copied ? 'Copied ✓' : 'Copy'}
             </button>

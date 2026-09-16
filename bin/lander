@@ -87,6 +87,8 @@ function guessMime(file) {
       '.json': 'application/json',
       '.txt': 'text/plain',
       '.md': 'text/markdown',
+      '.html': 'text/html',
+      '.htm': 'text/html',
       '.pdf': 'application/pdf',
     }[ext] || 'application/octet-stream'
   )
