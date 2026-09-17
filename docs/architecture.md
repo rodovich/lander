@@ -131,6 +131,12 @@ whatever backup you want *before* the file is saved, not before some later
 launch — and treat `mutateTask` as non-negotiable for exactly this reason, since
 the reload can land mid-turn on a riding task.
 
+## Run idle timeout
+
+The server supplies a 15-minute idle timeout on every `start-run` message. The
+supervisor uses that required value directly and re-arms its watchdog on host
+stdout or stderr. There is no separate daemon timeout setting.
+
 ## Restart and hot reload
 
 Because turns run in the separate host daemon, restarting the API doesn't

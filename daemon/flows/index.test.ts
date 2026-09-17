@@ -1,12 +1,12 @@
-// The capability view the daemon reads before a host exists, and which side
-// answers it. This is the cutover's hinge: flipping a provider changes where
-// these answers come from, and nothing else in the daemon should notice.
-
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
-import { FLOW_MODULES, providerCaps } from './index'
+import { describe, expect, it, vi } from 'vitest'
+import { FLOW_MODULES, announcedFlows, buildFlows, providerCaps } from './index'
+import { runHost } from '../flow-host'
+import type { HostEvent } from '../host-protocol'
+import { ROOT } from '../paths'
+import { goldenInput, settle } from './testCtx'
 import type { AgentLaunchDirInput } from '../agent'
 import { meta as claudeMeta } from './claude'
 import { meta as codexMeta } from './codex'
@@ -26,8 +26,8 @@ describe('provider caps', () => {
     expect(caps.codex.visionNative).toBe(true)
   })
 
-  it('enumerates capabilities for orchestration flows', () => {
-    const synthetic = {
+  it('makes one registration announced, capable, and executable by the host', async () => {
+    const synthetic: (typeof FLOW_MODULES)[string] = {
       meta: {
         api: 1,
         name: 'synthetic',
@@ -42,6 +42,13 @@ describe('provider caps', () => {
           reportsCost: false,
         },
       },
+      create: () => ({
+        meta: synthetic.meta,
+        onTurn: async (ctx) => {
+          ctx.emit.message('synthetic ran')
+          return { exitCode: 0 }
+        },
+      }),
       resolveLaunchDir: ({ recordedCwd, root }: AgentLaunchDirInput) => ({
         cwd: recordedCwd ?? root,
         reentryArgs: [],
@@ -49,6 +56,32 @@ describe('provider caps', () => {
     }
     FLOW_MODULES.synthetic = synthetic
     try {
+      expect(announcedFlows()).toContainEqual({
+        scope: 'bundled',
+        meta: synthetic.meta,
+      })
+      const built = buildFlows({ root: ROOT, env: {} })
+      expect(Object.keys(built)).toEqual(Object.keys(FLOW_MODULES))
+      expect(built.synthetic.meta).toEqual(synthetic.meta)
+      const events: HostEvent[] = []
+      const spawn = vi.fn()
+      runHost(
+        goldenInput({
+          name: 'registry',
+          chunks: [],
+          start: { flow: 'synthetic', agent: undefined },
+        }),
+        { emit: (event) => events.push(event), spawn },
+      )
+      await settle()
+      expect(spawn).not.toHaveBeenCalled()
+      expect(events).toContainEqual(expect.objectContaining({
+        kind: 'update',
+        steps: expect.arrayContaining([
+          expect.objectContaining({ text: 'synthetic ran' }),
+        ]),
+      }))
+      expect(events.at(-1)).toEqual({ kind: 'done', exitCode: 0, stderr: '' })
       const caps = providerCaps()
       expect(caps.synthetic).toBeDefined()
       expect(caps.synthetic.projectGrants).toBe(false)

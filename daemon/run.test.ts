@@ -181,7 +181,9 @@ describe('daemon run manager', () => {
       h.manager.startRun(makeStart({ idleTimeoutMs: 50 }))
       const host = h.hosts[0]
 
-      vi.advanceTimersByTime(50)
+      vi.advanceTimersByTime(49)
+      expect(host.kill).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(1)
       expect(host.kill).toHaveBeenCalledWith('SIGKILL')
 
       // The killed host closes without ever emitting a natural done. The
