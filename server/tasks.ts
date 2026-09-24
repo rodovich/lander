@@ -42,7 +42,7 @@ export type Message = {
 // A noteworthy point in a task's life, shown inline in the conversation
 // timeline: its creation ("launched"), a rename, or a crossing into/out of the
 // "wedged" (needs the user) or terminal "landed" status. The quiet riding↔
-// pacing churn during and after a run isn't interesting, so it isn't recorded.
+// paced churn during and after a run isn't interesting, so it isn't recorded.
 // Each event captures the task's title as of that moment so a later rename
 // doesn't change how earlier events read.
 export type TaskEvent = {
@@ -743,7 +743,7 @@ export function pushHookMessageItem(
 // Append a hook run's report (out of any ride, like a user message or an event).
 //
 // Deliberately does NOT bump `updatedAt`: the sidebar sorts on it, so a report
-// would resurface a pacing task to the top of the list for a finding that, in a
+// would resurface a paced task to the top of the list for a finding that, in a
 // report-only hook, nobody is being asked to act on — at the gate's own measured
 // rate, on roughly a fifth of all ride ends.
 export function pushHookItem(
@@ -914,7 +914,7 @@ export function publicTaskStatus(task: {
 }): string | undefined {
   if (typeof task.status !== 'string') return undefined
   if (task.status !== 'riding') return task.status
-  return openRide(task) || task.runId != null ? 'riding' : 'pacing'
+  return openRide(task) || task.runId != null ? 'riding' : 'paced'
 }
 
 // Flag the trailing-N user entries (N = queue length) as `queued`, cloning only
@@ -1014,7 +1014,7 @@ export function publicTask<T extends object>(
   // (`riding | wedged | landed`), so the public wire keeps today's four-word
   // vocabulary byte-for-byte. A stored `riding` task is actively *riding* only
   // while a run is live — an open ride, or (belt for a pre-ride task) a `runId`;
-  // with no live run it is idle, served as `pacing`, which the UI decorates with
+  // with no live run it is idle, served as `paced`, which the UI decorates with
   // any `scheduledFor`/`waitingFor`. `wedged`/`landed` serve as stored.
   const status = publicTaskStatus({
     ...(task as { status?: string; rides?: Ride[] }),
@@ -1075,9 +1075,9 @@ export function publicTask<T extends object>(
 //
 // Projection order is load-bearing. `publicTask` derives the served `status`
 // from `rides` (above): a stored `riding` task with no open ride is served
-// `pacing`. So the full projection runs FIRST and the arrays come off its
+// `paced`. So the full projection runs FIRST and the arrays come off its
 // *output* — dropping them on the way in would demote every riding task to
-// pacing, emptying the UI's riding section and killing the row spinner.
+// paced, emptying the UI's riding section and killing the row spinner.
 //
 // `scheduledMessages` rides through `publicTask` carrying each deferred
 // message's full text, so it is projected too, down to the fields the list
@@ -1145,9 +1145,9 @@ export function latestUpdateAt(task: {
 // Record a crossing into or out of a "notable" status — "wedged" (the task
 // needs the user) or the terminal "landed" — as a timeline event, so the UI can
 // show it inline among the messages. Entering a notable status records it
-// ("wedged"/"landed"); leaving one for an un-notable status (riding/pacing)
+// ("wedged"/"landed"); leaving one for an un-notable status (riding/paced)
 // records the inverse ("unwedged"/"unlanded"). A no-op for moves between two
-// quiet statuses (e.g. riding↔pacing) or that don't change status. Moving
+// quiet statuses (e.g. riding↔paced) or that don't change status. Moving
 // straight between two notable statuses (wedged↔landed) records the arrival
 // only. Call before assigning the new status, while task.status holds the old.
 //
@@ -1168,9 +1168,9 @@ export function latestUpdateAt(task: {
 // forgotten by the next one. It used to be the callers' job, and of the six paths
 // that needed it, three had quietly missed it.
 //
-// Note what this deliberately does NOT cover: a riding↔pacing move isn't a
+// Note what this deliberately does NOT cover: a riding↔paced move isn't a
 // crossing (both store as `riding`, so this returns early), which is exactly
-// right for an advisory `lander ask` — it never wedged, so pacing with the
+// right for an advisory `lander ask` — it never wedged, so waiting with the
 // question still on screen is the point. Superseding one of those is a different
 // rule, about new user intent rather than status, and stays with the paths that
 // carry it.
@@ -1238,8 +1238,8 @@ export function recordStatusTransition(
     // that run clears it (see driveTask), so it can never ride a second turn.
     //
     // Merged rather than assigned: the cleared-timer half of the marker is
-    // stamped separately by the /messages endpoint — riding↔pacing is not a
-    // crossing, so a pacing task can't ride this funnel at all — and the two
+    // stamped separately by the /messages endpoint — riding↔paced is not a
+    // crossing, so a paced task can't ride this funnel at all — and the two
     // halves co-occur (a wedged task can hold a retry wakeup), so neither may
     // clobber the other.
     task.revived = { ...task.revived, from: prev }

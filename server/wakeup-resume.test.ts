@@ -198,7 +198,7 @@ describe('a notify delivery supersedes the launcher’s wakeup timer', () => {
     // Named to the woken turn, so re-arming is a single actionable step.
     expect(writes).toContainEqual(
       expect.objectContaining({
-        revived: { pacingUntil: new Date(LATE).toLocaleString() },
+        revived: { waitingUntil: new Date(LATE).toLocaleString() },
       }),
     )
     // The await is a dependency on the child LANDING, which finishing a turn is

@@ -108,11 +108,11 @@ export function promptWithTaskManagement(
 // And codex has no turn-context block at all (daemon/flows/codex.ts), so putting
 // it there would fix claude only.
 export function buildRevivedBlock(revived: RevivedMarker): string {
-  // `pacing` when no notable status was crossed — which is the case a cleared
+  // `waiting` when no notable status was crossed — which is the case a cleared
   // timer arrives in almost every time.
-  const prior = revived.from ?? 'pacing'
-  const sentence = revived.pacingUntil
-    ? `You were ${prior} until ${revived.pacingUntil} when this message arrived; ` +
+  const prior = revived.from ?? 'waiting'
+  const sentence = revived.waitingUntil
+    ? `You were ${prior} until ${revived.waitingUntil} when this message arrived; ` +
       'the message changed your status to riding and cleared that wakeup. ' +
       'Re-arm it with `lander ride` if you still want it.'
     : `You were ${prior} when this message arrived; the message changed your ` +

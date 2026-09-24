@@ -6,7 +6,7 @@ import { taskHref } from './taskRef'
 // The statuses that have a tint of their own. Anything else — a status this
 // client doesn't know, or one carrying whitespace that would inject a second
 // class — renders untinted rather than as a broken selector.
-const TINTED = new Set(['riding', 'pacing', 'wedged', 'landed'])
+const TINTED = new Set(['riding', 'paced', 'wedged', 'landed'])
 
 // The variant token a status contributes to a className, or nothing.
 export function statusClass(status: string | undefined): string {

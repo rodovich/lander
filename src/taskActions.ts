@@ -28,7 +28,7 @@ export type TaskActionOption = {
 // Wedge/Un-land/Archive but not Land, and an archived one collapses to a single
 // Restore. The rules, action by action:
 //
-//  - launch:     a scheduled task (scheduledFor set, pacing or wedged), to run it early
+//  - launch:     a scheduled task (scheduledFor set, paced or wedged), to run it early
 //  - wedge:      any task not already wedged
 //  - unwedge:    a wedged task, to clear the wedge without waking it
 //  - land:       any task not already landed

@@ -413,7 +413,7 @@ describe('open-pr — watch', () => {
     expect(r.requests.some((q) => q.url.endsWith('/ride'))).toBe(false)
   })
 
-  it('gives up at the attempt bound instead of pacing forever', async () => {
+  it('gives up at the attempt bound instead of waiting forever', async () => {
     // 'pending' never resolves, which is what makes the bound reachable here.
     const r = await ride({
       flowState: { phase: 'watch', prNumber: 9999, attempts: 11 },

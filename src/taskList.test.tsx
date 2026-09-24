@@ -16,7 +16,7 @@ const task = (over: Partial<TaskWithProject> = {}): TaskWithProject => ({
   id: `t${seq++}`,
   agent: 'claude',
   title: `Task ${seq}`,
-  status: 'pacing',
+  status: 'paced',
   createdAt: at(0),
   allowEdits: true,
   projectSlug: 'proj',
@@ -137,11 +137,11 @@ describe('TaskList section headers', () => {
     const html = render([
       task({ status: 'landed', updatedAt: at(0) }),
       task({ status: 'landed', updatedAt: at(2) }),
-      task({ status: 'pacing', updatedAt: at(0) }),
+      task({ status: 'paced', updatedAt: at(0) }),
     ])
-    // pacing outranks landed, so the landed header is not `first`.
+    // paced outranks landed, so the landed header is not `first`.
     expect(html).toContain('task-group-header status landed split')
-    expect(html).toContain('task-group-header status pacing first')
+    expect(html).toContain('task-group-header status paced first')
     expect(html).toContain('task-group-header date landed')
     // The count chips row renders one chip per status present.
     expect(html.split('task-count-num').length - 1).toBe(2)

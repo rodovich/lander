@@ -887,7 +887,7 @@ export function createCtxRuntime(
   }
 
   // Raise an ask. `blocking: 'task'` wedges the task (the user must answer
-  // before it rides again); 'none' is advisory and leaves it pacing. Returns
+  // before it rides again); 'none' is advisory and leaves it paced. Returns
   // the created ask, so a caller could hold its id — though the open-PR flow
   // deliberately reads its ask back from the item log instead, since the id
   // does not exist until this resolves.

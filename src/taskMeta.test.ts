@@ -44,7 +44,7 @@ const withRides = (rides: Ride[]): Task =>
   ({
     id: 't',
     title: 'T',
-    status: 'pacing',
+    status: 'paced',
     createdAt: '2026-09-09T00:00:00.000Z',
     allowEdits: false,
     items: [],

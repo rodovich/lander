@@ -45,7 +45,7 @@ export type TaskListShape = {
   // orderedTasks interleaved with its status/date headers.
   taskRows: TaskRow[]
   // Per-status counts for the summary row below the filter dropdown, ordered
-  // left-to-right as the reverse of the list (landed, pacing, riding, wedged
+  // left-to-right as the reverse of the list (landed, paced, riding, wedged
   // — STATUS_RANK descending). Only statuses present after filtering appear.
   statusCounts: [string, number][]
   // Start of today in local-time ms, for formatting each row's time.
@@ -53,11 +53,11 @@ export type TaskListShape = {
 }
 
 // Group tasks by status — wedged (needs the user) first, then riding,
-// pacing, and landed last. Unknown statuses sort just ahead of landed.
+// paced, and landed last. Unknown statuses sort just ahead of landed.
 const STATUS_RANK: Record<string, number> = {
   wedged: 0,
   riding: 1,
-  pacing: 2,
+  paced: 2,
   landed: 4,
 }
 

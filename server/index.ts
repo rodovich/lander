@@ -227,7 +227,7 @@ type Task = {
   // ONE-SHOT marker: what an incoming message changed out from under this task —
   // the notable status it was pulled out of (stamped by recordStatusTransition,
   // the funnel every revival route crosses) and/or a ride wakeup the message
-  // cleared (stamped by the /messages endpoint, since riding↔pacing isn't a
+  // cleared (stamped by the /messages endpoint, since riding↔paced isn't a
   // crossing that funnel sees). It exists because the revived session's own last
   // act was `lander wedge`/`lander land`/`lander ride` and nothing else in the
   // next turn contradicts that memory. runTurn forwards it on start-run and the
@@ -972,7 +972,7 @@ function claimTaskRun(project: Project, id: string): boolean {
 // Drive a task's turns to completion: run the given opening turn, then drain
 // any messages queued onto the task while it ran — the whole queue joins into
 // one turn (see the batch note below) — until the queue empties. Only one
-// drainer runs per task at a time. The task is served as "pacing" once the queue
+// drainer runs per task at a time. The task is served as "paced" once the queue
 // is empty, unless the agent set its own status mid-run (e.g. `lander wedge` to
 // ask for input, or `lander land`), which we must not clobber.
 async function driveTask(project: Project, id: string): Promise<void> {
@@ -1045,8 +1045,8 @@ async function driveClaimedTask(project: Project, id: string): Promise<void> {
       await runTurn(project, id, batch.join('\n\n'), runId, atts, revived)
     }
   } finally {
-    // Under the status collapse there's no riding→pacing demotion to do — a
-    // closed ride *is* the demotion (publicTask serves `pacing` when no ride is
+    // Under the status collapse there's no riding→paced demotion to do — a
+    // closed ride *is* the demotion (publicTask serves `paced` when no ride is
     // open). We only tidy a stray open ride: if no run is tracked yet one is still
     // open (a run abandoned without a paired close), stamp it interrupted so it
     // doesn't linger as a live ride. A runId here belongs to a *newer* drainer
@@ -1115,7 +1115,7 @@ async function launchTask(
     // A task that scheduled a session-limit retry stayed wedged until now (see
     // the /retry handler), so record the un-wedge a hair ahead of the launch —
     // it surfaces in the timeline before the queued recovery prompt that the
-    // wakeup is about to drive. A no-op for a merely-pacing scheduled task.
+    // wakeup is about to drive. A no-op for a merely-waiting scheduled task.
     recordStatusTransition(
       t,
       'riding',
@@ -1228,7 +1228,7 @@ const NOTIFY_TEXT_MAX_CHARS = 2000
 //
 // The delivery is shaped exactly like a scheduled message rather than going out
 // through POST /messages: the sender is the scheduler, not the child, and the
-// child is pacing by now and may never ride again — so there is no principal to
+// child is waiting by now and may never ride again — so there is no principal to
 // authenticate and nothing to send from.
 async function deliverNotification(
   project: Project,
@@ -1290,7 +1290,7 @@ async function deliverNotification(
     if (t.scheduledFor) {
       t.revived = {
         ...t.revived,
-        pacingUntil: new Date(t.scheduledFor).toLocaleString(),
+        waitingUntil: new Date(t.scheduledFor).toLocaleString(),
       }
       delete t.scheduledFor
     }
@@ -1421,7 +1421,7 @@ async function sweepOnce(): Promise<void> {
       // ride and immediately rides again, and `running` holds it for that whole
       // chain. Delivering above the guard would wake the launcher between two
       // turns of a drain it never saw start. Here, the notification waits until
-      // the child is genuinely pacing.
+      // the child is genuinely waiting.
       if (task.pendingNotify) await deliverNotification(project, id, task)
       const timeDue =
         task.scheduledFor != null && Date.parse(task.scheduledFor) <= now
@@ -2385,7 +2385,7 @@ app.post('/api/:project/tasks', async (c) => {
         400,
       )
 
-    // A scheduled/awaiting task is created pacing and launched later by the
+    // A scheduled/awaiting task is created paced and launched later by the
     // scheduler. Resolve the launch triggers up front so a bad value fails loudly
     // rather than silently creating a task that never runs. The two combine: the
     // task launches on whichever fires first.
@@ -2480,7 +2480,7 @@ app.post('/api/:project/tasks', async (c) => {
       ...(title ? {} : { titlePending: true }),
       // Stored status is the collapsed vocabulary (`riding | wedged | landed`). A
       // deferred task stores `riding` with no open ride, so publicTask serves it
-      // as `pacing` (decorated with scheduledFor) until the scheduler launches
+      // as `paced` (decorated with scheduledFor) until the scheduler launches
       // it; an immediate task rides while the agent works the opening message; a
       // task with no message is `wedged` — it needs the user to supply a first
       // prompt.
@@ -2894,10 +2894,10 @@ app.patch('/api/:project/tasks/:id', async (c) => {
       if (typeof body.status === 'string') {
         const at = new Date().toISOString()
         // Normalize to the collapsed stored vocabulary: the UI's Un-wedge and
-        // Un-land actions (and any client) PATCH `pacing`, but idle is a derived
+        // Un-land actions (and any client) PATCH `paced`, but idle is a derived
         // presentation of a `riding` task with no open ride, so store `riding`.
-        // publicTask serves `pacing` back. wedged/landed store as sent.
-        const next = body.status === 'pacing' ? 'riding' : body.status
+        // publicTask serves `paced` back. wedged/landed store as sent.
+        const next = body.status === 'paced' ? 'riding' : body.status
         // A manual land/resume supersedes any open ask; a fresh wedge keeps it.
         // Both fall out of the crossing itself — recordStatusTransition settles
         // open asks on every crossing but the one into `wedged`.
@@ -2943,7 +2943,7 @@ app.patch('/api/:project/tasks/:id', async (c) => {
 })
 
 // Launch a scheduled task immediately, ahead of its scheduled time (the UI's
-// "launch" button on a scheduled task — pacing, or wedged on a deferred
+// "launch" button on a scheduled task — paced, or wedged on a deferred
 // session-limit retry). Clears the schedule, records the "launched" event (and
 // the un-wedge, if it was wedged), and drives the queued opening message.
 app.post('/api/:project/tasks/:id/launch', async (c) => {
@@ -2979,7 +2979,7 @@ app.post('/api/:project/tasks/:id/launch', async (c) => {
 //
 // `{ clear: true }` (`lander ride --clear`) is the inverse: it disarms whatever
 // triggers a prior ride (or deferred `new`) armed, taking no trigger of its own.
-// The case: the user woke a pacing task early (a reply revives it to riding
+// The case: the user woke a paced task early (a reply revives it to riding
 // without touching the triggers), so the original wakeup is now stale and would
 // later fire a spurious resume. We only drop the triggers — never touch status,
 // and record no event (the past `scheduled`/`awaiting` event stands as
@@ -3045,8 +3045,8 @@ app.post('/api/:project/tasks/:id/ride', async (c) => {
 
     const at = new Date().toISOString()
     await mutateTask(file, (t) => {
-      // Record leaving any notable status (wedged/landed); pacing is a derived,
-      // quiet presentation, so for the common riding→pacing this is a no-op.
+      // Record leaving any notable status (wedged/landed); paced is a derived,
+      // quiet presentation, so for the common riding→paced this is a no-op.
       recordStatusTransition(t, 'riding', at, hookBy(principal, project.slug, id))
       noteHumanContact(t, principal, at)
       // Replace any prior triggers so re-arming doesn't leave a stale one armed.
@@ -3063,7 +3063,7 @@ app.post('/api/:project/tasks/:id/ride', async (c) => {
           : { eventKind: 'scheduled', title: t.title, scheduledFor },
         at,
       )
-      // Stored status collapses to `riding`; publicTask serves `pacing`
+      // Stored status collapses to `riding`; publicTask serves `paced`
       // (decorated with the scheduledFor/waitingFor set above) since no ride is
       // open. The daemon-driven turn, if one is still streaming, closes its ride
       // on `done`, at which point the rest presentation takes over cleanly.
@@ -3382,7 +3382,7 @@ app.post('/api/:project/tasks/:id/archive', async (c) => {
       }
       // Only a task with a *live* run can't be archived (the reducer must keep
       // writing to it). Key on the run, not stored status — under the collapse an
-      // idle "pacing" task stores `riding` too, and it must stay archivable.
+      // idle "paced" task stores `riding` too, and it must stay archivable.
       // `running` closes the pre-runId window while the daemon connection waits.
       if (
         archived &&
@@ -3468,13 +3468,13 @@ app.post('/api/:project/tasks/:id/retitle', async (c) => {
 // deliberate:
 //
 //   - the item is `role: 'hook'`, not `role: 'user'` (see MessageItem);
-//   - the wakeup is NOT disarmed, because for a pacing supervised target that
+//   - the wakeup is NOT disarmed, because for a paced supervised target that
 //     wakeup is what would have woken it anyway;
 //   - an open ask is NOT withdrawn, so an advisory question survives a nudge;
 //   - `t.retry` is not touched — unreachable anyway, since a task holding one is
 //     wedged and a wedged target is refused below.
 //
-// The status crossing is a parameter rather than a suppression: a pacing target
+// The status crossing is a parameter rather than a suppression: a paced target
 // stores `riding`, so recordStatusTransition returns early and there is nothing
 // to suppress; a landed one crosses `unlanded`, which is wanted.
 async function nudgeFromHook(
@@ -3656,7 +3656,7 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
     if (deliverAt || waitFor) {
       // Stash on the recipient; the scheduler delivers and drives it when the
       // trigger fires (the due time or all awaited tasks landing, whichever
-      // first). Don't touch status or queue now — the recipient may be pacing
+      // first). Don't touch status or queue now — the recipient may be waiting
       // (or even landed) until then. mutateTask avoids clobbering a concurrent
       // run. Any attachments ride along until delivery (see applyDueMessages).
       let targetTitle = task.title
@@ -3726,22 +3726,22 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
       // message must not cancel it. Same rule the wake-delivery table states for
       // the daemon path (docs/daemon-wakeups.md §Delivery).
       //
-      // Stamped here rather than in recordStatusTransition because the pacing
-      // case can't ride that funnel at all: riding↔pacing isn't a crossing (both
+      // Stamped here rather than in recordStatusTransition because the paced
+      // case can't ride that funnel at all: riding↔paced isn't a crossing (both
       // store as `riding`), so it returns early. Merged into whatever the
       // crossing above stamped — a wedged task can hold a retry wakeup, so both
       // halves can apply to one revival.
       if (t.scheduledFor) {
         t.revived = {
           ...t.revived,
-          pacingUntil: new Date(t.scheduledFor).toLocaleString(),
+          waitingUntil: new Date(t.scheduledFor).toLocaleString(),
         }
         delete t.scheduledFor
       }
       pushUserItem(t, message, now, attachments ? { attachments } : {})
       t.updatedAt = now
       // Queue the prompt for the session and go "riding". driveTask clears it to
-      // "pacing" once the queue drains.
+      // "paced" once the queue drains.
       t.queued = [...(t.queued ?? []), message]
       t.status = 'riding'
       // A fresh message is the user's new intent; drop any pending retry so its
@@ -3839,7 +3839,7 @@ app.post('/api/:project/tasks/:id/asks', async (c) => {
       withdrawOpenAsks(t)
       // A task-blocking ask wedges the task in the same write, recording the
       // crossing so it surfaces in the timeline (decision 2). driveTask's finally
-      // only demotes riding→pacing, so a wedge set here survives a self-post. A
+      // only demotes riding→paced, so a wedge set here survives a self-post. A
       // `none` ask leaves the status untouched — the task waits, nothing in the
       // list — and only the create endpoint ever wedges, never un-wedges.
       if (blocking === 'task') {
@@ -4157,7 +4157,7 @@ export async function recoverQueues(): Promise<void> {
 
       const hasQueue = !!(task.queued && task.queued.length)
       // A turn interrupted by the previous process dying, with nothing driving it
-      // now. Under the status collapse an idle (pacing) task is stored `riding`
+      // now. Under the status collapse an idle (paced) task is stored `riding`
       // too, so "riding" no longer means "mid-run" — the real signal is unfinished
       // work with no live run: a still-open ride, or a trailing user item that
       // never got its reply (its queue was drained before the crash). A tracked run

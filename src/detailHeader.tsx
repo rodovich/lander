@@ -146,7 +146,7 @@ export const DetailHeader = memo(function DetailHeader({
             'task-status' +
             (task.status === 'wedged' ? ' wedged' : '') +
             (task.status === 'riding' ? ' riding' : '') +
-            (task.status === 'pacing' ? ' pacing' : '') +
+            (task.status === 'paced' ? ' paced' : '') +
             (task.status === 'landed' ? ' landed' : '')
           }
         >

@@ -242,7 +242,7 @@ describe('the revival notice reaches the prompt', () => {
     )!
     const flow = await driveFlow(g, claudeFlow())
     expect(promptOf(flow.spawns[0].args)).toContain(
-      '<task-revived>\nYou were pacing until 3:00:00 PM when this message ' +
+      '<task-revived>\nYou were waiting until 3:00:00 PM when this message ' +
         'arrived; the message changed your status to riding and cleared that ' +
         'wakeup. Re-arm it with `lander ride` if you still want it.\n' +
         '</task-revived>',

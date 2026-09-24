@@ -11,7 +11,7 @@
 //   collect            → read the working tree, attach the packet, ask for approval
 //   awaiting-approval  → read the answer, continue or stop
 //   push               → push the branch and open the PR, each behind a probe
-//   watch              → poll checks, pacing between attempts
+//   watch              → poll checks, waiting between attempts
 //
 // Two rules run through all of it:
 //
@@ -531,8 +531,8 @@ async function watch(
   }
   ctx.state.set(['attempts'], nextAttempt)
 
-  // On the FIRST pending result, offer a way out — advisory, so the task keeps
-  // pacing rather than demanding an answer.
+  // On the FIRST pending result, offer a way out — advisory, so the task stays
+  // paced rather than demanding an answer.
   if (nextAttempt === 1 && !advisory) {
     await ctx.ask({
       prompt: `Checks for PR #${prNumber} are still running. Keep watching?`,

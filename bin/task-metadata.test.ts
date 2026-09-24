@@ -26,15 +26,15 @@ describe('taskMetadata', () => {
   })
 
   it('includes scheduledFor only when the task is waiting on a timer', () => {
-    const pacing = taskMetadata({
+    const paced = taskMetadata({
       id: 'abc',
       title: 'Wake later',
-      status: 'pacing',
+      status: 'paced',
       createdAt: '2026-06-30T00:00:00.000Z',
       updatedAt: '2026-06-30T00:00:00.000Z',
       scheduledFor: '2026-07-01T00:00:00.000Z',
     })
-    expect(pacing.scheduledFor).toBe('2026-07-01T00:00:00.000Z')
+    expect(paced.scheduledFor).toBe('2026-07-01T00:00:00.000Z')
 
     const unscheduled = taskMetadata({
       id: 'def',
@@ -65,7 +65,7 @@ describe('taskMetadata', () => {
     const both = taskMetadata({
       id: 'mno',
       title: 'Both armed',
-      status: 'pacing',
+      status: 'paced',
       createdAt: '2026-06-30T00:00:00.000Z',
       updatedAt: '2026-06-30T00:00:00.000Z',
       scheduledFor: '2026-07-02T00:00:00.000Z',
@@ -80,7 +80,7 @@ describe('taskMetadata', () => {
     const awaitOnly = taskMetadata({
       id: 'pqr',
       title: 'Awaiting only',
-      status: 'pacing',
+      status: 'paced',
       createdAt: '2026-06-30T00:00:00.000Z',
       updatedAt: '2026-06-30T00:00:00.000Z',
       scheduledMessages: [{ text: 'again', waitFor: ['other'], relaunch: true }],
@@ -93,7 +93,7 @@ describe('taskMetadata', () => {
     const base = {
       id: 'ghi',
       title: 'Repeating relaunch',
-      status: 'pacing',
+      status: 'paced',
       createdAt: '2026-06-30T00:00:00.000Z',
       updatedAt: '2026-06-30T00:00:00.000Z',
     }

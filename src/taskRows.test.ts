@@ -15,7 +15,7 @@ const task = (over: Partial<TaskWithProject> = {}): TaskWithProject => ({
   id: `t${seq++}`,
   agent: 'claude',
   title: `Task ${seq}`,
-  status: 'pacing',
+  status: 'paced',
   createdAt: at(0),
   allowEdits: true,
   projectSlug: 'proj',
@@ -52,10 +52,10 @@ const tags = (shape: ReturnType<typeof buildTaskRows>) =>
   )
 
 describe('buildTaskRows', () => {
-  it('orders status groups wedged, riding, pacing, landed', () => {
+  it('orders status groups wedged, riding, paced, landed', () => {
     const shape = build([
       task({ id: 'a', status: 'landed' }),
-      task({ id: 'b', status: 'pacing' }),
+      task({ id: 'b', status: 'paced' }),
       task({ id: 'c', status: 'wedged' }),
       task({ id: 'd', status: 'riding' }),
     ])
@@ -63,15 +63,15 @@ describe('buildTaskRows', () => {
     expect(tags(shape)).toEqual([
       's:wedged', 'c',
       's:riding', 'd',
-      's:pacing', 'b',
+      's:paced', 'b',
       's:landed', 'a',
     ])
   })
 
   it('keeps recency order within a status and ranks unknown statuses ahead of landed', () => {
     const shape = build([
-      task({ id: 'new', status: 'pacing', updatedAt: at(0) }),
-      task({ id: 'old', status: 'pacing', updatedAt: at(1) }),
+      task({ id: 'new', status: 'paced', updatedAt: at(0) }),
+      task({ id: 'old', status: 'paced', updatedAt: at(1) }),
       task({ id: 'odd', status: 'mystery', updatedAt: at(0) }),
       task({ id: 'done', status: 'landed', updatedAt: at(0) }),
     ])
@@ -102,10 +102,10 @@ describe('buildTaskRows', () => {
       task({ id: 'today1', status: 'landed', updatedAt: at(0) }),
       task({ id: 'today2', status: 'landed', updatedAt: at(0, 8) }),
       task({ id: 'week', status: 'landed', updatedAt: at(2) }),
-      task({ id: 'single', status: 'pacing', updatedAt: at(0) }),
+      task({ id: 'single', status: 'paced', updatedAt: at(0) }),
     ])
     expect(tags(shape)).toEqual([
-      's:pacing', 'single',
+      's:paced', 'single',
       's:landed', 'd:today', 'today1', 'today2', 'd:week', 'week',
     ])
     // Each header carries the tasks under it: a split status all of its own,
@@ -119,7 +119,7 @@ describe('buildTaskRows', () => {
           ],
     )
     expect(headers).toEqual([
-      's:pacing=single',
+      's:paced=single',
       's:landed/split=today1,today2,week',
       'd:today=today1,today2',
       'd:week=week',
