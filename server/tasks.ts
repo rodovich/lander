@@ -59,7 +59,7 @@ export type TaskEvent = {
     // session so the next turn mints a fresh provider session (see sealForRelaunch).
     // Recorded twice for a scheduled relaunch: once at arm time carrying
     // `scheduledFor` (the pending indicator), then again at delivery without it
-    // (the actual divider) — the same pattern a deferred `rest` shows as a
+    // (the actual divider) — the same pattern a deferred `ride` shows as a
     // 'scheduled' then a 'launched'.
     | 'relaunched'
   // The task's title at the time of the event. Absent on a launch/schedule event

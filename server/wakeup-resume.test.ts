@@ -18,7 +18,7 @@ let dataDirRoot: string
 let tasksDir: string
 let originalEnv: NodeJS.ProcessEnv
 
-// A task that has already run a turn: the `lander rest` shape, where nothing is
+// A task that has already run a turn: the `lander ride` shape, where nothing is
 // queued and the wakeup drives the synthetic prompt rather than an opening
 // message. Seeded straight onto disk, which is how the sweep always sees one.
 function seed(id: string, extra: Record<string, unknown>): Promise<void> {

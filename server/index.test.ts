@@ -3104,7 +3104,7 @@ describe('asks', () => {
       status: 'wedged',
       scheduledFor: AT,
       // A turn already ran (a settled ride), so the wakeup drives the synthetic
-      // resume prompt rather than a queued opening message — the `lander rest`
+      // resume prompt rather than a queued opening message — the `lander ride`
       // path, not a deferred `new`.
       rides: [{ id: 'r0', startedAt: AT, endedAt: AT, outcome: 'done' }],
       items: [
@@ -3125,11 +3125,11 @@ describe('asks', () => {
 
   // Withdrawal rides on the status crossing (recordStatusTransition, unit-tested
   // in tasks.test.ts), so it reaches paths that never call withdrawOpenAsks
-  // themselves. `rest` from a wedge is one that used to miss it.
-  it('withdraws an open ask when a wedged task rests', async () => {
-    const id = 'ask-withdraw-rest'
+  // themselves. `ride` from a wedge is one that used to miss it.
+  it('withdraws an open ask when a wedged task arms a ride', async () => {
+    const id = 'ask-withdraw-ride'
     await seedTask(id, { status: 'wedged', asks: [openAsk()] })
-    const res = await post(`/api/${slug}/tasks/${id}/rest`, { time: 30 })
+    const res = await post(`/api/${slug}/tasks/${id}/ride`, { time: 30 })
     expect(res.status).toBe(200)
     const raw = await readRaw(id)
     expect(asksOf(raw)[0].state).toBe('withdrawn')
@@ -3137,18 +3137,17 @@ describe('asks', () => {
 
   // The mirror image: an advisory `lander ask` never wedged, so resting with the
   // question still up is the whole point of it — no crossing, no withdrawal.
-  it('keeps an advisory ask open when a riding task rests', async () => {
-    const id = 'ask-advisory-rest'
+  it('keeps an advisory ask open when a riding task arms a ride', async () => {
+    const id = 'ask-advisory-ride'
     await seedTask(id, {
       status: 'riding',
       asks: [openAsk({ blocking: 'none' })],
     })
-    const res = await post(`/api/${slug}/tasks/${id}/rest`, { time: 30 })
+    const res = await post(`/api/${slug}/tasks/${id}/ride`, { time: 30 })
     expect(res.status).toBe(200)
     const raw = await readRaw(id)
     expect(asksOf(raw)[0].state).toBe('open')
   })
-
   it('withdraws an open ask when the task is relaunched', async () => {
     const id = 'ask-withdraw-relaunch'
     await seedTask(id, { status: 'wedged', asks: [openAsk()] })
@@ -3703,7 +3702,7 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
         id,
         title: 'Resting task',
         // Stored `riding` with no open ride IS resting — the collapsed
-        // vocabulary. Both triggers armed at once, which `lander rest --await
+        // vocabulary. Both triggers armed at once, which `lander ride --await
         // --time` produces and which is the only way to watch the split.
         status: 'riding',
         scheduledFor: until,

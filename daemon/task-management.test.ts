@@ -40,7 +40,7 @@ describe('taskManagementPrompt / promptWithTaskManagement', () => {
 
 // The wording is deliberate and deliberately minimal — it states what happened
 // and stops. The one exception is the cleared-timer clause, which does point at
-// `lander rest`: there the agent has lost something it may want back, and naming
+// `lander ride`: there the agent has lost something it may want back, and naming
 // the remedy is the difference between a notice and a usable one. Asserted
 // byte-for-byte so a later "helpful" embellishment has to be a decision.
 describe('buildRevivedBlock', () => {
@@ -67,7 +67,7 @@ describe('buildRevivedBlock', () => {
       '<task-revived>\n' +
         'You were resting until 8/7/2026, 3:00:00 PM when this message arrived; ' +
         'the message changed your status to riding and cleared that wakeup. ' +
-        'Re-arm it with `lander rest` if you still want it.\n' +
+        'Re-arm it with `lander ride` if you still want it.\n' +
         '</task-revived>',
     )
   })
@@ -81,7 +81,7 @@ describe('buildRevivedBlock', () => {
       '<task-revived>\n' +
         'You were wedged until 3:00:00 PM when this message arrived; ' +
         'the message changed your status to riding and cleared that wakeup. ' +
-        'Re-arm it with `lander rest` if you still want it.\n' +
+        'Re-arm it with `lander ride` if you still want it.\n' +
         '</task-revived>',
     )
   })

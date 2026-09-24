@@ -102,7 +102,7 @@ activity, show Codex token usage, and label missing cost data as unavailable for
 Codex.
 
 Codex tasks can call back into Lander with `lander land`, `lander wedge`,
-`lander rest`, `lander launch`, `lander send`, and related commands when the
+`lander ride`, `lander launch`, `lander send`, and related commands when the
 Codex shell environment receives the injected `LANDER_*` values.
 
 ## Current limitations

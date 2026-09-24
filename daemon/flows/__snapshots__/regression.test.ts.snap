@@ -2174,7 +2174,7 @@ exports[`claude transcript regressions > revival notice names a cleared rest tim
         "do the thing
 
 <task-revived>
-You were resting until 3:00:00 PM when this message arrived; the message changed your status to riding and cleared that wakeup. Re-arm it with \`lander rest\` if you still want it.
+You were resting until 3:00:00 PM when this message arrived; the message changed your status to riding and cleared that wakeup. Re-arm it with \`lander ride\` if you still want it.
 </task-revived>
 
 <task-context>

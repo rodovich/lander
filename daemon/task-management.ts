@@ -90,14 +90,14 @@ export function promptWithTaskManagement(
 
 // The prompt block a revived task's first turn carries: one sentence telling the
 // resumed session what the arriving message changed out from under it. The
-// session's own last act was `lander wedge`/`lander land`/`lander rest` and
+// session's own last act was `lander wedge`/`lander land`/`lander ride` and
 // nothing else contradicts that memory, so left alone the agent answers as if
 // still wedged — or re-arms nothing and lets a cleared timer go unreplaced.
 //
 // Two facts, either or both (see RevivedMarker): the notable status it was pulled
-// out of, and a rest timer the message cleared. The timer clause names the time,
+// out of, and a ride timer the message cleared. The timer clause names the time,
 // because "your wakeup is gone" is only actionable if the agent knows which
-// wakeup — and it points at `lander rest` because re-arming is the whole remedy.
+// wakeup — and it points at `lander ride` because re-arming is the whole remedy.
 // An await is never reported: it survives the revival, so nothing changed.
 //
 // Provider-neutral by construction, and shaped like buildManifestBlock — a small
@@ -114,7 +114,7 @@ export function buildRevivedBlock(revived: RevivedMarker): string {
   const sentence = revived.restUntil
     ? `You were ${prior} until ${revived.restUntil} when this message arrived; ` +
       'the message changed your status to riding and cleared that wakeup. ' +
-      'Re-arm it with `lander rest` if you still want it.'
+      'Re-arm it with `lander ride` if you still want it.'
     : `You were ${prior} when this message arrived; the message changed your ` +
       'status to riding.'
   return ['<task-revived>', sentence, '</task-revived>'].join('\n')

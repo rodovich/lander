@@ -55,7 +55,7 @@ parent's turn.
 Choose the cheapest instrument that is still faithful:
 
 - **Test on yourself** when the behavior is self-directed — run the command you
-  expect to be denied, wedge with options, rest with a wakeup. Your own task is a
+  expect to be denied, wedge with options, arm a wakeup with `lander ride`. Your own task is a
   real task. The exception is anything that leaves a permanent mark on the
   conversation: `lander attachment put` writes a chip onto your own reply that
   nothing can remove, so probe it from a sibling. The task that first built

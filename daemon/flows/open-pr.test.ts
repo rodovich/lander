@@ -229,7 +229,7 @@ describe('open-pr — awaiting-approval', () => {
     })
     // It reached push and rested — no second user message required.
     expect(r.stateAfter.phase).toBe('watch')
-    expect(r.requests.some((q) => q.url.endsWith('/rest'))).toBe(true)
+    expect(r.requests.some((q) => q.url.endsWith('/ride'))).toBe(true)
   })
 
   it('stops on cancel', async () => {
@@ -310,7 +310,7 @@ describe('open-pr — watch', () => {
     const asks = r.requests.filter((q) => q.url.endsWith('/asks'))
     expect(asks).toHaveLength(1)
     expect(asks[0].body).toMatchObject({ blocking: 'none' })
-    expect(r.requests.some((q) => q.url.endsWith('/rest'))).toBe(true)
+    expect(r.requests.some((q) => q.url.endsWith('/ride'))).toBe(true)
   })
 
   it('consumes an advisory answer exactly once', async () => {
@@ -355,7 +355,7 @@ describe('open-pr — watch', () => {
       },
     })
     expect(r.text).toContain('Stopped watching')
-    expect(r.requests.some((q) => q.url.endsWith('/rest'))).toBe(false)
+    expect(r.requests.some((q) => q.url.endsWith('/ride'))).toBe(false)
   })
 
   it('walks the scripted failure branch: attachment, sibling launch, wedge', async () => {
@@ -410,7 +410,7 @@ describe('open-pr — watch', () => {
       flowConfig: { dryRun: true, dryRunOutcome: 'passed' },
     })
     expect(r.text).toContain('Checks passed')
-    expect(r.requests.some((q) => q.url.endsWith('/rest'))).toBe(false)
+    expect(r.requests.some((q) => q.url.endsWith('/ride'))).toBe(false)
   })
 
   it('gives up at the attempt bound instead of resting forever', async () => {
@@ -420,7 +420,7 @@ describe('open-pr — watch', () => {
       flowConfig: { dryRun: true, dryRunOutcome: 'pending' },
     })
     expect(r.text).toContain('stopped watching')
-    expect(r.requests.some((q) => q.url.endsWith('/rest'))).toBe(false)
+    expect(r.requests.some((q) => q.url.endsWith('/ride'))).toBe(false)
   })
 })
 

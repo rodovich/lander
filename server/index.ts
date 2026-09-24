@@ -226,10 +226,10 @@ type Task = {
   status: string
   // ONE-SHOT marker: what an incoming message changed out from under this task —
   // the notable status it was pulled out of (stamped by recordStatusTransition,
-  // the funnel every revival route crosses) and/or a rest wakeup the message
+  // the funnel every revival route crosses) and/or a ride wakeup the message
   // cleared (stamped by the /messages endpoint, since riding↔resting isn't a
   // crossing that funnel sees). It exists because the revived session's own last
-  // act was `lander wedge`/`lander land`/`lander rest` and nothing else in the
+  // act was `lander wedge`/`lander land`/`lander ride` and nothing else in the
   // next turn contradicts that memory. runTurn forwards it on start-run and the
   // daemon renders it as a one-sentence prompt block; the queue drain that
   // launches that run clears it under the same lock (see driveTask), so it rides
@@ -315,7 +315,7 @@ type Task = {
   // on each delivery. See ScheduledMessage in tasks.ts.
   scheduledMessages?: ScheduledMessage[]
   // ISO timestamp a scheduled task is set to launch. Set at creation via
-  // `--date`/`--time`, or later via `lander rest` to re-sleep a running task;
+  // `--date`/`--time`, or later via `lander ride` to re-sleep a running task;
   // the task rests until the scheduler reaches this time, which clears the
   // field, records a "launched" event, and drives the queue (a deferred new
   // task's opening message, or the resume prompt for a rested one, which reads
@@ -1125,7 +1125,7 @@ async function launchTask(
     pushEventItem(t, { eventKind: 'launched', title: t.title }, at)
     t.status = 'riding'
     t.updatedAt = at
-    // A task put to rest with `lander rest` has already run its opening turn, so
+    // A task put to rest with `lander ride` has already run its opening turn, so
     // nothing is queued to wake it — give the agent a prompt announcing it's
     // back. A task scheduled at creation (`new --date`) still has its opening
     // message queued and drives that instead, so skip the synthetic prompt.
@@ -1315,7 +1315,7 @@ async function deliverNotification(
 //
 // Cleared in a `finally`, and that is not decoration: the sweep has no internal
 // try/catch around `awaitSatisfied`/`launchTask`, so a latched flag would kill
-// scheduled-message delivery, deferred launches and every `lander rest` wakeup
+// scheduled-message delivery, deferred launches and every `lander ride` wakeup
 // for the whole instance until a restart. The guard is against a HANG; a
 // rejection needs no guard, since with no `unhandledRejection` handler the
 // process dies and `tsx watch` brings it back.
@@ -1325,7 +1325,7 @@ let sweepStartedAt = 0
 // released. Without it the guard can become the outage it prevents: the
 // `finally` only runs when the promise settles, so a sweep hung on a wedged
 // `awaitSatisfied` or an unresponsive filesystem would latch the flag and stop
-// scheduled-message delivery, deferred launches and every `lander rest` wakeup
+// scheduled-message delivery, deferred launches and every `lander ride` wakeup
 // instance-wide until a restart. Before the guard existed a hung sweep only
 // delayed itself.
 const SWEEP_STUCK_MS = 5 * 60_000
@@ -2036,7 +2036,7 @@ app.post('/api/:project/tasks/:id/attachments', async (c) => {
 
 // Resolve a requested wakeup time from either `date` (any date/time the server
 // can parse) or `wait` (minutes from now). The two are mutually exclusive. Used
-// by task creation (`--date`/`--wait` on `lander new`) and by `lander rest`.
+// by task creation (`--date`/`--wait` on `lander new`) and by `lander ride`.
 // Returns the ISO launch time, null when neither was given, or an error string
 // for a bad/conflicting value — so a bad request fails loudly rather than
 // silently creating something that never wakes.
@@ -2135,7 +2135,7 @@ async function resolveAwait(
   // Guard against a deadlock cycle: if any awaited task already waits (directly
   // or transitively) on the awaiter, these edges would close a loop in which
   // each task rests on the next and none can ever land. Only reachable when the
-  // awaiter already exists (`rest`, which passes selfId) — a freshly minted
+  // awaiter already exists (`ride`, which passes selfId) — a freshly minted
   // `new` id is unreferenced, so its await edges can never close a cycle.
   if (selfId && (await awaitReaches(project, ids, selfId)))
     return { error: 'await would create a cycle' }
@@ -2823,7 +2823,7 @@ app.patch('/api/:project/tasks/:id', async (c) => {
     // Changing a task's own edit grant is a privilege escalation, so only the
     // human (UI token) may do it — otherwise a task could PATCH itself to gain
     // access it was never given. Title and status stay open: the CLI's
-    // `lander land`/`wedge`/`rest` set status, and renames are harmless.
+    // `lander land`/`wedge` set status, and renames are harmless.
     if (typeof body.allowEdits === 'boolean' && principal.kind !== 'ui')
       return c.json(
         { error: 'only the UI may change a task’s edit permission' },
@@ -2873,7 +2873,7 @@ app.patch('/api/:project/tasks/:id', async (c) => {
 
     // Route the write through mutateTask — a fresh read immediately before the
     // atomic rename — so it can't clobber the streaming reducer's concurrent
-    // writes. The same reason `rest` does, and load-bearing now that a wedge
+    // writes. The same reason `ride` does, and load-bearing now that a wedge
     // can arrive mid-run.
     await mutateTask(file, (t) => {
       if (typeof body.title === 'string' && body.title.trim()) {
@@ -2968,8 +2968,8 @@ app.post('/api/:project/tasks/:id/launch', async (c) => {
   }
 })
 
-// Put a task to rest until a wakeup trigger fires (`lander rest`). Mirrors a
-// deferred `new`: it sets scheduledFor and/or waitingFor and records a
+// Arm a wakeup so the task rides again when a trigger fires (`lander ride`).
+// Mirrors a deferred `new`: it sets scheduledFor and/or waitingFor and records a
 // `scheduled` or `awaiting` event, so the scheduler relaunches it on whichever
 // trigger fires first. Unlike `new`, the task has already run, so launchTask
 // wakes the agent with a generated resume prompt naming the trigger that fired
@@ -2977,15 +2977,15 @@ app.post('/api/:project/tasks/:id/launch', async (c) => {
 // while the agent's turn is in flight, so it goes through mutateTask to avoid
 // clobbering the concurrent streaming writes.
 //
-// `{ clear: true }` (`lander rest --clear`) is the inverse: it disarms whatever
-// triggers a prior rest (or deferred `new`) armed, taking no trigger of its own.
+// `{ clear: true }` (`lander ride --clear`) is the inverse: it disarms whatever
+// triggers a prior ride (or deferred `new`) armed, taking no trigger of its own.
 // The case: the user woke a resting task early (a reply revives it to riding
 // without touching the triggers), so the original wakeup is now stale and would
 // later fire a spurious resume. We only drop the triggers — never touch status,
 // and record no event (the past `scheduled`/`awaiting` event stands as
-// history of the rest that did happen). Idempotent: clearing nothing succeeds and
-// reports `cleared: false`.
-app.post('/api/:project/tasks/:id/rest', async (c) => {
+// history of the wakeup that was armed). Idempotent: clearing nothing succeeds
+// and reports `cleared: false`.
+app.post('/api/:project/tasks/:id/ride', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
   try {

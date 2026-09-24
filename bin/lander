@@ -280,7 +280,7 @@ async function attachmentCommand(args) {
 
 // --date (a date/time the server parses) and --time (minutes from now) both set
 // a wakeup time; they're mutually exclusive, and --time must be a positive
-// number. Shared by `launch` (where a wakeup is optional), `rest`, and `send`.
+// number. Shared by `launch` (where a wakeup is optional), `ride`, and `send`.
 // --await (a wakeup *condition* — other tasks landing) is orthogonal and may
 // combine with either, so it isn't checked here; see resolveAwait.
 function validateSchedule(o) {
@@ -380,16 +380,17 @@ async function launchTask(rest) {
   console.log(task.id) // print new task id for the orchestrator to track
 }
 
-// Put the current task to rest with a scheduled wakeup. Takes the same
-// --date/--time flags as `launch`, but one is required (a wakeup needs a time).
-// The server flips the task to resting, records a `scheduled` event, and wakes
-// it at that time with a generated "Resumed at …" message.
+// Arm a wakeup so the current task rides again when a trigger fires: the same
+// --date/--time/--await flags as `launch`, but one is required (a wakeup needs a
+// trigger). The server records a `scheduled` or `awaiting` event, and once the
+// turn ends the scheduler wakes the task with a generated message naming the
+// trigger that fired.
 //
 // --clear is the inverse: it drops a pending wakeup the task no longer needs —
 // e.g. when the user woke it early (a reply leaves the trigger armed, so it would
 // otherwise fire a spurious resume later). It takes no trigger of its own, leaves
 // the task running, and is idempotent (nothing armed → "nothing to clear").
-async function restTask(args) {
+async function rideTask(args) {
   if (!TASK) die('no current task (LANDER_TASK unset)')
   const o = {}
   for (let i = 0; i < args.length; i++) {
@@ -398,12 +399,12 @@ async function restTask(args) {
     else if (a === '--time') o.time = Number(args[++i])
     else if (a === '--await') o.await = args[++i]
     else if (a === '--clear') o.clear = true
-    else die(`rest: unexpected argument ${a}`)
+    else die(`ride: unexpected argument ${a}`)
   }
   if (o.clear) {
     if (o.date != null || o.time != null || o.await != null)
-      die('rest --clear takes no trigger (--date/--time/--await)')
-    const res = await call(PROJECT, `/tasks/${TASK}/rest`, {
+      die('ride --clear takes no trigger (--date/--time/--await)')
+    const res = await call(PROJECT, `/tasks/${TASK}/ride`, {
       method: 'POST',
       body: JSON.stringify({ clear: true }),
     })
@@ -411,16 +412,14 @@ async function restTask(args) {
     return
   }
   if (o.date == null && o.time == null && o.await == null)
-    die(
-      'usage: lander rest (--date <when> | --time <minutes> | --await <ids> | --clear)',
-    )
+    die(`usage: lander ${USAGE.ride}`)
   validateSchedule(o)
   o.await = resolveAwait(o.await, { self: TASK })
-  await call(PROJECT, `/tasks/${TASK}/rest`, {
+  await call(PROJECT, `/tasks/${TASK}/ride`, {
     method: 'POST',
     body: JSON.stringify(o),
   })
-  console.log('resting')
+  console.log('wakeup armed')
 }
 
 // --interval (minutes) makes a relaunch repeat: each occurrence arms the next one
@@ -448,13 +447,13 @@ function validateRepeat(o) {
 // Relaunch the current task under a fresh provider session, keeping the
 // same task id. Takes the same trigger flags as `launch` (--date/--time/--await)
 // plus a positional message (or `-` for stdin); operates on the current TASK env
-// like `rest`, with no target id. Without a trigger the seal happens now and the
+// like `ride`, with no target id. Without a trigger the seal happens now and the
 // in-flight turn drains the message into the new session; with one it's deferred,
 // and the old session stays live until the trigger fires.
 //
 // --interval <minutes> makes it repeat, bounded by --repeat-count/--repeat-until
 // (see validateRepeat). --clear drops a pending scheduled relaunch — including a
-// repeating one's armed next occurrence — (the inverse, like `rest --clear`),
+// repeating one's armed next occurrence — (the inverse, like `ride --clear`),
 // taking no trigger of its own; idempotent.
 async function relaunchTask(args) {
   if (!TASK) die('no current task (LANDER_TASK unset)')
@@ -1059,7 +1058,7 @@ function runShell(command, args) {
 }
 
 // The `lander` object handed to a flow script. Server-backed methods (launch,
-// send, view, list, land, wedge, rest, relaunch) call the same API the CLI does;
+// send, view, list, land, wedge, ride, relaunch) call the same API the CLI does;
 // assist/shell run a local child; flow nests. Methods naming another task
 // resolve a full id or unambiguous prefix, like the CLI.
 function makeLander(inputs) {
@@ -1133,11 +1132,11 @@ function makeLander(inputs) {
       if (!options.length) die('lander.ask: options are required')
       return raiseAsk({ type: 'choice', options }, 'none')
     },
-    async rest(opts = {}) {
+    async ride(opts = {}) {
       // { clear: true } drops a pending wakeup instead of arming one; returns
       // whether any trigger was actually disarmed.
       if (opts.clear) {
-        const res = await call(PROJECT, `/tasks/${TASK}/rest`, {
+        const res = await call(PROJECT, `/tasks/${TASK}/ride`, {
           method: 'POST',
           body: JSON.stringify({ clear: true }),
         })
@@ -1147,8 +1146,8 @@ function makeLander(inputs) {
       validateSchedule(o)
       o.await = resolveAwait(opts.await, { self: TASK })
       if (o.date == null && o.time == null && o.await == null)
-        die('lander.rest: pass date, time, await, or clear')
-      await call(PROJECT, `/tasks/${TASK}/rest`, {
+        die('lander.ride: pass date, time, await, or clear')
+      await call(PROJECT, `/tasks/${TASK}/ride`, {
         method: 'POST',
         body: JSON.stringify(o),
       })
@@ -1246,7 +1245,7 @@ async function runFlow(args) {
 // this turn's claude, reaped when the turn ends, and lander never consumes its completion,
 // so it can't wake the task ("you'll be notified when it completes" only holds
 // in interactive mode, not lander's turn-based one). The note steers toward the
-// mechanisms that do persist: `lander rest` to wait, `lander launch` for parallel
+// mechanisms that do persist: `lander ride` to wait, `lander launch` for parallel
 // agentic work.
 //
 // Crucially this is advisory only: we emit `additionalContext` and set NO
@@ -1268,7 +1267,7 @@ async function bashGuard() {
     'and lander never consumes its completion, so it cannot wake the task — the ' +
     'job just leaks. Background it only for work you will consume within THIS ' +
     'turn. If you need to wait for something, end the turn and resume later with ' +
-    '`lander rest --time <minutes>` / `--date <when>` / `--await <ids>`. For ' +
+    '`lander ride --time <minutes>` / `--date <when>` / `--await <ids>`. For ' +
     'parallel agentic work, spawn a sibling task with `lander launch <message>`. ' +
     '(A turn-scoped co-process verb is planned for jobs that must outlive a turn.)'
   process.stdout.write(
@@ -1384,7 +1383,7 @@ const USAGE = {
   list: 'list [--status <s>] [--since <when>] [--until <when>] [--text <terms>] [--archived] [--json]',
   view: 'view <id> [--tools] [--messages <N|all>] [--clip <N|all>] [--json]',
   send: 'send <id> <message|-> [--date <when>|--time <min>] [--await <ids>] [--attach <paths…>]',
-  rest: 'rest (--date <when> | --time <min> | --await <ids> | --clear)',
+  ride: 'ride (--date <when> | --time <min> | --await <ids> | --clear)',
   relaunch:
     'relaunch <message|-> [--date <when>|--time <min>|--await <ids>] [--interval <min> [--repeat-count <n>|--repeat-until <when>]] [--clear]',
   wedge: 'wedge [--option <id:label> …]',
@@ -1424,7 +1423,7 @@ const run = {
   land: () => landTask(rest),
   wedge: () => wedgeTask(rest),
   ask: () => askTask(rest),
-  rest: () => restTask(rest),
+  ride: () => rideTask(rest),
   relaunch: () => relaunchTask(rest),
   launch: () => launchTask(rest),
   list: () => listTasks(rest),

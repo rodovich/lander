@@ -915,12 +915,12 @@ describe('ctx runtime — orchestration', () => {
     }
   })
 
-  it('posts rest triggers and launches siblings with a flow and config', async () => {
+  it('posts ride triggers and launches siblings with a flow and config', async () => {
     const h = withApi()
     const calls = fakeFetch({ id: 'sibling-1' })
     try {
       await runFlow(h, async (ctx) => {
-        await ctx.rest({ time: 5 })
+        await ctx.ride({ time: 5 })
         await ctx.launch('fix the build', {
           flow: 'claude',
           config: { pr: 12 },
@@ -928,7 +928,7 @@ describe('ctx runtime — orchestration', () => {
         })
         return { exitCode: 0 }
       })
-      expect(calls[0].url).toBe(`${API}/api/proj/tasks/task-1/rest`)
+      expect(calls[0].url).toBe(`${API}/api/proj/tasks/task-1/ride`)
       expect(calls[0].body).toMatchObject({ time: 5 })
       expect(calls[1].body).toMatchObject({
         message: 'fix the build',

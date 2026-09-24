@@ -244,7 +244,7 @@ describe('the revival notice reaches the prompt', () => {
     expect(promptOf(flow.spawns[0].args)).toContain(
       '<task-revived>\nYou were resting until 3:00:00 PM when this message ' +
         'arrived; the message changed your status to riding and cleared that ' +
-        'wakeup. Re-arm it with `lander rest` if you still want it.\n' +
+        'wakeup. Re-arm it with `lander ride` if you still want it.\n' +
         '</task-revived>',
     )
   })

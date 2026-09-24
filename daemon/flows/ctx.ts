@@ -214,7 +214,7 @@ export type CtxState = {
   patch(path: string[], value: unknown): void
   // Put any pending writes on the wire now. Writes otherwise batch until a
   // ctx.spawn drain or the turn's end, so a flow that mutates the task through
-  // an orchestration call (ask/wedge/rest) must flush first or risk losing the
+  // an orchestration call (ask/wedge/ride) must flush first or risk losing the
   // write to an interrupt. The ctx orchestration wrappers do this for you; this
   // is for a flow's own transitions that don't go through one.
   flush(): void
@@ -287,7 +287,7 @@ export type Ctx = {
   // its own answered ask.
   view(id?: string): Promise<unknown>
   list(...args: unknown[]): Promise<unknown>
-  rest(opts?: RestOpts): Promise<unknown>
+  ride(opts?: RideOpts): Promise<unknown>
   relaunch(...args: unknown[]): Promise<unknown>
   land(...args: unknown[]): Promise<unknown>
   flow(...args: unknown[]): Promise<unknown>
@@ -322,7 +322,7 @@ export type LaunchOpts = {
   edits?: boolean
 }
 
-export type RestOpts = {
+export type RideOpts = {
   date?: string
   time?: number
   await?: string
@@ -988,8 +988,8 @@ export function createCtxRuntime(
     // untouched, and an AskItem carries state/answer).
     view: (id) => apiCall(`/tasks/${id ?? apiTask}`),
     list: notImplemented('list'),
-    rest: (opts) =>
-      apiCall(`/tasks/${apiTask}/rest`, {
+    ride: (opts) =>
+      apiCall(`/tasks/${apiTask}/ride`, {
         method: 'POST',
         body: {
           ...(opts?.date ? { date: opts.date } : {}),

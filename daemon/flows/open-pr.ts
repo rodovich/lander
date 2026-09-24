@@ -3,7 +3,7 @@
 // It exists to exercise the whole driver surface against something that isn't a
 // chat agent — emit (tool items for real work), state (phase, branch, PR
 // number), attachments (the diff packet and a self-review), wedge (approval),
-// rest/wakeup re-entry (CI watching with no in-process sleep), launch (a repair
+// ride/wakeup re-entry (CI watching with no in-process sleep), launch (a repair
 // sibling on failure), and view (reading back its own answered ask).
 //
 // Four phases, driven by ctx.state.phase; EVERY ride is a re-entry:
@@ -173,7 +173,7 @@ async function onTurn(ctx: Ctx): Promise<TurnResult> {
   }
 
   // A mutating command. In dry-run it emits the exact argv it WOULD run and
-  // reports nothing else — every read, attachment, ask, rest and re-entry still
+  // reports nothing else — every read, attachment, ask, ride and re-entry still
   // happens for real, so the only thing dry-run removes is the outward effect.
   const runMutating = async (
     command: string,
@@ -396,7 +396,7 @@ async function push(
   )
 
   setPhase('watch')
-  await ctx.rest({ time: WATCH_INTERVAL_MIN })
+  await ctx.ride({ time: WATCH_INTERVAL_MIN })
 }
 
 // `gh --json number` output, or undefined when there is none.
@@ -547,7 +547,7 @@ async function watch(
     `Checks for PR #${prNumber} are still pending (attempt ${nextAttempt}/${MAX_WATCH_ATTEMPTS}).`,
   )
   setPhase('watch')
-  await ctx.rest({ time: WATCH_INTERVAL_MIN })
+  await ctx.ride({ time: WATCH_INTERVAL_MIN })
 }
 
 // `gh pr checks` exits non-zero when checks fail and prints one row per check.
@@ -564,13 +564,13 @@ export function classifyChecks({
 }
 
 // Dry-run's scripted sequence, so both terminal branches are genuinely walked
-// across real rest/re-entry cycles rather than only the rest machinery.
+// across real ride/re-entry cycles rather than only the wakeup machinery.
 export function scriptedCheck(
   attempts: number,
   outcome: 'passed' | 'failed' | 'pending',
 ): 'passed' | 'failed' | 'pending' {
   // 'pending' never resolves — the way to exercise the attempt bound (and the
-  // rest/re-entry loop) without waiting for a real CI run.
+  // ride/re-entry loop) without waiting for a real CI run.
   if (outcome === 'pending') return 'pending'
   if (outcome === 'passed') return attempts >= 1 ? 'passed' : 'pending'
   return attempts >= 2 ? 'failed' : 'pending'
