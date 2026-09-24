@@ -6,8 +6,9 @@ import type { TaskWithProject } from './types'
 export type TaskAction =
   | 'launch'
   | 'wedge'
-  | 'rest'
+  | 'unwedge'
   | 'land'
+  | 'unland'
   | 'copyId'
   | 'markUnread'
   | 'archive'
@@ -24,13 +25,14 @@ export type TaskActionOption = {
 
 // What a task offers right now: only the actions that would be both *visible
 // and enabled* for its current status, so e.g. a landed task offers
-// Wedge/Rest/Archive but not Land, and an archived one collapses to a single
+// Wedge/Un-land/Archive but not Land, and an archived one collapses to a single
 // Restore. The rules, action by action:
 //
 //  - launch:     a scheduled task (scheduledFor set, resting or wedged), to run it early
 //  - wedge:      any task not already wedged
-//  - rest:       a wedged or landed task, to return it to rest
+//  - unwedge:    a wedged task, to clear the wedge without waking it
 //  - land:       any task not already landed
+//  - unland:     a landed task, to clear the land without waking it
 //  - copyId:     any task, to copy its id to the clipboard
 //  - markUnread: any task that isn't already showing unviewed updates
 //  - archive:    any non-riding task (a riding one has a live run the server won't archive)
@@ -46,8 +48,9 @@ export function availableTaskActions(task: TaskWithProject): TaskActionOption[] 
     options.push({ action, label, group: 'other' })
   if (task.scheduledFor) status('launch', 'Launch')
   if (task.status !== 'wedged') status('wedge', 'Wedge')
-  if (task.status === 'wedged' || task.status === 'landed') status('rest', 'Rest')
+  if (task.status === 'wedged') status('unwedge', 'Un-wedge')
   if (task.status !== 'landed') status('land', 'Land')
+  if (task.status === 'landed') status('unland', 'Un-land')
   other('copyId', 'Copy ID')
   if (!isUnread(task)) other('markUnread', 'Mark unread')
   if (task.status !== 'riding') other('archive', 'Archive')

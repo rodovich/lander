@@ -31,11 +31,15 @@ describe('availableTaskActions', () => {
     expect(actions({ status: 'landed' })).not.toContain('land')
   })
 
-  it('offers Rest only to a task that has somewhere to come back from', () => {
-    expect(actions({ status: 'wedged' })).toContain('rest')
-    expect(actions({ status: 'landed' })).toContain('rest')
-    expect(actions({ status: 'resting' })).not.toContain('rest')
-    expect(actions({ status: 'riding' })).not.toContain('rest')
+  it('offers Un-wedge and Un-land only to a task holding that status', () => {
+    expect(actions({ status: 'wedged' })).toContain('unwedge')
+    expect(actions({ status: 'wedged' })).not.toContain('unland')
+    expect(actions({ status: 'landed' })).toContain('unland')
+    expect(actions({ status: 'landed' })).not.toContain('unwedge')
+    for (const status of ['resting', 'riding'] as const) {
+      expect(actions({ status })).not.toContain('unwedge')
+      expect(actions({ status })).not.toContain('unland')
+    }
   })
 
   // A riding task has a live run the server won't archive.
@@ -68,7 +72,7 @@ describe('availableTaskActions', () => {
       availableTaskActions(task(over)).map((o) => `${o.action}:${o.group}`)
     expect(groups({ status: 'wedged', scheduledFor: LATER })).toEqual([
       'launch:status',
-      'rest:status',
+      'unwedge:status',
       'land:status',
       'copyId:other',
       'markUnread:other',

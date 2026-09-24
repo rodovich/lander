@@ -324,8 +324,9 @@ export function useTaskActions(opts: {
     (task: TaskWithProject, action: TaskAction) => {
       if (action === 'launch') void launchNow(task)
       else if (action === 'wedge') void setStatus(task, 'wedged')
-      else if (action === 'rest') void setStatus(task, 'resting')
       else if (action === 'land') void setStatus(task, 'landed')
+      else if (action === 'unwedge' || action === 'unland')
+        void setStatus(task, 'resting')
       else if (action === 'copyId')
         void navigator.clipboard.writeText(task.id).catch(() => {})
       else if (action === 'markUnread') void markUnread(taskKeyOf(task))

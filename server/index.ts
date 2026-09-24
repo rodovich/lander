@@ -2893,8 +2893,8 @@ app.patch('/api/:project/tasks/:id', async (c) => {
       if (typeof body.allowEdits === 'boolean') t.allowEdits = body.allowEdits
       if (typeof body.status === 'string') {
         const at = new Date().toISOString()
-        // Normalize to the collapsed stored vocabulary: the UI's "rest" action
-        // (and any client) PATCHes `resting`, but idle is a derived presentation
+        // Normalize to the collapsed stored vocabulary: the UI's Un-wedge and
+        // Un-land actions (and any client) PATCH `resting`, but idle is a derived presentation
         // of a `riding` task with no open ride, so store `riding`. publicTask
         // serves `resting` back. wedged/landed store as sent.
         const next = body.status === 'resting' ? 'riding' : body.status
