@@ -610,7 +610,8 @@ body {
   color: var(--wedged);
 }
 
-.task-menu-item-rest {
+.task-menu-item-unwedge,
+.task-menu-item-unland {
   color: var(--muted);
 }
 
