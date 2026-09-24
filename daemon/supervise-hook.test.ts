@@ -234,7 +234,7 @@ describe('the supervision hook', () => {
   ])('gates on %s, then judges', async (predicate, instruction, closing) => {
     target = {
       id: 'tsk-1',
-      status: 'resting',
+      status: 'pacing',
       flow: 'claude',
       items: [user('u1', instruction), flow('f1', 'ride-1', closing)],
     }
@@ -257,7 +257,7 @@ describe('the supervision hook', () => {
   it('takes no action, on the segment most likely to provoke one', async () => {
     target = {
       id: 'tsk-1',
-      status: 'resting',
+      status: 'pacing',
       flow: 'claude',
       items: [
         user('u1', 'Fix the parser and then land.'),
@@ -279,7 +279,7 @@ describe('the supervision hook', () => {
   it('skips a segment it has already nudged', async () => {
     target = {
       id: 'tsk-1',
-      status: 'resting',
+      status: 'pacing',
       flow: 'claude',
       items: [
         user('u1', 'Fix the parser and then land.'),
@@ -311,7 +311,7 @@ describe('the supervision hook', () => {
   it('does not treat another hook’s nudge as its own', async () => {
     target = {
       id: 'tsk-1',
-      status: 'resting',
+      status: 'pacing',
       flow: 'claude',
       items: [
         user('u1', 'Fix the parser and then land.'),
@@ -341,7 +341,7 @@ describe('the supervision hook', () => {
   it('hands the judge the instruction, not only the closing message', async () => {
     target = {
       id: 'tsk-1',
-      status: 'resting',
+      status: 'pacing',
       flow: 'claude',
       items: [
         user('u1', 'Fix the parser and then land.'),
@@ -360,7 +360,7 @@ describe('the supervision hook', () => {
     await setVerdict('I think it probably did most of it, hard to say really.')
     target = {
       id: 'tsk-1',
-      status: 'resting',
+      status: 'pacing',
       flow: 'claude',
       items: [
         user('u1', 'Fix the parser and then land.'),
@@ -383,7 +383,7 @@ describe('the supervision hook', () => {
     await setVerdict('VERDICT: finished\nBECAUSE: it is waiting on a decision only its human can make.')
     target = {
       id: 'tsk-1',
-      status: 'resting',
+      status: 'pacing',
       flow: 'claude',
       items: [
         user('u1', 'Fix the parser.'),
@@ -402,7 +402,7 @@ describe('the supervision hook', () => {
   it('reuses its verdict rather than re-judging when a fire is retried', async () => {
     target = {
       id: 'tsk-1',
-      status: 'resting',
+      status: 'pacing',
       flow: 'claude',
       items: [
         user('u1', 'Fix the parser and then land.'),
@@ -420,7 +420,7 @@ describe('the supervision hook', () => {
   it('does not judge a target whose flow declares no provider', async () => {
     target = {
       id: 'tsk-1',
-      status: 'resting',
+      status: 'pacing',
       flow: 'open-pr',
       items: [
         user('u1', 'Fix the parser and then land.'),
@@ -439,7 +439,7 @@ describe('the supervision hook', () => {
   it('stays silent on a clean segment, and still logs it', async () => {
     target = {
       id: 'tsk-1',
-      status: 'resting',
+      status: 'pacing',
       items: [user('u1', 'Fix the parser.'), flow('f1', 'ride-1', 'Fixed it.')],
     }
     const report = await run()
@@ -464,7 +464,7 @@ describe('the supervision hook', () => {
   it('judges the segment once, at the ride that closes it', async () => {
     target = {
       id: 'tsk-1',
-      status: 'resting',
+      status: 'pacing',
       items: [
         user('u1', 'Please:\n1. fix the parser\n2. add a test\n'),
         flow('f1', 'ride-1', 'Working on it.'),
@@ -549,7 +549,7 @@ describe('the supervision hook', () => {
   it('writes one row per fire even when the body runs twice', async () => {
     target = {
       id: 'tsk-1',
-      status: 'resting',
+      status: 'pacing',
       items: [user('u1', 'Fix it.'), flow('f1', 'ride-1', 'Fixed.')],
     }
     const msg = message()
@@ -560,7 +560,7 @@ describe('the supervision hook', () => {
   })
 
   it('reports nothing at all for a ride it cannot locate', async () => {
-    target = { id: 'tsk-1', status: 'resting', items: [] }
+    target = { id: 'tsk-1', status: 'pacing', items: [] }
     const report = await run('ride-missing')
     expect(report.outcome).toBe('ran')
     expect(report.reports).toEqual([])

@@ -208,7 +208,7 @@ export function useTaskActions(opts: {
   // Launch a scheduled task now, ahead of its time (the header's "launch"
   // button). The server clears the schedule, records the launch, and starts the
   // agent. Optimistically drop the schedule and flip to riding so the launch
-  // button gives way to the resting one at once.
+  // button gives way to the pacing one at once.
   const launchNow = useCallback(
     (task: TaskWithProject) =>
       writeTask(task, { status: 'riding', scheduledFor: undefined }, 'launch'),
@@ -326,7 +326,7 @@ export function useTaskActions(opts: {
       else if (action === 'wedge') void setStatus(task, 'wedged')
       else if (action === 'land') void setStatus(task, 'landed')
       else if (action === 'unwedge' || action === 'unland')
-        void setStatus(task, 'resting')
+        void setStatus(task, 'pacing')
       else if (action === 'copyId')
         void navigator.clipboard.writeText(task.id).catch(() => {})
       else if (action === 'markUnread') void markUnread(taskKeyOf(task))

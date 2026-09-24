@@ -474,7 +474,7 @@ describe('the nudge', () => {
   })
 
   // The two suppressions that make a nudge not-a-message. A supervised target
-  // resting on a wakeup must keep it — that wakeup is what would have woken it
+  // waiting on a wakeup must keep it — that wakeup is what would have woken it
   // anyway — and an advisory ask is a question still worth answering.
   it('leaves the target’s wakeup armed and its advisory ask open', async () => {
     await seed({
@@ -909,7 +909,7 @@ describe('the land', () => {
   const raw = async (): Promise<Record<string, any>> =>
     JSON.parse(await readFile(file(), 'utf8'))
 
-  it('lands a resting target and records the crossing as the hook’s', async () => {
+  it('lands a pacing target and records the crossing as the hook’s', async () => {
     await seed()
     const res = await land(cred().token)
     expect(res.status).toBe(200)
@@ -937,12 +937,12 @@ describe('the land', () => {
   })
 
   // Landing deletes scheduledFor/waitingFor, and a reply restores neither — so
-  // a landed task resting on a wakeup is NOT reversible by a reply, which is the
+  // a landed task waiting on a wakeup is NOT reversible by a reply, which is the
   // whole reason landing is preferred to nudging.
   it.each([
     ['scheduledFor', { scheduledFor: '2099-01-01T00:00:00.000Z' }],
     ['waitingFor', { waitingFor: ['tsk-other'] }],
-  ])('refuses a target resting on %s', async (_name, over) => {
+  ])('refuses a target waiting on %s', async (_name, over) => {
     await seed(over)
     const res = await land(cred().token)
     expect(res.status).toBe(403)
@@ -953,7 +953,7 @@ describe('the land', () => {
   })
 
   // The queue is not in publicTask's "live run" derivation, so a task that has
-  // been sent a message but whose ride has not opened reads as resting.
+  // been sent a message but whose ride has not opened reads as pacing.
   it('refuses a target with a queued prompt and no open ride', async () => {
     await seed({ queued: ['do more'] })
     const res = await land(cred().token)
@@ -1163,7 +1163,7 @@ describe('the launch', () => {
   it.each([
     ['wedged', { status: 'wedged' }],
     ['riding', { queued: ['more'], status: 'riding' }],
-    ['resting on a wakeup', { scheduledFor: '2099-01-01T00:00:00.000Z' }],
+    ['waiting on a wakeup', { scheduledFor: '2099-01-01T00:00:00.000Z' }],
   ])('launches for a %s target', async (_name, over) => {
     await seed(over)
     expect((await launch(cred().token)).status).toBe(201)
@@ -1619,7 +1619,7 @@ describe('server task provider behavior', () => {
         id,
         agent: 'claude',
         title: 'Legacy',
-        status: 'resting',
+        status: 'pacing',
         createdAt: AT,
         updatedAt: AT,
         allowEdits: false,
@@ -1982,7 +1982,7 @@ describe('server task provider behavior', () => {
         {
           id: 'legacy-task',
           title: 'Legacy task',
-          status: 'resting',
+          status: 'pacing',
           createdAt: AT,
           updatedAt: AT,
           allowEdits: false,
@@ -2508,15 +2508,15 @@ describe('attachments', () => {
       await upload([{ name: 'p.png', type: 'image/png', bytes: new Uint8Array([1, 2]) }])
     ).json()) as { attachments: { id: string }[] }
 
-    // Seed a resting task so the send has a target and doesn't need a daemon.
-    const restingId = 'resting-attach-task'
+    // Seed a pacing task so the send has a target and doesn't need a daemon.
+    const restingId = 'pacing-attach-task'
     await writeFile(
       path.join(tasksDir, `${restingId}.json`),
       JSON.stringify(
         {
           id: restingId,
-          title: 'Resting',
-          status: 'resting',
+          title: 'Pacing',
+          status: 'pacing',
           createdAt: AT,
           updatedAt: AT,
           allowEdits: false,
@@ -2960,7 +2960,7 @@ describe('asks', () => {
     }
     expect(ask).toMatchObject({ blocking: 'none', state: 'open' })
     const raw = await readRaw(id)
-    // No status transition — the task rests with the question attached, and the
+    // No status transition — the task waits with the question attached, and the
     // wedge crossing that a task-blocking ask records is absent.
     expect(raw.status).toBe('riding')
     expect(eventsOf(raw).some((e) => e.eventKind === 'wedged')).toBe(false)
@@ -2983,7 +2983,7 @@ describe('asks', () => {
   it('answers an advisory ask: delivers the bare value, delivery queued to ride', async () => {
     const id = 'ask-answer-none'
     await seedTask(id, {
-      status: 'resting',
+      status: 'pacing',
       // Promptless (the agent message was the question), like an agent wedge.
       asks: [openAsk({ blocking: 'none', prompt: undefined })],
     })
@@ -2991,8 +2991,8 @@ describe('asks', () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as { status: string; items: Raw[] }
     // Stored `riding` with no open ride (no daemon in-test to start one) serves as
-    // `resting`; the queued delivery below rides it as soon as a daemon picks it up.
-    expect(body.status).toBe('resting')
+    // `pacing`; the queued delivery below rides it as soon as a daemon picks it up.
+    expect(body.status).toBe('pacing')
     const asks = body.items.filter((it) => it.kind === 'ask')
     expect(asks[0].state).toBe('answered')
     // A promptless ask delivers the bare chosen label as the next user message.
@@ -3012,8 +3012,8 @@ describe('asks', () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as { status: string; items: Raw[] }
     // Un-wedges to stored `riding`; with no open ride yet (no daemon in-test) that
-    // serves as `resting`, and the queued delivery rides once a daemon picks it up.
-    expect(body.status).toBe('resting')
+    // serves as `pacing`, and the queued delivery rides once a daemon picks it up.
+    expect(body.status).toBe('pacing')
     const asks = body.items.filter((it) => it.kind === 'ask')
     expect(asks[0].state).toBe('answered')
     // The delivery is appended as a queued user message carrying the chosen label.
@@ -3094,7 +3094,7 @@ describe('asks', () => {
     expect(asksOf(raw)[0].state).toBe('withdrawn')
   })
 
-  // A task can rest with a wakeup armed and *then* wedge (a platform kill, an
+  // A task can be pacing with a wakeup armed and *then* wedge (a platform kill, an
   // assistant error) before it fires. The wakeup resumes the task by its own
   // route, so the ask it left open is moot — it must not linger over the resumed
   // conversation.
@@ -3135,7 +3135,7 @@ describe('asks', () => {
     expect(asksOf(raw)[0].state).toBe('withdrawn')
   })
 
-  // The mirror image: an advisory `lander ask` never wedged, so resting with the
+  // The mirror image: an advisory `lander ask` never wedged, so pacing with the
   // question still up is the whole point of it — no crossing, no withdrawal.
   it('keeps an advisory ask open when a riding task arms a ride', async () => {
     const id = 'ask-advisory-ride'
@@ -3268,7 +3268,7 @@ describe('landing disarms the task’s wakeups', () => {
       taskFile(id),
       JSON.stringify({
         id,
-        title: 'Resting task',
+        title: 'Pacing task',
         status: 'riding',
         // Overdue on purpose: the trigger is one scheduler sweep away from
         // firing, which is exactly the state the seven observed cases were in.
@@ -3315,12 +3315,23 @@ describe('landing disarms the task’s wakeups', () => {
     expect(raw.scheduledFor).toBeUndefined()
     expect(raw.waitingFor).toBeUndefined()
   })
+
+  // What Un-land sends.
+  it('un-lands on a PATCH of pacing', async () => {
+    const id = 'land-then-pacing'
+    await seedArmed(id)
+    expect((await patch(id, { status: 'landed' })).status).toBe(200)
+    const res = await patch(id, { status: 'pacing' })
+    expect(res.status).toBe(200)
+    expect((await res.json()).status).toBe('pacing')
+    expect((await readRaw(id)).status).toBe('riding')
+  })
 })
 
 // A daemon that dies mid-turn (a supervisor max-drain SIGTERM, a crash) can't
 // settle its own runs; the server crashes the abandoned run once the reconnect
 // grace lapses. That platform kill must wedge the task with a retry ask — not
-// leave it silently resting like an interrupt would. Driven end to end over a real
+// leave it silently pacing like an interrupt would. Driven end to end over a real
 // attachDaemonServer with a fake daemon that HOLDS runs open (never sends a done),
 // so the only way its run ends is a crash. A user interrupt (the status PATCH
 // path) must keep its no-ask semantics.
@@ -3693,15 +3704,15 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
   // await is the opposite: a real dependency on sibling tasks that an unrelated
   // message must not cancel. Same split the wake-delivery table draws for the
   // daemon path (docs/daemon-wakeups.md §Delivery).
-  it('an early revival clears the rest timer, keeps the await, and says so', async () => {
-    const id = 'revived-resting'
+  it('an early revival clears the wakeup timer, keeps the await, and says so', async () => {
+    const id = 'revived-pacing'
     const until = new Date(Date.now() + 3_600_000).toISOString()
     await writeFile(
       path.join(tasksDir, `${id}.json`),
       JSON.stringify({
         id,
-        title: 'Resting task',
-        // Stored `riding` with no open ride IS resting — the collapsed
+        title: 'Pacing task',
+        // Stored `riding` with no open ride IS pacing — the collapsed
         // vocabulary. Both triggers armed at once, which `lander ride --await
         // --time` produces and which is the only way to watch the split.
         status: 'riding',
@@ -3727,7 +3738,7 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     }
     // The notice names the time, so re-arming is one actionable step rather than
     // a guess. Formatted server-side, in the same shape as "Resumed at …".
-    expect(run.revived).toEqual({ restUntil: new Date(until).toLocaleString() })
+    expect(run.revived).toEqual({ pacingUntil: new Date(until).toLocaleString() })
 
     const raw = await readRaw(id)
     expect(raw.scheduledFor).toBeUndefined()
@@ -3926,7 +3937,7 @@ describe('flow dispatch gate', () => {
       JSON.stringify({
         id,
         title: 'Gate task',
-        status: 'resting',
+        status: 'pacing',
         createdAt: AT,
         updatedAt: AT,
         allowEdits: false,

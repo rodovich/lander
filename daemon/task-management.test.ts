@@ -61,11 +61,11 @@ describe('buildRevivedBlock', () => {
   })
 
   // The common shape of the cleared-timer case: nothing notable was crossed, so
-  // "resting" is the only status there is to name.
-  it('names a cleared rest timer, its time, and the way to re-arm it', () => {
-    expect(buildRevivedBlock({ restUntil: '8/7/2026, 3:00:00 PM' })).toBe(
+  // "pacing" is the only status there is to name.
+  it('names a cleared wakeup timer, its time, and the way to re-arm it', () => {
+    expect(buildRevivedBlock({ pacingUntil: '8/7/2026, 3:00:00 PM' })).toBe(
       '<task-revived>\n' +
-        'You were resting until 8/7/2026, 3:00:00 PM when this message arrived; ' +
+        'You were pacing until 8/7/2026, 3:00:00 PM when this message arrived; ' +
         'the message changed your status to riding and cleared that wakeup. ' +
         'Re-arm it with `lander ride` if you still want it.\n' +
         '</task-revived>',
@@ -76,7 +76,7 @@ describe('buildRevivedBlock', () => {
   // wakeup, revived by a message. One sentence, not two notices.
   it('folds a crossed status and a cleared timer into one sentence', () => {
     expect(
-      buildRevivedBlock({ from: 'wedged', restUntil: '3:00:00 PM' }),
+      buildRevivedBlock({ from: 'wedged', pacingUntil: '3:00:00 PM' }),
     ).toBe(
       '<task-revived>\n' +
         'You were wedged until 3:00:00 PM when this message arrived; ' +

@@ -101,18 +101,19 @@ export type AttachmentRef = {
 // changed out from under the resumed session, which remembers only its own last
 // act. Two independent facts, either or both of which may be present (a marker
 // with neither is never stamped):
-//   `from`      — the notable status the message pulled the task out of, when it
-//                 was in one. Absent when the task was merely resting.
-//   `restUntil` — the display time of a rest wakeup the message cleared, since an
-//                 out-of-band revival supersedes a *timer*. Absent when no timer
-//                 was armed. Preformatted by the server, which owns the "Resumed
-//                 at …" wording this echoes; the daemon only interpolates it.
+//   `from`        — the notable status the message pulled the task out of, when
+//                   it was in one. Absent when the task was merely pacing.
+//   `pacingUntil` — the display time of a wakeup timer the message cleared, since
+//                   an out-of-band revival supersedes a *timer*. Absent when no
+//                   timer was armed. Preformatted by the server, which owns the
+//                   "Resumed at …" wording this echoes; the daemon only
+//                   interpolates it.
 // An `await` is deliberately NOT represented: it survives an early revival (a
 // real dependency an unrelated message must not cancel), so there is nothing to
 // report.
 export type RevivedMarker = {
   from?: 'wedged' | 'landed'
-  restUntil?: string
+  pacingUntil?: string
 }
 
 // Launch a run: like today's RunJob minus the file paths and the absolute cwd.

@@ -9,7 +9,7 @@ const task = (over: Partial<TaskWithProject> = {}): TaskWithProject => ({
   id: 'task1',
   agent: 'claude',
   title: 'Fix the parser',
-  status: 'resting',
+  status: 'pacing',
   createdAt: AT,
   allowEdits: true,
   projectSlug: 'proj',
@@ -22,7 +22,7 @@ const actions = (over: Partial<TaskWithProject> = {}) =>
   availableTaskActions(task(over)).map((o) => o.action)
 
 describe('availableTaskActions', () => {
-  it('offers every status change a resting task can make', () => {
+  it('offers every status change a pacing task can make', () => {
     expect(actions()).toEqual(['wedge', 'land', 'copyId', 'markUnread', 'archive'])
   })
 
@@ -36,7 +36,7 @@ describe('availableTaskActions', () => {
     expect(actions({ status: 'wedged' })).not.toContain('unland')
     expect(actions({ status: 'landed' })).toContain('unland')
     expect(actions({ status: 'landed' })).not.toContain('unwedge')
-    for (const status of ['resting', 'riding'] as const) {
+    for (const status of ['pacing', 'riding'] as const) {
       expect(actions({ status })).not.toContain('unwedge')
       expect(actions({ status })).not.toContain('unland')
     }
@@ -45,7 +45,7 @@ describe('availableTaskActions', () => {
   // A riding task has a live run the server won't archive.
   it('withholds Archive from a riding task', () => {
     expect(actions({ status: 'riding' })).not.toContain('archive')
-    expect(actions({ status: 'resting' })).toContain('archive')
+    expect(actions({ status: 'pacing' })).toContain('archive')
   })
 
   it('offers Launch only to a task with a scheduled start to bring forward', () => {

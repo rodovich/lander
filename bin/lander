@@ -536,13 +536,13 @@ function parseDateArg(flag, value) {
 // lists the archive alone; otherwise which pools a query reads follows from what
 // it asks for (see poolsFor), and a row read from the archive is marked as one.
 
-// The statuses a served row can carry. `resting` is not one of the three the
+// The statuses a served row can carry. `pacing` is not one of the three the
 // task file stores: the server derives it for a stored `riding` with no live run
 // (publicTaskStatus), and it is that served value --status compares against. A
 // value outside this set matches no row, so it is rejected rather than filtered
 // with — an unrecognized status and an empty project both print "(no tasks)",
 // and the caller cannot tell which it got.
-const STATUSES = ['landed', 'riding', 'resting', 'wedged']
+const STATUSES = ['landed', 'riding', 'pacing', 'wedged']
 
 // Which pools a query reads. Archiving files a finished task away: it moves the
 // record out of tasks/ and out of the scheduler's sweeps. Nine in ten landed
@@ -936,7 +936,7 @@ async function wedgeTask(args) {
 }
 
 // `lander ask --option id:label...` — raise an advisory choice ask that does
-// *not* wedge: the task keeps resting, your message this turn is the question, and
+// *not* wedge: the task keeps pacing, your message this turn is the question, and
 // the option buttons render under it. A clicked option's label arrives as the next
 // user message; the user may instead just reply, which supersedes the ask. Unlike
 // wedge, no status change and nothing in the task list. Choice-only by design: a

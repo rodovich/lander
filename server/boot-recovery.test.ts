@@ -39,8 +39,8 @@ function seed(id: string, extra: Record<string, unknown>): Promise<void> {
     JSON.stringify({
       id,
       title: id,
-      // A resting task stores as `riding` under the status collapse, so this is
-      // what a deferred task looks like at rest.
+      // A pacing task stores as `riding` under the status collapse, so this is
+      // what a deferred task looks like while it waits.
       status: 'riding',
       createdAt: AT,
       updatedAt: AT,

@@ -15,7 +15,7 @@ const BIN_DIR = path.dirname(fileURLToPath(import.meta.url))
 const LANDER_BIN = path.join(BIN_DIR, 'lander')
 
 const base = {
-  status: 'resting',
+  status: 'pacing',
   createdAt: '2026-08-01T00:00:00.000Z',
   updatedAt: '2026-08-01T01:00:00.000Z',
 }

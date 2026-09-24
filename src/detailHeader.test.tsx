@@ -10,7 +10,7 @@ const baseTask = (over: Partial<TaskWithProject> = {}): TaskWithProject => ({
   id: 'task1',
   agent: 'claude',
   title: 'Fix the parser',
-  status: 'resting',
+  status: 'pacing',
   createdAt: AT,
   allowEdits: true,
   projectSlug: 'proj',

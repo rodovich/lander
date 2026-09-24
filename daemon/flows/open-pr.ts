@@ -11,7 +11,7 @@
 //   collect            → read the working tree, attach the packet, ask for approval
 //   awaiting-approval  → read the answer, continue or stop
 //   push               → push the branch and open the PR, each behind a probe
-//   watch              → poll checks, resting between attempts
+//   watch              → poll checks, pacing between attempts
 //
 // Two rules run through all of it:
 //
@@ -64,12 +64,12 @@ export function resolveLaunchDir({
 
 // ── Tunables ────────────────────────────────────────────────────────────────
 
-// Rest between CI polls, and the cap on how many times we do it. The interval
+// Wait between CI polls, and the cap on how many times we do it. The interval
 // is deliberately realistic rather than short: every wakeup of an
 // already-ridden task pushes a synthetic "Resumed at …" USER item, so a tight
 // poll would write a wall of fake user turns. 12 attempts ≈ 1 hour ≈ 12 such
-// items, which is the noise budget that made it acceptable to defer "quiet
-// rest" to step 6 (where watch-ci actually motivates it).
+// items, which is the noise budget that made it acceptable to defer "quieter
+// wakeups" to step 6 (where watch-ci actually motivates it).
 const WATCH_INTERVAL_MIN = 5
 const MAX_WATCH_ATTEMPTS = 12
 
@@ -231,7 +231,7 @@ async function onTurn(ctx: Ctx): Promise<TurnResult> {
 
     if (current === 'push') {
       await push(ctx, { run, runMutating, setPhase, dryRun })
-      // push ends by resting; the ride ends here.
+      // push ends by arming a wakeup; the ride ends here.
       return { exitCode: 0 }
     }
 
@@ -532,7 +532,7 @@ async function watch(
   ctx.state.set(['attempts'], nextAttempt)
 
   // On the FIRST pending result, offer a way out — advisory, so the task keeps
-  // resting rather than demanding an answer.
+  // pacing rather than demanding an answer.
   if (nextAttempt === 1 && !advisory) {
     await ctx.ask({
       prompt: `Checks for PR #${prNumber} are still running. Keep watching?`,

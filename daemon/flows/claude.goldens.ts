@@ -349,12 +349,12 @@ export const CLAUDE_GOLDENS: Golden[] = [
     start: { revived: { from: 'wedged' } },
   },
   {
-    // The other half of the marker: a message that woke a resting task early
+    // The other half of the marker: a message that woke a pacing task early
     // disarmed its timer, and the notice has to say so or the woken turn silently
     // loses a wakeup it may still want.
-    name: 'revival notice names a cleared rest timer',
+    name: 'revival notice names a cleared wakeup timer',
     chunks: [[init(), assistantText('ok')], [result()]],
-    start: { revived: { restUntil: '3:00:00 PM' } },
+    start: { revived: { pacingUntil: '3:00:00 PM' } },
   },
   {
     name: 'agent stderr is aggregated into the done',

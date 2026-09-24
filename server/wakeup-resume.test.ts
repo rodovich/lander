@@ -174,8 +174,8 @@ describe('the prompt a fired wakeup drives', () => {
 
 // A `--notify` delivery is a message, not a wakeup — it never drives the
 // synthetic prompt. What it shares with a sent message is the arrival, so it has
-// to settle the rest timer that arrival makes moot.
-describe('a notify delivery supersedes the launcher’s rest timer', () => {
+// to settle the wakeup timer that arrival makes moot.
+describe('a notify delivery supersedes the launcher’s wakeup timer', () => {
   it('disarms the timer, tells the woken turn, and leaves the await armed', async () => {
     await seed('notify-launcher', {
       scheduledFor: LATE,
@@ -198,7 +198,7 @@ describe('a notify delivery supersedes the launcher’s rest timer', () => {
     // Named to the woken turn, so re-arming is a single actionable step.
     expect(writes).toContainEqual(
       expect.objectContaining({
-        revived: { restUntil: new Date(LATE).toLocaleString() },
+        revived: { pacingUntil: new Date(LATE).toLocaleString() },
       }),
     )
     // The await is a dependency on the child LANDING, which finishing a turn is

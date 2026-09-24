@@ -158,7 +158,7 @@ const REFUSALS: Record<HookRefusalReason, string> = {
   bound: `this hook has already acted ${HOOK_ACTION_BOUND} times on this task since a human last touched it`,
   wedged: 'the task is wedged, holding a question for its human',
   riding: 'the task is working again',
-  scheduled: 'the task is resting on a wakeup, which landing would delete',
+  scheduled: 'the task is waiting on a wakeup, which landing would delete',
   stale:
     'the task has moved on since this fire was recorded, so the finding is out of date',
 }

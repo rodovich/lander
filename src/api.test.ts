@@ -73,7 +73,7 @@ describe('loadTaskLinks conditional requests', () => {
                 id: 'same',
                 projectSlug: 'other',
                 title: 'Elsewhere',
-                status: 'resting',
+                status: 'pacing',
                 archived: false,
               },
             ],

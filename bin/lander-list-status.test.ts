@@ -16,7 +16,7 @@ const LANDER_BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), 'land
 const base = { createdAt: '2026-08-01T00:00:00.000Z', updatedAt: '2026-08-01T01:00:00.000Z' }
 const ACTIVE = [
   { ...base, id: 'act-1', title: 'Still going', status: 'riding' },
-  { ...base, id: 'act-2', title: 'Idle', status: 'resting' },
+  { ...base, id: 'act-2', title: 'Idle', status: 'pacing' },
   { ...base, id: 'act-3', title: 'Done', status: 'landed' },
 ]
 
@@ -62,16 +62,16 @@ afterAll(async () => {
 
 describe('lander list --status', () => {
   it('filters on a served status', async () => {
-    const { stdout, code } = await execLander(['list', '--status', 'resting'])
+    const { stdout, code } = await execLander(['list', '--status', 'pacing'])
     expect(code).toBe(0)
     expect(stdout).toContain('act-2')
     expect(stdout).not.toContain('act-1')
   })
 
-  it('accepts resting, which no task file stores', async () => {
-    // The stored value is `riding`; the server derives `resting` from it. A
+  it('accepts pacing, which no task file stores', async () => {
+    // The stored value is `riding`; the server derives `pacing` from it. A
     // vocabulary taken from the stored enum would reject this.
-    const { code } = await execLander(['list', '--status', 'resting'])
+    const { code } = await execLander(['list', '--status', 'pacing'])
     expect(code).toBe(0)
   })
 
@@ -83,7 +83,7 @@ describe('lander list --status', () => {
   })
 
   it('rejects a comma-delimited list, which matches no single row', async () => {
-    const { stderr, code } = await execLander(['list', '--status', 'riding,resting'])
+    const { stderr, code } = await execLander(['list', '--status', 'riding,pacing'])
     expect(code).not.toBe(0)
     expect(stderr).toContain('--status expects one of')
   })

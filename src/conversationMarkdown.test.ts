@@ -49,7 +49,7 @@ const tool = (id: string, rideId: string, over: Partial<ToolItem> = {}): ToolIte
 const task = (items: Item[], rides: Ride[]): TaskWithProject => ({
   id: 'task1',
   title: 'Fix the parser',
-  status: 'resting',
+  status: 'pacing',
   createdAt: AT,
   allowEdits: true,
   projectSlug: 'proj',

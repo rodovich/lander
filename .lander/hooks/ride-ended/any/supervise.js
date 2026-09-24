@@ -1,6 +1,6 @@
 // Supervision: judging, and acting on nothing.
 //
-// A task comes to rest half-finished more often than anyone notices, and the
+// A task stops half-finished more often than anyone notices, and the
 // evidence is that ~13-15 tasks in this corpus exist for no reason but to watch
 // another task and nudge it. Their prompts read as specifications for this hook.
 // What they cannot do is scale, and what a rule in the acting agent's own prompt

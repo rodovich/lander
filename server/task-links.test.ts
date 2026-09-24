@@ -51,7 +51,7 @@ describe('TaskLinkIndex', () => {
         id: 'active',
         projectSlug: 'one',
         title: 'Active',
-        status: 'resting',
+        status: 'pacing',
         archived: false,
       },
       {

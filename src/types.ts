@@ -282,9 +282,9 @@ export type Task = {
   // for Restore. Absent on active tasks.
   archived?: boolean
   // ISO timestamp a scheduled task is set to launch; present only while the
-  // task is resting and waiting for the server's scheduler (or a manual launch).
+  // task is pacing and waiting for the server's scheduler (or a manual launch).
   scheduledFor?: string
-  // Task ids this task is resting on (`--await`); the scheduler launches it once
+  // Task ids this task is waiting on (`--await`); the scheduler launches it once
   // all have landed. Present only while awaiting; may coexist with scheduledFor.
   waitingFor?: string[]
   // Deferred messages armed on this task (`lander send/relaunch --date/--time/

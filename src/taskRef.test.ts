@@ -34,7 +34,7 @@ describe('task references', () => {
       projectSlug,
       id,
       title: id,
-      status: 'resting',
+      status: 'pacing',
       archived: false,
     })
     expect(

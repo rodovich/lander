@@ -281,11 +281,11 @@ describe('publicTask', () => {
   const openR: Ride = { id: 'r1', startedAt: AT }
   const closedR: Ride = { id: 'r0', startedAt: AT, endedAt: later(1), outcome: 'done' }
 
-  it('serves riding with an open ride or a runId, resting otherwise', () => {
+  it('serves riding with an open ride or a runId, pacing otherwise', () => {
     expect(served({ rides: [openR] })).toBe('riding')
     expect(served({ runId: 'r1' })).toBe('riding')
-    expect(served({})).toBe('resting')
-    expect(served({ rides: [closedR] })).toBe('resting')
+    expect(served({})).toBe('pacing')
+    expect(served({ rides: [closedR] })).toBe('pacing')
   })
 
   it('serves wedged/landed as stored', () => {
@@ -343,7 +343,7 @@ describe('taskSummary', () => {
     const riding = taskSummary({ id: 's', status: 'riding', items: [], rides: [openR2] })
     expect((riding as { status?: string }).status).toBe('riding')
     const idle = taskSummary({ id: 's', status: 'riding', items: [], rides: [closedR2] })
-    expect((idle as { status?: string }).status).toBe('resting')
+    expect((idle as { status?: string }).status).toBe('pacing')
   })
 
   it('omits items and rides, and strips everything publicTask strips', () => {
@@ -970,9 +970,9 @@ describe('recordStatusTransition', () => {
     // The other half of the marker is stamped by the /messages endpoint, which
     // can run either side of this: merge, don't assign.
     it('keeps a cleared-timer half another path already stamped', () => {
-      const t = { ...revivedTask('wedged'), revived: { restUntil: '3:00 PM' } }
+      const t = { ...revivedTask('wedged'), revived: { pacingUntil: '3:00 PM' } }
       recordStatusTransition(t, 'riding', AT, 'human')
-      expect(t.revived).toEqual({ restUntil: '3:00 PM', from: 'wedged' })
+      expect(t.revived).toEqual({ pacingUntil: '3:00 PM', from: 'wedged' })
     })
 
     it('stamps nothing when the status does not actually change', () => {
@@ -1030,8 +1030,8 @@ describe('recordStatusTransition', () => {
       expect(askState(t)).toBe('open')
     })
 
-    // riding↔resting isn't a crossing at all (both store as `riding`), which is
-    // what lets an advisory `lander ask` rest with its question still up.
+    // riding↔pacing isn't a crossing at all (both store as `riding`), which is
+    // what lets an advisory `lander ask` wait with its question still up.
     it('keeps an open ask when the status does not actually change', () => {
       const t = asking('riding')
       recordStatusTransition(t, 'riding', AT, 'human')
@@ -1075,7 +1075,7 @@ describe('the task-hook trigger funnel', () => {
       expect(t.pendingHooks![0]).toMatchObject({ at: AT })
     })
 
-    // riding↔resting is not a crossing at all (both store as `riding`), and it
+    // riding↔pacing is not a crossing at all (both store as `riding`), and it
     // is by far the most common move a task makes. Firing here would mean a hook
     // per turn boundary on top of the ride-ended one.
     it('records nothing when the status does not actually change', () => {

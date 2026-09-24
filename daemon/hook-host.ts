@@ -147,7 +147,7 @@ async function checkApproval(
 // ── The context ────────────────────────────────────────────────────────────
 //
 // Deliberately small: a body needs far less than a driver flow. No `emit`
-// (there is no ride), no `state`, no `attachments`, and no ask/wedge/rest/relaunch
+// (there is no ride), no `state`, no `attachments`, and no ask/wedge/ride/relaunch
 // — absent from the surface rather than denied at each route, which is why this
 // shape needs no deny floor across every mutating path.
 //
@@ -426,7 +426,7 @@ function buildCtx(input: HookHostInput, reports: string[]) {
     // End the target, when the judgment is that it is finished.
     //
     // Bounded by the same record as the nudge, and refused on a target that is
-    // wedged, still working, or resting on a wakeup — that last because landing
+    // wedged, still working, or waiting on a wakeup — that last because landing
     // deletes an armed trigger, which would make "a wrongly landed task is
     // revived by a reply" false in exactly the case a supervisor meets most.
     //

@@ -300,7 +300,7 @@ body {
   color: var(--riding);
 }
 
-.task-group-header.status.resting {
+.task-group-header.status.pacing {
   color: var(--muted);
 }
 
@@ -322,7 +322,7 @@ body {
 }
 
 /* The date subheader echoes its status color (a step down in size from the
-   status header keeps the hierarchy). Resting/unknown stay muted. */
+   status header keeps the hierarchy). Pacing/unknown stay muted. */
 .task-group-header.date.wedged {
   color: var(--wedged);
 }
@@ -343,7 +343,7 @@ body {
 
 /* The tasks→header divider, by contrast, is its own zero-height row sitting just
    above the header in normal flow. Living off the header lets it scroll up and
-   out of view as the header pins — so stacked sticky headers (RESTING over OLDER)
+   out of view as the header pins — so stacked sticky headers (PACING over OLDER)
    meet with no rule between them. It carries no spacing of its own: the 8px down to
    the header text below comes from that header (a status centers its text; a date
    pads its top), and the gap to the list above is the last task's padding. */
@@ -377,7 +377,7 @@ body {
 
 /* Hover washes a row with a faint tint of its status color — lighter than the
    selection tint, so a selected row (defined below, equal specificity but later)
-   keeps its stronger wash even while hovered. Resting/unknown stay neutral. */
+   keeps its stronger wash even while hovered. Pacing/unknown stay neutral. */
 .task-item:hover {
   background: var(--bg-tinted);
 }
@@ -398,7 +398,7 @@ body {
   outline: none;
 }
 
-/* The focus ring wears the row's own status color (resting/unknown fall back
+/* The focus ring wears the row's own status color (pacing/unknown fall back
    to muted), matching the hover and selected tints below. */
 .task-item:focus-visible {
   outline: none;
@@ -417,7 +417,7 @@ body {
   box-shadow: inset 0 0 0 2px var(--landed);
 }
 
-/* A selected row is washed with a tint of its own status color (resting and
+/* A selected row is washed with a tint of its own status color (pacing and
    any unknown status fall back to the neutral selection tone). */
 .task-item.selected {
   background: var(--selected);
@@ -459,7 +459,7 @@ body {
 
 /* A small dot marking a task whose latest update the viewer hasn't seen. Sits
    before the title; centered against the baseline-aligned row. It wears the
-   row's status color (resting/unknown fall back to muted). */
+   row's status color (pacing/unknown fall back to muted). */
 .unseen-dot {
   flex-shrink: 0;
   align-self: center;
@@ -495,7 +495,7 @@ body {
 }
 
 /* The clock that marks a deferred task — one scheduled for a later time, or
-   resting until the tasks it awaits have landed. It inherits the status color
+   pacing until the tasks it awaits have landed. It inherits the status color
    via currentColor and sits on the text baseline. */
 .scheduled-clock {
   flex-shrink: 0;
@@ -704,7 +704,7 @@ body {
 }
 
 /* The quiet default once a turn finishes — neither blocked nor done. */
-.task-status.resting {
+.task-status.pacing {
   color: var(--muted);
 }
 
@@ -754,7 +754,7 @@ body {
   color: var(--riding);
 }
 
-.task-count.resting {
+.task-count.pacing {
   color: var(--muted);
 }
 
@@ -1698,12 +1698,12 @@ body {
   background: color-mix(in srgb, var(--landed) 20%, transparent);
 }
 
-.message-text a.task-mention.resting {
+.message-text a.task-mention.pacing {
   background: color-mix(in srgb, var(--muted) 14%, transparent);
   color: var(--muted);
 }
 
-.message-text a.task-mention.resting:hover {
+.message-text a.task-mention.pacing:hover {
   background: color-mix(in srgb, var(--muted) 22%, transparent);
 }
 
@@ -1838,10 +1838,10 @@ body {
   color: var(--landed);
 }
 
-/* Same muted tone as the "resting" status pill — a scheduled task rests. */
+/* Same muted tone as the "pacing" status pill — a scheduled task is pacing. */
 .timeline-note-label.scheduled,
 .timeline-note-label.awaiting,
-.timeline-note-label.resting {
+.timeline-note-label.pacing {
   color: var(--muted);
 }
 
@@ -1891,12 +1891,12 @@ body {
   background: color-mix(in srgb, var(--landed) 20%, transparent);
 }
 
-.timeline-note-link.resting {
+.timeline-note-link.pacing {
   background: color-mix(in srgb, var(--muted) 14%, transparent);
   color: var(--muted);
 }
 
-.timeline-note-link.resting:hover {
+.timeline-note-link.pacing:hover {
   background: color-mix(in srgb, var(--muted) 22%, transparent);
 }
 

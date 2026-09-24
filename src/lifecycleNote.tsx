@@ -70,7 +70,7 @@ export function LifecycleNote({
       {name}
       <span className={`timeline-note-label ${event.eventKind}`}>
         {EVENT_VERB[event.eventKind]}
-        {/* A 'scheduled' rest and an armed scheduled 'relaunch' both show the
+        {/* A 'scheduled' wakeup and an armed scheduled 'relaunch' both show the
             time they'll fire beside the verb. */}
         {(event.eventKind === 'scheduled' ||
           event.eventKind === 'relaunched') &&
