@@ -159,10 +159,20 @@ export function fullToolInput(input: unknown): string {
 // `Read(/path/to/file)` — which Claude reads as relative to the rule's source,
 // not the filesystem root. The Claude flow re-spells it before it reaches the
 // timeline (anchorFileRule in daemon/flows/claude.ts).
+//
+// Claude matches web tools by their own grammar, not the call's input: WebFetch
+// only by `domain:<host>` (a `WebFetch(<url>)` rule matches nothing), and
+// WebSearch only bare (a `WebSearch(<query>)` rule matches nothing). Checked
+// against CLI 2.1.280.
 export function toolRule(name: string, input: unknown): string {
+  if (name === 'WebSearch') return name
   if (!input || typeof input !== 'object') return name
   const i = input as Record<string, unknown>
   const str = (k: string) => (typeof i[k] === 'string' ? (i[k] as string) : '')
+  if (name === 'WebFetch') {
+    const host = URL.parse(str('url'))?.hostname
+    return host ? `${name}(domain:${host})` : name
+  }
   const spec =
     str('command') ||
     str('file_path') ||

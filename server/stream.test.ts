@@ -121,6 +121,23 @@ describe('toolRule', () => {
     expect(toolRule('TodoWrite', { todos: [] })).toBe('TodoWrite')
   })
 
+  it('spells WebFetch by domain, the only form Claude matches', () => {
+    expect(
+      toolRule('WebFetch', {
+        url: 'https://Example.com:8443/a/b?q=1',
+        prompt: 'summarize',
+      }),
+    ).toBe('WebFetch(domain:example.com)')
+    expect(toolRule('WebFetch', { url: 'not a url' })).toBe('WebFetch')
+    expect(toolRule('WebFetch', {})).toBe('WebFetch')
+  })
+
+  it('leaves WebSearch bare, since a query rule never matches', () => {
+    expect(toolRule('WebSearch', { query: 'example domain iana' })).toBe(
+      'WebSearch',
+    )
+  })
+
   it('does not truncate the specifier (the grant must be exact)', () => {
     const cmd = 'echo ' + 'x'.repeat(500)
     expect(toolRule('Bash', { command: cmd })).toBe(`Bash(${cmd})`)
