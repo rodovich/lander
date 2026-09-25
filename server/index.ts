@@ -581,13 +581,22 @@ async function awaitDaemonServing(
   return daemonServes(slug)
 }
 
-// Stop a turn so a riding task can be wedged out from under the agent: ask the
-// daemon to interrupt the run. It SIGKILLs the child and emits a clean
+// Stop a turn out from under the agent (a riding task wedged, landed, or paced):
+// ask the daemon to interrupt the run. It SIGKILLs the child and emits a clean
 // done{interrupted:true}, which reduceRunWs folds in — finalizing whatever
-// partial reply streamed without surfacing a crash. Best effort: a run that has
-// already finished is a no-op on the daemon side.
-function interruptRun(_project: Project, runId: string): void {
-  sendToDaemon({ type: 'interrupt', runId })
+// partial reply streamed without surfacing a crash. Then wait, briefly, for that
+// fold to close the run's ride, so the caller answers with the task as it now
+// stands: a paced task's only record of the pace is its closed ride. Best
+// effort: a run that has already finished is a no-op on the daemon side, and an
+// undelivered interrupt or a slow fold just answers with the ride still open.
+async function interruptRun(project: Project, id: string, runId: string): Promise<void> {
+  if (!sendToDaemon({ type: 'interrupt', runId })) return
+  const deadline = Date.now() + 3000
+  while (Date.now() < deadline) {
+    const task = await readTask(project.dataDir, id)
+    if (!task || openRide(task)?.id !== runId) return
+    await sleep(50)
+  }
 }
 
 // Run one agent turn on the host daemon and reduce its streamed updates onto the
@@ -2866,17 +2875,19 @@ app.patch('/api/:project/tasks/:id', async (c) => {
         return c.json({ error: 'a task may only land tasks it launched' }, 403)
     }
 
-    // Wedging or landing a riding task from anyone but the task's own CLI stops
-    // its in-flight run: the run is being pulled out from under the agent — the
-    // human redirecting a wedge, or a spawner winding down a child it launched.
-    // A task wedging or landing *itself* is finishing its own turn and runs on.
-    // The interrupt fires after the status write below; the run's reducer folds
-    // in the partial reply and (applyDone only wedges a still-riding task on a
-    // non-deliberate exit) leaves the new non-riding status as-is.
+    // Any status change to a riding task from anyone but the task's own CLI
+    // stops its in-flight run: the run is being pulled out from under the agent
+    // — the human redirecting a wedge or pacing it, or a spawner winding down a
+    // child it launched. A task wedging or landing *itself* is finishing its own
+    // turn and runs on. The interrupt fires after the status write below; the
+    // run's reducer folds in the partial reply and (applyDone only wedges a
+    // still-riding task on a non-deliberate exit) leaves the new status as-is.
+    // A pace (`paced`, stored as `riding`) is only the interrupt: the closed ride
+    // is what serves the task back as paced.
     const selfInitiated = isSelfPrincipal(principal, project, id)
     const runId = task.runId
     const interrupt =
-      (body.status === 'wedged' || body.status === 'landed') &&
+      typeof body.status === 'string' &&
       !selfInitiated &&
       task.status === 'riding' &&
       !!runId
@@ -2946,7 +2957,7 @@ app.patch('/api/:project/tasks/:id', async (c) => {
       )
     }
 
-    if (interrupt && runId) await interruptRun(project, runId)
+    if (interrupt && runId) await interruptRun(project, id, runId)
 
     const updated = await readTask(project.dataDir, id)
     return c.json(publicTask(updated ?? task))

@@ -7,6 +7,7 @@ export type TaskAction =
   | 'launch'
   | 'wedge'
   | 'unwedge'
+  | 'pace'
   | 'land'
   | 'unland'
   | 'copyId'
@@ -31,7 +32,8 @@ export type TaskActionOption = {
 //  - launch:     a scheduled task (scheduledFor set, paced or wedged), to run it early
 //  - wedge:      any task not already wedged
 //  - unwedge:    a wedged task, to clear the wedge without waking it
-//  - land:       any task not already landed
+//  - pace:       a riding task, to interrupt its turn and leave it paced
+//  - land:      any task not already landed
 //  - unland:     a landed task, to clear the land without waking it
 //  - copyId:     any task, to copy its id to the clipboard
 //  - markUnread: any task that isn't already showing unviewed updates
@@ -49,6 +51,7 @@ export function availableTaskActions(task: TaskWithProject): TaskActionOption[] 
   if (task.scheduledFor) status('launch', 'Launch')
   if (task.status !== 'wedged') status('wedge', 'Wedge')
   if (task.status === 'wedged') status('unwedge', 'Un-wedge')
+  if (task.status === 'riding') status('pace', 'Pace')
   if (task.status !== 'landed') status('land', 'Land')
   if (task.status === 'landed') status('unland', 'Un-land')
   other('copyId', 'Copy ID')

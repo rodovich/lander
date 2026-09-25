@@ -325,7 +325,9 @@ export function useTaskActions(opts: {
       if (action === 'launch') void launchNow(task)
       else if (action === 'wedge') void setStatus(task, 'wedged')
       else if (action === 'land') void setStatus(task, 'landed')
-      else if (action === 'unwedge' || action === 'unland')
+      // All three settle the task paced; pacing a riding one is what interrupts
+      // its turn, which the server does on the status change itself.
+      else if (action === 'unwedge' || action === 'unland' || action === 'pace')
         void setStatus(task, 'paced')
       else if (action === 'copyId')
         void navigator.clipboard.writeText(task.id).catch(() => {})

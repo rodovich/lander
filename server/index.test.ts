@@ -3785,6 +3785,31 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     answerInterrupt = false
   })
 
+  // Pacing is the same interrupt without leaving the riding/paced superstate:
+  // the PATCH answers once the ride has closed, so it serves back as paced.
+  it('a user PATCH to paced interrupts the run and stays riding', async () => {
+    const id = 'kill-user-pace'
+    await seed(id)
+    answerInterrupt = true
+
+    expect((await post(`/api/${slug}/tasks/${id}/messages`, { message: 'go' })).status).toBe(200)
+    await waitFor(() => startRuns(id).length === 1)
+    await waitForRaw(id, (raw) => !!raw.runId)
+
+    const res = await app.request(`/api/${slug}/tasks/${id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', 'x-lander-ui-token': UI_TOKEN },
+      body: JSON.stringify({ status: 'paced' }),
+    })
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as Raw).status).toBe('paced')
+    const raw = await waitForRaw(id, (r) => !r.runId)
+    expect(raw.status).toBe('riding')
+    expect((raw.rides as Raw[]).at(-1)?.outcome).toBe('interrupted')
+    expect(asksOf(raw).some((a) => a.origin === 'retry')).toBe(false)
+    answerInterrupt = false
+  })
+
   // The two tests below wait on the server's reconnect grace, and that wait is
   // usually instant but sometimes real. killDaemon fakes the clock so it can
   // expire the grace immediately — but reconcileGrace refuses to replace a timer
