@@ -566,7 +566,7 @@ body {
 }
 
 /* Fixed-positioned (anchored to the kebab's live rect) so the scrolling task
-   list never clips it. Right-aligned under the trigger. */
+   list never clips it; useAnchoredPosition keeps it inside the window. */
 .task-menu-popup {
   position: fixed;
   z-index: 100;
@@ -2342,16 +2342,13 @@ body {
   cursor: default;
 }
 
-/* The two-scope grant menu, dropping down from a row's kebab with its left edge
-   aligned to the kebab. Sits within the fixed .rule-popup, so it needs no escape
-   of its own. */
+/* The two-scope grant menu, fixed-anchored to a row's kebab (top/left set inline
+   from its measured rect) so it can shift left or flip up to stay inside the
+   window. Stacks within the fixed .rule-popup, above its rows. */
 .rule-row-menu-popup {
-  position: absolute;
-  top: 100%;
-  left: 0;
+  position: fixed;
   z-index: 1;
   min-width: 150px;
-  margin-top: 2px;
   padding: 4px;
   display: flex;
   flex-direction: column;
@@ -2359,15 +2356,6 @@ body {
   border: 1px solid var(--border);
   border-radius: 6px;
   box-shadow: 0 6px 18px rgba(17, 0, 0, 0.16);
-}
-
-/* When there isn't room below the kebab, the menu opens upward instead so it
-   can't spill past the window's bottom. */
-.rule-row-menu-popup.up {
-  top: auto;
-  bottom: 100%;
-  margin-top: 0;
-  margin-bottom: 2px;
 }
 
 /* One grant scope in that menu, read like a kebab menu's items. */

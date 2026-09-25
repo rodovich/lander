@@ -95,16 +95,20 @@ export function useFileDrop<T extends HTMLElement>(
   }
 }
 
-// A fixed-anchored popup that hangs under its trigger, flipping *above* it when
-// there isn't room below (so it never spills past the window's bottom), with
-// outside-click / Escape dismissal and re-anchoring on scroll/resize. Owns the
-// open state and returns refs to wire up. The popup is measured after it mounts
-// (hidden for one layout tick), so the up/down decision uses its real height.
-// Shared by the actions menus, the blocked-permissions summary, and the header
-// grant control. `gap` is the distance it stands off its trigger.
-export function useAnchoredPopup({ gap = 6 }: { gap?: number } = {}) {
-  const [open, setOpen] = useState(false)
-  const containerRef = useRef<HTMLDivElement>(null)
+// The closest a fixed-anchored popup may come to the window's edge.
+const VIEWPORT_MARGIN = 8
+
+// Where a `position: fixed` popup goes, relative to its trigger's live viewport
+// rect, so it stays inside the window: it hangs under the trigger, flipping
+// *above* it when there isn't room below, and left-aligns with it, flipping to
+// right-align when there isn't room to the right — then is clamped into the
+// window if even that overflows. The popup is measured after it mounts (hidden
+// for one layout tick), so both decisions use its real size, and it re-anchors
+// on scroll/resize. Open state belongs to the caller; useAnchoredPopup adds it
+// with dismissal for a standalone popup, while a popup whose open state lives
+// elsewhere (a rule row's scope menu) uses this directly. `gap` is the distance
+// it stands off its trigger.
+export function useAnchoredPosition(open: boolean, gap: number) {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const popupRef = useRef<HTMLDivElement>(null)
   const [style, setStyle] = useState<CSSProperties | null>(null)
@@ -118,19 +122,46 @@ export function useAnchoredPopup({ gap = 6 }: { gap?: number } = {}) {
       const r = triggerRef.current?.getBoundingClientRect()
       if (!r) return
       const ph = popupRef.current?.offsetHeight ?? 0
+      const pw = popupRef.current?.offsetWidth ?? 0
       const spaceBelow = window.innerHeight - r.bottom
       const spaceAbove = r.top
       // Flip up only once the height is known (ph > 0) and below can't hold it
       // while above has more room; otherwise hang below.
       const openUp = ph > 0 && spaceBelow < ph + gap && spaceAbove > spaceBelow
+      const maxLeft = window.innerWidth - VIEWPORT_MARGIN - pw
+      const left = r.left <= maxLeft ? r.left : r.right - pw
       setStyle({
-        left: r.left,
+        left: Math.max(VIEWPORT_MARGIN, Math.min(left, maxLeft)),
         ...(openUp
           ? { bottom: window.innerHeight - r.top + gap }
           : { top: r.bottom + gap }),
       })
     }
     place()
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [open, gap])
+
+  // Until the first layout pass sets a real position, keep the mounted popup
+  // hidden so its unplaced frame never flashes at the top-left.
+  const popupStyle: CSSProperties = style ?? { visibility: 'hidden', top: 0, left: 0 }
+  return { triggerRef, popupRef, popupStyle }
+}
+
+// A fixed-anchored popup (placed by useAnchoredPosition) that owns its open
+// state and closes on an outside click or Escape. Shared by the actions menus,
+// the blocked-permissions summary, and the header grant control.
+export function useAnchoredPopup({ gap = 6 }: { gap?: number } = {}) {
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const { triggerRef, popupRef, popupStyle } = useAnchoredPosition(open, gap)
+
+  useEffect(() => {
+    if (!open) return
     const onDown = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node))
         setOpen(false)
@@ -140,18 +171,11 @@ export function useAnchoredPopup({ gap = 6 }: { gap?: number } = {}) {
     }
     window.addEventListener('mousedown', onDown)
     window.addEventListener('keydown', onKey)
-    window.addEventListener('resize', place)
-    window.addEventListener('scroll', place, true)
     return () => {
       window.removeEventListener('mousedown', onDown)
       window.removeEventListener('keydown', onKey)
-      window.removeEventListener('resize', place)
-      window.removeEventListener('scroll', place, true)
     }
-  }, [open, gap])
+  }, [open])
 
-  // Until the first layout pass sets a real position, keep the mounted popup
-  // hidden so its unplaced frame never flashes at the top-left.
-  const popupStyle: CSSProperties = style ?? { visibility: 'hidden', top: 0, left: 0 }
   return { open, setOpen, containerRef, triggerRef, popupRef, popupStyle }
 }

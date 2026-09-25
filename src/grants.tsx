@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { useAnchoredPopup } from './hooks'
+import { useEffect, useRef, useState } from 'react'
+import { useAnchoredPopup, useAnchoredPosition } from './hooks'
 import type { BlockedRequest } from './permissions'
 import type { Task } from './types'
 
@@ -63,12 +63,13 @@ export function RuleRow({
   const [committed, setCommitted] = useState(initialRule)
   const [draft, setDraft] = useState(initialRule)
   const inputRef = useRef<HTMLInputElement>(null)
-  const kebabRef = useRef<HTMLButtonElement>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
-  // Open the scope menu upward when there isn't room for it below the kebab, so
-  // it can't spill past the window's bottom (measured against the kebab's live
-  // viewport rect, so it works wherever the enclosing popup ended up).
-  const [menuUp, setMenuUp] = useState(false)
+  // The scope menu is fixed-anchored to the kebab like the popup it sits in, so
+  // it stays inside the window even when the kebab is near its edge.
+  const {
+    triggerRef: kebabRef,
+    popupRef: menuRef,
+    popupStyle: menuStyle,
+  } = useAnchoredPosition(menuOpen, 2)
   // Absent capabilities (legacy payloads) default to fully capable.
   const canGrantTask = grants?.task ?? true
   const canGrantProject = grants?.project ?? true
@@ -79,19 +80,6 @@ export function RuleRow({
       inputRef.current?.select()
     }
   }, [editing])
-
-  useLayoutEffect(() => {
-    if (!menuOpen) {
-      setMenuUp(false)
-      return
-    }
-    const kr = kebabRef.current?.getBoundingClientRect()
-    const mh = menuRef.current?.offsetHeight ?? 0
-    if (kr) {
-      const spaceBelow = window.innerHeight - kr.bottom
-      setMenuUp(mh > 0 && spaceBelow < mh + 8 && kr.top > spaceBelow)
-    }
-  }, [menuOpen])
 
   function commit() {
     setCommitted(draft.trim())
@@ -171,8 +159,9 @@ export function RuleRow({
           {menuOpen && (
             <div
               ref={menuRef}
-              className={'rule-row-menu-popup' + (menuUp ? ' up' : '')}
+              className="rule-row-menu-popup"
               role="menu"
+              style={menuStyle}
             >
               <button
                 type="button"
