@@ -245,6 +245,24 @@ describe('RideTurn cross-task actions', () => {
     expect(html.indexOf('child-of-a1')).toBeGreaterThan(html.indexOf('3 steps'))
   })
 
+  it('stays before the next prose on an open ride as later prose streams in', () => {
+    // The same trace mid-ride: nothing is folded, so the note leads the prose
+    // right after its action rather than the fold's last kept sequence.
+    const open: RideItem[] = [
+      flow('open', 'opening-prose', { at: T('10:00:01'), groupId: 'g1' }),
+      tool('t1', { at: T('10:00:02'), groupId: 'g2' }),
+      flow('mid', 'middle-prose', { at: T('10:00:04'), groupId: 'g3' }),
+      tool('t2', { at: T('10:00:05'), groupId: 'g4' }),
+      flow('end', 'closing-'.repeat(10), { at: T('10:00:09'), groupId: 'g5' }),
+    ]
+    const html = render(open, {
+      actions: [taskAction('a1', T('10:00:03'))],
+      ride: settledRide({ endedAt: undefined }),
+    })
+    expect(html.indexOf('child-of-a1')).toBeGreaterThan(html.indexOf('t1'))
+    expect(html.indexOf('child-of-a1')).toBeLessThan(html.indexOf('middle-prose'))
+  })
+
   it('stacks everything done in one stretch as a single block', () => {
     const html = render(
       [

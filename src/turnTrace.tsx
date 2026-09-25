@@ -90,7 +90,15 @@ export function TurnTrace({
   // Where this turn's cross-task actions land: each before the next prose
   // section the fold keeps, so a note whose `lander launch` is inside a folded
   // stretch surfaces under that stretch's summary instead of hiding behind it.
-  const anchored = planTurnActions(items, mainIdxs, actions, collapse)
+  // Only a settled turn folds, so an open one anchors against every section —
+  // the plan's hidden ranges shift as prose streams in, and would drag the
+  // note down to each new paragraph.
+  const anchored = planTurnActions(
+    items,
+    mainIdxs,
+    actions,
+    settled ? collapse : { segments: [] },
+  )
 
   const renderBody = (j: number) => {
     const it = items[j]
