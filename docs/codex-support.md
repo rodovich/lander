@@ -27,8 +27,11 @@ agent CLI through the shared runtime, and reduces its output into host events.
 
 The Claude flow launches `claude` with Claude-specific session, permission,
 hook, worktree, and stream-json options. The Codex flow launches
-`codex exec --json --cd <cwd>`, captures the emitted thread id as the provider
-session id, and resumes with `codex exec --json --cd <cwd> resume <session-id>`.
+`codex exec --json --skip-git-repo-check --cd <cwd>`, captures the emitted
+thread id as the provider session id, and resumes with
+`codex exec --json --skip-git-repo-check --cd <cwd> resume <session-id>`.
+`--skip-git-repo-check` lets a project that is not a git repo run at all; codex
+otherwise refuses any directory outside a trusted repo.
 Both flows reduce provider output into Lander's normalized update shape:
 activity steps, final assistant text, usage, terminal errors, and provider
 session announcements.

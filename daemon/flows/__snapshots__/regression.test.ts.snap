@@ -3520,6 +3520,7 @@ exports[`codex transcript regressions > agent message reply 1`] = `
       "args": [
         "exec",
         "--json",
+        "--skip-git-repo-check",
         "--config",
         "default_permissions="lander-read-only"",
         "--config",
@@ -3622,6 +3623,7 @@ exports[`codex transcript regressions > command execution started and completed 
       "args": [
         "exec",
         "--json",
+        "--skip-git-repo-check",
         "--config",
         "default_permissions="lander-read-only"",
         "--config",
@@ -3763,6 +3765,7 @@ exports[`codex transcript regressions > edit access synthesizes the scoped works
       "args": [
         "exec",
         "--json",
+        "--skip-git-repo-check",
         "--config",
         "default_permissions="lander-edit"",
         "--config",
@@ -3865,6 +3868,7 @@ exports[`codex transcript regressions > error event folds into a failed done on 
       "args": [
         "exec",
         "--json",
+        "--skip-git-repo-check",
         "--config",
         "default_permissions="lander-read-only"",
         "--config",
@@ -3989,6 +3993,7 @@ exports[`codex transcript regressions > failed command execution 1`] = `
       "args": [
         "exec",
         "--json",
+        "--skip-git-repo-check",
         "--config",
         "default_permissions="lander-read-only"",
         "--config",
@@ -4115,6 +4120,7 @@ exports[`codex transcript regressions > file change item 1`] = `
       "args": [
         "exec",
         "--json",
+        "--skip-git-repo-check",
         "--config",
         "default_permissions="lander-read-only"",
         "--config",
@@ -4246,6 +4252,7 @@ exports[`codex transcript regressions > image turn places -i after the prompt on
       "args": [
         "exec",
         "--json",
+        "--skip-git-repo-check",
         "--config",
         "default_permissions="lander-read-only"",
         "--config",
@@ -4357,6 +4364,7 @@ exports[`codex transcript regressions > image turn places -i before the prompt o
       "args": [
         "exec",
         "--json",
+        "--skip-git-repo-check",
         "--config",
         "default_permissions="lander-read-only"",
         "--config",
@@ -4471,6 +4479,7 @@ exports[`codex transcript regressions > later ride reusing the same local item i
       "args": [
         "exec",
         "--json",
+        "--skip-git-repo-check",
         "--config",
         "default_permissions="lander-read-only"",
         "--config",
@@ -4586,6 +4595,7 @@ exports[`codex transcript regressions > read-only access synthesizes the read-on
       "args": [
         "exec",
         "--json",
+        "--skip-git-repo-check",
         "--config",
         "default_permissions="lander-read-only"",
         "--config",
@@ -4688,6 +4698,7 @@ exports[`codex transcript regressions > recorded cwd becomes the launch dir 1`] 
       "args": [
         "exec",
         "--json",
+        "--skip-git-repo-check",
         "--config",
         "default_permissions="lander-read-only"",
         "--config",
@@ -4790,6 +4801,7 @@ exports[`codex transcript regressions > result-only failed command with no obser
       "args": [
         "exec",
         "--json",
+        "--skip-git-repo-check",
         "--config",
         "default_permissions="lander-read-only"",
         "--config",
@@ -4903,6 +4915,7 @@ exports[`codex transcript regressions > resumed turn re-emitting thread.started 
       "args": [
         "exec",
         "--json",
+        "--skip-git-repo-check",
         "--config",
         "default_permissions="lander-read-only"",
         "--config",
@@ -5008,6 +5021,7 @@ exports[`codex transcript regressions > revival notice rides the prompt of the r
       "args": [
         "exec",
         "--json",
+        "--skip-git-repo-check",
         "--config",
         "default_permissions="lander-read-only"",
         "--config",
@@ -5114,6 +5128,7 @@ exports[`codex transcript regressions > second ride seeded with a nonzero flowSt
       "args": [
         "exec",
         "--json",
+        "--skip-git-repo-check",
         "--config",
         "default_permissions="lander-read-only"",
         "--config",
@@ -5217,6 +5232,7 @@ exports[`codex transcript regressions > turn.failed folds into a failed done 1`]
       "args": [
         "exec",
         "--json",
+        "--skip-git-repo-check",
         "--config",
         "default_permissions="lander-read-only"",
         "--config",
@@ -5341,6 +5357,7 @@ exports[`codex transcript regressions > usage on turn.completed 1`] = `
       "args": [
         "exec",
         "--json",
+        "--skip-git-repo-check",
         "--config",
         "default_permissions="lander-read-only"",
         "--config",

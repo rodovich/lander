@@ -323,10 +323,15 @@ function buildCodexArgs(
   // (confirmed Codex v0.144.5: a bare `- bullet…` prompt errors with "unexpected
   // argument", and codex's own tip is to pass it after `--`).
   const imageArgs = ctx.turn.images.flatMap((p) => ['-i', p])
+  // `--skip-git-repo-check` because a project need not be a git repo, and
+  // without it codex refuses to run outside a trusted one (confirmed v0.154.0:
+  // exit 1, "Not inside a trusted directory…"). Given at the exec level, it
+  // holds for `exec resume` too.
   if (sessionId)
     return [
       'exec',
       '--json',
+      '--skip-git-repo-check',
       ...codexConfigArgs(profile, configOverridesWithLanderDefaults),
       '--cd',
       ctx.task.cwd,
@@ -339,6 +344,7 @@ function buildCodexArgs(
   return [
     'exec',
     '--json',
+    '--skip-git-repo-check',
     ...codexConfigArgs(profile, configOverridesWithLanderDefaults),
     '--cd',
     ctx.task.cwd,

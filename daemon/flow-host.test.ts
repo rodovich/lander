@@ -196,6 +196,7 @@ describe('flow host', () => {
       args: [
         'exec',
         '--json',
+        '--skip-git-repo-check',
         '--config',
         'default_permissions="lander-read-only"',
         '--config',

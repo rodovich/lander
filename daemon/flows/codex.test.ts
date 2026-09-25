@@ -103,6 +103,7 @@ describe('Codex flow launch', () => {
     expect(launch.args).toEqual([
       'exec',
       '--json',
+      '--skip-git-repo-check',
       ...permissionArgs(false),
       '--config',
       'shell_environment_policy.inherit=all',
@@ -119,7 +120,6 @@ describe('Codex flow launch', () => {
       ),
     ])
     expect(launch.args.join('\0')).not.toContain('secret-token')
-    expect(launch.args).not.toContain('--skip-git-repo-check')
     expect(launch.args).not.toContain('--sandbox')
     expect(launch.args.join('\0')).not.toContain('sandbox_mode')
     expect(launch.args.join('\0')).toContain('extends=":read-only"')
@@ -139,6 +139,7 @@ describe('Codex flow launch', () => {
     expect(launch.args).toEqual([
       'exec',
       '--json',
+      '--skip-git-repo-check',
       ...permissionArgs(true),
       '--config',
       'shell_environment_policy.inherit=all',
@@ -178,6 +179,7 @@ describe('Codex flow launch', () => {
     expect(launch.args).toEqual([
       'exec',
       '--json',
+      '--skip-git-repo-check',
       ...permissionArgs(true, '/worktrees/feature', '/repo/.git'),
       '--config',
       'shell_environment_policy.inherit=all',
@@ -210,6 +212,7 @@ describe('Codex flow launch', () => {
     expect(launch.args).toEqual([
       'exec',
       '--json',
+      '--skip-git-repo-check',
       ...permissionArgs(false),
       '--config',
       'shell_environment_policy.inherit=all',
@@ -244,6 +247,7 @@ describe('Codex flow launch', () => {
     expect(launch.args).toEqual([
       'exec',
       '--json',
+      '--skip-git-repo-check',
       ...permissionArgs(true),
       '--config',
       'shell_environment_policy.inherit=all',
@@ -283,6 +287,7 @@ describe('Codex flow launch', () => {
     expect(launch.args).toEqual([
       'exec',
       '--json',
+      '--skip-git-repo-check',
       '--profile',
       'lander-codex',
       '--config',
@@ -327,6 +332,7 @@ describe('Codex flow launch', () => {
     expect(launch.args).toEqual([
       'exec',
       '--json',
+      '--skip-git-repo-check',
       '--profile',
       'lander-codex',
       '--config',
