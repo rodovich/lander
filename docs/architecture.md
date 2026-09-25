@@ -137,6 +137,15 @@ The server supplies a 15-minute idle timeout on every `start-run` message. The
 supervisor uses that required value directly and re-arms its watchdog on host
 stdout or stderr. There is no separate daemon timeout setting.
 
+The watchdog measures wall-clock silence, and the loop clock counts time the Mac
+spent asleep — so a machine that sleeps under a live turn hands the watchdog a run
+that looks 15 minutes idle the instant it wakes, and kills it. To narrow that
+window the daemon holds a `caffeinate -s -w <pid>` assertion whenever it is riding
+anything (`daemon/power.ts`). `-s` is honored only on AC power, which is the policy
+we want for a laptop and costs nothing to express; `-w` ties the assertion's life
+to the daemon's, so a hard kill can't leave the Mac pinned awake. It only narrows
+the window: no assertion survives a closed lid or an explicit Sleep.
+
 ## Restart and hot reload
 
 Because turns run in the separate host daemon, restarting the API doesn't

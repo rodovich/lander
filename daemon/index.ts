@@ -38,6 +38,7 @@ import { statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { createRunManager, type RunManagerMessage } from './run'
 import { createDrain } from './drain'
+import { createWakeHold } from './power'
 import {
   materializeAttachments,
   taskFilesDir,
@@ -300,6 +301,10 @@ async function materialize(
   })
 }
 
+// Held while we're riding anything, so an idle Mac doesn't sleep under a live
+// turn and hand the idle watchdog a run that looks silent the instant it wakes.
+const wake = createWakeHold()
+
 const runManager = createRunManager({
   caps: CAPS,
   resolveRunPaths,
@@ -309,7 +314,13 @@ const runManager = createRunManager({
   resolveFilesDir: (msg) => taskFilesDir(FILES_ROOT, msg.project, msg.taskId),
   materialize,
   refreshUsage,
-  onEmpty: () => drain.check(),
+  onEmpty: () => {
+    drain.check()
+    // onEmpty is a "one was removed" nudge, not a promise the map is empty, so
+    // ask before dropping the assertion. A settled-but-unacked run still counts,
+    // which over-holds by at most the reply round trip.
+    if (runManager.size() === 0) wake.release()
+  },
 })
 
 // The dev supervisor's drain handoff (daemon-watch.mjs sends SIGUSR2 on a daemon
@@ -404,6 +415,10 @@ function startRun(msg: StartRunMessage): void {
     })
     return
   }
+  // Before the start, not after: the attachment path registers its run
+  // asynchronously, so there is a window where nothing is held yet and a sleep
+  // would land squarely in it.
+  wake.hold()
   runManager.startRun(msg)
 }
 
