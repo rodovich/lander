@@ -120,6 +120,14 @@ receives. And when a change rests on a claim about how the agent CLI or the
 harness behaves, check that premise against the corpus (`data/`, or the harness's
 own record) or a probe before building on it.
 
+## Contract tests
+
+Assumptions about how the agent CLIs behave — a flag's meaning, what a stream
+field counts, whether a permission rule matches — are checked against the real
+CLIs by `npm run test:contract` (see [contract/README.md](../contract/README.md)).
+When a change rests on such an assumption, add or extend a contract test for it,
+and run the suite when a CLI updates.
+
 ## Probes
 
 Some claims about the running stack cannot be settled by reading code or running
