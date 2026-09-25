@@ -12,6 +12,8 @@ import {
   gitContext as realGitContext,
   projectDocBlock,
   reduceStreamLine,
+  sessionCost,
+  type SessionTotals,
   type Usage,
 } from 'lander/flow'
 import { fetchUsage, usageTelemetry } from '../../server/usage'
@@ -167,6 +169,14 @@ export function makeFlow({
 
       let usage: Usage | undefined
       let usageInf: string | undefined
+      // The session's running totals as of the previous turn, which this turn's
+      // cost is the difference from. A fresh session starts from zero; a resumed
+      // one whose previous totals were never recorded has no baseline. A turn
+      // killed before its result leaves the baseline behind, so its cost lands
+      // on the next turn rather than going uncounted.
+      const priorTotals: SessionTotals | undefined = resuming
+        ? readSessionTotals(ctx.state.get(['sessionTotals']))
+        : { costUsd: 0, tokens: 0 }
       let stderrText = ''
 
       const collectStderr = (async () => {
@@ -263,6 +273,15 @@ export function makeFlow({
             usage = usage?.cacheMiss
               ? { ...r.usage, cacheMiss: usage.cacheMiss }
               : r.usage
+            if (r.sessionTotals) {
+              const costUsd = sessionCost(r.sessionTotals, priorTotals, usage)
+              usage = {
+                ...usage,
+                ...(costUsd !== undefined ? { costUsd } : {}),
+                sessionCostUsd: r.sessionTotals.costUsd,
+              }
+              ctx.state.set(['sessionTotals'], r.sessionTotals)
+            }
             ctx.emit.meter({ usage })
           } else if (r.usageInferenceId !== usageInf) {
             usageInf = r.usageInferenceId
@@ -277,6 +296,13 @@ export function makeFlow({
       return { exitCode, stderr: stderrText.trim() }
     },
   }
+}
+
+function readSessionTotals(v: unknown): SessionTotals | undefined {
+  const t = v as Partial<SessionTotals> | undefined
+  return typeof t?.costUsd === 'number' && typeof t.tokens === 'number'
+    ? { costUsd: t.costUsd, tokens: t.tokens }
+    : undefined
 }
 
 // The tools whose permission rule takes a file path rather than a command or a

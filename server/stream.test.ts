@@ -8,6 +8,7 @@ import {
   summarizeToolResult,
   reduceStreamLine,
   addUsage,
+  sessionCost,
 } from './stream'
 
 // A fixed timestamp the reducer must thread through verbatim — it never reads a
@@ -618,25 +619,37 @@ describe('reduceStreamLine', () => {
     expect(r.usageInferenceId).toBeUndefined()
   })
 
-  it('pulls the turn dollar cost from a result event total_cost_usd', () => {
+  it('reports a result event total_cost_usd and modelUsage tokens as session totals', () => {
     const r = reduceStreamLine(
       JSON.stringify({
         type: 'result',
         result: 'done',
         usage: { output_tokens: 5 },
         total_cost_usd: 0.4728,
+        modelUsage: {
+          'claude-opus-5-5': {
+            inputTokens: 1,
+            outputTokens: 2,
+            cacheReadInputTokens: 30,
+            cacheCreationInputTokens: 400,
+            costUSD: 0.4,
+          },
+          'claude-haiku-4-5': { inputTokens: 5000, outputTokens: 60000, costUSD: 0.0728 },
+        },
       }),
       AT,
     )
-    expect(r.usage?.costUsd).toBe(0.4728)
+    expect(r.sessionTotals).toEqual({ costUsd: 0.4728, tokens: 65433 })
+    // The total spans the session, so it is not the turn's cost.
+    expect(r.usage?.costUsd).toBeUndefined()
   })
 
-  it('leaves costUsd undefined when a result event omits total_cost_usd', () => {
+  it('reports no session totals when a result event omits total_cost_usd', () => {
     const r = reduceStreamLine(
       JSON.stringify({ type: 'result', result: 'done', usage: { output_tokens: 5 } }),
       AT,
     )
-    expect(r.usage?.costUsd).toBeUndefined()
+    expect(r.sessionTotals).toBeUndefined()
   })
 
   it('pulls per-inference usage and id from an assistant event', () => {
@@ -866,5 +879,30 @@ describe('addUsage', () => {
   it('leaves usage undefined when a result event carries none', () => {
     const r = reduceStreamLine(JSON.stringify({ type: 'result', result: 'done' }), AT)
     expect(r.usage).toBeUndefined()
+  })
+})
+
+describe('sessionCost', () => {
+  const own = { input: 1, output: 2, cacheRead: 30, cacheCreation: 400 }
+
+  it('charges a fresh session the whole total', () => {
+    expect(sessionCost({ costUsd: 0.5, tokens: 433 }, { costUsd: 0, tokens: 0 }, own)).toBe(0.5)
+  })
+
+  it('charges a resumed turn the difference from the previous totals', () => {
+    expect(
+      sessionCost({ costUsd: 92.14, tokens: 9_000_433 }, { costUsd: 90.1, tokens: 9_000_000 }, own),
+    ).toBeCloseTo(2.04)
+  })
+
+  it('charges the whole total when the session count started over', () => {
+    expect(
+      sessionCost({ costUsd: 0.5, tokens: 433 }, { costUsd: 90.1, tokens: 9_000_000 }, own),
+    ).toBe(0.5)
+  })
+
+  it('without a baseline, charges the total only when its tokens are all the turn’s own', () => {
+    expect(sessionCost({ costUsd: 0.5, tokens: 433 }, undefined, own)).toBe(0.5)
+    expect(sessionCost({ costUsd: 92.14, tokens: 9_000_433 }, undefined, own)).toBeUndefined()
   })
 })

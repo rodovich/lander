@@ -128,6 +128,39 @@ describe('claude thread identity', () => {
     expect(flow.spawns[0].args.at(-1)).toBe('do the thing')
   })
 
+  it('charges a resumed turn only its share of the session’s running cost', async () => {
+    // Claude's total_cost_usd spans every turn of a resumed session.
+    const g: Golden = {
+      name: 'resumed turn with recorded session totals',
+      chunks: [
+        [
+          '{"type":"system","subtype":"init","model":"m"}',
+          JSON.stringify({
+            type: 'result',
+            result: 'ok',
+            usage: { input_tokens: 10, output_tokens: 40 },
+            total_cost_usd: 92.14,
+            modelUsage: { m: { inputTokens: 9010, outputTokens: 540 } },
+          }),
+        ],
+      ],
+      start: {
+        flowState: {
+          sessionId: 'sess-1',
+          sessionTotals: { costUsd: 90.1, tokens: 9500 },
+        },
+      },
+    }
+    const flow = await driveFlow(g, claudeFlow())
+    const usage = updatesOf(flow.events).at(-1)?.usage
+    expect(usage?.costUsd).toBeCloseTo(2.04)
+    expect(usage?.sessionCostUsd).toBe(92.14)
+    const task = applyEvents(goldenInput(g).start, flow.events) as {
+      flowState?: Record<string, unknown>
+    }
+    expect(task.flowState?.sessionTotals).toEqual({ costUsd: 92.14, tokens: 9550 })
+  })
+
   it('always sends the full context block when it mints a fresh session', async () => {
     // flowState rides in ungated and a replayed patch can outlive a seal, so a
     // stale baseline must never be able to suppress a new session's context.

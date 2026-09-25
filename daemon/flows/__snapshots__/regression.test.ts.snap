@@ -3219,6 +3219,10 @@ GIT-SNAPSHOT-STUB
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
+      "sessionTotals": {
+        "costUsd": 0.0421,
+        "tokens": 0,
+      },
       "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
 
@@ -3227,7 +3231,7 @@ You currently have no edit permission, so a spawned task cannot be granted it ei
 GIT-SNAPSHOT-STUB
 </task-context>",
     },
-    "flowStateRev": 2,
+    "flowStateRev": 3,
     "hookFireSeq": 1,
     "id": "task-1",
     "items": [
@@ -3286,6 +3290,7 @@ GIT-SNAPSHOT-STUB
           "input": 140,
           "model": "claude-opus-4-8",
           "output": 17,
+          "sessionCostUsd": 0.0421,
         },
       },
     ],
@@ -3364,6 +3369,7 @@ GIT-SNAPSHOT-STUB
         "input": 140,
         "model": undefined,
         "output": 17,
+        "sessionCostUsd": 0.0421,
       },
       "usageChanged": true,
     },

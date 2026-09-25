@@ -69,11 +69,10 @@ export type Step = {
 // cache — both processed at full price this turn; `cacheRead` is the discounted
 // re-read of cached context. The full prompt size across the turn's inferences is
 // the three summed. `model` is the session's driving (main-agent) model — see
-// reduceStreamLine's `drivingModel`. `costUsd` is the turn's dollar cost (the
-// result event's `total_cost_usd`, summing every model the turn touched); it
-// arrives only with that final event, so it's absent until the turn lands. The
-// UI shows the most recent turn's counts in the corner, updating as they stream,
-// and can sum them across the task.
+// reduceStreamLine's `drivingModel`. `costUsd` is the turn's dollar cost across
+// every model it touched; it is derived only once the turn's final event lands,
+// so it's absent until then. The UI shows the most recent turn's counts in the
+// corner, updating as they stream, and can sum them across the task.
 export type Usage = {
   input: number
   output: number
@@ -81,6 +80,11 @@ export type Usage = {
   cacheCreation: number
   model?: string
   costUsd?: number
+  // The provider's running cost for the whole session as of this turn, when the
+  // flow derived `costUsd` from one. Claude's `total_cost_usd` carries every
+  // earlier turn of a resumed session (CLI 2.1.278+), so a turn's own cost is
+  // the difference from the previous turn's total.
+  sessionCostUsd?: number
   // Why the turn's prompt cache missed, when the API reported one (Claude's
   // assistant events carry `message.diagnostics.cache_miss_reason`): the reason
   // type (e.g. `system_changed`, `tools_changed`, `previous_message_not_found`)
@@ -302,6 +306,12 @@ export function reduceStreamLine(
   // to retry when the limit lifts rather than firing into the same wall. Absent on
   // any other line, and on non-rejecting rate events (warnings still allow the turn).
   rateLimitResetsAt?: string
+  // The session's running totals from a result event: `total_cost_usd` and the
+  // token count summed across `modelUsage`. Both cover every turn of the
+  // session, not just this one (a resumed session restores them), so they are
+  // reported apart from `usage` for the flow to difference against the previous
+  // turn's — see sessionCost.
+  sessionTotals?: SessionTotals
 } {
   let ev: any
   try {
@@ -317,6 +327,7 @@ export function reduceStreamLine(
   let usageFinal: boolean | undefined
   let drivingModel: string | undefined
   let rateLimitResetsAt: string | undefined
+  let sessionTotals: SessionTotals | undefined
   if (ev.type === 'system' && ev.subtype === 'init') {
     if (typeof ev.model === 'string') drivingModel = ev.model
   } else if (ev.type === 'assistant' && Array.isArray(ev.message?.content)) {
@@ -407,10 +418,20 @@ export function reduceStreamLine(
       // end. It carries no model of its own — the caller stamps the session's
       // driving model (from the init event) onto it.
       usage = parseUsage(ev.usage as Record<string, unknown>)
-      // The turn's dollar cost across every model it touched; only the result
-      // event reports it.
-      if (typeof ev.total_cost_usd === 'number') usage.costUsd = ev.total_cost_usd
       usageFinal = true
+    }
+    if (typeof ev.total_cost_usd === 'number') {
+      let tokens = 0
+      if (ev.modelUsage && typeof ev.modelUsage === 'object')
+        for (const m of Object.values(ev.modelUsage as Record<string, any>))
+          for (const k of [
+            'inputTokens',
+            'outputTokens',
+            'cacheReadInputTokens',
+            'cacheCreationInputTokens',
+          ])
+            if (typeof m?.[k] === 'number') tokens += m[k]
+      sessionTotals = { costUsd: ev.total_cost_usd, tokens }
     }
   } else if (ev.type === 'rate_limit_event') {
     // Only a *rejection* actually stopped the turn — a warning (status
@@ -432,5 +453,29 @@ export function reduceStreamLine(
     usageFinal,
     drivingModel,
     rateLimitResetsAt,
+    sessionTotals,
   }
+}
+
+export type SessionTotals = { costUsd: number; tokens: number }
+
+// A turn's own cost, from the session totals its result event reported and the
+// previous turn's (`prior`: zeros for a fresh session, undefined when resuming a
+// session whose previous totals were never recorded). `usage` is the turn's own
+// token counts. Returns undefined when the turn's share can't be known.
+export function sessionCost(
+  now: SessionTotals,
+  prior: SessionTotals | undefined,
+  usage: Usage,
+): number | undefined {
+  if (prior) {
+    // Totals that went backwards mean the CLI started this session's count
+    // over, so everything it reports is this turn's.
+    if (now.tokens < prior.tokens || now.costUsd < prior.costUsd) return now.costUsd
+    return now.costUsd - prior.costUsd
+  }
+  // No baseline: the whole total is this turn's only if its tokens are all
+  // this turn's own.
+  const own = usage.input + usage.output + usage.cacheRead + usage.cacheCreation
+  return now.tokens === own ? now.costUsd : undefined
 }

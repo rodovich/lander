@@ -14,6 +14,7 @@ export {
 export {
   reduceStreamLine,
   addUsage,
+  sessionCost,
   summarizeToolInput,
   fullToolInput,
   toolRule,
@@ -23,6 +24,7 @@ export {
   type Step,
   type Usage,
   type CacheMiss,
+  type SessionTotals,
 } from '../server/stream'
 
 // Codex stream reduction and thread identity.
