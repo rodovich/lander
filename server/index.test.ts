@@ -3339,12 +3339,14 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
   let http: Server
   let ws: WebSocket
   const received: { type: string; runId?: string; taskId?: string; project?: string }[] = []
-  // The platform-kill retry ask's prompt (index.ts PLATFORM_KILL_PROMPT) and error
+  // The platform-kill retry ask's prompts (index.ts PLATFORM_KILL_PROMPT_*) and error
   // line — pinned here as the user-facing contract. The prompt states the kill
   // rather than asking about it: the options are the question, and the prompt
   // stays behind as the record once they're gone.
   const KILL_PROMPT =
-    'This ride was killed by a daemon update while work was in flight.'
+    'This ride was killed when the daemon running it stopped while work was in flight.'
+  const RESTART_PROMPT =
+    'This ride was killed when lander restarted while work was in flight.'
   const KILL_ERROR =
     'error running assistant: the daemon running this task stopped before the turn finished'
   // When true, the fake daemon answers an interrupt with a clean interrupted done,
@@ -3894,6 +3896,51 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     const settled = asksOf(await readRaw(id)).find((a) => a.origin === 'retry')!
     expect(settled.state).toBe('answered')
     expect(settled.prompt).toBe(KILL_PROMPT)
+  }, 30_000)
+
+  // The same kill found on a reattach rather than watched live: the server comes
+  // up holding a tracked run and no daemon claims it, because the daemon went
+  // down with it — a whole-stack restart. The prompt must say that, not blame the
+  // daemon alone. A message drives the task, whose reattach is the `resume` path.
+  it('names a restart when a reattached run is never claimed', async () => {
+    const id = 'kill-restart'
+    await writeFile(
+      path.join(tasksDir, `${id}.json`),
+      JSON.stringify({
+        id,
+        title: 'Kill task',
+        status: 'riding',
+        createdAt: AT,
+        updatedAt: AT,
+        allowEdits: false,
+        shape: 2,
+        items: [],
+        rides: [{ id: 'r-restart', startedAt: AT }],
+        runId: 'run-kill-restart',
+        runCursor: 0,
+      }),
+    )
+
+    // The run has no owner whatever the daemon's state, so the reattach arms the
+    // grace; advance it on a fake clock until the crash lands.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    let raw: Raw
+    try {
+      const posted = post(`/api/${slug}/tasks/${id}/messages`, { message: 'go' })
+      const deadline = Date.now() + 10_000
+      do {
+        await vi.advanceTimersByTimeAsync(30_000)
+        await new Promise((r) => setImmediate(r))
+        raw = await readRaw(id)
+      } while (raw.status !== 'wedged' && Date.now() < deadline)
+      expect((await posted).status).toBe(200)
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(raw.status).toBe('wedged')
+    const ask = asksOf(raw).find((a) => a.origin === 'retry')
+    expect(ask!.prompt).toBe(RESTART_PROMPT)
+    closeRunChannel('run-kill-restart')
   }, 30_000)
 })
 

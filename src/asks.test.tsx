@@ -83,9 +83,9 @@ describe('AskForm rendering', () => {
     'keeps the prompt but drops the form once %s',
     (state) => {
       const html = render(
-        ask({ state, prompt: 'This ride was killed by a daemon update.' }),
+        ask({ state, prompt: 'This ride was killed when lander restarted.' }),
       )
-      expect(html).toContain('This ride was killed by a daemon update.')
+      expect(html).toContain('This ride was killed when lander restarted.')
       expect(html).not.toContain('ask-form')
       expect(html).not.toContain('Alpha')
     },

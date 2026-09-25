@@ -799,10 +799,21 @@ async function runTurn(
 // The prompt states what happened rather than asking ("— retry?"): the options
 // below it are the question, and the prompt outlives them as the conversation's
 // record of the kill once the ask is answered or withdrawn.
+//
+// Neither prompt blames a daemon *update*: an update drains (its riding turns
+// finish on the old daemon), so it never reaches this path unless the drain
+// itself fails. What does reach it is the daemon process going away. We tell the
+// two ways we find out apart. On a reattach (`resume`) the server has just booted
+// and no daemon claimed the run, so the daemon went down with it — the whole
+// stack was restarted (an `npm run dev` restart kills the daemon and its
+// children). Otherwise the server stayed up and watched the daemon drop and
+// never come back.
 const PLATFORM_KILL_ERROR =
   'error running assistant: the daemon running this task stopped before the turn finished'
-const PLATFORM_KILL_PROMPT =
-  'This ride was killed by a daemon update while work was in flight.'
+const PLATFORM_KILL_PROMPT_RESTART =
+  'This ride was killed when lander restarted while work was in flight.'
+const PLATFORM_KILL_PROMPT_DAEMON_LOST =
+  'This ride was killed when the daemon running it stopped while work was in flight.'
 
 // Drain the per-run channel the WS handler feeds (update/done/crashed) and fold
 // each event onto the task with the applyUpdate/applyDone consumer. The daemon
@@ -866,7 +877,9 @@ async function reduceRunWs(
                 committed: hadOutput,
                 askId: nextAskId(t, Date.parse(at)),
                 at,
-                prompt: PLATFORM_KILL_PROMPT,
+                prompt: resume
+                  ? PLATFORM_KILL_PROMPT_RESTART
+                  : PLATFORM_KILL_PROMPT_DAEMON_LOST,
               })
             t.updatedAt = at
           }
