@@ -73,6 +73,18 @@ describe.skipIf(!VERSION)(`codex contract (${VERSION})`, () => {
     expect(b.output_tokens).toBeGreaterThan(a.output_tokens)
   })
 
+  // So the flow charges each ride its difference from the previous total: the
+  // two rides sum to the thread total it saved.
+  it("charges the resumed ride only its share of the thread's total", () => {
+    const a = first.ride.usage!
+    const b = second.ride.usage!
+    const total = second.task.flowState?.threadUsage as typeof a
+    expect(first.task.flowState?.threadUsage).toEqual(a)
+    for (const k of ['input', 'output', 'cacheRead', 'cacheCreation'] as const)
+      expect(a[k] + b[k]).toBe(total[k])
+    expect(b.input + b.cacheRead).toBeLessThan(1.5 * (a.input + a.cacheRead))
+  })
+
   it('runs a turn in a project that is not a git repo', async () => {
     const turn = await driveLive(flow, {
       root: scratchDir({ git: false }),

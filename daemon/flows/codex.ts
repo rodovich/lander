@@ -16,10 +16,11 @@ import path from 'node:path'
 import { codexConfigArgs } from '../codex-config'
 import { execFileSync } from 'node:child_process'
 import {
-  addUsage,
+  codexTurnUsage,
   deliveryDigest,
   extractCodexSession,
   projectDocBlock,
+  readThreadUsage,
   reduceCodexStreamLine,
   shouldDeliver,
   taskManagementPrompt,
@@ -167,8 +168,16 @@ export function makeFlow({
 
       // ── Reduce ───────────────────────────────────────────────────────────
       const tools = new Map<string, ToolHandle>()
-      let usage: Usage | undefined
-      let usageInf: string | undefined
+      // The thread's running total as of the previous turn, which this turn's
+      // usage is the difference from. A fresh thread starts from zero. A thread
+      // resumed before any total was saved has no baseline, and its turn is left
+      // without usage rather than charged the whole total: the undercount is one
+      // turn, the overcount would be every earlier turn of the thread again, and
+      // it happens once per thread. A turn killed before turn.completed leaves the
+      // baseline behind, so its usage lands on the next turn instead of vanishing.
+      const priorTotal: Usage | undefined = sessionId
+        ? readThreadUsage(ctx.state.get(['threadUsage']))
+        : { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 }
       let terminalError: string | undefined
       let announced = sessionId !== undefined
       let stderrText = ''
@@ -248,17 +257,10 @@ export function makeFlow({
         // No blocked-status folding to reproduce: codex's public stream omits
         // sandbox-denied shell items entirely, so a refused call never appears.
 
-        if (r.usage) {
-          if (r.usageFinal) {
-            usage = usage?.cacheMiss
-              ? { ...r.usage, cacheMiss: usage.cacheMiss }
-              : r.usage
-            ctx.emit.meter({ usage })
-          } else if (r.usageInferenceId !== usageInf) {
-            usageInf = r.usageInferenceId
-            usage = addUsage(usage, r.usage)
-            ctx.emit.meter({ usage })
-          }
+        if (r.threadUsage) {
+          const usage = codexTurnUsage(r.threadUsage, priorTotal)
+          if (usage) ctx.emit.meter({ usage })
+          ctx.state.set(['threadUsage'], r.threadUsage)
         }
       }
 

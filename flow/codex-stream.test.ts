@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { extractCodexSession, reduceCodexStreamLine } from './codex-stream'
+import {
+  codexTurnUsage,
+  extractCodexSession,
+  readThreadUsage,
+  reduceCodexStreamLine,
+} from './codex-stream'
 
 const AT = '2026-01-01T00:00:00.000Z'
 const FIXTURES = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../server/fixtures/codex')
@@ -19,8 +24,7 @@ function reduceFixture(name: string) {
     updates,
     steps: updates.flatMap((u) => u.steps),
     finalText: lastDefined(updates.map((u) => u.finalText)),
-    usage: lastDefined(updates.map((u) => u.usage)),
-    usageFinal: lastDefined(updates.map((u) => u.usageFinal)),
+    threadUsage: lastDefined(updates.map((u) => u.threadUsage)),
     terminalErrors: updates
       .map((u) => u.terminalError)
       .filter((e): e is string => typeof e === 'string'),
@@ -45,7 +49,7 @@ describe('Codex stream reducer', () => {
     expect(extractCodexSession(JSON.stringify({ type: 'turn.started' }))).toBeUndefined()
   })
 
-  it('reduces a text-only successful turn and final usage', () => {
+  it('reduces a text-only successful turn and the thread total', () => {
     const r = reduceFixture('text-only-success.jsonl')
     expect(r.steps).toEqual([
       {
@@ -55,13 +59,50 @@ describe('Codex stream reducer', () => {
       },
     ])
     expect(r.finalText).toBe('codex-fixture-ok')
-    expect(r.usage).toEqual({
+    expect(r.threadUsage).toEqual({
       input: 1886,
       output: 33,
       cacheRead: 10112,
       cacheCreation: 0,
     })
-    expect(r.usageFinal).toBe(true)
+  })
+
+  // The two fixtures are consecutive turns of one thread, and the resumed one's
+  // turn.completed carries the thread's running total (11,998 → 24,388 input).
+  it('charges a resumed turn only its difference from the previous total', () => {
+    const first = reduceFixture('text-only-success.jsonl').threadUsage!
+    const resumed = reduceFixture('resumed-session.jsonl').threadUsage!
+    expect(resumed.input + resumed.cacheRead).toBe(24388)
+    expect(codexTurnUsage(resumed, first)).toEqual({
+      input: 742, // (24,388 − 21,760) − (11,998 − 10,112)
+      output: 27,
+      cacheRead: 11648,
+      cacheCreation: 0,
+    })
+  })
+
+  it('charges a fresh thread its whole total', () => {
+    const first = reduceFixture('text-only-success.jsonl').threadUsage!
+    const zero = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 }
+    expect(codexTurnUsage(first, zero)).toEqual(first)
+  })
+
+  it('takes the whole total when it went down, as a restarted count', () => {
+    const first = reduceFixture('text-only-success.jsonl').threadUsage!
+    const resumed = reduceFixture('resumed-session.jsonl').threadUsage!
+    expect(codexTurnUsage(first, resumed)).toEqual(first)
+  })
+
+  it('leaves the turn uncharged when there is no previous total', () => {
+    const resumed = reduceFixture('resumed-session.jsonl').threadUsage!
+    expect(codexTurnUsage(resumed, undefined)).toBeUndefined()
+  })
+
+  it('reads back only a well-formed saved total', () => {
+    const first = reduceFixture('text-only-success.jsonl').threadUsage!
+    expect(readThreadUsage(JSON.parse(JSON.stringify(first)))).toEqual(first)
+    expect(readThreadUsage(undefined)).toBeUndefined()
+    expect(readThreadUsage({ input: 1, output: 2 })).toBeUndefined()
   })
 
   it('reduces command executions using Codex\'s reported tool name', () => {

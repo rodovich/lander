@@ -28,7 +28,12 @@ export {
 } from '../server/stream'
 
 // Codex stream reduction and thread identity.
-export { reduceCodexStreamLine, extractCodexSession } from './codex-stream'
+export {
+  reduceCodexStreamLine,
+  extractCodexSession,
+  codexTurnUsage,
+  readThreadUsage,
+} from './codex-stream'
 
 // ── Attachment manifest ─────────────────────────────────────────────────────
 export {

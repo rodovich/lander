@@ -11,11 +11,13 @@ export type CodexLineUpdate = {
   steps: Step[]
   finalText?: string
   blockedIds?: string[]
-  usage?: Usage
-  usageInferenceId?: string
-  usageFinal?: boolean
-  drivingModel?: string
-  rateLimitResetsAt?: string
+  // The thread's running token total as of this turn, from `turn.completed`.
+  // Not the turn's own usage: Codex builds that event from the thread total and
+  // seeds it from the session file on resume (confirmed v0.154.0; v0.149–0.153
+  // lost the seed to a bug and briefly reported per-turn counts). The flow
+  // charges the turn its difference from the previous total — see
+  // codexTurnUsage.
+  threadUsage?: Usage
   terminalError?: string
 }
 
@@ -36,8 +38,7 @@ export function reduceCodexStreamLine(
 
   const steps: CodexLineUpdate['steps'] = []
   let finalText: string | undefined
-  let usage: Usage | undefined
-  let usageFinal: boolean | undefined
+  let threadUsage: Usage | undefined
   let terminalError: string | undefined
 
   if (ev.type === 'item.started' || ev.type === 'item.completed' || ev.type === 'item.failed') {
@@ -91,17 +92,50 @@ export function reduceCodexStreamLine(
       }
     }
   } else if (ev.type === 'turn.completed') {
-    if (ev.usage && typeof ev.usage === 'object') {
-      usage = parseCodexUsage(ev.usage as Record<string, unknown>)
-      usageFinal = true
-    }
+    if (ev.usage && typeof ev.usage === 'object')
+      threadUsage = parseCodexUsage(ev.usage as Record<string, unknown>)
   } else if (ev.type === 'error') {
     terminalError = errorMessage(ev)
   } else if (ev.type === 'turn.failed') {
     terminalError = errorMessage(ev.error) ?? errorMessage(ev)
   }
 
-  return { steps, finalText, usage, usageFinal, terminalError }
+  return { steps, finalText, threadUsage, terminalError }
+}
+
+const USAGE_COUNTS = ['input', 'output', 'cacheRead', 'cacheCreation'] as const
+
+// A turn's own usage, from the thread total its turn.completed reported and the
+// previous turn's (`prior`: zeros for a fresh thread, undefined when resuming a
+// thread whose previous total was never recorded). Returns undefined when the
+// turn's share can't be known.
+export function codexTurnUsage(
+  now: Usage,
+  prior: Usage | undefined,
+): Usage | undefined {
+  if (!prior) return undefined
+  // A count that went backwards means Codex started the thread's total over, so
+  // everything it reports is this turn's.
+  if (USAGE_COUNTS.some((k) => now[k] < prior[k])) return now
+  return {
+    input: now.input - prior.input,
+    output: now.output - prior.output,
+    cacheRead: now.cacheRead - prior.cacheRead,
+    cacheCreation: now.cacheCreation - prior.cacheCreation,
+  }
+}
+
+// A thread total saved in flow state, or undefined when the value isn't one.
+export function readThreadUsage(value: unknown): Usage | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const v = value as Record<string, unknown>
+  if (!USAGE_COUNTS.every((k) => typeof v[k] === 'number')) return undefined
+  return {
+    input: v.input as number,
+    output: v.output as number,
+    cacheRead: v.cacheRead as number,
+    cacheCreation: v.cacheCreation as number,
+  }
 }
 
 function parseJson(line: string): any | undefined {

@@ -219,6 +219,53 @@ describe('codex session and identity', () => {
     expect(overlap).toEqual([])
   })
 
+  // Codex's turn.completed usage is the thread's running total.
+  const resumedTurn = (flowState: Record<string, unknown>): Golden => ({
+    name: 'resumed turn reporting the thread total',
+    chunks: [
+      [
+        JSON.stringify({ type: 'thread.started', thread_id: 'thread-1' }),
+        JSON.stringify({
+          type: 'item.completed',
+          item: { id: 'item-0', type: 'agent_message', text: 'ok' },
+        }),
+        JSON.stringify({
+          type: 'turn.completed',
+          usage: { input_tokens: 24388, cached_input_tokens: 21760, output_tokens: 60 },
+        }),
+      ],
+    ],
+    start: { agent: 'codex', flowState: { sessionId: 'thread-1', ...flowState } },
+  })
+  const TOTAL = { input: 2628, output: 60, cacheRead: 21760, cacheCreation: 0 }
+
+  it('charges a resumed turn only its share of the thread’s running total', async () => {
+    const g = resumedTurn({
+      threadUsage: { input: 1886, output: 33, cacheRead: 10112, cacheCreation: 0 },
+    })
+    const flow = await driveFlow(g, codexFlow())
+    expect(updatesOf(flow.events).at(-1)?.usage).toEqual({
+      input: 742,
+      output: 27,
+      cacheRead: 11648,
+      cacheCreation: 0,
+    })
+    const task = applyEvents(goldenInput(g).start, flow.events) as {
+      flowState?: Record<string, unknown>
+    }
+    expect(task.flowState?.threadUsage).toEqual(TOTAL)
+  })
+
+  it('leaves a resumed turn with no saved total uncharged, and saves one', async () => {
+    const g = resumedTurn({})
+    const flow = await driveFlow(g, codexFlow())
+    expect(updatesOf(flow.events).some((u) => u.usage)).toBe(false)
+    const task = applyEvents(goldenInput(g).start, flow.events) as {
+      flowState?: Record<string, unknown>
+    }
+    expect(task.flowState?.threadUsage).toEqual(TOTAL)
+  })
+
   it('reports no project-grant support, with a reason to show the user', async () => {
     const { meta } = codexFlow()
     expect(meta.capabilities.grants).toEqual({ task: false, project: false })

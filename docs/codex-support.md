@@ -99,10 +99,21 @@ and `.codex` metadata protections remain in place. Both profiles allow network
 access, including the local Lander API used by in-task self-management commands.
 
 The Codex JSONL reducer currently handles text replies, command executions, file
-change events, failed commands or failed turns, resumed sessions, and per-turn
-token usage. The UI can show Codex as the task agent, display Codex turn
-activity, show Codex token usage, and label missing cost data as unavailable for
-Codex.
+change events, failed commands or failed turns, resumed sessions, and token
+usage. The UI can show Codex as the task agent, display Codex turn activity,
+show Codex token usage, and label missing cost data as unavailable for Codex.
+
+Codex's `turn.completed` usage is the thread's running total, not the turn's
+own: `codex exec` builds it from the thread total, and `exec resume` seeds that
+total from the session file (confirmed v0.154.0: three turns on one thread
+reported 14,571 → 29,170 → 43,794 input tokens). Codex 0.149–0.153 briefly
+reported per-turn counts because a bug stopped resume from reading the seed;
+0.144.5 and earlier behaved as 0.154.0 does. The Codex flow therefore saves each
+turn's total in flow state (`threadUsage`) and charges the turn the field-by-field
+difference from the previous one. A fresh thread starts from zero, and a total
+that went down is taken whole as a restarted count. A thread resumed before any
+total was saved has no baseline, so that one turn is left without usage rather
+than charged the thread's whole history again.
 
 Codex tasks can call back into Lander with `lander land`, `lander wedge`,
 `lander ride`, `lander launch`, `lander send`, and related commands when the
@@ -138,9 +149,10 @@ for background-shell advisory context, cwd recording, and worktree bookkeeping.
 Codex currently relies on explicit launch cwd, prompt instructions, permission
 profiles, and environment config rather than equivalent per-turn hooks.
 
-Codex usage data is per-turn only. Lander can parse token usage from Codex JSONL,
-but Codex tasks do not have Claude-style subscription-window usage, cost
-reporting, or reliable rate-limit reset scheduling in the current integration.
+Codex usage data is token counts only. Lander derives each turn's tokens from
+Codex's running thread total, but Codex tasks do not have Claude-style
+subscription-window usage, cost reporting, or reliable rate-limit reset
+scheduling in the current integration.
 
 Codex stream data is less rich than Claude's stream for some UI features. The
 current reducer handles the common event shapes Lander has fixtures for, but it

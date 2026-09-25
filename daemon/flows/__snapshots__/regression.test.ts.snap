@@ -5390,8 +5390,14 @@ do the thing",
     "flowState": {
       "sessionId": "thread-1",
       "taskPrompt": "sha256:0ea953f9109ca38d64f99a28a78e694b30a52f7ecf750037c2f704927134bdda",
+      "threadUsage": {
+        "cacheCreation": 0,
+        "cacheRead": 120,
+        "input": 380,
+        "output": 42,
+      },
     },
-    "flowStateRev": 2,
+    "flowStateRev": 3,
     "hookFireSeq": 1,
     "id": "task-1",
     "items": [
