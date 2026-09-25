@@ -2,9 +2,19 @@ import { forwardRef, useCallback, useEffect, useId, useRef, useState } from 'rea
 import { createPortal } from 'react-dom'
 import { loadAttachment } from './api'
 import { formatBytes } from './format'
+import { Markdown } from './markdown'
+import { useTaskLink } from './taskLinkContext'
 import type { Attachment } from './types'
 
-type PreviewKind = 'image' | 'html' | 'text' | 'pdf' | 'audio' | 'video' | 'unknown'
+type PreviewKind =
+  | 'image'
+  | 'html'
+  | 'markdown'
+  | 'text'
+  | 'pdf'
+  | 'audio'
+  | 'video'
+  | 'unknown'
 
 // Where a gallery's bytes come from: a file's contents, or null when they
 // can't be had. The gallery never learns what serves them. Its identity is an
@@ -15,6 +25,7 @@ const MAX_TEXT_PREVIEW_BYTES = 1024 * 1024
 const TEXT_FILE_NAME =
   /(?:^|\.)(?:c|cc|cpp|css|diff|env|go|h|hpp|ini|java|js|jsx|log|mjs|patch|py|rb|rs|sh|sql|toml|ts|tsx|xml|ya?ml)$/i
 const HTML_FILE_NAME = /\.html?$/i
+const MARKDOWN_FILE_NAME = /\.(?:md|markdown)$/i
 
 export function previewKind(file: Attachment): PreviewKind {
   const mime = file.mime.toLowerCase().split(';', 1)[0].trim()
@@ -26,6 +37,13 @@ export function previewKind(file: Attachment): PreviewKind {
       HTML_FILE_NAME.test(file.name))
   )
     return 'html'
+  if (
+    mime === 'text/markdown' ||
+    mime === 'text/x-markdown' ||
+    ((mime === 'application/octet-stream' || mime === 'text/plain') &&
+      MARKDOWN_FILE_NAME.test(file.name))
+  )
+    return 'markdown'
   if (mime.startsWith('audio/')) return 'audio'
   if (mime.startsWith('video/')) return 'video'
   if (mime === 'application/pdf') return 'pdf'
@@ -257,6 +275,7 @@ function FilePreviewModal({
   onMove: (direction: -1 | 1) => void
 }) {
   const kind = previewKind(file)
+  const linkTask = useTaskLink()
   const titleId = useId()
   const modalRef = useRef<HTMLDivElement>(null)
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -329,14 +348,15 @@ function FilePreviewModal({
     void load(file)
       .then(async (blob) => {
         if (!blob) throw new Error('fetch failed')
-        const truncated = kind === 'text' && blob.size > MAX_TEXT_PREVIEW_BYTES
-        const text = kind === 'text'
+        const isText = kind === 'text' || kind === 'markdown'
+        const truncated = isText && blob.size > MAX_TEXT_PREVIEW_BYTES
+        const text = isText
           ? await blob.slice(0, MAX_TEXT_PREVIEW_BYTES).text()
           : kind === 'html'
             ? await blob.text()
             : null
         if (canceled) return
-        if (kind !== 'text' && kind !== 'html' && kind !== 'unknown')
+        if (!isText && kind !== 'html' && kind !== 'unknown')
           objectUrl = URL.createObjectURL(blob)
         setPreview({ status: 'ready', blob, objectUrl, text, truncated })
       })
@@ -479,9 +499,15 @@ function FilePreviewModal({
               <video className="attachment-preview-video" src={preview.objectUrl!} controls />
             ) : kind === 'audio' ? (
               <audio className="attachment-preview-audio" src={preview.objectUrl!} controls />
-            ) : kind === 'text' ? (
+            ) : kind === 'text' || kind === 'markdown' ? (
               <div className="attachment-preview-text-wrap">
-                <pre className="attachment-preview-text">{preview.text}</pre>
+                {kind === 'markdown' ? (
+                  <div className="attachment-preview-markdown message-text">
+                    <Markdown text={preview.text!} linkTask={linkTask} />
+                  </div>
+                ) : (
+                  <pre className="attachment-preview-text">{preview.text}</pre>
+                )}
                 {preview.truncated && (
                   <div className="attachment-preview-truncated">
                     Preview limited to the first {formatBytes(MAX_TEXT_PREVIEW_BYTES)}.

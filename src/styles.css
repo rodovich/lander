@@ -1131,6 +1131,15 @@ body {
   overflow-wrap: anywhere;
 }
 
+.attachment-preview-markdown {
+  width: 100%;
+  min-height: 0;
+  padding: 20px 28px;
+  overflow: auto;
+  background: var(--bg);
+  color: var(--fg);
+}
+
 .attachment-preview-truncated {
   padding: 8px 12px;
   border-top: 1px solid var(--border);

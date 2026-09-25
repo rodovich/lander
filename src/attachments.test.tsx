@@ -29,6 +29,9 @@ describe('attachment previews', () => {
     expect(previewKind(file('text/html; charset=utf-8'))).toBe('html')
     expect(previewKind(file('application/octet-stream', 'harness.html'))).toBe('html')
     expect(previewKind(file('text/plain', 'page.htm'))).toBe('html')
+    expect(previewKind(file('text/markdown; charset=utf-8'))).toBe('markdown')
+    expect(previewKind(file('application/octet-stream', 'README.md'))).toBe('markdown')
+    expect(previewKind(file('text/plain', 'notes.markdown'))).toBe('markdown')
   })
 
   it('confines HTML previews to an opaque origin with no network', () => {
