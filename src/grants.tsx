@@ -234,6 +234,10 @@ function RulePopup({
     useAnchoredPopup()
   const [openMenuKey, setOpenMenuKey] = useState<string | null>(null)
   const [granted, setGranted] = useState<Record<string, Granted>>({})
+  // Bumped by each grant from the authoring row, remounting it empty and back in
+  // edit mode so several rules can be granted in one open. A seeded row instead
+  // keeps its checkmark.
+  const [authoringRound, setAuthoringRound] = useState(0)
 
   useEffect(() => {
     if (open) return
@@ -251,8 +255,9 @@ function RulePopup({
       granted={granted[key] ?? null}
       onGrant={async (committed, scope) => {
         setOpenMenuKey(null)
-        if (await onAllow(committed, scope))
-          setGranted((g) => ({ ...g, [key]: { scope, rule: committed } }))
+        if (!(await onAllow(committed, scope))) return
+        if (extra) setAuthoringRound((n) => n + 1)
+        else setGranted((g) => ({ ...g, [key]: { scope, rule: committed } }))
       }}
       {...extra}
     />
@@ -276,10 +281,13 @@ function RulePopup({
         <div ref={popupRef} className="rule-popup" style={popupStyle}>
           {head}
           {rules.map((r) => row(r.key, r.rule))}
-          {/* Remounted fresh each time the popup reopens (the popup unmounts on
-              close), so authoring another rule is one reopen. */}
+          {/* Remounted fresh after each grant, and each time the popup reopens
+              (the popup unmounts on close). */}
           {authoring &&
-            row(AUTHORING_KEY, '', { autoEdit: true, placeholder: authoring.placeholder })}
+            row(AUTHORING_KEY + authoringRound, '', {
+              autoEdit: true,
+              placeholder: authoring.placeholder,
+            })}
         </div>
       )}
     </div>
