@@ -98,6 +98,13 @@ const requests = new Map<
 // just reloaded and it hasn't re-announced yet); on expiry those still-unowned
 // runs are crashed. Reconciled — armed and cleared — by reconcileGrace.
 let graceTimer: ReturnType<typeof setTimeout> | null = null
+// Whether the /daemon endpoint is accepting connections. Until it is, no daemon
+// *can* reconnect, so the grace must not be counting: boot recovery reattaches
+// runs (requestResume) before serve() binds, and a slow bind — measured
+// 2026-09-28, a 20s await before serve() — used to spend the whole grace with
+// the endpoint absent, crashing runs whose daemon was alive and waiting to
+// re-announce them. The grace now starts when the listener does.
+let endpointListening = false
 
 export function daemonConnected(): boolean {
   return primary != null
@@ -361,6 +368,8 @@ function reconcileGrace(): void {
     }
     return
   }
+  // Not yet: attachDaemonServer reconciles again once the endpoint listens.
+  if (!endpointListening) return
   if (graceTimer) return
   graceTimer = setTimeout(() => {
     graceTimer = null
@@ -411,6 +420,14 @@ export function attachDaemonServer(
   opts: DaemonServerOpts,
 ): void {
   const wss = new WebSocketServer({ noServer: true })
+
+  // Start any grace boot recovery left pending, now that a daemon can reach us.
+  const onListening = () => {
+    endpointListening = true
+    reconcileGrace()
+  }
+  if (server.listening) onListening()
+  else server.once('listening', onListening)
 
   server.on('upgrade', (req: IncomingMessage, socket, head) => {
     const url = new URL(req.url ?? '', 'http://localhost')
