@@ -115,5 +115,5 @@ concurrently(
       env: daemonEnv,
     },
   ],
-  { killOthers: ['failure', 'success'] },
+  { killOthersOn: ['failure', 'success'] },
 ).result.catch(() => process.exit(1))
