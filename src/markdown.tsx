@@ -1,4 +1,4 @@
-import { Fragment, memo, type ReactNode } from 'react'
+import { Fragment, memo, type JSX, type ReactNode } from 'react'
 import { CopyButton } from './copyButton'
 import { parseBlocks, type Block } from './markdownBlocks'
 import { timed } from './perf'

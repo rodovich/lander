@@ -47,7 +47,7 @@ export function ComposerPanel({
   placeholder: string
   rows: number
   textareaClassName?: string
-  textareaRef?: RefObject<HTMLTextAreaElement>
+  textareaRef?: RefObject<HTMLTextAreaElement | null>
   textareaDisabled?: boolean
   // Work is in flight: no dropping, pasting, or attaching onto a panel that is
   // mid-send. Whether the textarea itself locks is `textareaDisabled` — the
