@@ -139,6 +139,13 @@ usually stronger evidence than the log line a plan asked someone to watch for.
 
 The convention is `probe/<name>.mjs`, run as `node probe/<name>.mjs`.
 
+The one server log a task can read is `data/logs/slow.log`: every API request
+slower than 3s (including one still hanging, or abandoned by its client) and
+every event-loop stall over 1s, timestamped. It is empty while all is well, so
+when the UI hung or timed out, check it first — no line for that moment means
+the API was answering and the stall was in front of it (the Vite proxy or the
+browser).
+
 ## Cleanup and reporting
 
 Land or archive the throwaway tasks you launched, and remove probe files, scratch

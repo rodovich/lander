@@ -130,6 +130,7 @@ import {
 import { readHookCredential, hookCredentialFor, HookRefusal } from './hook-runs'
 import { dispatchPendingHooks, hookDispatchInFlightFor } from './hook-dispatch'
 import { TITLE_MAX_CHARS, generateTitle } from './title'
+import { createSlowLog, fileWriter } from './slow-log'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const LANDER_BIN_DIR = path.join(ROOT, 'bin')
@@ -1599,6 +1600,12 @@ function noteHumanContact(
 }
 
 export const app = new Hono()
+
+// Times every request; writes nothing until the boot block below gives it a
+// file, so tests importing `app` leave no log behind.
+let writeSlowLine: ((line: string) => void) | null = null
+const slowLog = createSlowLog((line) => writeSlowLine?.(line))
+app.use('*', slowLog.middleware)
 
 // The per-flow status telemetry each producing adapter pushes, as an { agent:
 // items } map — the same cache the tasks poll embeds. Opaque to the server; empty
@@ -4306,6 +4313,10 @@ async function backfillArtifactsToAttachments(): Promise<void> {
 
 const port = Number(process.env.PORT ?? 6181)
 if (process.env.NODE_ENV !== 'test' && process.env.VITEST !== 'true') {
+  // Before the boot work below, so a slow boot shows up as a blocked loop.
+  writeSlowLine = fileWriter(path.join(DATA_ROOT, 'logs', 'slow.log'))
+  slowLog.start()
+
   // Finish durable migrations, then claim every recoverable active task before
   // accepting archive or mutation requests. driveTask takes its in-memory claim
   // synchronously before its first await, so recoverQueues may return while the
