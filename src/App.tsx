@@ -44,7 +44,15 @@ export function App() {
     'lander:timeFilter',
     'any',
   )
+  // What an action failed with — a land the daemon refused, a message that
+  // didn't send. Sticky on purpose: it reports something the user did, and it
+  // stays until they do the next thing.
   const [error, setError] = useState<string | null>(null)
+  // What the tasks poll last failed with, owned by the poll and cleared by its
+  // next good cycle (see useTaskData). Kept out of `error` rather than sharing
+  // it: a self-clearing slot would wipe an action's message within the 2s poll
+  // gap, which is faster than it can be read.
+  const [pollError, setPollError] = useState<string | null>(null)
   const initialTaskRef = useRef<TaskRef | null>(taskRefFromPath())
   // The task data proper: the displayed list and its polls, per-flow telemetry,
   // projects and the session's project filter, and mention-link resolution.
@@ -65,7 +73,7 @@ export function App() {
     resolveTaskLink,
     taskLinks,
     taskLinksLoaded,
-  } = useTaskData(view, setError, initialTaskRef.current?.projectSlug)
+  } = useTaskData(view, setPollError, initialTaskRef.current?.projectSlug)
   // The open task, readable by the actions at call time. Assigned below, once
   // the effective selection is derived from the shaped list.
   const currentRef = useRef<TaskWithProject | null>(null)
@@ -303,7 +311,12 @@ export function App() {
       </div>
 
       <div className="detail">
-        {error && <div className="error">{error}</div>}
+        {/* One banner for both slots. An action's failure wins the spot while
+            it is up: the user is standing in front of it, and the poll's is the
+            ambient one. */}
+        {(error ?? pollError) && (
+          <div className="error">{error ?? pollError}</div>
+        )}
         {hooksProject ? (
           <HooksPanel
             projects={projects}

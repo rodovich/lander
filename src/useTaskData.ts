@@ -32,7 +32,7 @@ const POLL_GAP_MS = 2000
 // `shown` — the view/time/search filters stay with the caller.
 export function useTaskData(
   view: TaskView,
-  onError: (message: string) => void,
+  onPollError: (message: string | null) => void,
   initialProjectSlug = '',
 ) {
   const [tasks, setTasks] = useState<TaskWithProject[]>([])
@@ -198,8 +198,21 @@ export function useTaskData(
   useEffect(() => {
     if (shownKey === '') return
     // Poll so assistant replies appear once the server appends them.
+    //
+    // Each cycle reports its own outcome, failure *and* recovery. The banner
+    // carries no timestamp, so it reads in the present tense — and a failed poll
+    // that stayed up until some unrelated action happened to clear it went on
+    // claiming something was wrong long after the next cycle had proved
+    // otherwise. The common case is a one-cycle gap while `tsx watch` restarts
+    // the API server, which self-heals in about two seconds. A failure that
+    // isn't transient keeps being re-reported by every cycle that follows it, so
+    // nothing here hides a server that is actually down.
     const stop = startPoll(
-      () => refresh().catch((e) => onError(e.message ?? String(e))),
+      () =>
+        refresh().then(
+          () => onPollError(null),
+          (e) => onPollError(e.message ?? String(e)),
+        ),
       POLL_GAP_MS,
     )
     return () => {
