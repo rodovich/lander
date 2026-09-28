@@ -33,6 +33,35 @@ function describeTimeout(e: unknown, url: string): unknown {
     : e
 }
 
+// A response whose body wasn't the JSON the route promises. Same standard as the
+// timeout above, for the same reason: `JSON.parse('')` throws "Unexpected end of
+// JSON input", which names neither the request nor the cause, and the poll's
+// error banner is where it would land.
+const unreadable = (url: string, status: number) =>
+  new Error(`unreadable response from ${url} (HTTP ${status})`)
+
+// The JSON body of a response, or an error describing why there isn't one. A
+// body that fails to parse is routine rather than hypothetical: the dev proxy
+// answers a request it cannot reach the API server with — every `tsx watch`
+// restart opens a window of those — with an empty 500, and a restart mid-response
+// truncates a 200.
+async function readJson(
+  r: Response,
+  url: string,
+): Promise<Record<string, unknown>> {
+  const body = (await r.json().catch(() => undefined)) as
+    | Record<string, unknown>
+    | undefined
+  if (!r.ok) {
+    const stated = typeof body?.error === 'string' ? body.error : ''
+    throw new Error(
+      stated || `${url} failed: HTTP ${r.status} ${r.statusText}`.trimEnd(),
+    )
+  }
+  if (!body) throw unreadable(url, r.status)
+  return body
+}
+
 // One installation-wide link projection, conditionally fetched. After the
 // first response an unchanged poll is a bodyless 304; the server serves it from
 // memory, so this neither repeats task conversations over the wire nor scans
@@ -195,8 +224,10 @@ export async function loadShownTasks(
       const url = `/api/${slug}/tasks${query ? `?${query}` : ''}`
       try {
         const r = await fetch(url, { signal: readTimeout() })
-        const body = await r.json()
-        if (!r.ok) throw new Error(body.error ?? r.statusText)
+        const body = await readJson(r, url)
+        // A parsed body still owes us the list. Without this the truncated-200
+        // case reaches `.map` and reads as "Cannot read properties of undefined".
+        if (!Array.isArray(body.tasks)) throw unreadable(url, r.status)
         return {
           tasks: (body.tasks as Task[]).map((t) => ({ ...t, projectSlug: slug })),
           telemetry: (body.telemetry ?? {}) as FlowTelemetry,

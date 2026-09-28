@@ -139,3 +139,41 @@ describe('read timeouts', () => {
     await expect(loadShownTasks(['p'], false)).rejects.toThrow('Failed to fetch')
   })
 })
+
+// A body that isn't the JSON the route promises. The dev proxy answers a request
+// it cannot reach the API server with — every `tsx watch` restart of it — with an
+// empty 500, so this is the ordinary shape of a restart seen from the client, and
+// it must read as a sentence about the request rather than as JSON.parse's
+// "Unexpected end of JSON input".
+describe('unreadable bodies', () => {
+  const respond = (body: string, init: ResponseInit) =>
+    vi.stubGlobal('fetch', async () => new Response(body, init))
+
+  it('names the request and the status when the proxy answers an empty 500', async () => {
+    respond('', { status: 500, statusText: 'Internal Server Error' })
+    await expect(loadShownTasks(['p'], false)).rejects.toThrow(
+      '/api/p/tasks failed: HTTP 500 Internal Server Error',
+    )
+  })
+
+  it('prefers what the server said, when it said anything', async () => {
+    respond(JSON.stringify({ error: 'no such project' }), { status: 404 })
+    await expect(loadShownTasks(['p'], false)).rejects.toThrow('no such project')
+  })
+
+  it('reports a 200 whose body was truncated mid-flight', async () => {
+    respond('{"tasks":[{"id":"a"', { status: 200 })
+    await expect(loadShownTasks(['p'], false)).rejects.toThrow(
+      'unreadable response from /api/p/tasks (HTTP 200)',
+    )
+  })
+
+  // Parsing is not enough: `tasks` is what the caller maps over, and without
+  // this the failure surfaces as "Cannot read properties of undefined".
+  it('reports a parsed 200 that carries no task list', async () => {
+    respond(JSON.stringify({ telemetry: {} }), { status: 200 })
+    await expect(loadShownTasks(['p'], false)).rejects.toThrow(
+      'unreadable response from /api/p/tasks (HTTP 200)',
+    )
+  })
+})
