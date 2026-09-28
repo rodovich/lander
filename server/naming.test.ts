@@ -5,17 +5,20 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { normalizeProjectPath } from './projects'
 
 // A naming call takes seconds, and the flag that tells the retry sites "this
-// task still needs a name" is set for all of them. The stub keeps the call open
-// long enough for a second trigger to arrive while the first is in flight — the
-// live shape, where the opening turn starts milliseconds after creation — and
-// counts what actually got asked of the model.
+// task still needs a name" is set for all of them. The stub holds each call open
+// until the test calls `release` — so a second trigger arrives while the first
+// is in flight, the live shape where the opening turn starts milliseconds after
+// creation — and counts what actually got asked of the model. A fixed hold
+// instead let a loaded run reach the second trigger after the first call had
+// already ended, which is a legitimate retry and not the race under test.
 const calls: string[] = []
 let answer: string | null = null
+let release: () => void = () => {}
 vi.mock('./title', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./title')>()),
   generateTitle: vi.fn(async (_dir: string, source: string) => {
     calls.push(source)
-    await new Promise((r) => setTimeout(r, 80))
+    await new Promise<void>((r) => (release = r))
     return answer
   }),
 }))
@@ -82,11 +85,17 @@ describe('a task is named once at a time', () => {
     // window would otherwise have fired a second call.
     answer = null
     await recoverQueues()
+    // driveTask checks the flag before it drains the queue, so once the queue
+    // has moved the second trigger has already come and gone — while the first
+    // call is still held open.
     await vi.waitFor(async () => {
       expect((await readRaw('named-once')).queued ?? []).not.toEqual(['opening'])
     })
-    await new Promise((r) => setTimeout(r, 200))
     expect(calls).toEqual(['opening'])
+    release()
+    // A null answer writes nothing, so the call unwinds — and the guard clears —
+    // in microtasks alone, all of which run before the next macrotask.
+    await new Promise((r) => setImmediate(r))
     expect((await readRaw('named-once')).titlePending).toBe(true)
 
     // The guard is per call, not per task: once the first call has ended, the
@@ -94,6 +103,8 @@ describe('a task is named once at a time', () => {
     // retried, which is the whole point of the flag.
     answer = 'Named on retry'
     await recoverQueues()
+    await vi.waitFor(() => expect(calls).toEqual(['opening', 'opening']))
+    release()
     await vi.waitFor(async () => {
       expect((await readRaw('named-once')).title).toBe('Named on retry')
     })
