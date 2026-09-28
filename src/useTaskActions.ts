@@ -47,75 +47,36 @@ export function useTaskActions(opts: {
   // The task whose title is being regenerated, if any.
   const [retitling, setRetitling] = useState<string | null>(null)
 
-  // Mark a task caught-up: advance its server-side `seenAt` to its latest
-  // completed update, which clears its unseen dot. Optimistically advances the
-  // local copy so the dot clears at once; the 2s poll reconciles. The server
-  // stores the marker monotonically, so a stale/older value never moves it back.
-  // Reads tasksRef so a delayed (dwell-timer) call sees the freshest data.
-  const markSeen = useCallback(
-    async (key: string) => {
-      const task = tasksRef.current.find((t) => taskKeyOf(t) === key)
-      if (!task) return
-      const id = task.id
-      const at = latestUpdateAt(task)
-      if (!at || (task.seenAt && task.seenAt >= at)) return
-      setTasks((prev) =>
-        prev.map((t) => (taskKeyOf(t) === key ? { ...t, seenAt: at } : t)),
-      )
-      try {
-        await fetch(`/api/${task.projectSlug}/tasks/${id}/seen`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ at }),
-        })
-      } catch {
-        // best-effort; a later dwell or the poll will retry the mark
-      }
-    },
-    [tasksRef, setTasks],
-  )
-
-  // Mark a task unread: reset its server-side `seenAt` so the task's latest
-  // update reads as unviewed again, re-showing its dot. Optimistically clears
-  // the local marker so the dot appears at once; the 2s poll reconciles. The
-  // next time the viewer reads the task, markSeen advances the marker forward
-  // again.
-  const markUnread = useCallback(
-    async (key: string) => {
-      const task = tasksRef.current.find((t) => taskKeyOf(t) === key)
-      if (!task) return
-      const id = task.id
-      setTasks((prev) =>
-        prev.map((t) => (taskKeyOf(t) === key ? { ...t, seenAt: '' } : t)),
-      )
-      try {
-        await fetch(`/api/${task.projectSlug}/tasks/${id}/unread`, {
-          method: 'POST',
-        })
-      } catch {
-        // best-effort; the next poll restores the true marker
-      }
-    },
-    [tasksRef, setTasks],
-  )
-
   // Write one task through the mutation fence: apply `patch` optimistically,
   // send the request, then settle on the task the server returns — or roll back
   // to the server's copy on failure. The fence keeps a poll issued before the
   // write from painting the old state back over the new. With no `action` the
-  // patch itself is PATCHed to the task; with one, it is a bodiless POST to
-  // that sub-route and the patch is only the local prediction of its effect
-  // (possibly empty, when the result can't be predicted).
+  // patch itself is PATCHed to the task; with one, it is a POST to that
+  // sub-route carrying `body` (if any), and the patch is only the local
+  // prediction of its effect (possibly empty, when the result can't be
+  // predicted). A `quiet` write is best-effort view state: it neither clears
+  // nor sets the error line, only rolls back.
   const writeTask = useCallback(
-    async (task: TaskWithProject, patch: TaskPatch, action?: string) => {
+    async (
+      task: TaskWithProject,
+      patch: TaskPatch,
+      opts: { action?: string; body?: unknown; quiet?: boolean } = {},
+    ) => {
+      const { action, quiet } = opts
       const proj = task.projectSlug
-      setError(null)
+      if (!quiet) setError(null)
       const mutation = beginTaskMutation(task, patch)
       try {
         const r = await fetch(
           `/api/${proj}/tasks/${task.id}${action ? `/${action}` : ''}`,
           action
-            ? { method: 'POST', headers: uiHeaders() }
+            ? {
+                method: 'POST',
+                headers: uiHeaders(),
+                ...(opts.body !== undefined
+                  ? { body: JSON.stringify(opts.body) }
+                  : {}),
+              }
             : {
                 method: 'PATCH',
                 headers: uiHeaders(),
@@ -130,10 +91,43 @@ export function useTaskActions(opts: {
         })
       } catch (err) {
         finishTaskMutation(mutation)
-        setError(err instanceof Error ? err.message : String(err))
+        if (!quiet) setError(err instanceof Error ? err.message : String(err))
       }
     },
     [setError, beginTaskMutation, finishTaskMutation],
+  )
+
+  // Mark a task caught-up: advance its server-side `seenAt` to its latest
+  // completed update, which clears its unseen dot. Written through the fence so
+  // the dot clears at once and a poll issued before the mark can't bring it
+  // back. The server stores the marker monotonically, so a stale/older value
+  // never moves it back. Reads tasksRef so a delayed (dwell-timer) call sees the
+  // freshest data.
+  const markSeen = useCallback(
+    async (key: string) => {
+      const task = tasksRef.current.find((t) => taskKeyOf(t) === key)
+      if (!task) return
+      const at = latestUpdateAt(task)
+      if (!at || (task.seenAt && task.seenAt >= at)) return
+      await writeTask(
+        task,
+        { seenAt: at },
+        { action: 'seen', body: { at }, quiet: true },
+      )
+    },
+    [tasksRef, writeTask],
+  )
+
+  // Mark a task unread: reset its server-side `seenAt` so the task's latest
+  // update reads as unviewed again, re-showing its dot at once. The next time
+  // the viewer reads the task, markSeen advances the marker forward again.
+  const markUnread = useCallback(
+    async (key: string) => {
+      const task = tasksRef.current.find((t) => taskKeyOf(t) === key)
+      if (!task) return
+      await writeTask(task, { seenAt: '' }, { action: 'unread', quiet: true })
+    },
+    [tasksRef, writeTask],
   )
 
   const setStatus = useCallback(
@@ -211,7 +205,11 @@ export function useTaskActions(opts: {
   // button gives way to the paced one at once.
   const launchNow = useCallback(
     (task: TaskWithProject) =>
-      writeTask(task, { status: 'riding', scheduledFor: undefined }, 'launch'),
+      writeTask(
+        task,
+        { status: 'riding', scheduledFor: undefined },
+        { action: 'launch' },
+      ),
     [writeTask],
   )
 
@@ -279,7 +277,7 @@ export function useTaskActions(opts: {
     const key = taskKeyOf(current)
     setRetitling(key)
     try {
-      await writeTask(current, {}, 'retitle')
+      await writeTask(current, {}, { action: 'retitle' })
     } finally {
       setRetitling((prev) => (prev === key ? null : prev))
     }
