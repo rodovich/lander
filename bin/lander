@@ -7,7 +7,7 @@
 // LANDER_TASK, and LANDER_TOKEN (the per-task secret that authenticates these
 // callbacks).
 import { spawnSync } from 'node:child_process'
-import { createReadStream, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { createReadStream, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { inDateRange, matchesText, taskMetadata } from './task-metadata.js'
@@ -205,9 +205,13 @@ async function catLocalFile(id, usage) {
 // riding. Also writes the blob into the task's local store: the daemon
 // materializes turn inputs only, so nothing else would ever fetch an output down
 // and `ls`/`cat` would not see it.
-async function putAttachment(pathOrBytes, { name, mime } = {}) {
+function requireTask() {
   if (!API) die('not inside a lander task (LANDER_API unset)')
   if (!TASK) die('no current task (LANDER_TASK unset)')
+}
+
+async function putAttachment(pathOrBytes, { name, mime } = {}) {
+  requireTask()
   let bytes
   let filename
   if (typeof pathOrBytes === 'string') {
@@ -263,16 +267,28 @@ async function attachmentCommand(args) {
       else if (a === '--mime') o.mime = rest[++i]
       else pos.push(a)
     }
-    const p = pos.shift()
-    if (!p) die('usage: lander attachment put <path> [--name <n>] [--mime <m>]')
-    const ref = await putAttachment(p, { name: o.name, mime: o.mime })
-    console.log(`${ref.name}  ${ref.id}  ${ref.size}`)
+    if (!pos.length) die('usage: lander attachment put <path>… [--name <n>] [--mime <m>]')
+    if (o.name && pos.length > 1) die('--name needs a single path')
+    requireTask()
+    // Check every path before uploading any, so a typo in the third path doesn't
+    // leave the first two attached and the rest silently missing.
+    for (const p of pos) {
+      let ok = false
+      try {
+        ok = statSync(p).isFile()
+      } catch {}
+      if (!ok) die(`cannot read file: ${p}`)
+    }
+    for (const p of pos) {
+      const ref = await putAttachment(p, { name: o.name, mime: o.mime })
+      console.log(`${ref.name}  ${ref.id}  ${ref.size}`)
+    }
     return
   }
   // Reject an unknown subcommand before the store guard, so a typo reports the
   // usage rather than a confusing "no attachments for this task".
   if (sub !== 'ls' && sub !== 'cat')
-    die('usage: lander attachment (put <path> [--name <n>] [--mime <m>] | ls | cat <id>)')
+    die('usage: lander attachment (put <path>… [--name <n>] [--mime <m>] | ls | cat <id>)')
   if (!FILES_DIR) die('no attachments for this task (LANDER_FILES_DIR unset)')
   if (sub === 'ls') return void listLocalFiles()
   await catLocalFile(rest[0], 'usage: lander attachment cat <id>')
@@ -1391,7 +1407,7 @@ const USAGE = {
   archive: 'archive <id…> [--restore]',
   assist: 'assist <prompt> [text …]',
   attachment:
-    'attachment (put <path> [--name <n>] [--mime <m>] | ls | cat <id>)',
+    'attachment (put <path>… [--name <n>] [--mime <m>] | ls | cat <id>)',
   flow: 'flow <name> [--key <k> <v> …]',
 }
 

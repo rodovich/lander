@@ -225,6 +225,67 @@ describe('lander attachment', () => {
     expect(cat.stdout).toBe('# hi\n')
   })
 
+  it('put attaches every path it is given', async () => {
+    const dir = await makeFilesDir()
+    cleanups.push(() => rm(dir, { recursive: true, force: true }))
+    const a = path.join(dir, 'a.png')
+    const b = path.join(dir, 'b.png')
+    await writeFile(a, 'A')
+    await writeFile(b, 'B')
+    const stub = await stubServer((n) => ({
+      attachment: { id: `blob-${n}`, name: `${'ab'[n]}.png`, mime: 'image/png', size: 1 },
+      hosted: true,
+    }))
+    cleanups.push(stub.close)
+
+    const { stdout, code } = await execLander(['attachment', 'put', a, b], {
+      ...bareEnv(),
+      LANDER_API: stub.origin,
+      LANDER_TASK: 'task-1',
+      LANDER_PROJECT: 'proj',
+      LANDER_TOKEN: 'secret',
+      LANDER_FILES_DIR: dir,
+    })
+    expect(code).toBe(0)
+    expect(stub.captured.map((c) => c.body.includes('filename="b.png"'))).toEqual([
+      false,
+      true,
+    ])
+    expect(stdout.trim().split('\n')).toEqual(['a.png  blob-0  1', 'b.png  blob-1  1'])
+  })
+
+  it('put uploads nothing when any path is unreadable', async () => {
+    const dir = await makeFilesDir()
+    cleanups.push(() => rm(dir, { recursive: true, force: true }))
+    const a = path.join(dir, 'a.png')
+    await writeFile(a, 'A')
+    const stub = await stubServer(() => ({}))
+    cleanups.push(stub.close)
+
+    const { stderr, code } = await execLander(
+      ['attachment', 'put', a, path.join(dir, 'missing.png')],
+      {
+        ...bareEnv(),
+        LANDER_API: stub.origin,
+        LANDER_TASK: 'task-1',
+        LANDER_PROJECT: 'proj',
+        LANDER_FILES_DIR: dir,
+      },
+    )
+    expect(code).not.toBe(0)
+    expect(stderr).toContain('missing.png')
+    expect(stub.captured).toHaveLength(0)
+  })
+
+  it('put rejects --name with several paths', async () => {
+    const { stderr, code } = await execLander(
+      ['attachment', 'put', 'a.png', 'b.png', '--name', 'x.png'],
+      { ...bareEnv(), LANDER_API: 'http://127.0.0.1:1', LANDER_TASK: 'task-1' },
+    )
+    expect(code).not.toBe(0)
+    expect(stderr).toContain('--name needs a single path')
+  })
+
   it('warns when the server found no turn to attach it to', async () => {
     const dir = await makeFilesDir()
     cleanups.push(() => rm(dir, { recursive: true, force: true }))

@@ -73,7 +73,7 @@ A task's agent can call back into lander to manage itself. When the daemon launc
 | `lander send <id> <message>` | Message another task in this project — now, or deferred with `--date`/`--time`/`--await`. |
 | `lander archive <id> [--restore]` | Archive a task (or `--restore` it) — move it out of the list into `archived/`, or back. |
 | `lander attachment ls` / `lander attachment cat <id>` | List **this** task's files (id/name/mime/size) — both the ones sent to it and the ones it attached — or stream one's raw bytes to stdout. See [Attachments](#attachments). |
-| `lander attachment put <path> [--name <n>] [--mime <m>]` | Attach a file to the turn **this** task is riding, so it renders on the reply (name defaults to the basename) — see [Outputs](#outputs). |
+| `lander attachment put <path>… [--name <n>] [--mime <m>]` | Attach files to the turn **this** task is riding, so they render on the reply (name defaults to the basename; `--name` takes a single path) — see [Outputs](#outputs). |
 | `lander help [command]` / `lander <command> --help` | Print usage — the full command index, or one command's flags. Print-only: `--help`/`-h`/`help` are intercepted before dispatch, so they never launch or send anything. |
 
 **Choice options are suggested replies, not a control surface.** Write each `--option` label as a potential instruction to the agent that the user could have typed and that the agent could execute without asking anything back. These commands are deliberately absent from the task prompt: they're for flow- and skill-directed use, where a script decides the fork points — conversation-driven agents should just converse.
@@ -94,7 +94,7 @@ At turn time the daemon lazily materializes a task's attachments into a per-task
 
 #### Outputs
 
-A task's **outputs** are the same thing as its inputs, differing only in which message carries them: `lander attachment put <path> [--name <n>] [--mime <m>]` stores a blob and records the ref on the flow item for the turn the task is riding, so the file renders as a chip on that reply. If the turn has emitted nothing yet, the attachment opens its first item and becomes the first thing that turn shows — a flow that writes its outputs before it speaks still has them appear where it wrote them.
+A task's **outputs** are the same thing as its inputs, differing only in which message carries them: `lander attachment put <path>… [--name <n>] [--mime <m>]` stores a blob per path and records the ref on the flow item for the turn the task is riding, so the file renders as a chip on that reply. If the turn has emitted nothing yet, the attachment opens its first item and becomes the first thing that turn shows — a flow that writes its outputs before it speaks still has them appear where it wrote them.
 
 An HTML output previews as a live page — a component harness with dummy data, an interactive chart — rather than as source. It runs in an iframe sandboxed to an opaque origin (scripts allowed, no access to the lander page) under a CSP that permits only inline and `data:`/`blob:` resources, so the page must be one self-contained file: bundle scripts, styles, and assets inline (e.g. esbuild or `vite-plugin-singlefile`). The preview's **Open in tab** shows it full-window under the same sandbox.
 
