@@ -4311,8 +4311,12 @@ if (process.env.NODE_ENV !== 'test' && process.env.VITEST !== 'true') {
   await backfillArtifactsToAttachments()
   await recoverQueues()
 
-  const server = serve({ fetch: app.fetch, port })
-  console.log(`api listening on http://localhost:${port}`)
+  // Loopback only: this API spawns agent processes, and an unauthenticated
+  // caller still resolves as `anon`. Every client reaches it as `localhost`
+  // (Vite's proxy, the daemon, the in-task CLI), which falls back from ::1 to
+  // 127.0.0.1.
+  const server = serve({ fetch: app.fetch, port, hostname: '127.0.0.1' })
+  console.log(`api listening on http://127.0.0.1:${port}`)
 
   // Accept the host daemon's WebSocket and route runs to it. The server's
   // @hono/node-server serve() returns a Node http.Server, which we hand to the WS
