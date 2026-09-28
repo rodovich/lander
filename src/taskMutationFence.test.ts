@@ -6,8 +6,10 @@ import {
   insertTask,
   mergeTaskRefresh,
   patchTask,
+  removeTask,
   replaceTask,
   settleTaskPatch,
+  settleTaskRemoval,
 } from './taskMutationFence'
 import type { TaskWithProject } from './types'
 
@@ -122,6 +124,54 @@ describe('task mutation fence', () => {
     expect(
       mergeTaskRefresh(fence, issuedAfter, stale, [task('a', 'landed')]).map((t) => t.id),
     ).toEqual(['a'])
+  })
+
+  it('keeps a removed task out of a refresh issued before or during the removal', () => {
+    const fence = createTaskMutationFence()
+    const a = task('a', 'landed')
+    const b = task('b', 'riding')
+    const issuedBefore = fence.clock
+    const handle = beginTaskPatch(fence, a, 'removed')
+    const issuedDuring = fence.clock
+    const current = removeTask([a, b], handle.key)
+
+    for (const issuedAt of [issuedBefore, issuedDuring]) {
+      const merged = mergeTaskRefresh(fence, issuedAt, current, [
+        task('a', 'landed'),
+        task('b', 'landed'),
+      ])
+      expect(merged.map(({ id, status }) => ({ id, status }))).toEqual([
+        { id: 'b', status: 'landed' },
+      ])
+    }
+
+    // Once the move succeeds, a refresh that began while it was in flight still
+    // can't bring the row back; one issued afterwards is authoritative.
+    expect(settleTaskRemoval(fence, handle, true)).toBeNull()
+    expect(
+      mergeTaskRefresh(fence, issuedDuring, current, [task('a', 'landed'), b]).map(
+        (t) => t.id,
+      ),
+    ).toEqual(['b'])
+    expect(
+      mergeTaskRefresh(fence, fence.clock, current, [task('a', 'landed'), b]).map(
+        (t) => t.id,
+      ),
+    ).toEqual(['a', 'b'])
+  })
+
+  it('reinstates a task whose removal fails, from the newest server copy', () => {
+    const fence = createTaskMutationFence()
+    const a = task('a', 'landed')
+    const handle = beginTaskPatch(fence, a, 'removed')
+    const issuedAt = fence.clock
+    mergeTaskRefresh(fence, issuedAt, [], [
+      task('a', 'landed', { title: 'renamed meanwhile' }),
+    ])
+
+    const reinstated = settleTaskRemoval(fence, handle, false)
+    expect(reinstated).toMatchObject({ id: 'a', title: 'renamed meanwhile' })
+    expect(insertTask([], reinstated!).map((t) => t.id)).toEqual(['a'])
   })
 
   it('replaces rather than duplicates a task admitted twice', () => {

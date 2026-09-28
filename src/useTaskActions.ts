@@ -19,7 +19,6 @@ export function useTaskActions(opts: {
   // Latest tasks readable from timer callbacks that outlive the render that
   // scheduled them (the seen-marker dwell timer marks a task seen 2s later).
   tasksRef: { current: TaskWithProject[] }
-  setTasks: React.Dispatch<React.SetStateAction<TaskWithProject[]>>
   refresh: () => Promise<void>
   beginTaskMutation: (
     task: TaskWithProject,
@@ -29,15 +28,18 @@ export function useTaskActions(opts: {
     handle: TaskMutationHandle,
     updated?: TaskWithProject,
   ) => void
+  beginTaskRemoval: (task: TaskWithProject) => TaskMutationHandle
+  finishTaskRemoval: (handle: TaskMutationHandle, succeeded: boolean) => void
   setError: (message: string | null) => void
 }) {
   const {
     currentRef,
     tasksRef,
-    setTasks,
     refresh,
     beginTaskMutation,
     finishTaskMutation,
+    beginTaskRemoval,
+    finishTaskRemoval,
     setError,
   } = opts
 
@@ -137,66 +139,66 @@ export function useTaskActions(opts: {
 
   // Archive (or restore) a task by moving it between the project's tasks/ and
   // archived/ dirs. The list shows only active tasks or only archived ones, so
-  // either action moves the row out of the current view: optimistically drop it
-  // from the list. A reload reconciles.
-  const archiveTask = useCallback(
+  // either move takes the row out of the current view: drop it through the
+  // fence, so a poll issued before the move can't bring it back, and reinstate
+  // it if the move fails. Throws the failure for the caller to report.
+  const moveTask = useCallback(
     async (task: TaskWithProject, archived: boolean) => {
-      const id = task.id
-      const proj = task.projectSlug
-      const key = taskKeyOf(task)
-      setError(null)
-      setTasks((prev) => prev.filter((t) => taskKeyOf(t) !== key))
+      const removal = beginTaskRemoval(task)
       try {
-        const r = await fetch(`/api/${proj}/tasks/${id}/archive`, {
-          method: 'POST',
-          headers: uiHeaders(),
-          body: JSON.stringify({ archived }),
-        })
+        const r = await fetch(
+          `/api/${task.projectSlug}/tasks/${task.id}/archive`,
+          {
+            method: 'POST',
+            headers: uiHeaders(),
+            body: JSON.stringify({ archived }),
+          },
+        )
         if (!r.ok) {
-          const body = await r.json()
+          const body = await r.json().catch(() => ({}))
           throw new Error(body.error ?? r.statusText)
         }
-        await refresh()
+        finishTaskRemoval(removal, true)
+      } catch (err) {
+        finishTaskRemoval(removal, false)
+        throw err
+      }
+    },
+    [beginTaskRemoval, finishTaskRemoval],
+  )
+
+  const archiveTask = useCallback(
+    async (task: TaskWithProject, archived: boolean) => {
+      setError(null)
+      try {
+        await moveTask(task, archived)
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
       }
     },
-    [setError, setTasks, refresh],
+    [setError, moveTask],
   )
 
   // Archive a whole section's tasks at once (the section header's kebab). The
   // caller resolves the section to its target tasks — a status, or a single
-  // status+date bucket. Drops them all optimistically, fires the per-task
-  // archive calls in parallel, then reloads to reconcile — including any that
-  // failed, which the reload brings back. Only offered for non-riding sections
-  // (a riding task has a live run the server won't archive), so every target
-  // is archivable.
+  // status+date bucket. Moves them all in parallel, each fenced on its own, so
+  // any that fail come back while the rest stay archived. Only offered for
+  // non-riding sections (a riding task has a live run the server won't
+  // archive), so every target is archivable.
   const archiveSection = useCallback(
     async (targets: TaskWithProject[]) => {
       if (targets.length === 0) return
-      const keys = new Set(targets.map(taskKeyOf))
       setError(null)
-      setTasks((prev) => prev.filter((t) => !keys.has(taskKeyOf(t))))
-      try {
-        await Promise.all(
-          targets.map(async (t) => {
-            const r = await fetch(`/api/${t.projectSlug}/tasks/${t.id}/archive`, {
-              method: 'POST',
-              headers: uiHeaders(),
-              body: JSON.stringify({ archived: true }),
-            })
-            if (!r.ok) {
-              const body = await r.json()
-              throw new Error(body.error ?? r.statusText)
-            }
-          }),
-        )
-      } catch (err) {
+      const results = await Promise.allSettled(
+        targets.map((t) => moveTask(t, true)),
+      )
+      const failed = results.find((r) => r.status === 'rejected')
+      if (failed) {
+        const err = failed.reason
         setError(err instanceof Error ? err.message : String(err))
       }
-      await refresh()
     },
-    [setError, setTasks, refresh],
+    [setError, moveTask],
   )
 
   // Launch a scheduled task now, ahead of its time (the header's "launch"

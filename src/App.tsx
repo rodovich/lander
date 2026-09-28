@@ -50,7 +50,6 @@ export function App() {
   // projects and the session's project filter, and mention-link resolution.
   const {
     tasks,
-    setTasks,
     tasksRef,
     telemetry,
     projects,
@@ -59,6 +58,8 @@ export function App() {
     refresh,
     beginTaskMutation,
     finishTaskMutation,
+    beginTaskRemoval,
+    finishTaskRemoval,
     admitTask,
     hasLoadedRef,
     resolveTaskLink,
@@ -82,10 +83,11 @@ export function App() {
   } = useTaskActions({
     currentRef,
     tasksRef,
-    setTasks,
     refresh,
     beginTaskMutation,
     finishTaskMutation,
+    beginTaskRemoval,
+    finishTaskRemoval,
     setError,
   })
   // The list search box, session-scoped alongside the other list filters.

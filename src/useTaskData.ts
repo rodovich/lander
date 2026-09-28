@@ -12,8 +12,10 @@ import {
   insertTask,
   mergeTaskRefresh,
   patchTask,
+  removeTask,
   replaceTask,
   settleTaskPatch,
+  settleTaskRemoval,
   type TaskMutationHandle,
   type TaskPatch,
 } from './taskMutationFence'
@@ -59,9 +61,12 @@ export function useTaskData(
   // until then (the URL sync, which would otherwise clobber a deep link).
   const hasLoadedRef = useRef(false)
 
-  // Status writes are optimistic while the displayed-list poll runs
+  // Task writes are optimistic while the displayed-list poll runs
   // independently. Fence only the task being written: stale snapshots cannot
-  // roll it back, while changes to every other task still land normally.
+  // roll it back, while changes to every other task still land normally. The
+  // fenced operations below (patch, removal, admit) and the poll's merge are
+  // the only writers of `tasks`; setTasks stays private so no optimistic write
+  // can skip the fence.
   const taskMutationFenceRef = useRef(createTaskMutationFence())
   const beginTaskMutation = useCallback(
     (task: TaskWithProject, patch: TaskPatch): TaskMutationHandle => {
@@ -80,6 +85,28 @@ export function useTaskData(
       )
       if (replacement)
         setTasks((prev) => replaceTask(prev, handle.key, replacement))
+    },
+    [],
+  )
+  // The same fence for a write that takes a task out of the displayed list (an
+  // archive or restore): drop the row at once, keep polls that predate the
+  // write from bringing it back, and reinstate it if the write fails.
+  const beginTaskRemoval = useCallback(
+    (task: TaskWithProject): TaskMutationHandle => {
+      const handle = beginTaskPatch(taskMutationFenceRef.current, task, 'removed')
+      setTasks((prev) => removeTask(prev, handle.key))
+      return handle
+    },
+    [],
+  )
+  const finishTaskRemoval = useCallback(
+    (handle: TaskMutationHandle, succeeded: boolean) => {
+      const reinstated = settleTaskRemoval(
+        taskMutationFenceRef.current,
+        handle,
+        succeeded,
+      )
+      if (reinstated) setTasks((prev) => insertTask(prev, reinstated))
     },
     [],
   )
@@ -283,7 +310,6 @@ export function useTaskData(
 
   return {
     tasks,
-    setTasks,
     tasksRef,
     telemetry,
     projects,
@@ -292,6 +318,8 @@ export function useTaskData(
     refresh,
     beginTaskMutation,
     finishTaskMutation,
+    beginTaskRemoval,
+    finishTaskRemoval,
     admitTask,
     hasLoadedRef,
     resolveTaskLink,
