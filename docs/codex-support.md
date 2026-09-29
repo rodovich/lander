@@ -160,6 +160,20 @@ does not provide all Claude-specific fields such as authoritative permission
 denial ids, Claude subagent parent metadata, Claude model/cost data, or
 subscription reset events.
 
+Codex chips are named by what the stream itself says: the item type
+(`command_execution`, `file_change`, `web_search`), or the item's own `tool`
+field where it has one (`mcp_tool_call` → e.g. `browser_navigate`, with the
+`server` leading its input; `collab_tool_call` → `wait`). The names the model
+actually calls (`exec_command`, `apply_patch`, …) appear only in Codex's private
+rollout log, so lander does not use them.
+
+Subagents barely reach the public stream. As of Codex 0.154.0 the only item is a
+`collab_tool_call` for each `wait`, with its receivers and agent states empty;
+`spawn_agent`, `send_message`, and the subagents' own activity emit nothing. A
+Codex task shows when it waited on subagents, not which ones, what it asked
+them, or what they did. The rollout log records their lifecycle and activity,
+but the spawn prompt is encrypted even there.
+
 Codex's `exec --json` stream does not export dynamic/custom tool-call items.
 Most shell activity still appears because a nested shell invocation emits a
 separate `command_execution` item. However, a shell invocation denied by the

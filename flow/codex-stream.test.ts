@@ -7,6 +7,7 @@ import {
   extractCodexSession,
   readThreadUsage,
   reduceCodexStreamLine,
+  unwrapShellCommand,
 } from './codex-stream'
 
 const AT = '2026-01-01T00:00:00.000Z'
@@ -111,7 +112,7 @@ describe('Codex stream reducer', () => {
       {
         kind: 'tool_use',
         tool: 'command_execution',
-        input: "/bin/zsh -lc 'printf codex-command-fixture'",
+        input: 'printf codex-command-fixture',
         toolUseId: 'item_0',
         rule: "command_execution(/bin/zsh -lc 'printf codex-command-fixture')",
         createdAt: AT,
@@ -184,11 +185,124 @@ describe('Codex stream reducer', () => {
         createdAt: AT,
       },
       {
+        kind: 'tool_result',
+        text: '',
+        toolUseId: 'item_0',
+        isError: false,
+        createdAt: AT,
+      },
+      {
         kind: 'text',
         text: 'done',
         createdAt: AT,
       },
     ])
+  })
+
+  it('settles a file change that Codex reports failed as an error', () => {
+    const r = reduceCodexStreamLine(
+      JSON.stringify({
+        type: 'item.completed',
+        item: { id: 'item_0', type: 'file_change', changes: [], status: 'failed' },
+      }),
+      AT,
+    )
+    expect(r.steps).toEqual([
+      { kind: 'tool_result', text: '', toolUseId: 'item_0', isError: true, createdAt: AT },
+    ])
+  })
+
+  // Captured from codex-cli 0.154.0. Every item lands between the messages the
+  // agent wrote before and after it, in stream order.
+  it('reduces web searches, MCP calls and file changes in stream order', () => {
+    const r = reduceFixture('tool-coverage.jsonl')
+    expect(
+      r.steps.map((s) =>
+        s.kind === 'text'
+          ? `text: ${s.text!.split('\n')[0]}`
+          : s.kind === 'tool_use'
+            ? `use ${s.tool}(${s.input}) #${s.toolUseId}`
+            : `result #${s.toolUseId}${s.isError ? ' error' : ''}: ${s.text}`,
+      ),
+    ).toEqual([
+      'text: No plan/todo tool is available, so I’ll track the three items here:',
+      'use web_search(codex cli exec json events) #exec-c92104ec-c27a-4b4d-a418-f176a15c607a',
+      'result #exec-c92104ec-c27a-4b4d-a418-f176a15c607a: ',
+      'text: 1. Web search — complete.',
+      'use browser_navigate(playwright: https://example.com) #item_5',
+      'result #item_5 error: MCP tool call requires approval, but approval policy is never',
+      'text: Navigation was blocked because the tool requires approval and this session’s approval policy is `never`.',
+      'use file_change(add /tmp/codex-probe/hello.txt) #item_7',
+      'result #item_7: ',
+      'text: 3. Both patch attempts — complete: created `hello.txt` containing `hi`; modifying `missing.txt` failed as expected.',
+      'text: done',
+    ])
+  })
+
+  it('folds an MCP result from its content blocks', () => {
+    const r = reduceCodexStreamLine(
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          id: 'item_0',
+          type: 'mcp_tool_call',
+          server: 's',
+          tool: 't',
+          arguments: {},
+          result: { content: [{ type: 'text', text: 'page loaded' }] },
+          error: null,
+          status: 'completed',
+        },
+      }),
+      AT,
+    )
+    expect(r.steps).toEqual([
+      { kind: 'tool_result', text: 'page loaded', toolUseId: 'item_0', isError: false, createdAt: AT },
+    ])
+  })
+
+  // Codex 0.154 emits no item for spawn_agent; its waits are the only trace of
+  // subagents in the public stream, named by the item's `tool` field.
+  it('reduces multi-agent waits between the prose around them', () => {
+    const r = reduceFixture('collab-wait.jsonl')
+    expect(
+      r.steps.map((s) =>
+        s.kind === 'text'
+          ? `text: ${s.text!.trim()}`
+          : `${s.kind} ${s.tool ?? ''} #${s.toolUseId}${s.isError ? ' error' : ''}`,
+      ),
+    ).toEqual([
+      'text: I’ll start both subagents in parallel and wait for their results.',
+      'tool_use wait #item_1',
+      'tool_result  #item_1',
+      'tool_use wait #item_2',
+      'tool_result  #item_2',
+      'text: Subagent A: slept; Subagent B: beta',
+    ])
+  })
+
+  it('unwraps the login-shell wrapper Codex puts around every command', () => {
+    expect(unwrapShellCommand("/bin/zsh -lc 'git log --oneline -3'")).toBe(
+      'git log --oneline -3',
+    )
+    expect(unwrapShellCommand(`/bin/zsh -lc 'echo '"'"'hi'"'"''`)).toBe(
+      "echo 'hi'",
+    )
+    // Captured: a double-quoted heredoc whose body carries escaped quotes.
+    expect(
+      unwrapShellCommand(
+        `/bin/zsh -lc "python3 - <<'PY'\nprint(\\"a \\$b\\")\nPY"`,
+      ),
+    ).toBe(`python3 - <<'PY'\nprint("a $b")\nPY`)
+    expect(unwrapShellCommand('/bin/bash -lc ls')).toBe('ls')
+    // Anything else reads as Codex sent it.
+    expect(unwrapShellCommand('ls -la')).toBe('ls -la')
+    expect(unwrapShellCommand("/bin/zsh -lc 'unterminated")).toBe(
+      "/bin/zsh -lc 'unterminated",
+    )
+    expect(unwrapShellCommand("/bin/zsh -lc 'a' 'b'")).toBe(
+      "/bin/zsh -lc 'a' 'b'",
+    )
   })
 
   it('surfaces top-level error and turn.failed events as terminal errors', () => {

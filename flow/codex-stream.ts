@@ -52,16 +52,19 @@ export function reduceCodexStreamLine(
         const tool = item.type
         const command = typeof item.command === 'string' ? item.command : ''
         if (ev.type === 'item.started') {
+          // Codex reports every command wrapped in its login shell
+          // (`/bin/zsh -lc '…'`); the chip shows the command the agent wrote.
+          const shown = unwrapShellCommand(command)
           // A multi-line or long command reads on the chip as one clipped line;
           // keep the untruncated, newline-preserving form so the expanded chip can
           // show it as written. Omit it when the one-line summary already says as
           // much (a short single-line command).
-          const inputFull = fullToolInput({ command })
+          const inputFull = fullToolInput({ command: shown })
           steps.push({
             kind: 'tool_use',
             tool,
-            input: command,
-            ...(inputFull && inputFull !== summarizeToolInput({ command })
+            input: shown,
+            ...(inputFull && inputFull !== summarizeToolInput({ command: shown })
               ? { inputFull }
               : {}),
             toolUseId: id,
@@ -77,18 +80,113 @@ export function reduceCodexStreamLine(
             createdAt: at,
           })
         }
-      } else if (item.type === 'file_change' && ev.type === 'item.started') {
+      } else if (item.type === 'file_change') {
         const id = typeof item.id === 'string' ? item.id : undefined
         const tool = item.type
-        const path = firstChangePath(item)
-        steps.push({
-          kind: 'tool_use',
-          tool,
-          input: summarizeFileChange(item),
-          toolUseId: id,
-          rule: path ? toolRule(tool, { path }) : tool,
-          createdAt: at,
-        })
+        if (ev.type === 'item.started') {
+          const path = firstChangePath(item)
+          steps.push({
+            kind: 'tool_use',
+            tool,
+            input: summarizeFileChange(item),
+            toolUseId: id,
+            rule: path ? toolRule(tool, { path }) : tool,
+            createdAt: at,
+          })
+        } else {
+          // The stream carries no diff or message for a patch, only its outcome.
+          steps.push({
+            kind: 'tool_result',
+            text: '',
+            toolUseId: id,
+            isError: itemFailed(ev.type, item),
+            createdAt: at,
+          })
+        }
+      } else if (item.type === 'mcp_tool_call') {
+        // Named by the item's own `tool` field, with its `server` leading the
+        // input the way an Agent chip leads with its subagent type.
+        const id = typeof item.id === 'string' ? item.id : undefined
+        const tool = typeof item.tool === 'string' && item.tool ? item.tool : item.type
+        const server = typeof item.server === 'string' ? item.server : ''
+        if (ev.type === 'item.started') {
+          const args = summarizeToolInput(item.arguments)
+          const input = server ? (args ? `${server}: ${args}` : server) : args
+          const argsFull = fullToolInput(item.arguments)
+          const inputFull = server && argsFull ? `${server}: ${argsFull}` : argsFull
+          steps.push({
+            kind: 'tool_use',
+            tool,
+            input,
+            ...(inputFull && inputFull !== input ? { inputFull } : {}),
+            toolUseId: id,
+            rule: toolRule(tool, item.arguments),
+            createdAt: at,
+          })
+        } else {
+          const error =
+            item.error && typeof item.error === 'object'
+              ? errorMessage(item.error)
+              : undefined
+          steps.push({
+            kind: 'tool_result',
+            text: summarizeToolResult(error ?? mcpResultContent(item.result)),
+            toolUseId: id,
+            isError: error !== undefined || itemFailed(ev.type, item),
+            createdAt: at,
+          })
+        }
+      } else if (item.type === 'web_search') {
+        // The start carries an empty query (Codex fills it in on completion), so
+        // the chip opens and settles at completion. Nothing else can land
+        // between the two: the model sees the result before it writes again.
+        if (ev.type !== 'item.started') {
+          const id = typeof item.id === 'string' ? item.id : undefined
+          const tool = item.type
+          const query =
+            (typeof item.query === 'string' && item.query) ||
+            (typeof item.action?.query === 'string' ? item.action.query : '')
+          steps.push({
+            kind: 'tool_use',
+            tool,
+            input: query,
+            toolUseId: id,
+            rule: toolRule(tool, { query }),
+            createdAt: at,
+          })
+          steps.push({
+            kind: 'tool_result',
+            text: '',
+            toolUseId: id,
+            isError: itemFailed(ev.type, item),
+            createdAt: at,
+          })
+        }
+      } else if (item.type === 'collab_tool_call') {
+        // A multi-agent call, named by the item's own `tool` field. As of Codex
+        // 0.154 only `wait` reaches the public stream, and with its receivers
+        // and agent states empty — so the chip marks when the agent waited on
+        // its subagents and nothing about them.
+        const id = typeof item.id === 'string' ? item.id : undefined
+        const tool = typeof item.tool === 'string' && item.tool ? item.tool : item.type
+        if (ev.type === 'item.started') {
+          steps.push({
+            kind: 'tool_use',
+            tool,
+            input: '',
+            toolUseId: id,
+            rule: tool,
+            createdAt: at,
+          })
+        } else {
+          steps.push({
+            kind: 'tool_result',
+            text: '',
+            toolUseId: id,
+            isError: itemFailed(ev.type, item),
+            createdAt: at,
+          })
+        }
       }
     }
   } else if (ev.type === 'turn.completed') {
@@ -176,6 +274,69 @@ function commandFailed(item: Record<string, unknown>): boolean {
   if (typeof item.exit_code === 'number') return item.exit_code !== 0
   if (typeof item.exitCode === 'number') return item.exitCode !== 0
   return false
+}
+
+// A settled item's outcome: `item.failed`, or a completion whose status says
+// the call did not succeed.
+function itemFailed(evType: string, item: Record<string, unknown>): boolean {
+  return (
+    evType === 'item.failed' ||
+    item.status === 'failed' ||
+    item.status === 'error'
+  )
+}
+
+// An MCP call's result as Codex relays it: the server's `content` blocks.
+function mcpResultContent(result: unknown): unknown {
+  if (!result || typeof result !== 'object') return result
+  return (result as Record<string, unknown>).content
+}
+
+// The command inside Codex's login-shell wrapper — `/bin/zsh -lc '…'` — undoing
+// the wrapper's quoting. Returned unchanged when it is not exactly that shape,
+// so an unfamiliar form reads as Codex sent it rather than half-unwrapped.
+export function unwrapShellCommand(command: string): string {
+  const m = /^\/\S*\/(?:ba|z)?sh -lc (.+)$/s.exec(command)
+  if (!m) return command
+  const body = m[1]
+  let out = ''
+  let i = 0
+  while (i < body.length) {
+    const c = body[i]
+    if (c === "'") {
+      const end = body.indexOf("'", i + 1)
+      if (end === -1) return command
+      out += body.slice(i + 1, end)
+      i = end + 1
+    } else if (c === '"') {
+      i++
+      for (;;) {
+        if (i >= body.length) return command
+        const d = body[i]
+        if (d === '"') break
+        // Inside double quotes a backslash escapes only these four; before any
+        // other character it is literal.
+        if (d === '\\' && i + 1 < body.length && '"\\$`'.includes(body[i + 1])) {
+          out += body[i + 1]
+          i += 2
+        } else {
+          out += d
+          i++
+        }
+      }
+      i++
+    } else if (c === '\\' && i + 1 < body.length) {
+      out += body[i + 1]
+      i += 2
+    } else if (/\s/.test(c)) {
+      // An unquoted space would make it several arguments, not one command.
+      return command
+    } else {
+      out += c
+      i++
+    }
+  }
+  return out
 }
 
 function firstChangePath(item: Record<string, unknown>): string | undefined {
