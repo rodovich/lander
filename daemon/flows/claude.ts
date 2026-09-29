@@ -336,6 +336,15 @@ function buildContextBlock(
   gitContext: (cwd: string) => string | undefined,
 ): string {
   const parts = [`${forwardableAccess({ agent: 'claude', ...ctx.task })}.`]
+  // The rules granted to this task, which ride --allowedTools. Listed as state
+  // rather than as a "newly granted" note, so a grant surfaces exactly once — by
+  // changing the block, which the baseline compare then re-sends — and a
+  // one-turn line never costs a second resend when it drops out.
+  if (ctx.task.allow?.length)
+    parts.push(
+      'Tool permissions granted to this task (beyond the defaults): ' +
+        ctx.task.allow.map((rule) => `\`${rule}\``).join(', '),
+    )
   // A worktree task launches from the project root and re-enters the worktree
   // through argv, so read the snapshot from where the shell actually lands —
   // reading root would describe the wrong branch and dirty tree.

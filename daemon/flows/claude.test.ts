@@ -195,6 +195,24 @@ describe('Claude flow', () => {
     expect(context).not.toContain('Git status')
   })
 
+  it('lists task allow rules in the context block only when there are some', async () => {
+    const { context } = await runClaude({
+      task: { allowEdits: false, allow: ['Bash(npm test)', 'WebFetch'] },
+      root: '/repo',
+      cwd: '/repo',
+    })
+    expect(context).toContain(
+      'Tool permissions granted to this task (beyond the defaults): ' +
+        '`Bash(npm test)`, `WebFetch`',
+    )
+    const { context: none } = await runClaude({
+      task: { allowEdits: false, allow: [] },
+      root: '/repo',
+      cwd: '/repo',
+    })
+    expect(none).not.toContain('Tool permissions granted')
+  })
+
   describe('resolveLaunchDir', () => {
     const yes = () => true
 

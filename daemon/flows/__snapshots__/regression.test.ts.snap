@@ -2945,6 +2945,8 @@ Task state as of this message — background context from lander, not the user's
 
 You currently have no edit permission, so a spawned task cannot be granted it either.
 
+Tool permissions granted to this task (beyond the defaults): \`Bash(npm test)\`, \`Bash(npm run build)\`
+
 GIT-SNAPSHOT-STUB
 </task-context>",
       ],
@@ -2966,6 +2968,8 @@ GIT-SNAPSHOT-STUB
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
 
 You currently have no edit permission, so a spawned task cannot be granted it either.
+
+Tool permissions granted to this task (beyond the defaults): \`Bash(npm test)\`, \`Bash(npm run build)\`
 
 GIT-SNAPSHOT-STUB
 </task-context>",
