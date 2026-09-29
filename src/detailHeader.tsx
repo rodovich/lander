@@ -88,10 +88,6 @@ export const DetailHeader = memo(function DetailHeader({
 
   return (
     <div className="detail-header">
-      {/* The task's recorded worktree — what its flow's worktree hooks stored,
-          never derived from its cwd, which only records where the shell stood
-          when the last turn ended. The project it's in is the navbar's. */}
-      {task.worktree && <div className="detail-worktree">{task.worktree}</div>}
       {editingTitle ? (
         <input
           ref={titleInputRef}
@@ -140,6 +136,10 @@ export const DetailHeader = memo(function DetailHeader({
           <CopyConversationButton markdown={copyMarkdown} />
         </div>
       )}
+      {/* The task's recorded worktree — what its flow's worktree hooks stored,
+          never derived from its cwd, which only records where the shell stood
+          when the last turn ended. The project it's in is the navbar's. */}
+      {task.worktree && <div className="detail-worktree">{task.worktree}</div>}
       <div className="detail-meta">
         <span
           className={

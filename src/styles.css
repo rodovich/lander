@@ -661,7 +661,7 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 8px;
+  padding: 4px 12px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
@@ -1311,13 +1311,13 @@ body {
   flex-direction: column;
 }
 
-/* The worktree line, title row, and meta row are direct children stacked by the
+/* The title row, worktree line, and meta row are direct children stacked by the
    column gap; none of them carry their own margins. */
 .detail-header {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 24px 28px 20px;
+  padding: 20px 28px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-tinted);
 }
