@@ -36,10 +36,7 @@ export const Navbar = memo(function Navbar({
   return (
     <nav className="navbar">
       <div className="navbar-start">
-        <div className="navbar-brand">
-          <img src="/favicon.svg" alt="" width={20} height={20} />
-          lander
-        </div>
+        <img className="navbar-brand" src="/wordmark.svg" alt="lander" height={20} />
         {projects.length > 0 && (
           <SegmentedControl
             label="Project"
