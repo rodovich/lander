@@ -160,13 +160,13 @@ body {
   border-right: 1px solid var(--border);
 }
 
-/* Tinted toolbar holding the status links and the search/filter row. The gap
+/* Tinted toolbar holding the search field and the filter menus' row. The gap
    spaces the two rows with no dividing border between them. */
 .task-toolbar {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 8px 16px;
+  padding: 10px 16px;
   background: var(--bg-tinted);
   border-bottom: 1px solid var(--border);
 }
@@ -731,10 +731,15 @@ body {
 
 /* The per-status count row under the filter dropdown. Each entry wears its
    status color (same palette as the status pills); the number is emphasized. */
+/* The status-count chips, a tinted strip of their own under the search and
+   filter toolbar, ruled off from it by the toolbar's bottom border. */
 .task-counts {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 12px;
+  padding: 8px 16px;
+  background: var(--bg-tinted);
+  border-bottom: 1px solid var(--border);
   font-size: 11px;
 }
 

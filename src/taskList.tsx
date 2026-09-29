@@ -199,20 +199,6 @@ export const TaskList = memo(function TaskList({
   return (
     <>
       <div className="task-toolbar">
-        {hasProjects && statusCounts.length > 0 && (
-          <div className="task-counts">
-            {statusCounts.map(([status, count]) => (
-              <button
-                key={status}
-                type="button"
-                className={'task-count ' + status}
-                onClick={() => scrollToStatus(status)}
-              >
-                <span className="task-count-num">{count}</span> {status}
-              </button>
-            ))}
-          </div>
-        )}
         <input
           ref={searchInputRef}
           type="search"
@@ -239,6 +225,20 @@ export const TaskList = memo(function TaskList({
           />
         </div>
       </div>
+      {hasProjects && statusCounts.length > 0 && (
+        <div className="task-counts">
+          {statusCounts.map(([status, count]) => (
+            <button
+              key={status}
+              type="button"
+              className={'task-count ' + status}
+              onClick={() => scrollToStatus(status)}
+            >
+              <span className="task-count-num">{count}</span> {status}
+            </button>
+          ))}
+        </div>
+      )}
       <ul
         ref={taskListRef}
         className="task-list"
