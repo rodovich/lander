@@ -213,15 +213,15 @@ export const TaskList = memo(function TaskList({
             ))}
           </div>
         )}
+        <input
+          ref={searchInputRef}
+          type="search"
+          className="task-search"
+          placeholder="Search tasks (⌘⇧F)"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        />
         <div className="task-filters">
-          <input
-            ref={searchInputRef}
-            type="search"
-            className="task-search"
-            placeholder="Search (⌘⇧F)"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          />
           <FilterMenu
             label="View"
             value={view}

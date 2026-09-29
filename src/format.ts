@@ -65,27 +65,6 @@ export function lastPathComponent(p: string): string {
   return p.split('/').filter(Boolean).pop() ?? p
 }
 
-// The "project • worktree" line above the detail header's title, or null when it
-// would be noise: a single project and no worktree.
-//
-// `worktree` is the task's recorded worktree name — what its flow's worktree
-// hooks stored — and is never derived from the task's cwd. A cwd under
-// `.claude/worktrees/` records only where the shell stood when the last turn
-// ended; a flow that launches at the project root will not be there next turn,
-// so a badge derived from it named a worktree the task had already left.
-export function detailHeaderLabel({
-  project,
-  projectCount,
-  worktree,
-}: {
-  project: string
-  projectCount: number
-  worktree?: string
-}): string | null {
-  if (projectCount <= 1 && !worktree) return null
-  return lastPathComponent(project) + (worktree ? ` • ${worktree}` : '')
-}
-
 // Abbreviate a token count for the compact corner readout: exact below 1,000,
 // then whole "k" up to a million ("35k"), then whole "M" beyond ("4M").
 export function formatTokens(n: number): string {

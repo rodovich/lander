@@ -37,7 +37,6 @@ function SparkleIcon() {
 // beside it, since App re-renders on every poll and scroll flip.
 export const DetailHeader = memo(function DetailHeader({
   task,
-  projectLabel,
   retitling,
   copyMarkdown,
   onTaskAction,
@@ -47,8 +46,6 @@ export const DetailHeader = memo(function DetailHeader({
   setAllowEdits,
 }: {
   task: TaskWithProject
-  // "project • worktree" for the line above the title, or null to omit it.
-  projectLabel: string | null
   retitling: string | null
   // The whole conversation as markdown, built on the click rather than on every
   // render of the header.
@@ -91,7 +88,10 @@ export const DetailHeader = memo(function DetailHeader({
 
   return (
     <div className="detail-header">
-      {projectLabel && <div className="detail-project">{projectLabel}</div>}
+      {/* The task's recorded worktree — what its flow's worktree hooks stored,
+          never derived from its cwd, which only records where the shell stood
+          when the last turn ended. The project it's in is the navbar's. */}
+      {task.worktree && <div className="detail-worktree">{task.worktree}</div>}
       {editingTitle ? (
         <input
           ref={titleInputRef}

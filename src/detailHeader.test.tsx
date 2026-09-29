@@ -26,7 +26,6 @@ const render = (
   renderToStaticMarkup(
     <DetailHeader
       task={task}
-      projectLabel={null}
       retitling={null}
       copyMarkdown={() => ''}
       onTaskAction={() => {}}
@@ -39,14 +38,13 @@ const render = (
   )
 
 describe('DetailHeader', () => {
-  it('renders the title, status, and the project label only when given', () => {
-    const html = render(baseTask({ status: 'wedged' }), {
-      projectLabel: 'proj • wt-fix',
-    })
+  it('renders the title, status, and the worktree line only when recorded', () => {
+    const html = render(baseTask({ status: 'wedged', worktree: 'wt-fix' }))
     expect(html).toContain('Fix the parser')
     expect(html).toContain('task-status wedged')
-    expect(html).toContain('proj • wt-fix')
-    expect(render(baseTask())).not.toContain('detail-project')
+    expect(html).toContain('detail-worktree')
+    expect(html).toContain('wt-fix')
+    expect(render(baseTask())).not.toContain('detail-worktree')
   })
 
   it('carries both copy buttons — the task id and the conversation', () => {

@@ -171,7 +171,7 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
-/* The search field takes what the two filter menus leave. */
+/* The view and time-window menus, side by side under the search field. */
 .task-filters {
   display: flex;
   align-items: center;
@@ -179,8 +179,7 @@ body {
 }
 
 .task-search {
-  flex: 1;
-  min-width: 0;
+  width: 100%;
   padding: 7px 12px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -652,8 +651,8 @@ body {
   color: var(--muted);
 }
 
-/* The view and time-window dropdowns beside the task search. The trigger reads
-   the current pick; it's bordered like the search field it sits beside. */
+/* The view and time-window dropdowns under the task search. The trigger reads
+   the current pick; it's bordered like the search field above it. */
 .filter-menu {
   flex-shrink: 0;
 }
@@ -1312,7 +1311,7 @@ body {
   flex-direction: column;
 }
 
-/* The project name, title row, and meta row are direct children stacked by the
+/* The worktree line, title row, and meta row are direct children stacked by the
    column gap; none of them carry their own margins. */
 .detail-header {
   display: flex;
@@ -1328,7 +1327,7 @@ body {
   font-size: 20px;
 }
 
-.detail-project {
+.detail-worktree {
   color: var(--muted);
   font-size: 12px;
   overflow: hidden;

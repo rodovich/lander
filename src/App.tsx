@@ -4,7 +4,6 @@ import { Conversation } from './conversation'
 import { conversationMarkdown } from './conversationMarkdown'
 import { DetailHeader } from './detailHeader'
 import { dataTransferHasFiles } from './fileDrop'
-import { detailHeaderLabel } from './format'
 import { usePersistentState, useSessionState } from './hooks'
 import { HooksPanel } from './hooksPanel'
 import { Navbar, pageTitle } from './navbar'
@@ -193,16 +192,6 @@ export function App() {
   // immediate marking while actively viewing).
   useSeenMarker({ current, atBottom, tabActive, markSeen })
 
-  // "project • worktree" over the detail header's title. The worktree half reads
-  // the task's recorded `worktree`, never its cwd — see detailHeaderLabel.
-  const projectLabel = current
-    ? detailHeaderLabel({
-        project: pathBySlug.get(current.projectSlug) ?? current.projectSlug,
-        projectCount: projects.length,
-        worktree: current.worktree,
-      })
-    : null
-
   // What the reader has opened on the open task's timeline, shared by the
   // timeline that draws it and the header's copy, which writes out what's showing.
   const disclosure = useTimelineDisclosure(current)
@@ -301,7 +290,6 @@ export function App() {
             <TaskLinkProvider value={resolveTaskLink}>
               <DetailHeader
                 task={current}
-                projectLabel={projectLabel}
                 retitling={retitling}
                 copyMarkdown={copyMarkdown}
                 onTaskAction={runTaskAction}
