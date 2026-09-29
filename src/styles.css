@@ -30,6 +30,12 @@ body,
   margin: 0;
 }
 
+/* The navbar over the two-column layout, which takes the rest of the height. */
+#root {
+  display: flex;
+  flex-direction: column;
+}
+
 body {
   background: var(--bg);
   color: var(--fg);
@@ -38,9 +44,111 @@ body {
 }
 
 .layout {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: 340px 1fr;
-  height: 100%;
+}
+
+/* ---- navbar ---- */
+
+/* The brand and project switcher lead; the start group grows to push the hooks
+   button to the right edge. */
+.navbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+  background: var(--bg-tinted);
+  border-bottom: 1px solid var(--border);
+}
+
+.navbar-start {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.navbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.navbar-button {
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.navbar-button:hover {
+  background: var(--selected);
+}
+
+.navbar-button.active {
+  background: var(--selected);
+  border-color: color-mix(in srgb, var(--riding) 40%, var(--border));
+  color: var(--riding);
+}
+
+.navbar-button:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--riding);
+}
+
+/* ---- segmented control ---- */
+
+/* A tinted track holding the options; the picked one is raised onto the page
+   background. Scrolls sideways rather than wrapping when the options outgrow
+   it. */
+.segmented {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-tinted);
+}
+
+.segmented-option {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.segmented-option:hover {
+  background: var(--selected);
+  color: var(--fg);
+}
+
+.segmented-option.picked {
+  background: var(--bg);
+  color: var(--fg);
+  font-weight: 600;
+  box-shadow: 0 1px 2px var(--shadow);
+}
+
+.segmented-option:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--riding);
 }
 
 /* ---- left column ---- */
@@ -52,121 +160,8 @@ body {
   border-right: 1px solid var(--border);
 }
 
-/* The project dropdown is a custom popup (the native <select> can't show
-   checkmarks or a "Show all" footer), so it's positioned relative to anchor
-   the absolutely-positioned menu beneath the trigger. */
-.project-filter {
-  position: relative;
-}
-
-.project-select {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 12px 16px;
-  border: none;
-  border-bottom: 1px solid var(--border);
-  border-radius: 0;
-  background: var(--bg-tinted);
-  color: var(--muted);
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-  appearance: none;
-}
-
-.project-select:hover {
-  background: var(--selected);
-  color: var(--fg);
-}
-
-.project-select:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 2px var(--riding);
-}
-
-.project-select-label {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The project name leads the collapsed dropdown: larger, bolder, uppercase. */
-.project-select-name {
-  font-size: 13px;
-  font-weight: 600;
-  text-transform: uppercase;
-}
-
-/* The time/view suffixes share the name's larger size and uppercase, but keep
-   the normal weight so the project name stays the emphasis. */
-.project-select-suffix {
-  font-size: 13px;
-  text-transform: uppercase;
-}
-
-.project-select-caret {
-  flex-shrink: 0;
-}
-
-.project-menu {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  z-index: 10;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-top: none;
-  box-shadow: 0 8px 24px rgba(17, 0, 0, 0.12);
-  max-height: 60vh;
-  overflow-y: auto;
-}
-
-.project-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 10px 16px;
-  border: none;
-  background: none;
-  color: var(--fg);
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.project-menu-item:hover {
-  background: var(--bg-tinted);
-}
-
-.project-menu-all {
-  border-bottom: 1px solid var(--border);
-  color: var(--muted);
-}
-
-.project-menu-check {
-  flex-shrink: 0;
-  width: 12px;
-  color: var(--riding);
-}
-
-.project-menu-path {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Tinted toolbar holding the status links and search field, matching the
-   project dropdown above it. The gap spaces the two rows with no dividing
-   border between them. */
+/* Tinted toolbar holding the status links and the search/filter row. The gap
+   spaces the two rows with no dividing border between them. */
 .task-toolbar {
   display: flex;
   flex-direction: column;
@@ -176,8 +171,16 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+/* The search field takes what the two filter menus leave. */
+.task-filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .task-search {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 7px 12px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -522,15 +525,6 @@ body {
   animation: spin 0.7s linear infinite;
 }
 
-/* The project leaf shown next to a task's name when projects are intermixed.
-   It claims the space it needs (the name yields), so it never shrinks. */
-.task-project {
-  color: var(--muted);
-  font-size: 12px;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
 /* The kebab (⋮) trigger and its menu. A direct child of the task item (beside
    the content column), held to its natural width at the row's right. No
    transform here — that would become the containing block for the position:fixed
@@ -658,14 +652,50 @@ body {
   color: var(--muted);
 }
 
-.project-menu-view-first {
-  border-top: 1px solid var(--border);
+/* The view and time-window dropdowns beside the task search. The trigger reads
+   the current pick; it's bordered like the search field it sits beside. */
+.filter-menu {
+  flex-shrink: 0;
+}
+
+.filter-menu-trigger {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.filter-menu-trigger:hover {
+  background: var(--selected);
+}
+
+.filter-menu-trigger:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--riding);
+}
+
+.filter-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.filter-menu-check {
+  width: 12px;
+  color: var(--riding);
 }
 
 .new-task-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
 }
 
@@ -673,22 +703,9 @@ body {
   margin: 0;
 }
 
-.new-task-project {
-  font: inherit;
-  font-size: 12px;
-  max-width: 50%;
-  padding: 2px 6px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--muted);
-  cursor: pointer;
-}
-
 .new-task-agent {
   font: inherit;
   font-size: 12px;
-  margin-right: auto;
   padding: 2px 0;
   border: 0;
   background: transparent;
@@ -2707,15 +2724,6 @@ body.resizing-row {
   font-weight: 600;
   margin: 0;
   flex: 1;
-}
-
-.hooks-project {
-  font: inherit;
-  color: var(--fg);
-  background: var(--bg-tinted);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 6px;
 }
 
 .hooks-section {

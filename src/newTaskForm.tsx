@@ -3,40 +3,28 @@ import type { Dispatch, SetStateAction } from 'react'
 import { loadFlows, uiHeaders, uploadAttachments } from './api'
 import { ComposerPanel } from './composerPanel'
 import { agentDisplayName } from './agentDisplay'
-import { lastPathComponent } from './format'
 import { useSessionState } from './hooks'
-import type { FlowMeta, Project, Task, TaskWithProject } from './types'
+import type { FlowMeta, Task, TaskWithProject } from './types'
 
 // The sidebar's new-task composer: the draft message and its attachments, the
-// agent/project pickers, and task creation. The agent and project picks are
-// owned by App — the telemetry panel reads the agent, and the project menu
-// writes the project on a single-project pick — but the rest of the draft
-// state lives here, used nowhere else.
+// agent picker, and task creation. The agent pick is owned by App — the
+// telemetry panel reads it — but the rest of the draft state lives here, used
+// nowhere else.
 export const NewTaskForm = memo(function NewTaskForm({
-  projects,
-  shown,
-  currentProjectSlug,
+  targetSlug,
   flow,
   setFlow,
-  newProject,
-  setNewProject,
   height,
   setError,
   admit,
   onCreated,
 }: {
-  projects: Project[]
-  shown: string[]
-  // The open task's project, the fallback target when several are shown.
-  currentProjectSlug: string | undefined
+  // The project a new task is created in: the one the navbar has open.
+  targetSlug: string
   // The picked driver flow's name. A plain string, not a closed union: the set
   // is whatever the daemon announced.
   flow: string
   setFlow: Dispatch<SetStateAction<string>>
-  // Explicit project override for the form; empty means "follow the default"
-  // (targetSlug below).
-  newProject: string
-  setNewProject: Dispatch<SetStateAction<string>>
   height: number
   setError: (message: string | null) => void
   // Puts the created task into the displayed list from the POST's own answer,
@@ -53,18 +41,6 @@ export const NewTaskForm = memo(function NewTaskForm({
   // — File isn't serializable) and uploaded to the durable store on submit.
   const [newFiles, setNewFiles] = useState<File[]>([])
   const [submitting, setSubmitting] = useState(false)
-
-  // The project a new task is created in: an explicit pick from the form's
-  // dropdown if made, else the single shown project, else the project of the
-  // task currently open, else the first project.
-  const defaultTargetSlug =
-    shown.length === 1
-      ? shown[0]
-      : currentProjectSlug ?? projects[0]?.slug ?? ''
-  const targetSlug =
-    newProject && projects.some((p) => p.slug === newProject)
-      ? newProject
-      : defaultTargetSlug
 
   // The flows this project can launch, refetched when the target project
   // changes (step 5 adds project-scoped flows, so the set is per-project even
@@ -157,19 +133,6 @@ export const NewTaskForm = memo(function NewTaskForm({
               </option>
             ))}
           </select>
-          {projects.length > 1 && (
-            <select
-              className="new-task-project"
-              value={targetSlug}
-              onChange={(e) => setNewProject(e.target.value)}
-            >
-              {projects.map((p) => (
-                <option key={p.slug} value={p.slug}>
-                  {lastPathComponent(p.path)}
-                </option>
-              ))}
-            </select>
-          )}
         </div>
       }
       actions={

@@ -28,8 +28,8 @@ const POLL_GAP_MS = 2000
 
 // The client's task data: the displayed task list and its polling, the
 // installation-wide compact index used for link resolution, per-flow telemetry, and the
-// project list with the session's project filter. Owns no view state beyond
-// `shown` — the view/time/search filters stay with the caller.
+// project list with the session's open project. Owns no view state beyond
+// `project` — the view/time/search filters stay with the caller.
 export function useTaskData(
   view: TaskView,
   onPollError: (message: string | null) => void,
@@ -45,12 +45,10 @@ export function useTaskData(
   // snapshot it was handed for whichever flow is in view.
   const [telemetry, setTelemetry] = useState<FlowTelemetry>({})
   const [projects, setProjects] = useState<Project[]>([])
-  // The project dropdown acts as a filter: `shown` holds the slugs whose tasks
-  // are merged into the list. It is always either a single project or every
-  // project ("show all"); see showOnly/showAll in the project menu.
-  // Session-scoped so it survives a reload but stays per-tab; reconciled
-  // against the live project list once it loads (see the /api/projects effect).
-  const [shown, setShown] = useSessionState<string[]>('lander:shown', [])
+  // The project the navbar has open, whose tasks the list shows. Session-scoped
+  // so it survives a reload but stays per-tab; reconciled against the live
+  // project list once it loads (see the /api/projects effect).
+  const [project, setProject] = useSessionState('lander:project', '')
 
   // Latest tasks readable from timer callbacks that outlive the render that
   // scheduled them (the seen-marker dwell timer marks a task seen 2s later).
@@ -110,56 +108,53 @@ export function useTaskData(
     },
     [],
   )
-  // Load the project list once. Reconcile the session-restored project filter
-  // against it — keeping the picked slugs that still exist, and falling back to
-  // "show all" only when nothing valid was restored (first visit, or every
-  // picked project has since gone away).
+  // Load the project list once. Reconcile the open project against it: the
+  // routed task's project wins, then the session-restored pick if it still
+  // exists, then the first project.
   useEffect(() => {
     fetch('/api/projects')
       .then((r) => r.json())
       .then((list: Project[]) => {
         setProjects(list)
         const all = list.map((p) => p.slug)
-        setShown((prev) => {
-          const routed = all.includes(initialProjectSlug)
-            ? [initialProjectSlug]
-            : []
-          const valid = routed.length ? routed : prev.filter((s) => all.includes(s))
-          return valid.length > 0 ? valid : all
-        })
+        setProject((prev) =>
+          all.includes(initialProjectSlug)
+            ? initialProjectSlug
+            : all.includes(prev)
+              ? prev
+              : (all[0] ?? ''),
+        )
       })
       .catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const shownKey = shown.join(',')
   const archived = view === 'archived'
-  const refreshScope = `${shownKey}\n${archived}`
+  const refreshScope = `${project}\n${archived}`
   const refreshScopeRef = useRef(refreshScope)
   refreshScopeRef.current = refreshScope
 
   // Show a task the server just created from its own answer, ahead of any poll
   // — but only into a list that would carry it: a task created in a project
-  // that isn't shown, or while the archived pool is displayed, is one the next
+  // that isn't open, or while the archived pool is displayed, is one the next
   // poll would rightly omit, so admitting it would paint a row that vanishes
   // two seconds later. The fence boundary is set outside the state updater: an
   // updater may run twice under StrictMode, and the clock must advance exactly
   // once per admit.
   const admitTask = useCallback(
     (task: TaskWithProject) => {
-      if (archived || !shown.includes(task.projectSlug)) return
+      if (archived || task.projectSlug !== project) return
       admitToFence(taskMutationFenceRef.current, task)
       setTasks((prev) => insertTask(prev, task))
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [shownKey, archived],
+    [project, archived],
   )
 
   // Load the shown tasks (and the telemetry snapshot that rides along) and
   // commit them. Shared by the 2s poll and the action paths that reconcile
   // after a mutation — so both halves of the payload land everywhere. The epoch
   // guard drops a stale in-flight load once the scope it was issued under
-  // (shown set, archived flag) has changed: the moral equivalent of the old
+  // (open project, archived flag) has changed: the moral equivalent of the old
   // poll effect's `canceled` flag, extended to the action-path refreshes.
   const epochRef = useRef(0)
   const refreshOrderRef = useRef(new MonotonicRequestGate())
@@ -170,7 +165,7 @@ export function useTaskData(
     const mutationFence = taskMutationFenceRef.current
     const issuedAt = mutationFence.clock
     try {
-      const { tasks, telemetry } = await loadShownTasks(shown, archived)
+      const { tasks, telemetry } = await loadShownTasks([project], archived)
       if (
         refreshScope !== refreshScopeRef.current ||
         epoch !== epochRef.current ||
@@ -193,10 +188,10 @@ export function useTaskData(
       throw error
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shownKey, archived])
+  }, [project, archived])
 
   useEffect(() => {
-    if (shownKey === '') return
+    if (project === '') return
     // Poll so assistant replies appear once the server appends them.
     //
     // Each cycle reports its own outcome, failure *and* recovery. The banner
@@ -326,8 +321,8 @@ export function useTaskData(
     tasksRef,
     telemetry,
     projects,
-    shown,
-    setShown,
+    project,
+    setProject,
     refresh,
     beginTaskMutation,
     finishTaskMutation,

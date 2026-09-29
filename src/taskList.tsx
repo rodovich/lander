@@ -1,13 +1,16 @@
 import { memo, useEffect, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
-import { DATE_CATEGORY_LABELS } from './format'
-import { SectionActionsMenu } from './menus'
+import { DATE_CATEGORY_LABELS, TIME_FILTER_LABELS, VIEW_LABELS } from './format'
+import { FilterMenu, SectionActionsMenu } from './menus'
 import type { TaskAction } from './taskActions'
 import { tick } from './perf'
 import { taskKeyOf } from './taskRef'
 import { TaskRow } from './taskRow'
 import type { TaskListShape, TaskRow as ListRow } from './taskRows'
-import type { TaskView, TaskWithProject } from './types'
+import type { TaskView, TaskWithProject, TimeFilter } from './types'
+
+const TASK_VIEWS: TaskView[] = ['inbox', 'unread', 'archived']
+const TIME_FILTERS: TimeFilter[] = ['today', 'week', 'older', 'any']
 
 // A sticky header over a run of tasks: a status, or a date bucket within a
 // status split into dates. Faint rules bracket each contiguous run of task rows
@@ -86,10 +89,11 @@ export const TaskList = memo(function TaskList({
   tasksEmpty,
   hasProjects,
   view,
+  setView,
+  timeFilter,
+  setTimeFilter,
   filter,
   setFilter,
-  showProjectLabels,
-  pathBySlug,
   selected,
   onSelect,
   onFocusChange,
@@ -102,10 +106,11 @@ export const TaskList = memo(function TaskList({
   tasksEmpty: boolean
   hasProjects: boolean
   view: TaskView
+  setView: Dispatch<SetStateAction<TaskView>>
+  timeFilter: TimeFilter
+  setTimeFilter: Dispatch<SetStateAction<TimeFilter>>
   filter: string
   setFilter: Dispatch<SetStateAction<string>>
-  showProjectLabels: boolean
-  pathBySlug: Map<string, string>
   selected: string | null
   onSelect: (id: string, projectSlug: string) => void
   // Whether DOM focus rests on a row inside the list (see useViewingState).
@@ -208,14 +213,31 @@ export const TaskList = memo(function TaskList({
             ))}
           </div>
         )}
-        <input
-          ref={searchInputRef}
-          type="search"
-          className="task-search"
-          placeholder="Search tasks (⌘⇧F)"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-        />
+        <div className="task-filters">
+          <input
+            ref={searchInputRef}
+            type="search"
+            className="task-search"
+            placeholder="Search (⌘⇧F)"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          />
+          <FilterMenu
+            label="View"
+            value={view}
+            onChange={setView}
+            options={TASK_VIEWS.map((v) => ({ value: v, label: VIEW_LABELS[v] }))}
+          />
+          <FilterMenu
+            label="Time"
+            value={timeFilter}
+            onChange={setTimeFilter}
+            options={TIME_FILTERS.map((t) => ({
+              value: t,
+              label: TIME_FILTER_LABELS[t],
+            }))}
+          />
+        </div>
       </div>
       <ul
         ref={taskListRef}
@@ -273,11 +295,6 @@ export const TaskList = memo(function TaskList({
               task={task}
               selected={taskKeyOf(task) === selected}
               tabbable={index === rovingIndex}
-              projectPath={
-                showProjectLabels
-                  ? (pathBySlug.get(task.projectSlug) ?? task.projectSlug)
-                  : null
-              }
               todayStart={todayStart}
               onSelect={() => onSelect(task.id, task.projectSlug)}
               onKeyDown={(e) => onTaskKeyDown(e, index, task)}

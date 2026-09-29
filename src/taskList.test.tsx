@@ -42,10 +42,11 @@ const render = (
       tasksEmpty={tasks.length === 0}
       hasProjects={true}
       view={view}
+      setView={() => {}}
+      timeFilter="any"
+      setTimeFilter={() => {}}
       filter={query}
       setFilter={() => {}}
-      showProjectLabels={false}
-      pathBySlug={new Map()}
       selected={null}
       onSelect={() => {}}
       onFocusChange={() => {}}

@@ -1,4 +1,4 @@
-import type { DateCategory } from './types'
+import type { DateCategory, TaskView, TimeFilter } from './types'
 
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
@@ -44,6 +44,19 @@ export const DATE_CATEGORY_LABELS: Record<DateCategory, string> = {
   today: 'Today',
   week: 'This week',
   older: 'Older',
+}
+
+// The task list's time-window and view filters, as their menus and the page
+// title name them.
+export const TIME_FILTER_LABELS: Record<TimeFilter, string> = {
+  ...DATE_CATEGORY_LABELS,
+  any: 'Any time',
+}
+
+export const VIEW_LABELS: Record<TaskView, string> = {
+  inbox: 'Inbox',
+  unread: 'Unread',
+  archived: 'Archived',
 }
 
 // "/Users/me/code/myapp" -> "myapp"; the leaf is enough to tell projects apart

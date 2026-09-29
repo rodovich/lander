@@ -1,5 +1,5 @@
 import { forwardRef } from 'react'
-import { formatTaskTime, lastPathComponent } from './format'
+import { formatTaskTime } from './format'
 import { TaskActionsMenu } from './menus'
 import { availableTaskActions } from './taskActions'
 import type { TaskAction } from './taskActions'
@@ -59,9 +59,6 @@ export const TaskRow = forwardRef<
     selected: boolean
     // Whether Tab reaches this row (the roving tabindex).
     tabbable: boolean
-    // The project's path, for the leaf label; null when only one project's
-    // tasks are shown and the label would be noise.
-    projectPath: string | null
     // Midnight today, which decides whether the time reads as a clock or a date.
     todayStart: number
     onSelect: () => void
@@ -69,7 +66,7 @@ export const TaskRow = forwardRef<
     onAction: (action: TaskAction) => void
   }
 >(function TaskRow(
-  { task, selected, tabbable, projectPath, todayStart, onSelect, onKeyDown, onAction },
+  { task, selected, tabbable, todayStart, onSelect, onKeyDown, onAction },
   ref,
 ) {
   const unseen = isUnread(task)
@@ -105,9 +102,6 @@ export const TaskRow = forwardRef<
             />
           )}
           <div className="task-title">{task.title}</div>
-          {projectPath !== null && (
-            <span className="task-project">{lastPathComponent(projectPath)}</span>
-          )}
         </div>
         {task.archived && (
           <div className="task-meta-row">

@@ -48,6 +48,8 @@ export type MenuItem = {
   label: React.ReactNode
   className?: string
   separatorBefore?: boolean
+  // Set on a pick-one menu's items: whether this is the current pick.
+  checked?: boolean
   onSelect: () => void
 }
 
@@ -167,7 +169,8 @@ function ActionsMenu({
                   itemRefs.current[i] = el
                 }}
                 type="button"
-                role="menuitem"
+                role={item.checked === undefined ? 'menuitem' : 'menuitemradio'}
+                aria-checked={item.checked}
                 tabIndex={-1}
                 className={'task-menu-item' + (item.className ? ` ${item.className}` : '')}
                 onClick={(e) => {
@@ -241,6 +244,55 @@ export function TaskActionsMenu({
         className: `task-menu-item-${action}`,
         separatorBefore: i > 0 && actions[i - 1].group !== group,
         onSelect: () => onAction(action),
+      }))}
+    />
+  )
+}
+
+// A pick-one dropdown whose closed trigger reads the current pick, and whose
+// items check the pick off.
+export function FilterMenu<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  // Names the trigger for assistive tech.
+  label: string
+  options: { value: T; label: string }[]
+  value: T
+  onChange: (value: T) => void
+}) {
+  return (
+    <ActionsMenu
+      className="filter-menu"
+      triggerClassName="filter-menu-trigger"
+      triggerLabel={label}
+      trigger={
+        <>
+          {options.find((o) => o.value === value)?.label}
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path
+              d="m6 9 6 6 6-6"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </>
+      }
+      items={options.map((o) => ({
+        key: o.value,
+        label: (
+          <>
+            <span className="filter-menu-check">{o.value === value ? '✓' : ''}</span>
+            {o.label}
+          </>
+        ),
+        className: 'filter-menu-item',
+        checked: o.value === value,
+        onSelect: () => onChange(o.value),
       }))}
     />
   )

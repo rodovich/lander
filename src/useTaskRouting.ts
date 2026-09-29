@@ -16,7 +16,7 @@ export function useTaskRouting({
   taskLinks,
   taskLinksLoaded,
   hasLoadedRef,
-  setShown,
+  setProject,
   setView,
   onNavigate,
 }: {
@@ -31,8 +31,8 @@ export function useTaskRouting({
   taskLinks: TaskLink[]
   taskLinksLoaded: boolean
   hasLoadedRef: { readonly current: boolean }
-  // Routing to a task in another project or pool widens the list to show it.
-  setShown: Dispatch<SetStateAction<string[]>>
+  // Routing to a task in another project or pool switches the list to show it.
+  setProject: Dispatch<SetStateAction<string>>
   setView: Dispatch<SetStateAction<TaskView>>
   // Called on every navigation, for whatever the pane was showing instead of a
   // task (the hooks panel). Must be stable.
@@ -79,9 +79,7 @@ export function useTaskRouting({
       setSelectedTaskKey(key)
       setPendingRouteKey(key)
       onNavigate()
-      setShown((prev) =>
-        prev.includes(ref.projectSlug) ? prev : [ref.projectSlug],
-      )
+      setProject(ref.projectSlug)
       if (link)
         setView((prev) =>
           link.archived ? 'archived' : prev === 'archived' ? 'inbox' : prev,
@@ -89,7 +87,7 @@ export function useTaskRouting({
       if (push)
         window.history.pushState(null, '', taskHref(ref.projectSlug, ref.id))
     },
-    [onNavigate, setShown, setView, taskLinkByKey],
+    [onNavigate, setProject, setView, taskLinkByKey],
   )
 
   // A route intent holds the URL steady while its project/pool reloads. Once
@@ -109,13 +107,11 @@ export function useTaskRouting({
       }
       return
     }
-    setShown((prev) =>
-      prev.includes(link.projectSlug) ? prev : [link.projectSlug],
-    )
+    setProject(link.projectSlug)
     setView((prev) =>
       link.archived ? 'archived' : prev === 'archived' ? 'inbox' : prev,
     )
-  }, [pendingRouteKey, setShown, setView, taskLinkByKey, taskLinksLoaded, tasks])
+  }, [pendingRouteKey, setProject, setView, taskLinkByKey, taskLinksLoaded, tasks])
 
   // Task links are ordinary anchors for copy/open-in-new-tab semantics. Plain
   // clicks stay in-process so browser history, drafts, and file attachments all

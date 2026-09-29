@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { loadHooks, setHookApproval, setTrustedBranch } from './api'
-import { lastPathComponent } from './format'
 import { MonotonicRequestGate } from './requestOrder'
-import type { Hook, Project, ProjectHooks } from './types'
+import type { Hook, ProjectHooks } from './types'
 
 // A project's hooks: the modules its tree declares under `.lander/hooks/`, and
 // the two independent ways one comes to be allowed to run — a human approving
@@ -185,17 +184,13 @@ export function HooksList({
   )
 }
 
-// The panel proper: picks the project, loads its hooks, and reloads after every
+// The panel proper: loads the navbar's project's hooks, and reloads after every
 // change, since approving a version can change what a different path resolves to.
 export function HooksPanel({
-  projects,
   slug,
-  setSlug,
   onClose,
 }: {
-  projects: Project[]
   slug: string
-  setSlug: (slug: string) => void
   onClose: () => void
 }) {
   const [hooks, setHooks] = useState<ProjectHooks | null>(null)
@@ -243,20 +238,6 @@ export function HooksPanel({
     <div className="hooks-panel">
       <div className="hooks-head">
         <h2 className="hooks-title">Hooks</h2>
-        {projects.length > 1 && (
-          <select
-            className="hooks-project"
-            value={slug}
-            aria-label="Project"
-            onChange={(e) => setSlug(e.target.value)}
-          >
-            {projects.map((p) => (
-              <option key={p.slug} value={p.slug}>
-                {lastPathComponent(p.path)}
-              </option>
-            ))}
-          </select>
-        )}
         <button type="button" className="hooks-button" onClick={onClose}>
           Close
         </button>
