@@ -1803,6 +1803,24 @@ body {
   font-style: italic;
 }
 
+/* Pace, beside the spinner: interrupts the turn. Upright and muted like the
+   menu's Pace item, so it doesn't pick up the row's italic. */
+.pending-pace {
+  font: inherit;
+  font-size: 12px;
+  font-style: normal;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-tinted);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.pending-pace:hover {
+  color: var(--fg);
+}
+
 .spinner {
   width: 12px;
   height: 12px;

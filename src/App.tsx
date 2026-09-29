@@ -305,6 +305,7 @@ export function App() {
                 onAtBottomChange={setAtBottom}
                 allowTool={allowTool}
                 answerAsk={answerAsk}
+                onTaskAction={runTaskAction}
               />
               <ResizeHandle
                 height={composerHeight}

@@ -86,6 +86,7 @@ const render = (
       answering={false}
       onAnswerAsk={() => {}}
       onAllow={async () => true}
+      onPace={() => {}}
       {...over}
     />,
   )
@@ -309,6 +310,7 @@ describe('RideTurn settled/open footers', () => {
       { ride: settledRide({ endedAt: undefined }) },
     )
     expect(html).toContain('is working…')
+    expect(html).toContain('pending-pace')
     expect(html).not.toContain('blocked-summary')
   })
 
@@ -316,6 +318,7 @@ describe('RideTurn settled/open footers', () => {
     const html = render([tool('t1', { status: 'blocked', rule: 'Bash(rm:*)' })])
     expect(html).toContain('blocked-summary')
     expect(html).not.toContain('is working…')
+    expect(html).not.toContain('pending-pace')
   })
 
   it('gathers the flow items’ attachments below the turn', () => {

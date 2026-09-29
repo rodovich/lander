@@ -96,6 +96,7 @@ const render = (
       onAtBottomChange={() => {}}
       allowTool={async () => true}
       answerAsk={async () => {}}
+      onTaskAction={() => {}}
       {...over}
     />,
   )
@@ -187,6 +188,7 @@ describe('Conversation pending rows', () => {
       }),
     )
     expect(html).toContain('is starting…')
+    expect(html).toContain('pending-pace')
   })
 
   it('hands off to the ride’s own working spinner once items arrive', () => {

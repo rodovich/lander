@@ -1,11 +1,12 @@
-import { memo, useEffect, useMemo, useRef } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef } from 'react'
 import { AskForm } from './asks'
 import { MessageAttachments } from './attachments'
 import { LifecycleNote } from './lifecycleNote'
 import { MessageBubble } from './messageBubble'
 import { MessageText } from './messageText'
 import { tick, timed } from './perf'
-import { RideTurn } from './rideTurn'
+import { PendingRow, RideTurn } from './rideTurn'
+import type { TaskAction } from './taskActions'
 import { TaskActionNote } from './taskActionNote'
 import { openRide, taskAgentModelName } from './taskMeta'
 import { taskKeyOf } from './taskRef'
@@ -26,6 +27,7 @@ export const Conversation = memo(function Conversation({
   onAtBottomChange,
   allowTool,
   answerAsk,
+  onTaskAction,
 }: {
   task: TaskWithProject
   disclosure: TimelineDisclosure
@@ -36,6 +38,7 @@ export const Conversation = memo(function Conversation({
     askId: string,
     body: { optionId?: string; text?: string },
   ) => Promise<void>
+  onTaskAction: (task: TaskWithProject, action: TaskAction) => void
 }) {
   // Opt-in profiling (see perf.ts): count re-renders of the conversation pane
   // separately from App's own churn — a high count against little task
@@ -71,6 +74,12 @@ export const Conversation = memo(function Conversation({
   // ride block renders its own trailing "working…" spinner; when it hasn't (the
   // run was just handed off), the standalone "starting…" row stands in.
   const openR = openRide(task)
+
+  // The spinner rows' Pace button — the kebab menu's Pace, on this task.
+  const pace = useCallback(
+    () => onTaskAction(task, 'pace'),
+    [task, onTaskAction],
+  )
   const openRideHasItems =
     !!openR && (task.items?.some((it) => it.rideId === openR.id) ?? false)
 
@@ -231,6 +240,7 @@ export const Conversation = memo(function Conversation({
             answering={answering}
             onAnswerAsk={answerAsk}
             onAllow={allowTool}
+            onPace={pace}
           />
         )
       })}
@@ -239,10 +249,9 @@ export const Conversation = memo(function Conversation({
           known until that output arrives, so this stays model-agnostic. */}
       {task.status === 'riding' && !openRideHasItems && (
         <div className="message">
-          <div className="message-pending">
-            <span className="spinner" aria-hidden />
+          <PendingRow onPace={pace}>
             {`${taskAgentModelName(task.flow ?? task.agent)} is starting…`}
-          </div>
+          </PendingRow>
         </div>
       )}
     </div>

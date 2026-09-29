@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { memo, type ReactNode } from 'react'
 import { AskForm } from './asks'
 import { MessageAttachments } from './attachments'
 import { formatTimestamp } from './format'
@@ -9,6 +9,31 @@ import { TurnTrace } from './turnTrace'
 import type { RideItem } from './timeline'
 import type { AskItem, Ride, TaskActionItem, Task } from './types'
 import type { TimelineDisclosure } from './useTimelineDisclosure'
+
+// The riding task's spinner row — "working…" in its open turn, or "starting…"
+// before the turn has streamed anything — with a Pace button that interrupts
+// the turn, the same as the kebab menu's Pace.
+export function PendingRow({
+  onPace,
+  children,
+}: {
+  onPace: () => void
+  children: ReactNode
+}) {
+  return (
+    <div className="message-pending">
+      <span className="spinner" aria-hidden />
+      {children}
+      <button
+        className="pending-pace"
+        title="Interrupt this turn and leave the task paced"
+        onClick={onPace}
+      >
+        Pace
+      </button>
+    </div>
+  )
+}
 
 // One assistant turn in the conversation: the bubble around a turn's trace (see
 // TurnTrace), carrying the turn's confirmed denials, the in-flight working
@@ -26,6 +51,7 @@ export const RideTurn = memo(function RideTurn({
   answering,
   onAnswerAsk,
   onAllow,
+  onPace,
 }: {
   ride: Ride
   items: RideItem[]
@@ -42,6 +68,8 @@ export const RideTurn = memo(function RideTurn({
   answering: boolean
   onAnswerAsk: (askId: string, body: { optionId?: string; text?: string }) => void
   onAllow: (rule: string, scope: 'task' | 'project') => Promise<boolean>
+  // Paces the task, from the open turn's spinner row.
+  onPace: () => void
 }) {
   const settled = !!ride.endedAt
   // A finished turn's confirmed denials. Denials are authoritative at ride end,
@@ -73,10 +101,9 @@ export const RideTurn = memo(function RideTurn({
       {/* The in-flight turn's working spinner, after the ride's last item — an
           open ride (no endedAt) is streaming. */}
       {!settled && (
-        <div className="message-pending">
-          <span className="spinner" aria-hidden />
+        <PendingRow onPace={onPace}>
           {`${taskAgentModelName(agent, ride.usage?.model)} is working…`}
-        </div>
+        </PendingRow>
       )}
       {files.length > 0 && (
         <MessageAttachments attachments={files} slug={slug} />
