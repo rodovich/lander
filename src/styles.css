@@ -58,9 +58,10 @@ body {
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 8px 16px;
+  padding: 10px 16px;
   background: var(--bg-tinted);
-  border-bottom: 1px solid var(--border);
+  /* As thick as a resize handle's line while it's dragged. */
+  border-bottom: 3px solid var(--landed);
 }
 
 .navbar-start {
@@ -86,7 +87,7 @@ body {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
-  color: var(--fg);
+  color: var(--muted);
   cursor: pointer;
 }
 
@@ -665,7 +666,7 @@ body {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
-  color: var(--fg);
+  color: var(--muted);
   font: inherit;
   font-size: 13px;
   white-space: nowrap;
