@@ -131,6 +131,7 @@ import { readHookCredential, hookCredentialFor, HookRefusal } from './hook-runs'
 import { dispatchPendingHooks, hookDispatchInFlightFor } from './hook-dispatch'
 import { TITLE_MAX_CHARS, generateTitle } from './title'
 import { createSlowLog, fileWriter } from './slow-log'
+import { readStats } from './stats'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const LANDER_BIN_DIR = path.join(ROOT, 'bin')
@@ -1628,6 +1629,16 @@ app.get('/api/task-links', async (c) => {
     if (etagMatches(c.req.header('if-none-match'), snapshot.etag))
       return c.body(null, 304)
     return c.json({ links: snapshot.links })
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : String(error) }, 500)
+  }
+})
+
+// The stats dashboard's facts across every configured project, each tagged with
+// its project's slug so the client can narrow to one without a refetch.
+app.get('/api/stats', async (c) => {
+  try {
+    return c.json(await readStats(PROJECTS))
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : String(error) }, 500)
   }
