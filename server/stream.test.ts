@@ -100,6 +100,61 @@ describe('fullToolInput', () => {
   })
 })
 
+describe('Agent calls', () => {
+  const agentLine = (input: Record<string, unknown>) =>
+    JSON.stringify({
+      type: 'assistant',
+      message: {
+        id: 'msg_1',
+        content: [{ type: 'tool_use', id: 'toolu_1', name: 'Agent', input }],
+      },
+    })
+
+  it('expands to the description line followed by the prompt', () => {
+    const [step] = reduceStreamLine(
+      agentLine({
+        description: 'Mockup 1',
+        prompt: 'Design one mockup.\n\nUse the shared data.',
+        subagent_type: 'general-purpose',
+        run_in_background: false,
+      }),
+      AT,
+    ).steps
+    expect(step.input).toBe('general-purpose: Mockup 1')
+    expect(step.inputFull).toBe(
+      'general-purpose: Mockup 1\n\nDesign one mockup.\n\nUse the shared data.',
+    )
+  })
+
+  it('keeps a long prompt whole up to 16k', () => {
+    const prompt = 'p'.repeat(5000)
+    const [step] = reduceStreamLine(
+      agentLine({ description: 'd', prompt, subagent_type: 'Explore' }),
+      AT,
+    ).steps
+    expect(step.inputFull).toBe(`Explore: d\n\n${prompt}`)
+    const [capped] = reduceStreamLine(
+      agentLine({ description: 'd', prompt: 'q'.repeat(20000), subagent_type: 'Explore' }),
+      AT,
+    ).steps
+    expect(capped.inputFull).toHaveLength(16002)
+    expect(capped.inputFull!.endsWith('\n…')).toBe(true)
+  })
+
+  it('carries no prompt for any other tool', () => {
+    const line = JSON.stringify({
+      type: 'assistant',
+      message: {
+        id: 'msg_1',
+        content: [
+          { type: 'tool_use', id: 't', name: 'Bash', input: { command: 'ls', prompt: 'x' } },
+        ],
+      },
+    })
+    expect(reduceStreamLine(line, AT).steps[0].inputFull).toBeUndefined()
+  })
+})
+
 describe('toolRule', () => {
   it('returns the bare tool name for non-object input', () => {
     expect(toolRule('Read', null)).toBe('Read')

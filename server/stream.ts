@@ -149,6 +149,19 @@ export function fullToolInput(input: unknown): string {
   return full.length > 4000 ? full.slice(0, 4000) + '\n…' : full
 }
 
+// An Agent call's expanded input: its `<type>: <description>` line, then the
+// prompt the subagent was given, which the chip otherwise never shows. The cap
+// is looser than fullToolInput's, since a prompt is the whole brief — about one
+// in ten runs past 4k.
+export function agentInputFull(input: unknown): string {
+  const head = fullToolInput(input)
+  const prompt =
+    input && typeof input === 'object' ? (input as Record<string, unknown>).prompt : undefined
+  if (typeof prompt !== 'string' || !prompt) return head
+  const full = `${head}\n\n${prompt}`
+  return full.length > 16000 ? full.slice(0, 16000) + '\n…' : full
+}
+
 // Render a tool call as a settings.json-style permission rule, e.g.
 // `Bash(npm run build)`. Keys off the same identifying field as
 // summarizeToolInput but leaves it untruncated, so the popup can show — and let
@@ -359,7 +372,10 @@ export function reduceStreamLine(
         if (!parentToolUseId) finalText = block.text
       } else if (block.type === 'tool_use') {
         const input = summarizeToolInput(block.input)
-        const inputFull = fullToolInput(block.input)
+        const inputFull =
+          block.name === 'Agent'
+            ? agentInputFull(block.input)
+            : fullToolInput(block.input)
         steps.push({
           kind: 'tool_use',
           tool: block.name,
