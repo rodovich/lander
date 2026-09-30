@@ -193,6 +193,20 @@ describe('codex session and identity', () => {
     expect(sessionOps).toEqual([])
   })
 
+  it('does not count a notice as the model consuming the turn', async () => {
+    // The task prompt rides the user message once per thread; a turn that only
+    // produced a Codex notice must leave it to be re-sent.
+    const g = CODEX_GOLDENS.find(
+      (x) => x.name === 'notice item before a failed turn',
+    )!
+    const flow = await driveFlow(g, codexFlow())
+    const task = applyEvents(goldenInput(g).start, flow.events) as {
+      flowState?: Record<string, unknown>
+    }
+    expect(task.flowState?.taskPrompt).toBeUndefined()
+    expect(updatesOf(flow.events).flatMap((u) => u.steps.map((s) => s.tool))).toContain('error')
+  })
+
   it('persists the thread id the stream reports on a fresh turn', async () => {
     const g = CODEX_GOLDENS[0]
     const flow = await driveFlow(g, codexFlow())

@@ -19,14 +19,15 @@ export type CodexLineUpdate = {
   // codexTurnUsage.
   threadUsage?: Usage
   terminalError?: string
+  // Set when the line is a Codex notice (an `error` item) rather than anything
+  // the model did.
+  notice?: true
 }
 
 export function extractCodexSession(line: string): string | undefined {
   const ev = parseJson(line)
   if (ev?.type !== 'thread.started') return undefined
-  if (typeof ev.thread_id === 'string') return ev.thread_id
-  if (typeof ev.thread?.id === 'string') return ev.thread.id
-  return undefined
+  return typeof ev.thread_id === 'string' ? ev.thread_id : undefined
 }
 
 export function reduceCodexStreamLine(
@@ -40,8 +41,9 @@ export function reduceCodexStreamLine(
   let finalText: string | undefined
   let threadUsage: Usage | undefined
   let terminalError: string | undefined
+  let notice: true | undefined
 
-  if (ev.type === 'item.started' || ev.type === 'item.completed' || ev.type === 'item.failed') {
+  if (ev.type === 'item.started' || ev.type === 'item.completed') {
     const item = ev.item
     if (item && typeof item === 'object') {
       if (item.type === 'agent_message' && typeof item.text === 'string') {
@@ -74,23 +76,27 @@ export function reduceCodexStreamLine(
         } else {
           steps.push({
             kind: 'tool_result',
-            text: summarizeToolResult(commandOutput(item)),
+            text: summarizeToolResult(item.aggregated_output),
             toolUseId: id,
-            isError: commandFailed(item) || ev.type === 'item.failed',
+            // A declined command — its approval refused — also reports exit -1.
+            isError:
+              item.status === 'failed' ||
+              item.status === 'declined' ||
+              (typeof item.exit_code === 'number' && item.exit_code !== 0),
             createdAt: at,
           })
         }
       } else if (item.type === 'file_change') {
         const id = typeof item.id === 'string' ? item.id : undefined
         const tool = item.type
+        const changes = fileChanges(item)
         if (ev.type === 'item.started') {
-          const path = firstChangePath(item)
           steps.push({
             kind: 'tool_use',
             tool,
-            input: summarizeFileChange(item),
+            input: changes.map((c) => `${c.kind} ${c.path}`).join(', '),
             toolUseId: id,
-            rule: path ? toolRule(tool, { path }) : tool,
+            rule: changes.length ? toolRule(tool, { path: changes[0].path }) : tool,
             createdAt: at,
           })
         } else {
@@ -99,94 +105,119 @@ export function reduceCodexStreamLine(
             kind: 'tool_result',
             text: '',
             toolUseId: id,
-            isError: itemFailed(ev.type, item),
+            isError: item.status === 'failed',
             createdAt: at,
           })
         }
       } else if (item.type === 'mcp_tool_call') {
-        // Named by the item's own `tool` field, with its `server` leading the
-        // input the way an Agent chip leads with its subagent type.
+        // The server and tool lead the input, the way an Agent chip leads with
+        // its subagent type.
         const id = typeof item.id === 'string' ? item.id : undefined
-        const tool = typeof item.tool === 'string' && item.tool ? item.tool : item.type
-        const server = typeof item.server === 'string' ? item.server : ''
+        const tool = item.type
         if (ev.type === 'item.started') {
+          const callee = [item.server, item.tool]
+            .filter((v) => typeof v === 'string' && v)
+            .join(' ')
           const args = summarizeToolInput(item.arguments)
-          const input = server ? (args ? `${server}: ${args}` : server) : args
+          const input = args ? `${callee}: ${args}` : callee
           const argsFull = fullToolInput(item.arguments)
-          const inputFull = server && argsFull ? `${server}: ${argsFull}` : argsFull
+          const inputFull = argsFull ? `${callee}: ${argsFull}` : callee
           steps.push({
             kind: 'tool_use',
             tool,
             input,
-            ...(inputFull && inputFull !== input ? { inputFull } : {}),
+            ...(inputFull !== input ? { inputFull } : {}),
             toolUseId: id,
-            rule: toolRule(tool, item.arguments),
             createdAt: at,
           })
         } else {
           const error =
-            item.error && typeof item.error === 'object'
-              ? errorMessage(item.error)
-              : undefined
+            typeof item.error?.message === 'string' ? item.error.message : undefined
           steps.push({
             kind: 'tool_result',
-            text: summarizeToolResult(error ?? mcpResultContent(item.result)),
+            text: summarizeToolResult(error ?? item.result?.content),
             toolUseId: id,
-            isError: error !== undefined || itemFailed(ev.type, item),
+            isError: item.status === 'failed',
             createdAt: at,
           })
         }
       } else if (item.type === 'web_search') {
-        // The start carries an empty query (Codex fills it in on completion), so
-        // the chip opens and settles at completion. Nothing else can land
-        // between the two: the model sees the result before it writes again.
-        if (ev.type !== 'item.started') {
+        // The start carries an empty query and no action (Codex fills both in on
+        // completion), so the chip opens and settles at completion. Nothing else
+        // can land between the two: the model sees the result before it writes
+        // again.
+        if (ev.type === 'item.completed') {
           const id = typeof item.id === 'string' ? item.id : undefined
-          const tool = item.type
-          const query =
-            (typeof item.query === 'string' && item.query) ||
-            (typeof item.action?.query === 'string' ? item.action.query : '')
           steps.push({
             kind: 'tool_use',
-            tool,
-            input: query,
+            tool: item.type,
+            input: webSearchInput(item),
             toolUseId: id,
-            rule: toolRule(tool, { query }),
             createdAt: at,
           })
           steps.push({
             kind: 'tool_result',
             text: '',
             toolUseId: id,
-            isError: itemFailed(ev.type, item),
+            isError: false,
             createdAt: at,
           })
         }
       } else if (item.type === 'collab_tool_call') {
-        // A multi-agent call, named by the item's own `tool` field. As of Codex
-        // 0.154 only `wait` reaches the public stream, and with its receivers
-        // and agent states empty — so the chip marks when the agent waited on
-        // its subagents and nothing about them.
+        // A multi-agent call, its `tool` leading the input. As of Codex 0.154
+        // only `wait` reaches the public stream, with its prompt, receivers and
+        // agent states empty; the prompt and each agent's closing message are
+        // shown whenever Codex fills them in.
         const id = typeof item.id === 'string' ? item.id : undefined
-        const tool = typeof item.tool === 'string' && item.tool ? item.tool : item.type
+        const tool = item.type
         if (ev.type === 'item.started') {
+          const name = typeof item.tool === 'string' ? item.tool : ''
+          const prompt = typeof item.prompt === 'string' ? item.prompt : ''
+          const input = prompt
+            ? `${name}: ${summarizeToolInput({ description: prompt })}`
+            : name
+          const inputFull = prompt
+            ? `${name}: ${fullToolInput({ description: prompt })}`
+            : name
           steps.push({
             kind: 'tool_use',
             tool,
-            input: '',
+            input,
+            ...(inputFull !== input ? { inputFull } : {}),
             toolUseId: id,
-            rule: tool,
             createdAt: at,
           })
         } else {
           steps.push({
             kind: 'tool_result',
-            text: '',
+            text: summarizeToolResult(agentStates(item)),
             toolUseId: id,
-            isError: itemFailed(ev.type, item),
+            isError: item.status === 'failed',
             createdAt: at,
           })
         }
+      } else if (item.type === 'error' && typeof item.message === 'string') {
+        // A non-fatal notice — a config warning, a deprecation, a model reroute
+        // — that Codex reports as a completed `error` item and carries on past.
+        // Fatal errors are the top-level `error` event below instead.
+        const input = summarizeToolInput({ description: item.message })
+        const inputFull = fullToolInput({ description: item.message })
+        steps.push({
+          kind: 'tool_use',
+          tool: item.type,
+          input,
+          ...(inputFull !== input ? { inputFull } : {}),
+          toolUseId: item.id,
+          createdAt: at,
+        })
+        steps.push({
+          kind: 'tool_result',
+          text: '',
+          toolUseId: item.id,
+          isError: true,
+          createdAt: at,
+        })
+        notice = true
       }
     }
   } else if (ev.type === 'turn.completed') {
@@ -198,7 +229,7 @@ export function reduceCodexStreamLine(
     terminalError = errorMessage(ev.error) ?? errorMessage(ev)
   }
 
-  return { steps, finalText, threadUsage, terminalError }
+  return { steps, finalText, threadUsage, terminalError, ...(notice ? { notice } : {}) }
 }
 
 const USAGE_COUNTS = ['input', 'output', 'cacheRead', 'cacheCreation'] as const
@@ -258,38 +289,42 @@ function parseCodexUsage(u: Record<string, unknown>): Usage {
   }
 }
 
-function commandOutput(item: Record<string, unknown>): string {
-  const parts = [
-    item.aggregated_output,
-    item.output,
-    item.stdout,
-    item.stderr,
-    item.message,
-  ].filter((v): v is string => typeof v === 'string' && v.length > 0)
-  return parts.join(parts.length > 1 ? '\n' : '')
-}
-
-function commandFailed(item: Record<string, unknown>): boolean {
-  if (item.status === 'failed' || item.status === 'error') return true
-  if (typeof item.exit_code === 'number') return item.exit_code !== 0
-  if (typeof item.exitCode === 'number') return item.exitCode !== 0
-  return false
-}
-
-// A settled item's outcome: `item.failed`, or a completion whose status says
-// the call did not succeed.
-function itemFailed(evType: string, item: Record<string, unknown>): boolean {
-  return (
-    evType === 'item.failed' ||
-    item.status === 'failed' ||
-    item.status === 'error'
+// A file_change item's `changes`: each a path and an add/delete/update kind.
+function fileChanges(item: any): { path: string; kind: string }[] {
+  if (!Array.isArray(item.changes)) return []
+  return item.changes.filter(
+    (c: any) => typeof c?.path === 'string' && typeof c.kind === 'string',
   )
 }
 
-// An MCP call's result as Codex relays it: the server's `content` blocks.
-function mcpResultContent(result: unknown): unknown {
-  if (!result || typeof result !== 'object') return result
-  return (result as Record<string, unknown>).content
+// What a web search did, from its `action`: the query for a search, and the
+// action with its page for the others.
+function webSearchInput(item: any): string {
+  const a = item.action
+  if (a?.type === 'search') {
+    if (typeof a.query === 'string' && a.query) return a.query
+    if (Array.isArray(a.queries)) return a.queries.join(', ')
+  }
+  if (typeof a?.url === 'string') {
+    const pattern = typeof a.pattern === 'string' ? ` ${a.pattern}` : ''
+    return `${a.type} ${a.url}${pattern}`
+  }
+  return typeof item.query === 'string' ? item.query : ''
+}
+
+// A multi-agent call's report on the agents it touched: each one's status and,
+// when it has one, its message.
+function agentStates(item: any): string {
+  const states =
+    item.agents_states && typeof item.agents_states === 'object'
+      ? Object.values(item.agents_states)
+      : []
+  return states
+    .map((s: any) =>
+      [s?.status, s?.message].filter((v) => typeof v === 'string' && v).join(': '),
+    )
+    .filter(Boolean)
+    .join('\n')
 }
 
 // The command inside Codex's login-shell wrapper — `/bin/zsh -lc '…'` — undoing
@@ -337,35 +372,6 @@ export function unwrapShellCommand(command: string): string {
     }
   }
   return out
-}
-
-function firstChangePath(item: Record<string, unknown>): string | undefined {
-  if (typeof item.path === 'string') return item.path
-  if (typeof item.file_path === 'string') return item.file_path
-  const changes = Array.isArray(item.changes) ? item.changes : []
-  for (const change of changes) {
-    if (!change || typeof change !== 'object') continue
-    const c = change as Record<string, unknown>
-    if (typeof c.path === 'string') return c.path
-    if (typeof c.file_path === 'string') return c.file_path
-  }
-  return undefined
-}
-
-function summarizeFileChange(item: Record<string, unknown>): string {
-  const changes = Array.isArray(item.changes) ? item.changes : []
-  const first =
-    changes.find((c) => c && typeof c === 'object') as
-      | Record<string, unknown>
-      | undefined
-  const path = firstChangePath(item)
-  const kind =
-    (typeof first?.kind === 'string' && first.kind) ||
-    (typeof item.kind === 'string' && item.kind) ||
-    (typeof first?.type === 'string' && first.type) ||
-    (typeof item.status === 'string' && item.status) ||
-    ''
-  return [kind, path].filter(Boolean).join(' ')
 }
 
 function errorMessage(value: unknown): string | undefined {

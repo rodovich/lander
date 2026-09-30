@@ -210,7 +210,10 @@ export function makeFlow({
 
         const r = reduceCodexStreamLine(trimmed, ctx.now())
 
-        if (r.steps.length || r.finalText !== undefined) producedOutput = true
+        // A notice doesn't count: Codex reports config warnings before the turn
+        // starts, so one proves nothing about the model reading the prompt.
+        if ((r.steps.length && !r.notice) || r.finalText !== undefined)
+          producedOutput = true
 
         if (r.terminalError) {
           if (!terminalError) terminalError = r.terminalError
@@ -233,9 +236,8 @@ export function makeFlow({
           } else if (step.kind === 'text') {
             ctx.emit.message(step.text ?? '')
           } else {
-            // Codex reports item.failed for a command it never announced
-            // starting, so a result with no observed open is normal here, not an
-            // edge case. Synthesize the open so the lifecycle is well-formed.
+            // A result whose call was never observed opening still has to land;
+            // synthesize the open so the lifecycle is well-formed.
             const localId = step.toolUseId
             let h = localId !== undefined ? tools.get(localId) : undefined
             if (!h) {

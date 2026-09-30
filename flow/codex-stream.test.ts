@@ -229,7 +229,7 @@ describe('Codex stream reducer', () => {
       'use web_search(codex cli exec json events) #exec-c92104ec-c27a-4b4d-a418-f176a15c607a',
       'result #exec-c92104ec-c27a-4b4d-a418-f176a15c607a: ',
       'text: 1. Web search — complete.',
-      'use browser_navigate(playwright: https://example.com) #item_5',
+      'use mcp_tool_call(playwright browser_navigate: https://example.com) #item_5',
       'result #item_5 error: MCP tool call requires approval, but approval policy is never',
       'text: Navigation was blocked because the tool requires approval and this session’s approval policy is `never`.',
       'use file_change(add /tmp/codex-probe/hello.txt) #item_7',
@@ -262,23 +262,140 @@ describe('Codex stream reducer', () => {
   })
 
   // Codex 0.154 emits no item for spawn_agent; its waits are the only trace of
-  // subagents in the public stream, named by the item's `tool` field.
+  // subagents in the public stream.
   it('reduces multi-agent waits between the prose around them', () => {
     const r = reduceFixture('collab-wait.jsonl')
     expect(
       r.steps.map((s) =>
         s.kind === 'text'
           ? `text: ${s.text!.trim()}`
-          : `${s.kind} ${s.tool ?? ''} #${s.toolUseId}${s.isError ? ' error' : ''}`,
+          : s.kind === 'tool_use'
+            ? `use ${s.tool}(${s.input}) #${s.toolUseId}`
+            : `result #${s.toolUseId}${s.isError ? ' error' : ''}: ${s.text}`,
       ),
     ).toEqual([
       'text: I’ll start both subagents in parallel and wait for their results.',
-      'tool_use wait #item_1',
-      'tool_result  #item_1',
-      'tool_use wait #item_2',
-      'tool_result  #item_2',
+      'use collab_tool_call(wait) #item_1',
+      'result #item_1: ',
+      'use collab_tool_call(wait) #item_2',
+      'result #item_2: ',
       'text: Subagent A: slept; Subagent B: beta',
     ])
+  })
+
+  // Not observed from 0.154 — its spawns bypass this item — but the schema
+  // carries them, so they read through when Codex fills them in.
+  it('shows a multi-agent call’s prompt and its agents’ closing states', () => {
+    const [use] = reduceCodexStreamLine(
+      JSON.stringify({
+        type: 'item.started',
+        item: {
+          id: 'item_0',
+          type: 'collab_tool_call',
+          tool: 'spawn_agent',
+          sender_thread_id: 't0',
+          receiver_thread_ids: [],
+          prompt: 'count the files',
+          agents_states: {},
+          status: 'in_progress',
+        },
+      }),
+      AT,
+    ).steps
+    expect(use).toMatchObject({ tool: 'collab_tool_call', input: 'spawn_agent: count the files' })
+    const [result] = reduceCodexStreamLine(
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          id: 'item_1',
+          type: 'collab_tool_call',
+          tool: 'wait',
+          sender_thread_id: 't0',
+          receiver_thread_ids: ['t1'],
+          prompt: null,
+          agents_states: { t1: { status: 'completed', message: '42 files' } },
+          status: 'completed',
+        },
+      }),
+      AT,
+    ).steps
+    expect(result).toMatchObject({ text: 'completed: 42 files', isError: false })
+  })
+
+  // Captured from codex-cli 0.154.0 with a deprecated feature flag: the notice
+  // arrives before the turn starts, and is not the model's output.
+  it('shows a Codex notice as an error chip carrying its message', () => {
+    const r = reduceFixture('error-item.jsonl')
+    expect(r.steps.slice(0, 2)).toEqual([
+      {
+        kind: 'tool_use',
+        tool: 'error',
+        input:
+          '`[features].web_search_request` is deprecated because web search is enabled by default. (Set `web_search` to `"live"`, `"indexed"`, `"cached"`, or `"disabled"` at the top level (or under a profile) in…',
+        inputFull:
+          '`[features].web_search_request` is deprecated because web search is enabled by default. (Set `web_search` to `"live"`, `"indexed"`, `"cached"`, or `"disabled"` at the top level (or under a profile) in config.toml if you want to override it.)',
+        toolUseId: 'item_0',
+        createdAt: AT,
+      },
+      { kind: 'tool_result', text: '', toolUseId: 'item_0', isError: true, createdAt: AT },
+    ])
+    expect(r.updates[1].notice).toBe(true)
+    expect(r.updates[3].notice).toBeUndefined()
+    expect(r.finalText).toBe('ok')
+  })
+
+  // Codex reports a command whose approval was refused as `declined`, exit -1.
+  it('marks a declined command failed', () => {
+    const r = reduceCodexStreamLine(
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          id: 'item_0',
+          type: 'command_execution',
+          command: 'touch x',
+          aggregated_output: 'rejected by user',
+          exit_code: -1,
+          status: 'declined',
+        },
+      }),
+      AT,
+    )
+    expect(r.steps[0]).toMatchObject({ kind: 'tool_result', isError: true })
+  })
+
+  it('names the page for web actions other than a search', () => {
+    const input = (action: unknown) =>
+      reduceCodexStreamLine(
+        JSON.stringify({
+          type: 'item.completed',
+          item: { id: 'ws', type: 'web_search', query: '', action },
+        }),
+        AT,
+      ).steps[0].input
+    expect(input({ type: 'search', queries: ['a', 'b'] })).toBe('a, b')
+    expect(input({ type: 'open_page', url: 'https://x.test' })).toBe('open_page https://x.test')
+    expect(input({ type: 'find_in_page', url: 'https://x.test', pattern: 'foo' })).toBe(
+      'find_in_page https://x.test foo',
+    )
+  })
+
+  it('lists every path a file change touches', () => {
+    const [use] = reduceCodexStreamLine(
+      JSON.stringify({
+        type: 'item.started',
+        item: {
+          id: 'fc',
+          type: 'file_change',
+          changes: [
+            { path: '/r/a.ts', kind: 'update' },
+            { path: '/r/b.ts', kind: 'add' },
+          ],
+          status: 'in_progress',
+        },
+      }),
+      AT,
+    ).steps
+    expect(use.input).toBe('update /r/a.ts, add /r/b.ts')
   })
 
   it('unwraps the login-shell wrapper Codex puts around every command', () => {
@@ -307,7 +424,12 @@ describe('Codex stream reducer', () => {
 
   it('surfaces top-level error and turn.failed events as terminal errors', () => {
     const r = reduceFixture('turn-failed.jsonl')
-    expect(r.steps).toEqual([])
+    // The fixture's one item is a notice, not the model's work.
+    expect(r.steps.map((s) => `${s.kind} ${s.tool ?? ''}`)).toEqual([
+      'tool_use error',
+      'tool_result ',
+    ])
+    expect(r.updates.filter((u) => u.steps.length).every((u) => u.notice)).toBe(true)
     expect([...new Set(r.terminalErrors)]).toEqual([
       "The 'definitely-not-a-real-model' model is not supported when using Codex with a ChatGPT account.",
     ])

@@ -66,27 +66,6 @@ export const CODEX_GOLDENS: Golden[] = [
     start: codexStart,
   },
   {
-    // The normal codex shape, not an edge case: a command it never announced
-    // starting comes back as item.failed.
-    name: 'result-only failed command with no observed start',
-    chunks: [
-      [threadStarted()],
-      [
-        j({
-          type: 'item.failed',
-          item: {
-            id: 'item-orphan',
-            type: 'command_execution',
-            command: 'nope',
-            exit_code: 127,
-            aggregated_output: 'command not found',
-          },
-        }),
-      ],
-    ],
-    start: codexStart,
-  },
-  {
     name: 'file change item',
     chunks: [
       [
@@ -103,6 +82,23 @@ export const CODEX_GOLDENS: Golden[] = [
       [agentMessage('edited it')],
     ],
     start: codexStart,
+  },
+  {
+    // A config warning Codex reports before the turn starts, then the turn
+    // fails: nothing the model did.
+    name: 'notice item before a failed turn',
+    chunks: [
+      [
+        threadStarted(),
+        j({
+          type: 'item.completed',
+          item: { id: 'item_0', type: 'error', message: 'a setting is deprecated' },
+        }),
+      ],
+      [j({ type: 'turn.failed', error: { message: 'model refused' } })],
+    ],
+    start: codexStart,
+    exitCode: 0,
   },
   {
     name: 'usage on turn.completed',
