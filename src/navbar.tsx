@@ -18,20 +18,25 @@ export function pageTitle(
   return parts.length ? parts.join(' • ') : 'lander'
 }
 
+// The panels the navbar's buttons open in the detail pane, in place of a task.
+export type Panel = 'stats' | 'hooks'
+
+const PANEL_LABELS: Record<Panel, string> = { stats: 'Stats', hooks: 'Hooks' }
+
 // The bar across the top of the page: the brand, the project switcher, and the
-// project's hooks.
+// project's stats and hooks.
 export const Navbar = memo(function Navbar({
   projects,
   project,
   setProject,
-  hooksOpen,
-  onToggleHooks,
+  panel,
+  onTogglePanel,
 }: {
   projects: Project[]
   project: string
   setProject: (slug: string) => void
-  hooksOpen: boolean
-  onToggleHooks: () => void
+  panel: Panel | null
+  onTogglePanel: (panel: Panel) => void
 }) {
   return (
     <nav className="navbar">
@@ -51,14 +56,19 @@ export const Navbar = memo(function Navbar({
         )}
       </div>
       {project && (
-        <button
-          type="button"
-          className={'navbar-button' + (hooksOpen ? ' active' : '')}
-          aria-pressed={hooksOpen}
-          onClick={onToggleHooks}
-        >
-          Hooks
-        </button>
+        <div className="navbar-actions">
+          {(['stats', 'hooks'] as const).map((name) => (
+            <button
+              key={name}
+              type="button"
+              className={'navbar-button' + (panel === name ? ' active' : '')}
+              aria-pressed={panel === name}
+              onClick={() => onTogglePanel(name)}
+            >
+              {PANEL_LABELS[name]}
+            </button>
+          ))}
+        </div>
       )}
     </nav>
   )

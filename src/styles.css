@@ -52,8 +52,8 @@ body {
 
 /* ---- navbar ---- */
 
-/* The brand and project switcher lead; the start group grows to push the hooks
-   button to the right edge. */
+/* The brand and project switcher lead; the start group grows to push the stats
+   and hooks buttons to the right edge. */
 .navbar {
   display: flex;
   align-items: center;
@@ -74,6 +74,13 @@ body {
 
 .navbar-brand {
   display: block;
+}
+
+/* The panel buttons, set closer to each other than to the rest of the bar. */
+.navbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .navbar-button {
@@ -2720,29 +2727,31 @@ body.resizing-row {
   padding: 16px 28px 0;
 }
 
+/* A navbar panel's header row (see PanelHeader): the title, the panel's
+   controls, and the close X pushed to the far right. */
+.panel-header-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.panel-close {
+  margin-left: auto;
+}
+
 /* The project's hook settings, shown in the detail pane in place of a
-   conversation. The two sections are independent approval mechanisms, so they
-   are siblings separated by the column gap rather than one nested under the
-   other. */
+   conversation, scrolling under the panel header. The two sections are
+   independent approval mechanisms, so they are siblings separated by the column
+   gap rather than one nested under the other. */
 .hooks-panel {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 24px;
   padding: 20px 28px;
   overflow-y: auto;
-}
-
-.hooks-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.hooks-title {
-  font-size: 1.1em;
-  font-weight: 600;
-  margin: 0;
-  flex: 1;
 }
 
 .hooks-section {
@@ -2832,8 +2841,8 @@ body.resizing-row {
   color: var(--muted);
 }
 
-/* Every button in the hooks panel — Approve and Withdraw, but Save and Close
-   too. `.hook-approve` is the one variant that tints. */
+/* Every button in the hooks panel — Approve and Withdraw, but Save too.
+   `.hook-approve` is the one variant that tints. */
 .hooks-button {
   font: inherit;
   padding: 4px 10px;
@@ -2852,4 +2861,158 @@ body.resizing-row {
 .hooks-button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* ---- stats ---- */
+
+/* The stats dashboard's charts, shown in the detail pane in place of a
+   conversation, scrolling under the panel header that holds the range and
+   project filters scoping them all. */
+.stats-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  align-content: start;
+  padding: 20px 28px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: 16px;
+}
+
+/* ---- charts ---- */
+
+/* One chart (see charts.tsx): its title, the plot, and the key under it. */
+.chart-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* The heatmap's 24 columns take a full row of a grid of cards. */
+.chart-card-wide {
+  grid-column: 1 / -1;
+}
+
+.chart-title {
+  font-size: 1em;
+  font-weight: 600;
+  margin: 0;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chart-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.chart-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+/* Holds the chart's SVG and anchors its tooltip. */
+.chart-plot {
+  position: relative;
+}
+
+.chart-plot svg {
+  display: block;
+  overflow: visible;
+}
+
+.chart-gridline {
+  stroke: var(--border-secondary);
+  stroke-width: 1;
+}
+
+.chart-baseline {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.chart-tick {
+  fill: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-hover {
+  fill: var(--selected);
+}
+
+/* The transparent hit target over each column: the whole column answers the
+   pointer and the keyboard, not just the painted bar. */
+.chart-hit {
+  fill: transparent;
+  outline: none;
+}
+
+.chart-hit:focus-visible {
+  stroke: var(--riding);
+  stroke-width: 2;
+}
+
+.chart-heat-cell {
+  outline: none;
+}
+
+.chart-heat-cell.hovered,
+.chart-heat-cell:focus-visible {
+  stroke: var(--fg);
+  stroke-width: 1.5;
+}
+
+.chart-tooltip {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  box-shadow: 0 2px 8px var(--shadow);
+  font-size: 12px;
+  white-space: nowrap;
+  z-index: 1;
+}
+
+.chart-tooltip-title {
+  color: var(--muted);
+}
+
+.chart-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* A short stroke of the series color keys each row. */
+.chart-tooltip-key {
+  width: 10px;
+  height: 2px;
+  border-radius: 1px;
+}
+
+.chart-tooltip-word {
+  color: var(--muted);
 }

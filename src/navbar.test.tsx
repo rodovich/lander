@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { Navbar, pageTitle } from './navbar'
+import { Navbar, pageTitle, type Panel } from './navbar'
 import type { Project } from './types'
 
 const P = (path: string): Project => ({
@@ -27,14 +27,14 @@ describe('pageTitle', () => {
 })
 
 describe('Navbar', () => {
-  const render = (project: string, hooksOpen = false) =>
+  const render = (project: string, panel: Panel | null = null) =>
     renderToStaticMarkup(
       <Navbar
         projects={THREE}
         project={project}
         setProject={() => {}}
-        hooksOpen={hooksOpen}
-        onToggleHooks={() => {}}
+        panel={panel}
+        onTogglePanel={() => {}}
       />,
     )
 
@@ -46,8 +46,10 @@ describe('Navbar', () => {
     expect(html).toMatch(/aria-checked="true"[^>]*>beta</)
   })
 
-  it('presses the hooks button while the panel is open', () => {
-    expect(render('beta')).toContain('aria-pressed="false"')
-    expect(render('beta', true)).toContain('aria-pressed="true"')
+  it('presses only the open panel’s button', () => {
+    expect(render('beta')).not.toContain('aria-pressed="true"')
+    expect(render('beta', 'hooks')).toMatch(/aria-pressed="true"[^>]*>Hooks</)
+    expect(render('beta', 'stats')).toMatch(/aria-pressed="true"[^>]*>Stats</)
+    expect(render('beta', 'stats').match(/aria-pressed="true"/g)).toHaveLength(1)
   })
 })

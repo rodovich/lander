@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { loadHooks, setHookApproval, setTrustedBranch } from './api'
+import { PanelHeader } from './panelHeader'
 import { MonotonicRequestGate } from './requestOrder'
 import type { Hook, ProjectHooks } from './types'
 
@@ -235,30 +236,27 @@ export function HooksPanel({
   }
 
   return (
-    <div className="hooks-panel">
-      <div className="hooks-head">
-        <h2 className="hooks-title">Hooks</h2>
-        <button type="button" className="hooks-button" onClick={onClose}>
-          Close
-        </button>
+    <>
+      <PanelHeader title="Hooks" onClose={onClose} />
+      <div className="hooks-panel">
+        {error && <div className="error">{error}</div>}
+        {hooks && (
+          <>
+            <HooksList
+              hooks={hooks}
+              busy={busy}
+              onSetApproval={(hook, approved) =>
+                void act(() => setHookApproval(slug, hook, approved))
+              }
+            />
+            <TrustedBranch
+              hooks={hooks}
+              busy={busy}
+              onSave={(ref) => void act(() => setTrustedBranch(slug, ref))}
+            />
+          </>
+        )}
       </div>
-      {error && <div className="error">{error}</div>}
-      {hooks && (
-        <>
-          <HooksList
-            hooks={hooks}
-            busy={busy}
-            onSetApproval={(hook, approved) =>
-              void act(() => setHookApproval(slug, hook, approved))
-            }
-          />
-          <TrustedBranch
-            hooks={hooks}
-            busy={busy}
-            onSave={(ref) => void act(() => setTrustedBranch(slug, ref))}
-          />
-        </>
-      )}
-    </div>
+    </>
   )
 }

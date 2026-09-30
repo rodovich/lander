@@ -1,3 +1,4 @@
+import type { StatsFacts } from './stats'
 import type {
   FlowMeta,
   ProjectHooks,
@@ -160,6 +161,18 @@ export async function loadFlows(slug: string): Promise<FlowMeta[]> {
     return (body.flows ?? []) as FlowMeta[]
   } catch {
     return []
+  }
+}
+
+// Every configured project's stats facts; the dashboard narrows and buckets
+// them itself.
+export async function loadStats(): Promise<StatsFacts> {
+  const url = '/api/stats'
+  try {
+    const r = await fetch(url, { signal: readTimeout() })
+    return (await readJson(r, url)) as StatsFacts
+  } catch (e) {
+    throw describeTimeout(e, url)
   }
 }
 

@@ -6,10 +6,12 @@ import { DetailHeader } from './detailHeader'
 import { dataTransferHasFiles } from './fileDrop'
 import { usePersistentState, useSessionState } from './hooks'
 import { HooksPanel } from './hooksPanel'
-import { Navbar, pageTitle } from './navbar'
+import { lastPathComponent } from './format'
+import { Navbar, pageTitle, type Panel } from './navbar'
 import { NewTaskForm } from './newTaskForm'
 import { tick } from './perf'
 import { ResizeHandle } from './resizeHandle'
+import { StatsPanel } from './statsPanel'
 import { TaskList } from './taskList'
 import { TaskLinkProvider } from './taskLinkContext'
 import { buildTaskRows } from './taskRows'
@@ -99,10 +101,10 @@ export function App() {
   })
   // The list search box, session-scoped alongside the other list filters.
   const [filter, setFilter] = useSessionState('lander:filter', '')
-  // Whether the open project's hook settings fill the detail pane in place of
-  // the conversation. Not persisted: it is a place you go, not a mode the app
-  // should still be in tomorrow.
-  const [hooksOpen, setHooksOpen] = useState(false)
+  // Which navbar panel (stats, or the open project's hook settings) fills the
+  // detail pane in place of the conversation, if any. Not persisted: it is a
+  // place you go, not a mode the app should still be in tomorrow.
+  const [panel, setPanel] = useState<Panel | null>(null)
 
   // The new-task form's agent pick. Session-scoped like the form's draft
   // message (which lives in the form), so two tabs keep independent picks.
@@ -172,9 +174,12 @@ export function App() {
   const { orderedTasks } = listShape
 
   // Picking a task, or following a link or the back button to one, is how you
-  // leave the hooks panel; it shares the pane.
-  const leaveHooks = useCallback(() => setHooksOpen(false), [])
-  const toggleHooks = useCallback(() => setHooksOpen((o) => !o), [])
+  // leave a navbar panel; it shares the pane.
+  const leavePanel = useCallback(() => setPanel(null), [])
+  const togglePanel = useCallback(
+    (name: Panel) => setPanel((open) => (open === name ? null : name)),
+    [],
+  )
   const { selected, current, selectTask } = useTaskRouting({
     initialRef: initialTaskRef.current,
     tasks,
@@ -184,7 +189,7 @@ export function App() {
     hasLoadedRef,
     setProject,
     setView,
-    onNavigate: leaveHooks,
+    onNavigate: leavePanel,
   })
   currentRef.current = current
 
@@ -230,8 +235,8 @@ export function App() {
         projects={projects}
         project={project}
         setProject={setProject}
-        hooksOpen={hooksOpen}
-        onToggleHooks={toggleHooks}
+        panel={panel}
+        onTogglePanel={togglePanel}
       />
       <div className="layout">
         <div className="sidebar">
@@ -284,8 +289,14 @@ export function App() {
           {(error ?? pollError) && (
             <div className="error">{error ?? pollError}</div>
           )}
-          {hooksOpen && project ? (
-            <HooksPanel slug={project} onClose={leaveHooks} />
+          {panel === 'stats' && project ? (
+            <StatsPanel
+              slug={project}
+              projectName={lastPathComponent(pathBySlug.get(project) ?? project)}
+              onClose={leavePanel}
+            />
+          ) : panel === 'hooks' && project ? (
+            <HooksPanel slug={project} onClose={leavePanel} />
           ) : current ? (
             <TaskLinkProvider value={resolveTaskLink}>
               <DetailHeader
