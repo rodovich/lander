@@ -120,6 +120,21 @@ describe('claude thread identity', () => {
     expect(flow.spawns[0].args.slice(0, 2)).toEqual(['--session-id', MINTED])
   })
 
+  it('ends a subagent’s trace with its report, before the parent writes again', async () => {
+    const g = CLAUDE_GOLDENS.find(
+      (x) => x.name === 'subagent report closes its trace',
+    )!
+    const flow = await driveFlow(g, claudeFlow())
+    const task = applyEvents(goldenInput(g).start, flow.events) as {
+      items: { id: string; kind: string; name?: string; text?: string; parentId?: string }[]
+    }
+    const agent = task.items.find((it) => it.name === 'Agent')!
+    const rows = task.items
+      .filter((it) => it.kind === 'tool' || (it.kind === 'message' && it.parentId !== undefined) || it.text === 'there are 2')
+      .map((it) => `${it.parentId === agent.id ? '  ' : ''}${it.kind} ${it.name ?? it.text}`)
+    expect(rows).toEqual(['tool Agent', '  tool Bash', '  message 2', 'message there are 2'])
+  })
+
   it('does not re-send an unchanged turn context', async () => {
     const g = CLAUDE_GOLDENS.find(
       (x) => x.name === 'unchanged turn context is not re-sent',

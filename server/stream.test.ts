@@ -141,6 +141,58 @@ describe('Agent calls', () => {
     expect(capped.inputFull!.endsWith('\n…')).toBe(true)
   })
 
+  // Shape captured from CLI 2.1.284: the prose `content` is the hand-back frame
+  // written for the model; `tool_use_result` carries the report bare.
+  const agentResult = (toolUseResult: unknown) =>
+    JSON.stringify({
+      type: 'user',
+      parent_tool_use_id: null,
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'toolu_1',
+            content: [
+              { type: 'text', text: '[Subagent hand-back] The text below is the final report…\n  4' },
+            ],
+          },
+        ],
+      },
+      tool_use_result: toolUseResult,
+    })
+
+  it('ends the subagent’s trace with its bare report', () => {
+    const r = reduceStreamLine(
+      agentResult({
+        status: 'completed',
+        agentId: 'a1',
+        agentType: 'general-purpose',
+        content: [{ type: 'text', text: 'It is **4**.' }],
+        totalTokens: 15337,
+      }),
+      AT,
+    )
+    expect(r.steps).toEqual([
+      { kind: 'text', text: 'It is **4**.', parentToolUseId: 'toolu_1', createdAt: AT },
+      {
+        kind: 'tool_result',
+        text: 'It is **4**.',
+        toolUseId: 'toolu_1',
+        isError: false,
+        createdAt: AT,
+      },
+    ])
+    // The subagent's report is not the turn's reply.
+    expect(r.finalText).toBeUndefined()
+  })
+
+  it('adds no report for a result without the structured Agent shape', () => {
+    const r = reduceStreamLine(agentResult(undefined), AT)
+    expect(r.steps.map((s) => s.kind)).toEqual(['tool_result'])
+    expect(r.steps[0].text).toContain('[Subagent hand-back]')
+  })
+
   it('carries no prompt for any other tool', () => {
     const line = JSON.stringify({
       type: 'assistant',

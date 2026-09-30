@@ -162,6 +162,18 @@ export function agentInputFull(input: unknown): string {
   return full.length > 16000 ? full.slice(0, 16000) + '\n…' : full
 }
 
+// The subagent's report from an Agent result's structured `tool_use_result`
+// (its `content` text blocks), capped like the prompt. Undefined for any other
+// result.
+function agentReport(result: unknown): string | undefined {
+  if (!result || typeof result !== 'object') return undefined
+  const r = result as Record<string, unknown>
+  if (typeof r.agentId !== 'string' || !Array.isArray(r.content)) return undefined
+  const text = rawToolResultText(r.content).trim()
+  if (!text) return undefined
+  return text.length > 16000 ? text.slice(0, 16000) + '\n…' : text
+}
+
 // Render a tool call as a settings.json-style permission rule, e.g.
 // `Bash(npm run build)`. Keys off the same identifying field as
 // summarizeToolInput but leaves it untruncated, so the popup can show — and let
@@ -421,11 +433,23 @@ export function reduceStreamLine(
     // carries no parent id and stays at top level.
     const parentToolUseId =
       typeof ev.parent_tool_use_id === 'string' ? ev.parent_tool_use_id : undefined
+    const report = agentReport(ev.tool_use_result)
     for (const block of ev.message.content) {
       if (block.type === 'tool_result') {
+        // An Agent call's result is the subagent's final report, wrapped for
+        // the model in a hand-back frame. The event also carries it bare, and
+        // it becomes the last message of the subagent's trace — the CLI never
+        // streams the subagent's own prose.
+        if (report !== undefined && !parentToolUseId)
+          steps.push({
+            kind: 'text',
+            text: report,
+            parentToolUseId: block.tool_use_id,
+            createdAt: at,
+          })
         steps.push({
           kind: 'tool_result',
-          text: summarizeToolResult(block.content),
+          text: summarizeToolResult(report ?? block.content),
           toolUseId: block.tool_use_id,
           parentToolUseId,
           isError: block.is_error === true,

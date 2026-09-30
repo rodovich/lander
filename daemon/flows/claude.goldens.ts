@@ -98,6 +98,52 @@ export const CLAUDE_GOLDENS: Golden[] = [
     ],
   },
   {
+    // The Agent result's structured `tool_use_result` (CLI 2.1.284) carries the
+    // report the hand-back frame wraps.
+    name: 'subagent report closes its trace',
+    chunks: [
+      [
+        init(),
+        assistantTools('msg_1', [
+          {
+            type: 'tool_use',
+            id: 'toolu_agent',
+            name: 'Agent',
+            input: {
+              subagent_type: 'general-purpose',
+              description: 'Count docs',
+              prompt: 'Count the markdown files under docs/.',
+            },
+          },
+        ]),
+      ],
+      [
+        assistantTools(
+          'msg_sub',
+          [{ type: 'tool_use', id: 'toolu_inner', name: 'Bash', input: { command: 'ls docs' } }],
+          { parent_tool_use_id: 'toolu_agent' },
+        ),
+        toolResult('toolu_inner', 'a.md\nb.md', { parent_tool_use_id: 'toolu_agent' }),
+      ],
+      [
+        toolResult(
+          'toolu_agent',
+          [{ type: 'text', text: '[Subagent hand-back] The report follows:\n  2' }],
+          {
+            tool_use_result: {
+              status: 'completed',
+              agentId: 'a1',
+              agentType: 'general-purpose',
+              content: [{ type: 'text', text: '2' }],
+            },
+          },
+        ),
+        assistantText('there are 2', 'msg_2'),
+        result({ result: 'there are 2' }),
+      ],
+    ],
+  },
+  {
     name: 'edit and write produce diff hunks',
     chunks: [
       [

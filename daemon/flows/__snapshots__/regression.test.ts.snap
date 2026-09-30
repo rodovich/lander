@@ -2699,6 +2699,228 @@ b.ts",
 }
 `;
 
+exports[`claude transcript regressions > subagent report closes its trace 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--session-id",
+        "minted-session-id",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "minted-session-id",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "tool:ride-1:0",
+        "input": "general-purpose: Count docs",
+        "inputFull": "general-purpose: Count docs
+
+Count the markdown files under docs/.",
+        "kind": "tool",
+        "name": "Agent",
+        "output": "2",
+        "rideId": "ride-1",
+        "rule": "Agent",
+        "status": "ok",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:1",
+        "id": "tool:ride-1:1",
+        "input": "ls docs",
+        "kind": "tool",
+        "name": "Bash",
+        "output": "a.md
+b.md",
+        "parentId": "tool:ride-1:0",
+        "rideId": "ride-1",
+        "rule": "Bash(ls docs)",
+        "status": "ok",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "itm-mjuohs00-2",
+        "kind": "message",
+        "parentId": "tool:ride-1:0",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "2",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:2",
+        "id": "itm-mjuohs00-3",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "there are 2",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": undefined,
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "input": "general-purpose: Count docs",
+          "inputFull": "general-purpose: Count docs
+
+Count the markdown files under docs/.",
+          "kind": "tool_use",
+          "rule": "Agent",
+          "tool": "Agent",
+          "toolUseId": "tool:ride-1:0",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": undefined,
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:1",
+          "input": "ls docs",
+          "kind": "tool_use",
+          "parentToolUseId": "tool:ride-1:0",
+          "rule": "Bash(ls docs)",
+          "tool": "Bash",
+          "toolUseId": "tool:ride-1:1",
+        },
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "isError": false,
+          "kind": "tool_result",
+          "text": "a.md
+b.md",
+          "toolUseId": "tool:ride-1:1",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "there are 2",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "kind": "text",
+          "parentToolUseId": "tool:ride-1:0",
+          "text": "2",
+        },
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "isError": false,
+          "kind": "tool_result",
+          "text": "2",
+          "toolUseId": "tool:ride-1:0",
+        },
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:2",
+          "kind": "text",
+          "text": "there are 2",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
 exports[`claude transcript regressions > subagent trace with sub-subagent nesting 1`] = `
 {
   "done": {
