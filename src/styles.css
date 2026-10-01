@@ -76,6 +76,18 @@ body {
   display: block;
 }
 
+/* An action's or the poll's failure, held to one line so the bar never grows;
+   the full text is in the hover title. A zero basis has it take only the room
+   the switcher leaves, so showing it never squeezes its siblings. */
+.navbar-error {
+  flex: 1 1 0;
+  min-width: 0;
+  color: var(--wedged);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* The panel buttons, set closer to each other than to the rest of the bar. */
 .navbar-actions {
   display: flex;

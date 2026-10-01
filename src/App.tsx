@@ -262,6 +262,10 @@ export function App() {
         setProject={setProject}
         panel={panel}
         onTogglePanel={togglePanel}
+        // One slot for both errors. An action's failure wins it while it is
+        // up: the user is standing in front of it, and the poll's is the
+        // ambient one.
+        error={error ?? pollError}
       />
       <div className="layout">
         <div className="sidebar">
@@ -309,12 +313,6 @@ export function App() {
         </div>
 
         <div className="detail">
-          {/* One banner for both slots. An action's failure wins the spot while
-              it is up: the user is standing in front of it, and the poll's is
-              the ambient one. */}
-          {(error ?? pollError) && (
-            <div className="error">{error ?? pollError}</div>
-          )}
           {panel === 'stats' && project ? (
             <StatsPanel
               slug={project}

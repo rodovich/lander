@@ -27,7 +27,11 @@ describe('pageTitle', () => {
 })
 
 describe('Navbar', () => {
-  const render = (project: string, panel: Panel | null = null) =>
+  const render = (
+    project: string,
+    panel: Panel | null = null,
+    error: string | null = null,
+  ) =>
     renderToStaticMarkup(
       <Navbar
         projects={THREE}
@@ -35,6 +39,7 @@ describe('Navbar', () => {
         setProject={() => {}}
         panel={panel}
         onTogglePanel={() => {}}
+        error={error}
       />,
     )
 
@@ -51,5 +56,12 @@ describe('Navbar', () => {
     expect(render('beta', 'hooks')).toMatch(/aria-pressed="true"[^>]*>Hooks</)
     expect(render('beta', 'stats')).toMatch(/aria-pressed="true"[^>]*>Stats</)
     expect(render('beta', 'stats').match(/aria-pressed="true"/g)).toHaveLength(1)
+  })
+
+  it('shows an error only while there is one', () => {
+    expect(render('beta')).not.toContain('navbar-error')
+    expect(render('beta', null, '502 Bad Gateway')).toMatch(
+      /class="navbar-error"[^>]*>502 Bad Gateway</,
+    )
   })
 })

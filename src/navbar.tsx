@@ -23,20 +23,22 @@ export type Panel = 'stats' | 'hooks'
 
 const PANEL_LABELS: Record<Panel, string> = { stats: 'Stats', hooks: 'Hooks' }
 
-// The bar across the top of the page: the brand, the project switcher, and the
-// project's stats and hooks.
+// The bar across the top of the page: the brand, the project switcher, the
+// app-wide error if there is one, and the project's stats and hooks.
 export const Navbar = memo(function Navbar({
   projects,
   project,
   setProject,
   panel,
   onTogglePanel,
+  error,
 }: {
   projects: Project[]
   project: string
   setProject: (slug: string) => void
   panel: Panel | null
   onTogglePanel: (panel: Panel) => void
+  error: string | null
 }) {
   return (
     <nav className="navbar">
@@ -53,6 +55,11 @@ export const Navbar = memo(function Navbar({
               title: p.path,
             }))}
           />
+        )}
+        {error && (
+          <div className="navbar-error" role="alert" title={error}>
+            {error}
+          </div>
         )}
       </div>
       {project && (
