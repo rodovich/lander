@@ -2454,6 +2454,16 @@ app.post('/api/:project/tasks', async (c) => {
     // task spawned this one, supplies the backlink we prepend to the message.
     const principal = await resolvePrincipal(c.req)
 
+    // A task may only launch tasks in its own project, the same rule a send is
+    // held to (the human, via the UI, may launch anywhere). The `lander launch`
+    // CLI always targets the caller's own project, so this just enforces that
+    // server-side — which is what lets a task's spawner be named by id alone.
+    if (principal.kind === 'task' && principal.slug !== project.slug)
+      return c.json(
+        { error: 'a task may only launch tasks in its own project' },
+        403,
+      )
+
     // Granting a spawned task edit access requires a caller that holds it. The
     // human (UI token) may grant it freely; an authenticated task may only pass
     // on edit access it has itself — so a task can't spawn a child more

@@ -1365,6 +1365,35 @@ describe('permission grants by principal', () => {
     })
   })
 
+  // A task's sender and spawner are named by id alone, which holds only while
+  // neither a launch nor a send can cross a project boundary.
+  it('refuses a task a launch or a send into another project', async () => {
+    await seedTask('tsk-crosser')
+    const launch = await app.request(`/api/${secondSlug}/tasks`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...taskAuth('tsk-crosser') },
+      body: JSON.stringify({ message: 'over the fence' }),
+    })
+    expect(launch.status).toBe(403)
+    expect(await launch.json()).toMatchObject({
+      error: 'a task may only launch tasks in its own project',
+    })
+
+    const target = await createTask('Elsewhere', secondSlug)
+    const send = await app.request(
+      `/api/${secondSlug}/tasks/${target.id}/messages`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...taskAuth('tsk-crosser') },
+        body: JSON.stringify({ message: 'over the fence' }),
+      },
+    )
+    expect(send.status).toBe(403)
+    expect(await send.json()).toMatchObject({
+      error: 'a task may only message tasks in its own project',
+    })
+  })
+
   it('lets only the UI change an existing task’s edit grant', async () => {
     await seedTask('tsk-escalate')
     const self = await patch('tsk-escalate', taskAuth('tsk-escalate'), {
@@ -2268,16 +2297,16 @@ describe('acting task coordination history', () => {
     expect(delivered.text.startsWith(`From ${actor.id}:`)).toBe(true)
   })
 
-  it('uses project-qualified identity and minimizes cross-project snapshots', async () => {
+  it('uses project-qualified identity and records no refused cross-project action', async () => {
     const actor = await createTask('Cross-project action actor')
     const waiter = await createTask('Remote condition title', secondSlug)
 
-    const launched = await launchAs(actor.id, secondSlug, {
+    const forbiddenLaunch = await launchAs(actor.id, secondSlug, {
       title: 'Explicit remote title',
       message: 'Acknowledge and land.',
       await: [waiter.id],
     })
-    expect(launched.status).toBe(201)
+    expect(forbiddenLaunch.status).toBe(403)
 
     // The same id in another project is not self. A task principal is the pair
     // (project slug, id), so this remote status change must still be recorded.
@@ -2314,22 +2343,13 @@ describe('acting task coordination history', () => {
     expect(forbiddenSend.status).toBe(403)
 
     const rows = await actions(actor.id)
-    expect(rows).toHaveLength(2)
+    expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({
-      action: 'launch',
-      target: { projectSlug: secondSlug, title: 'Explicit remote title' },
-      trigger: {
-        kind: 'awaiting',
-        tasks: [{ id: waiter.id, projectSlug: secondSlug }],
-      },
-    })
-    expect(rows[0].trigger).not.toHaveProperty('tasks.0.title')
-    expect(rows[1]).toMatchObject({
       action: 'status',
       target: { id: actor.id, projectSlug: secondSlug },
       toStatus: 'riding',
     })
-    expect(rows[1].target.title).toBeUndefined()
+    expect(rows[0].target.title).toBeUndefined()
   })
 
   it('omits self, anonymous, failed, rejected, and no-op actions', async () => {
