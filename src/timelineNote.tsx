@@ -47,11 +47,14 @@ export function TaskChip({
 export function TimelineNote({
   at,
   inTurn,
+  variant,
   list,
   detail,
   children,
 }: {
   at: string
+  // A second class on the row (`message-queued`).
+  variant?: string
   // Rendered inside an assistant turn rather than on the timeline rail. The
   // turn already says when it ran and the notes group at one point in it, so
   // the row drops its timestamp (kept as the row's tooltip, where the exact
@@ -62,12 +65,20 @@ export function TimelineNote({
   // where.
   list?: ReactNode
   // Revealable detail behind a disclosure triangle — a sent message's text.
-  // `label` names it in the toggle's tooltip ("Show message").
-  detail?: { label: string; body: ReactNode }
+  // `label` names it in the toggle's tooltip ("Show message"). Each new truthy
+  // `openOn` opens it — a search match landing inside — in the same render, so
+  // the detail is in the page by the time the caller scrolls to it.
+  detail?: { label: string; body: ReactNode; openOn?: unknown }
   // The prose. Plain inline content, so it flows and wraps as a sentence.
   children: ReactNode
 }) {
-  const [open, setOpen] = useState(false)
+  const openOn = detail?.openOn
+  const [open, setOpen] = useState(!!openOn)
+  const [seenOpenOn, setSeenOpenOn] = useState(openOn)
+  if (openOn !== seenOpenOn) {
+    setSeenOpenOn(openOn)
+    if (openOn) setOpen(true)
+  }
   const head = (
     <>
       <span className="timeline-note-text">{children}</span>
@@ -78,7 +89,7 @@ export function TimelineNote({
   )
   return (
     <div
-      className={`timeline-note${inTurn ? ' in-turn' : ''}`}
+      className={`timeline-note${inTurn ? ' in-turn' : ''}${variant ? ` ${variant}` : ''}`}
       title={inTurn ? formatTimestamp(at) : undefined}
     >
       {detail ? (

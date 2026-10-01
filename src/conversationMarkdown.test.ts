@@ -200,9 +200,13 @@ describe('conversationMarkdown', () => {
       action: 'launch',
       target: { id: 'child', projectSlug: 'proj', title: 'Child task' },
     }
-    const out = md(task([event, action], []))
+    const sent = user('s1', 'sender-words', { from: { task: 'sender-task', via: 'send' } })
+    const out = md(task([event, action, sent], []))
     expect(out).toContain('_Fix the parser wedged_')
     expect(out).toContain('_launched task Child task_')
+    // Another task's message, closed as a freshly-opened task shows it.
+    expect(out).toContain('_received message from sender-task_')
+    expect(out).not.toContain('sender-words')
   })
 
   it('carries an open ask as the footer of the turn that raised it', () => {

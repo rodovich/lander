@@ -151,6 +151,29 @@ describe('Conversation timeline dispatch', () => {
     expect(html).toContain('really finished?')
   })
 
+  // Another task's message is not the user's either: a note naming the sender,
+  // its words folded behind the disclosure — until a search match lands in it.
+  it('renders another task’s message as a folded note naming its sender', () => {
+    const sent = user('s1', 'sender-words', {
+      from: { task: 'sender-task', via: 'notify' },
+      queued: true,
+    })
+    const html = render(baseTask({ items: [sent] }))
+    expect(html).not.toContain('message-user')
+    expect(html).toContain('received message from')
+    expect(html).toContain('href="/proj/sender-task"')
+    expect(html).toContain('timeline-note message-queued')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).not.toContain('sender-words')
+
+    const revealed = render(baseTask({ items: [sent] }), {
+      reveal: { itemId: 's1', occurrence: 0, query: 'sender' },
+    })
+    expect(revealed).toContain('aria-expanded="true"')
+    expect(revealed).toContain('data-item-id="s1"')
+    expect(revealed).toContain('sender-words')
+  })
+
   it('marks a queued follow-up bubble', () => {
     const html = render(
       baseTask({ items: [user('u1', 'later', { queued: true })] }),

@@ -2038,10 +2038,19 @@ body {
 
 /* The disclosure triangle hangs in the row's left gutter — 12px of caret plus
    the row's own 8px gap — so a note with revealable detail still starts its
-   prose on the timeline's 28px inset, level with the notes that have none. */
+   prose on the timeline's 28px inset, level with the notes that have none. The
+   caret sits at the gutter's right edge, the row's gap from the prose, and
+   centered on the prose's first line: the toggle takes the prose's font, so
+   the caret is sized to the prose and the toggle is one of its lines tall
+   (`1lh`), rather than sitting on its baseline, where a triangle reads as low. */
 .timeline-note .collapsible-toggle {
   width: 12px;
   margin-left: -20px;
+  align-self: flex-start;
+  font: inherit;
+  height: 1lh;
+  align-items: center;
+  justify-content: flex-end;
 }
 
 /* The revealed detail — a sent message's text — reads like a tool call's
@@ -2049,6 +2058,14 @@ body {
 .timeline-note-detail {
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* A message another task sent, revealed: it is what this task was told, so it
+   reads as a message — rendered markdown at full contrast — not as the muted
+   echo of someone else's. The markdown keeps its own whitespace rules. */
+.timeline-note-detail .message-text-wrap {
+  white-space: normal;
+  color: var(--fg);
 }
 
 /* The same note, standing inside the turn that took the action rather than on
@@ -2067,6 +2084,7 @@ body {
    row, level with the one on a fold summary above it. */
 .timeline-note.in-turn .collapsible-toggle {
   margin-left: 0;
+  justify-content: flex-start;
 }
 
 /* The actions anchored at one point in a turn, as one block, ruled off from the

@@ -7,6 +7,7 @@ import { MessageText } from './messageText'
 import { tick, timed } from './perf'
 import { PendingRow, RideTurn } from './rideTurn'
 import type { TaskAction } from './taskActions'
+import { SentMessageNote } from './sentMessageNote'
 import { TaskActionNote } from './taskActionNote'
 import { openRide, taskAgentModelName } from './taskMeta'
 import { taskKeyOf } from './taskRef'
@@ -238,6 +239,16 @@ export const Conversation = memo(function Conversation({
         }
         if (entry.kind === 'user') {
           const m = entry.item
+          if (m.from && 'task' in m.from)
+            return (
+              <SentMessageNote
+                key={`u-${m.id}`}
+                item={m}
+                sender={m.from.task}
+                slug={task.projectSlug}
+                openOn={reveal?.itemId === m.id ? reveal : undefined}
+              />
+            )
           // A hook's nudge sits in the same slot as a typed message — it was
           // queued and drove a turn the same way — but it is not the user
           // speaking, so it gets its own voice rather than the user's tint.

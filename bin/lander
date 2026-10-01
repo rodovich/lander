@@ -696,8 +696,14 @@ function conversationBlocks(items, { tools }) {
       // A hook's nudge drove the reply that follows it. Dropping it (it is
       // neither role `user` nor ride-attached) would show that reply with no
       // visible cause.
+      // A message another task sent is named by its sender, not the user.
       blocks.push({
-        role: it.role === 'hook' ? `hook ${it.from?.hook ?? ''}`.trim() : 'user',
+        role:
+          it.role === 'hook'
+            ? `hook ${it.from?.hook ?? ''}`.trim()
+            : it.from?.task
+              ? `from ${it.from.task}`
+              : 'user',
         parts: [it.text ?? ''],
       })
     } else if (it.kind === 'hook') {

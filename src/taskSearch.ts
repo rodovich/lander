@@ -14,7 +14,9 @@ type Part = { itemId: string; text: string }
 // tool output happened to contain. Tool calls stay out entirely — a chip is a
 // step, not something the conversation says — as does the scaffolding around
 // the text: headings, fold summaries, lifecycle sentences. Every agent turn
-// collapses, a still-running one included.
+// collapses, a still-running one included. One exception: a message another
+// task sent renders folded, but is searched all the same — it can be the task's
+// whole brief — and opening a match unfolds it.
 function conversationParts(task: TaskWithProject): Part[] {
   const parts: Part[] = []
   const push = (itemId: string, text: string | undefined) => {

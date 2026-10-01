@@ -5,10 +5,11 @@
 // summary the fold shows in its place. What is on screen is what lands on the
 // clipboard.
 //
-// One disclosure stays closed here whatever the reader did with it: a task
-// action's sent message, whose open/closed state lives inside the row's own
-// component rather than in the pane's state, so this module can't see it. The
-// collapsed reading is the one a freshly-opened task shows.
+// Two disclosures stay closed here whatever the reader did with them: a task
+// action's sent message, and a message another task sent this one. Their
+// open/closed state lives inside the row's own component rather than in the
+// pane's state, so this module can't see it. The collapsed reading is the one a
+// freshly-opened task shows.
 //
 // And one fold applies here that the screen skips: every agent turn collapses,
 // a still-running one included, where the view leaves a running turn whole
@@ -157,6 +158,10 @@ export function conversationMarkdown({
   for (const entry of timeline) {
     if (entry.kind === 'user') {
       const m = entry.item
+      if (m.from && 'task' in m.from) {
+        blocks.push(`_received message from ${m.from.task}_ · ${formatTimestamp(m.at)}`)
+        continue
+      }
       const role =
         m.role === 'hook'
           ? `hook ${m.from && 'hook' in m.from ? m.from.hook : ''}`.trim()
