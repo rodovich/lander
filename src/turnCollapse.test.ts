@@ -6,13 +6,13 @@ import { planTurnCollapse } from './turnCollapse'
 type TestItem = {
   kind: 'message' | 'tool' | 'event' | 'ask'
   text?: string
+  parentId?: string
 }
 
 const text = (value: string): TestItem => ({ kind: 'message', text: value })
 const tool = (): TestItem => ({ kind: 'tool' })
 
-const plan = (items: TestItem[], indices?: number[]) =>
-  planTurnCollapse(items, indices)
+const plan = (items: TestItem[]) => planTurnCollapse(items)
 
 describe('planTurnCollapse', () => {
   it('keeps opening text before tools and collapses the range before the longest sequence', () => {
@@ -114,15 +114,18 @@ describe('planTurnCollapse', () => {
     })
   })
 
-  it('ignores items outside the supplied main-thread indices', () => {
+  it('plans over the main thread, leaving subagent items out of every segment', () => {
     const items = [
       text('intro'),
-      text('nested subagent text that should not drive the main collapse'),
+      {
+        ...text('nested subagent text that should not drive the main collapse'),
+        parentId: 'agent-1',
+      },
       tool(),
       text('final answer'),
     ]
 
-    expect(plan(items, [0, 2, 3])).toEqual({
+    expect(plan(items)).toEqual({
       segments: [
         { hidden: false, indices: [0] },
         { hidden: true, indices: [2] },

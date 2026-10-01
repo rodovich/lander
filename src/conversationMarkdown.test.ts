@@ -170,7 +170,7 @@ describe('conversationMarkdown', () => {
     expect(opened).not.toContain('steps, 2 tools…')
   })
 
-  it('keeps an open turn whole — an unsettled ride never folds', () => {
+  it('folds an open turn too — the copy collapses every agent turn', () => {
     const items: Item[] = [
       flow('m1', 'r1', 'opening'),
       tool('t1', 'r1'),
@@ -180,7 +180,7 @@ describe('conversationMarkdown', () => {
       tool('t3', 'r1'),
       flow('m4', 'r1', 'wrapping up'),
     ]
-    expect(md(task(items, [{ id: 'r1', startedAt: AT }]))).toContain(
+    expect(md(task(items, [{ id: 'r1', startedAt: AT }]))).not.toContain(
       'a middle note',
     )
   })

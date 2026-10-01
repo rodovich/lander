@@ -1,10 +1,31 @@
 // The subset of a ride item the collapse reads: whether it carries assistant
-// prose (a flow `message`) and how much, and whether it's a tool call (the
-// separator that splits text sequences). A ToolItem/MessageItem satisfies this
+// prose (a flow `message`) and how much, whether it's a tool call (the
+// separator that splits text sequences), and whether it belongs to a subagent
+// rather than the main thread. A ToolItem/MessageItem satisfies this
 // structurally, so callers pass a ride's items straight through.
 type CollapsibleItem = {
   kind: 'message' | 'tool' | 'event' | 'ask' | 'hook'
   text?: string
+  parentId?: string
+}
+
+// One agent turn's items split into its main thread and its subagents' items.
+// A subagent item (parentId set) belongs to the spawning tool chip, which nests
+// it, so it never opens a main-thread group nor feeds the collapse. The links
+// go arbitrarily deep: a child's own children are keyed under its id in turn.
+export function turnThreads(items: readonly { parentId?: string }[]): {
+  mainIdxs: number[]
+  childrenByParent: Map<string, number[]>
+} {
+  const mainIdxs: number[] = []
+  const childrenByParent = new Map<string, number[]>()
+  items.forEach((it, j) => {
+    if (!it.parentId) return void mainIdxs.push(j)
+    const sibs = childrenByParent.get(it.parentId)
+    if (sibs) sibs.push(j)
+    else childrenByParent.set(it.parentId, [j])
+  })
+  return { mainIdxs, childrenByParent }
 }
 
 // A run of items that either stays visible or folds away together. The plan is
@@ -49,13 +70,14 @@ const textLength = (item: CollapsibleItem) =>
 // one sequence (Codex emits a message per paragraph, so a single answer is a run
 // of them). Keep three sequences — the opening prose before the first tool, the
 // longest concatenated sequence, and the last sequence — plus any trailing items
-// after the last one, and fold everything in between. Operates over a ride's
-// main-thread items; the caller passes the item array and the `indices` of the
-// main thread (subagent-nested items excluded).
+// after the last one, and fold everything in between. Takes one agent turn's
+// items and plans over its main thread; subagent items appear in no segment.
+// Whether a turn folds at all (the conversation view leaves a running turn
+// whole) is the caller's call.
 export function planTurnCollapse(
   items: readonly CollapsibleItem[],
-  indices: readonly number[] = items.map((_, i) => i),
 ): TurnCollapsePlan {
+  const indices = turnThreads(items).mainIdxs
   const n = indices.length
   const isText = (pos: number) => textLength(items[indices[pos]]) > 0
 

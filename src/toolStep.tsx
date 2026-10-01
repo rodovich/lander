@@ -35,6 +35,29 @@ function DiffView({ edits }: { edits: { old: string; new: string }[] }) {
   )
 }
 
+// Which detail a tool chip can reveal. The input counts when the server
+// captured an untruncated copy, or when the raw input is multi-line — either way
+// there's more to see than the one-line chip shows. A plain single-line input
+// has nothing extra (older items predate inputFull; a codex command is the
+// multi-line case there). A subagent spawner reveals the nested trace; an edit
+// reveals its diff; everything else reveals its captured output (if any — a
+// still-running call has none yet). The trace subsumes the call's result text
+// (it ends with the subagent's final reply), and the diff wins over an Edit's
+// noisy confirmation. The full input, when present, rides above whichever of
+// these the chip has.
+export function toolDetail(item: ToolItem, hasChildren: boolean) {
+  const hasInput = !!item.inputFull || item.input.includes('\n')
+  const hasDiff = !!item.edits && item.edits.length > 0
+  const hasResult = !hasDiff && !hasChildren && !!item.output
+  return {
+    hasInput,
+    hasDiff,
+    hasChildren,
+    hasResult,
+    hasDetail: hasInput || hasDiff || hasChildren || hasResult,
+  }
+}
+
 // A tool call in the activity trace: a chip (red when the call was blocked or
 // failed) beside its one-line input. The tool item carries its own outcome
 // (`status`) and captured output, folded in from the result — no use/result
@@ -60,24 +83,13 @@ export function ToolStep({
   // trace as its revealable detail, pre-rendered by the caller. Absent otherwise.
   subItems?: React.ReactNode
 }) {
-  // Whether the input alone makes the chip a disclosure: it does when the server
-  // captured an untruncated copy, or when the raw input is multi-line — either way
-  // there's more to see than the one-line chip shows. A plain single-line input
-  // has nothing extra, so it stays a non-expanding label (older items predate
-  // inputFull; a codex command is the multi-line case there).
-  const hasInput = !!item.inputFull || item.input.includes('\n')
+  const { hasDiff, hasChildren, hasResult, hasDetail } = toolDetail(
+    item,
+    !!subItems,
+  )
   // What the open body wraps: the server's untruncated capture, else the chip's
   // own input. It replaces the one-line copy on the chip once expanded.
   const fullInput = item.inputFull ?? item.input
-  const hasDiff = !!item.edits && item.edits.length > 0
-  // A subagent spawner reveals the nested trace; an edit reveals its diff;
-  // everything else reveals its captured output (if any — a still-running call has
-  // none yet). The trace subsumes the call's result text (it ends with the
-  // subagent's final reply), and the diff wins over an Edit's noisy confirmation.
-  // The full input, when present, rides above whichever of these the chip has.
-  const hasChildren = !!subItems
-  const hasResult = !hasDiff && !hasChildren && !!item.output
-  const hasDetail = hasInput || hasDiff || hasChildren || hasResult
   const noun = hasDiff
     ? 'diff'
     : hasChildren

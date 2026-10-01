@@ -2,9 +2,9 @@ import { Fragment } from 'react'
 import { Collapsible } from './collapsible'
 import { MessageText } from './messageText'
 import { TaskActionNote } from './taskActionNote'
-import { ToolStep } from './toolStep'
+import { ToolStep, toolDetail } from './toolStep'
 import { planTurnActions } from './turnActions'
-import { groupInferences, planTurnCollapse } from './turnCollapse'
+import { groupInferences, planTurnCollapse, turnThreads } from './turnCollapse'
 import type { RideItem } from './timeline'
 import type { TaskActionItem } from './types'
 import type { TimelineDisclosure } from './useTimelineDisclosure'
@@ -46,58 +46,36 @@ export function TurnTrace({
   settled: boolean
   disclosure: TimelineDisclosure
 }) {
-  // Subagent items (parentId set) don't render inline — they fold into their
-  // spawning tool chip. Map each spawning tool id to its direct children's
-  // indices so renderItem can nest them; the links go arbitrarily deep, so
-  // rendering a child recurses on its own children in turn.
-  const childrenByParent = new Map<string, number[]>()
-  items.forEach((it, j) => {
-    if (it.parentId) {
-      const sibs = childrenByParent.get(it.parentId)
-      if (sibs) sibs.push(j)
-      else childrenByParent.set(it.parentId, [j])
-    }
-  })
-  // The main thread: items with no parent. Subagent items are folded under
-  // their spawning chip, so they never open a main-thread group nor feed
-  // collapse/copy controls.
-  const mainIdxs = items.map((_, j) => j).filter((j) => !items[j].parentId)
-  // Ids of every tool chip with revealable detail (full input, a diff, captured
-  // output, or a nested subagent trace) in this ride, so an option/shift-click
-  // on one toggles them all together — nested chips included, since ids are
-  // ride-wide.
-  const detailKeys = items
-    .map((it) =>
-      it.kind === 'tool' &&
-      (it.inputFull ||
-        it.input.includes('\n') ||
-        it.edits?.length ||
-        it.output ||
-        childrenByParent.has(it.id))
-        ? it.id
-        : null,
-    )
-    .filter((k): k is string => k !== null)
+  // Subagent items don't render inline — they fold into their spawning tool
+  // chip, and rendering a child recurses on its own children in turn.
+  const { mainIdxs, childrenByParent } = turnThreads(items)
+  // Ids of every tool chip with revealable detail in this ride, so an
+  // option/shift-click on one toggles them all together — nested chips
+  // included, since ids are ride-wide.
+  const detailKeys = items.flatMap((it) =>
+    it.kind === 'tool' && toolDetail(it, childrenByParent.has(it.id)).hasDetail
+      ? [it.id]
+      : [],
+  )
   // Group consecutive main items by the groupId that produced them (see
   // groupInferences). Each group is one inference — ruled apart from the next.
   const groupByGroup = (idxs: number[]) => groupInferences(items, idxs)
   // Settled turns fold down by their flow messages, independent of group
   // boundaries: keep the opening prose before the first tool, the longest text
   // sequence, and the last, collapsing the ranges between (see
-  // planTurnCollapse). An open ride renders in full, as does any turn too short
-  // to have a gap.
-  const collapse = planTurnCollapse(items, mainIdxs)
+  // planTurnCollapse). An open ride renders in full — its shape isn't settled,
+  // and the plan's hidden ranges would shift as prose streams in — as does any
+  // turn too short to have a gap.
+  const collapse = settled ? planTurnCollapse(items) : null
   // Where this turn's cross-task actions land: each before the next prose
   // section the fold keeps, so a note whose `lander launch` is inside a folded
   // stretch surfaces under that stretch's summary instead of hiding behind it.
-  // Only a settled turn folds, so an open one anchors against every section —
-  // the plan's hidden ranges shift as prose streams in, and would drag the
-  // note down to each new paragraph.
+  // An unfolded turn anchors against every section.
   const anchored = planTurnActions(
     items,
     mainIdxs,
     actions,
-    settled ? collapse : { segments: [] },
+    collapse ?? { segments: [] },
   )
 
   const renderBody = (j: number) => {
@@ -178,8 +156,7 @@ export function TurnTrace({
       <TurnActions actions={anchored.tail} />
     </>
   )
-  const folds = settled && collapse.segments.some((seg) => seg.hidden)
-  if (!folds)
+  if (!collapse?.segments.some((seg) => seg.hidden))
     return (
       <>
         {renderItemList(mainIdxs)}

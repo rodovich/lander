@@ -24,12 +24,11 @@ const plan = (
   items: (ReturnType<typeof prose> | ReturnType<typeof tool>)[],
   actions: TaskActionItem[],
 ) => {
-  const mainIdxs = items.map((_, i) => i)
   return planTurnActions(
     items,
-    mainIdxs,
+    items.map((_, i) => i),
     actions,
-    planTurnCollapse(items, mainIdxs),
+    planTurnCollapse(items),
   )
 }
 
@@ -83,10 +82,7 @@ describe('planTurnActions', () => {
       tool(T('10:00:05')),
       prose(T('10:00:09'), 'closing-'.repeat(10)),
     ]
-    const collapse = planTurnCollapse(
-      items,
-      items.map((_, i) => i),
-    )
+    const collapse = planTurnCollapse(items)
     expect(collapse.segments.some((s) => s.hidden)).toBe(true)
     const { before } = plan(items, [action('a1', T('10:00:03'))])
     expect([...before.keys()]).toEqual([4])

@@ -9,10 +9,15 @@
 // action's sent message, whose open/closed state lives inside the row's own
 // component rather than in the pane's state, so this module can't see it. The
 // collapsed reading is the one a freshly-opened task shows.
+//
+// And one fold applies here that the screen skips: every agent turn collapses,
+// a still-running one included, where the view leaves a running turn whole
+// while its shape is still changing.
 
 import { formatTimestamp } from './format'
 import { EVENT_VERB } from './lifecycleNote'
-import { groupInferences, planTurnCollapse } from './turnCollapse'
+import { toolDetail } from './toolStep'
+import { groupInferences, planTurnCollapse, turnThreads } from './turnCollapse'
 import type { RideItem, TimelineEntry } from './timeline'
 import type {
   AskItem,
@@ -196,14 +201,7 @@ function rideBlocks(
   expandedTurns: Set<string>,
 ): string[] {
   const items = entry.items
-  const childrenByParent = new Map<string, number[]>()
-  items.forEach((it, j) => {
-    if (!it.parentId) return
-    const sibs = childrenByParent.get(it.parentId)
-    if (sibs) sibs.push(j)
-    else childrenByParent.set(it.parentId, [j])
-  })
-  const mainIdxs = items.map((_, j) => j).filter((j) => !items[j].parentId)
+  const { childrenByParent } = turnThreads(items)
 
   const renderIdxs = (idxs: number[]): string[] =>
     idxs.flatMap((j) => itemBlocks(j))
@@ -216,13 +214,10 @@ function rideBlocks(
   }
 
   const toolBlocks = (it: ToolItem, childIdxs: number[]): string[] => {
-    // The same four sources of revealable detail the chip reads, in the same
-    // precedence: a nested trace or a diff stands in for the captured output.
-    const hasInput = !!it.inputFull || it.input.includes('\n')
-    const hasDiff = !!it.edits?.length
-    const hasChildren = childIdxs.length > 0
-    const hasResult = !hasDiff && !hasChildren && !!it.output
-    const hasDetail = hasInput || hasDiff || hasChildren || hasResult
+    const { hasDiff, hasChildren, hasResult, hasDetail } = toolDetail(
+      it,
+      childIdxs.length > 0,
+    )
     const open = hasDetail && openDetails.has(it.id)
     const status =
       it.status === 'blocked' || it.status === 'failed' ? ` _(${it.status})_` : ''
@@ -255,17 +250,11 @@ function rideBlocks(
     return out
   }
 
-  const collapse = planTurnCollapse(items, mainIdxs)
-  const settled = !!entry.ride.endedAt
-  const folds = settled && collapse.segments.some((seg) => seg.hidden)
-
-  const body: string[] = folds
-    ? collapse.segments.flatMap((seg, si) =>
-        !seg.hidden || expandedTurns.has(`${entry.ride.id}:${si}`)
-          ? renderIdxs(seg.indices)
-          : [`_${foldSummary(items, seg.indices)}_`],
-      )
-    : renderIdxs(mainIdxs)
+  const body = planTurnCollapse(items).segments.flatMap((seg, si) =>
+    !seg.hidden || expandedTurns.has(`${entry.ride.id}:${si}`)
+      ? renderIdxs(seg.indices)
+      : [`_${foldSummary(items, seg.indices)}_`],
+  )
 
   const files = items.flatMap((it) =>
     it.kind === 'message' ? (it.attachments ?? []) : [],
