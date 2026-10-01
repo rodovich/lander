@@ -118,8 +118,12 @@ export type MessageItem = ItemCommon & {
   // flow, which would make it look like the task's own output.
   role: 'user' | 'flow' | 'hook'
   text: string
-  // Which hook spoke, on a `hook` message.
-  from?: { hook: string; path: string; fireId: string }
+  // Who spoke, when it was not the task's human: the hook on a `hook` message,
+  // or the task that launched, messaged, or `--notify`-woke this one on a
+  // `user` message.
+  from?:
+    | { hook: string; path: string; fireId: string }
+    | { task: string; via: 'launch' | 'send' | 'notify' }
   attachments?: Attachment[]
   // Set on a user message once a queued batch delivers it: the ride that
   // consumed it. Absent on converted history.

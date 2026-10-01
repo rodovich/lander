@@ -1320,7 +1320,7 @@ async function deliverNotification(
       }
       delete t.scheduledFor
     }
-    applyDueMessages(t, [{ text }], at)
+    applyDueMessages(t, [{ text, from: { task: childId, via: 'notify' } }], at)
     t.status = 'riding'
     t.updatedAt = at
     drive = true
@@ -2609,7 +2609,12 @@ app.post('/api/:project/tasks', async (c) => {
       },
       new Date(Date.parse(now) - 1).toISOString(),
     )
-    pushUserItem(task, message, now, attachments ? { attachments } : {})
+    pushUserItem(task, message, now, {
+      ...(attachments ? { attachments } : {}),
+      ...(principal.kind === 'task'
+        ? { from: { task: principal.id, via: 'launch' as const } }
+        : {}),
+    })
 
     // A hook's launch is recorded against the TARGET before the new task is
     // written, carrying the id this route has already minted. Two writes, in
@@ -3684,10 +3689,11 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
     // client's task-mention linking render it as a status-tinted chip like any
     // other task reference. A task messaging itself, or the human via the UI, is
     // bare.
-    const message =
+    const from =
       principal.kind === 'task' && principal.id !== id
-        ? `From ${principal.id}:\n\n${rawMessage}`
-        : rawMessage
+        ? { task: principal.id, via: 'send' as const }
+        : undefined
+    const message = from ? `From ${from.task}:\n\n${rawMessage}` : rawMessage
 
     // What an action record echoes back on the sender: their own words, not the
     // backlink-prefixed copy above — the actor's timeline already knows who it is.
@@ -3721,6 +3727,7 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
           deliverAt,
           waitFor,
           ...(attachments ? { attachments } : {}),
+          ...(from ? { from } : {}),
         })
       })
       const actionAt = new Date().toISOString()
@@ -3792,7 +3799,10 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
         }
         delete t.scheduledFor
       }
-      pushUserItem(t, message, now, attachments ? { attachments } : {})
+      pushUserItem(t, message, now, {
+        ...(attachments ? { attachments } : {}),
+        ...(from ? { from } : {}),
+      })
       t.updatedAt = now
       // Queue the prompt for the session and go "riding". driveTask clears it to
       // "paced" once the queue drains.

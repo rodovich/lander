@@ -1260,6 +1260,9 @@ describe('the launch', () => {
     // has none of.
     expect(child.spawnedBy).toBe(first.id)
     expect(child.spawnedByProject).toBe(slug)
+    expect(
+      child.items.find((i: { role?: string }) => i.role === 'user').from,
+    ).toEqual({ task: first.id, via: 'launch' })
   })
 })
 
@@ -2293,8 +2296,47 @@ describe('acting task coordination history', () => {
     expect(row.text).not.toContain(`From ${actor.id}:`)
     const delivered = ((await rawTask(recipient.id)).items as Raw[]).at(-1) as {
       text: string
+      from?: unknown
     }
     expect(delivered.text.startsWith(`From ${actor.id}:`)).toBe(true)
+    expect(delivered.from).toEqual({ task: actor.id, via: 'send' })
+  })
+
+  it('names the sender on a deferred message once it delivers', async () => {
+    const actor = await createTask('Deferred sender')
+    const recipient = await createTask('Deferred recipient')
+    expect(
+      (
+        await asTask(
+          actor.id,
+          `/api/${slug}/tasks/${recipient.id}/messages`,
+          'POST',
+          { message: 'later', time: 60 },
+        )
+      ).status,
+    ).toBe(200)
+    expect((await rawTask(recipient.id)).scheduledMessages).toMatchObject([
+      { from: { task: actor.id, via: 'send' } },
+    ])
+  })
+
+  it('leaves the human’s and a task’s own messages unattributed', async () => {
+    const actor = await createTask('Self sender')
+    expect(
+      (
+        await asTask(actor.id, `/api/${slug}/tasks/${actor.id}/messages`, 'POST', {
+          message: 'note to self',
+        })
+      ).status,
+    ).toBe(200)
+    expect(
+      (await post(`/api/${slug}/tasks/${actor.id}/messages`, { message: 'from the human' }))
+        .status,
+    ).toBe(200)
+    const users = ((await rawTask(actor.id)).items as Raw[]).filter(
+      (i) => i.kind === 'message' && i.role === 'user',
+    )
+    expect(users.map((u) => u.from)).toEqual(users.map(() => undefined))
   })
 
   it('uses project-qualified identity and records no refused cross-project action', async () => {

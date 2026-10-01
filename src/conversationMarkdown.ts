@@ -157,7 +157,10 @@ export function conversationMarkdown({
   for (const entry of timeline) {
     if (entry.kind === 'user') {
       const m = entry.item
-      const role = m.role === 'hook' ? `hook ${m.from?.hook ?? ''}`.trim() : 'user'
+      const role =
+        m.role === 'hook'
+          ? `hook ${m.from && 'hook' in m.from ? m.from.hook : ''}`.trim()
+          : 'user'
       blocks.push(heading(role, m.at))
       if (m.text.trim()) blocks.push(m.text.trim())
       if (m.attachments?.length) blocks.push(attachmentLine(m.attachments))

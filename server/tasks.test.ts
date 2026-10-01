@@ -1300,6 +1300,12 @@ describe('applyDueMessages', () => {
     expect(t.queued).toEqual(['a', 'b'])
   })
 
+  it('carries a sending task onto the delivered item', () => {
+    const t = task()
+    applyDueMessages(t, [{ text: 'a', from: { task: 'tsk-s', via: 'send' } }, { text: 'b' }], AT2)
+    expect(userItems(t).map((u) => u.from)).toEqual([{ task: 'tsk-s', via: 'send' }, undefined])
+  })
+
   it('seals once and leads with the relaunch text when a relaunch is due', () => {
     const t = task()
     applyDueMessages(t, [{ text: 'ordinary' }, { text: 'fresh', relaunch: true }], AT2)

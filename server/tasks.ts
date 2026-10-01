@@ -495,6 +495,14 @@ type ItemCommon = {
   groupId?: string
 }
 
+export type HookSender = { hook: string; path: string; fireId: string }
+
+// A task that put a message in another task's conversation, and how: its
+// `lander launch` opening message, a `lander send`, or the `--notify` wake
+// carrying its closing message. Named by id alone, because neither a launch nor
+// a send may cross a project.
+export type TaskSender = { task: string; via: 'launch' | 'send' | 'notify' }
+
 export type MessageItem = ItemCommon & {
   kind: 'message'
   // `hook` is a task hook's nudge: a finding appended and driven as a turn. It is
@@ -505,10 +513,12 @@ export type MessageItem = ItemCommon & {
   // own assistant output.
   role: 'user' | 'flow' | 'hook'
   text: string
-  // Which hook spoke, on a `hook` message. Carried rather than left to be parsed
-  // out of the attributed text: `path` is a hook's identity, and a body asking
-  // "did I already nudge this span" must not have to regex a display prefix.
-  from?: { hook: string; path: string; fireId: string }
+  // Who spoke, when it was not the task's human: the hook on a `hook` message,
+  // or the task behind a `user` message another task put there. Carried rather
+  // than left to be parsed out of the attributed text: `path` is a hook's
+  // identity, and a body asking "did I already nudge this span" must not have
+  // to regex a display prefix.
+  from?: HookSender | TaskSender
   attachments?: Attachment[]
   // Set on a user message once a queued batch delivers it: the ride that consumed
   // it, making the batching visible. Absent on converted history.
@@ -656,7 +666,7 @@ export function pushUserItem(
   task: { items?: Item[] },
   text: string,
   at: string,
-  opts: { attachments?: Attachment[]; deliveredIn?: string } = {},
+  opts: { attachments?: Attachment[]; deliveredIn?: string; from?: TaskSender } = {},
 ): MessageItem {
   const item: MessageItem = {
     id: nextItemId(task, at),
@@ -664,6 +674,7 @@ export function pushUserItem(
     kind: 'message',
     role: 'user',
     text,
+    ...(opts.from ? { from: opts.from } : {}),
     ...(opts.attachments?.length ? { attachments: opts.attachments } : {}),
     ...(opts.deliveredIn ? { deliveredIn: opts.deliveredIn } : {}),
   }
@@ -745,7 +756,7 @@ export function pushTaskActionItem(
 export function pushHookMessageItem(
   task: { items?: Item[] },
   text: string,
-  from: NonNullable<MessageItem['from']>,
+  from: HookSender,
   at: string,
 ): MessageItem {
   const item: MessageItem = {
@@ -903,6 +914,9 @@ export type ScheduledMessage = {
   // carried until delivery when they land on the appended user message (like an
   // immediate send). Absent when the deferred message had none.
   attachments?: Attachment[]
+  // The task that sent it, stamped on the delivered message. Absent for the
+  // human's own sends and a task's relaunch of itself.
+  from?: TaskSender
 }
 
 // The driver flow a task runs under — the single reader every server read of a
@@ -1465,6 +1479,7 @@ export function applyDueMessages(
   for (const m of [...relaunch, ...rest]) {
     pushUserItem(task, m.text, at, {
       ...(m.attachments?.length ? { attachments: m.attachments } : {}),
+      ...(m.from ? { from: m.from } : {}),
     })
     ;(task.queued ??= []).push(m.text)
   }

@@ -192,6 +192,11 @@ describe('a notify delivery supersedes the launcher’s wakeup timer', () => {
     expect(await lastPrompt('notify-launcher')).toBe(
       'notify-child finished a turn:\n\non it',
     )
+    // From the child, not the launcher's human.
+    expect((raw.items as { from?: unknown }[]).at(-1)?.from).toEqual({
+      task: 'notify-child',
+      via: 'notify',
+    })
     // The fallback the launcher armed against the child never speaking is moot
     // now, and would otherwise fire in 2099 against a task that moved on.
     expect(raw.scheduledFor).toBeUndefined()

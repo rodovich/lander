@@ -245,7 +245,11 @@ export const Conversation = memo(function Conversation({
           return (
             <MessageBubble
               key={`u-${m.id}`}
-              role={isHook ? `hook ${m.from?.hook ?? ''}`.trim() : 'user'}
+              role={
+                isHook
+                  ? `hook ${m.from && 'hook' in m.from ? m.from.hook : ''}`.trim()
+                  : 'user'
+              }
               at={m.at}
               itemId={m.id}
               variant={
