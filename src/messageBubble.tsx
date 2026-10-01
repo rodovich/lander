@@ -13,7 +13,7 @@ export function MessageBubble({
   itemId,
   children,
 }: {
-  // How the speaker is named in the head: "user", "assistant", "hook cleanup".
+  // How the speaker is named in the head: "you", "agent", "hook cleanup".
   role: string
   at: string
   variant?: string

@@ -69,7 +69,7 @@ const md = (
   })
 
 describe('conversationMarkdown', () => {
-  it('writes the title, the user bubbles, and each turn as a heading', () => {
+  it('writes the title, your bubbles, and each turn as a heading', () => {
     const out = md(
       task(
         [user('m1', 'do the thing'), flow('m2', 'r1', 'did the thing')],
@@ -77,8 +77,8 @@ describe('conversationMarkdown', () => {
       ),
     )
     expect(out).toContain('# Fix the parser')
-    expect(out).toMatch(/## user · .*\n\ndo the thing/)
-    expect(out).toMatch(/## assistant · .*\n\ndid the thing/)
+    expect(out).toMatch(/## you · .*\n\ndo the thing/)
+    expect(out).toMatch(/## agent · .*\n\ndid the thing/)
   })
 
   it('gives a closed tool chip its one-line input and nothing more', () => {

@@ -259,7 +259,7 @@ export const Conversation = memo(function Conversation({
               role={
                 isHook
                   ? `hook ${m.from && 'hook' in m.from ? m.from.hook : ''}`.trim()
-                  : 'user'
+                  : 'you'
               }
               at={m.at}
               itemId={m.id}

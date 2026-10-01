@@ -83,7 +83,7 @@ export const RideTurn = memo(function RideTurn({
   return (
     <div className="message message-assistant">
       <div className="message-head">
-        <span className="message-role">assistant</span>
+        <span className="message-role">agent</span>
         <span className="message-time">{formatTimestamp(ride.startedAt)}</span>
       </div>
       <div className="steps">

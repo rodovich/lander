@@ -116,8 +116,10 @@ describe('Conversation timeline dispatch', () => {
       }),
     )
     expect(html).toContain('message-user')
+    expect(html).toContain('>you<')
     expect(html).toContain('user-question')
     expect(html).toContain('message-assistant')
+    expect(html).toContain('>agent<')
     expect(html).toContain('assistant-answer')
     // A lifecycle transition and a task action share one row component, so they
     // are told apart by what they say, not by a class of their own.
