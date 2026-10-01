@@ -487,6 +487,78 @@ body {
   background: var(--landed);
 }
 
+/* A secondary row nested under a list row (a task's search matches): one
+   ellipsized line, set off by a rail. Its left edge lines up with the row's
+   content above. */
+.list-subrow {
+  display: flex;
+  gap: 8px;
+  padding: 4px 10px 4px 16px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.list-subrow:hover {
+  background: var(--bg-tinted);
+  color: var(--fg);
+}
+
+.list-subrow:focus {
+  outline: none;
+}
+
+.list-subrow:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--muted);
+  color: var(--fg);
+}
+
+.list-subrow-rail {
+  flex-shrink: 0;
+  width: 2px;
+  align-self: stretch;
+  border-radius: 1px;
+  background: var(--border);
+}
+
+.list-subrow-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* An action in the subrow slot ("Show N more"): accent-colored, no rail. */
+.list-subrow.link {
+  font-size: 11px;
+  color: var(--riding);
+}
+
+/* Closes a run of subrows off from the row below it. */
+.list-subrow-end {
+  height: 6px;
+}
+
+/* Text matched by a search, wherever it shows: a translucent bubble around
+   the bold match. Horizontal padding only — a parent that clips its overflow
+   (an ellipsized line) would cut off any vertical. */
+.text-highlight {
+  background: color-mix(in srgb, var(--muted) 20%, transparent);
+  color: inherit;
+  font-weight: 600;
+  border-radius: 3px;
+  padding: 0 3px;
+}
+
+/* The same match painted over rendered text by the CSS Custom Highlight API
+   (see paintRanges), which takes colors only. The literal is --muted at 20%:
+   a highlight pseudo-element doesn't reliably resolve custom properties. */
+::highlight(text-highlight) {
+  background-color: rgba(17, 0, 0, 0.11);
+}
+
 .task-meta-row {
   display: flex;
   align-items: baseline;

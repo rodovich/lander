@@ -9,11 +9,18 @@ import { useTaskLink } from './taskLinkContext'
 // scroll/tab-focus state flip. The task-link resolver it reads is referentially
 // stable (see resolveTaskLink's useCallback), so an unchanged `text` skips all
 // of that work.
-export const MessageText = memo(function MessageText({ text }: { text: string }) {
+export const MessageText = memo(function MessageText({
+  text,
+  itemId,
+}: {
+  text: string
+  // The task item the text belongs to, so a search match can find it.
+  itemId?: string
+}) {
   const linkTask = useTaskLink()
   if (!text) return null
   return (
-    <div className="message-text-wrap">
+    <div className="message-text-wrap" data-item-id={itemId}>
       <div className="message-text">
         <Markdown text={text} linkTask={linkTask} />
       </div>

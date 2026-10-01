@@ -51,7 +51,10 @@ const task = (
 })
 
 const ids = (tasks: TaskWithProject[], query: string) =>
-  [...conversationMatches(tasks, query)].map((t) => t.id)
+  [...conversationMatches(tasks, query).keys()].map((t) => t.id)
+
+const matchesOf = (t: TaskWithProject, query: string) =>
+  conversationMatches([t], query).get(t)
 
 // A turn that folds: the opening, the longest sequence, and the last stay —
 // with the tools trailing the last — and the middle note and the tools around
@@ -118,5 +121,41 @@ describe('conversationMatches', () => {
     expect(
       ids([task('a', [flow('m1', 'draft, now final')], running)], 'final'),
     ).toEqual(['a'])
+  })
+})
+
+describe('conversation match listing', () => {
+  it('counts every match and lists them in order, by item and occurrence', () => {
+    const t = task('a', [
+      user('u1', 'fix it, then fix it again'),
+      ...folding(),
+      user('u2', 'one more fix'),
+    ])
+    const m = matchesOf(t, 'fix')!
+    expect(m.count).toBe(3)
+    expect(
+      m.list(10).map(({ itemId, occurrence }) => [itemId, occurrence]),
+    ).toEqual([
+      ['u1', 0],
+      ['u1', 1],
+      ['u2', 0],
+    ])
+    expect(m.list(2)).toHaveLength(2)
+  })
+
+  it('excerpts the original text on one line, from a word boundary', () => {
+    const lead = 'words '.repeat(10)
+    const t = task('a', [user('u1', `${lead}the\nPermissioning step`)])
+    const [match] = matchesOf(t, 'permission')!.list(1)
+    // Cut at a space, not mid-word, and the newline collapsed.
+    expect(match.snippet).toMatch(/^…words /)
+    expect(match.snippet).toContain('the Permissioning step')
+  })
+
+  it('starts the excerpt without an ellipsis when the match is near the start', () => {
+    const t = task('b', [user('u1', 'needs permission first')])
+    expect(matchesOf(t, 'permission')!.list(1)[0].snippet).toBe(
+      'needs permission first',
+    )
   })
 })

@@ -10,16 +10,22 @@ export function MessageBubble({
   role,
   at,
   variant,
+  itemId,
   children,
 }: {
   // How the speaker is named in the head: "user", "assistant", "hook cleanup".
   role: string
   at: string
   variant?: string
+  // The task item the bubble renders, so a search match can find it.
+  itemId?: string
   children: React.ReactNode
 }) {
   return (
-    <div className={'message' + (variant ? ` ${variant}` : '')}>
+    <div
+      className={'message' + (variant ? ` ${variant}` : '')}
+      data-item-id={itemId}
+    >
       <div className="message-head">
         <span className="message-role">{role}</span>
         <span className="message-time">{formatTimestamp(at)}</span>

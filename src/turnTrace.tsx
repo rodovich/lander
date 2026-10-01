@@ -102,7 +102,7 @@ export function TurnTrace({
       // A flow message item: its prose. The open ask renders as the whole
       // turn's footer, not inline with whatever prose happened to precede the
       // wedge.
-      return <MessageText key={it.id} text={it.text} />
+      return <MessageText key={it.id} text={it.text} itemId={it.id} />
     }
     return null
   }

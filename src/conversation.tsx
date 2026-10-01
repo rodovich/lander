@@ -10,9 +10,18 @@ import type { TaskAction } from './taskActions'
 import { TaskActionNote } from './taskActionNote'
 import { openRide, taskAgentModelName } from './taskMeta'
 import { taskKeyOf } from './taskRef'
+import { findTextRanges, paintRanges } from './textRanges'
 import { buildTimeline } from './timeline'
 import type { AskItem, TaskWithProject } from './types'
 import type { TimelineDisclosure } from './useTimelineDisclosure'
+
+// Where a search match lies in a task's conversation: the item, which of the
+// query's occurrences in it, and the query itself (lowercased).
+export type ConversationReveal = {
+  itemId: string
+  occurrence: number
+  query: string
+}
 
 // The open task's scrolling timeline of user bubbles, ride turns, asks, and
 // lifecycle events, pinned to the latest content while the reader is at the
@@ -23,6 +32,7 @@ import type { TimelineDisclosure } from './useTimelineDisclosure'
 export const Conversation = memo(function Conversation({
   task,
   disclosure,
+  reveal,
   answering,
   onAtBottomChange,
   allowTool,
@@ -31,6 +41,8 @@ export const Conversation = memo(function Conversation({
 }: {
   task: TaskWithProject
   disclosure: TimelineDisclosure
+  // A search match on this task to bring into view, if one was just opened.
+  reveal: ConversationReveal | null
   answering: boolean
   onAtBottomChange: (atBottom: boolean) => void
   allowTool: (rule: string, scope: 'task' | 'project') => Promise<boolean>
@@ -140,6 +152,30 @@ export const Conversation = memo(function Conversation({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [task.id, task.projectSlug, itemCount, streamSignal])
 
+  // Bring a search match into view: scroll its occurrence a third of the way
+  // down the pane and paint every occurrence in its item, until the reveal
+  // changes or the task does. Declared after the pin above so that, on the
+  // switch a match's click makes, it scrolls after the pin to the bottom. An
+  // occurrence the rendered text no longer holds (markdown can split or drop
+  // it) falls back to the nearest one, then to the item itself.
+  useEffect(() => {
+    const el = messagesRef.current
+    if (!el || !reveal) return
+    const target = el.querySelector(
+      `[data-item-id="${CSS.escape(reveal.itemId)}"]`,
+    )
+    if (!target) return
+    const ranges = findTextRanges(target, reveal.query)
+    const spot = ranges[Math.min(reveal.occurrence, ranges.length - 1)] ?? target
+    el.scrollTop +=
+      spot.getBoundingClientRect().top -
+      el.getBoundingClientRect().top -
+      el.clientHeight / 3
+    onMessagesScroll()
+    return paintRanges('text-highlight', ranges)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reveal])
+
   return (
     <div className="messages" ref={messagesRef} onScroll={onMessagesScroll}>
       {timeline.map((entry) => {
@@ -192,6 +228,7 @@ export const Conversation = memo(function Conversation({
               role={`hook ${h.hook}`}
               at={h.at}
               variant="message-platform"
+              itemId={h.id}
             >
               {h.text && <MessageText text={h.text} />}
               {h.error && <div className="hook-error">{h.error}</div>}
@@ -210,6 +247,7 @@ export const Conversation = memo(function Conversation({
               key={`u-${m.id}`}
               role={isHook ? `hook ${m.from?.hook ?? ''}`.trim() : 'user'}
               at={m.at}
+              itemId={m.id}
               variant={
                 `message-${isHook ? 'hook' : 'user'}` +
                 (m.queued ? ' message-queued' : '')

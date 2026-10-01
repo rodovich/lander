@@ -1,16 +1,24 @@
-import { memo, useEffect, useRef } from 'react'
+import { Fragment, memo, useEffect, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { DATE_CATEGORY_LABELS, TIME_FILTER_LABELS, VIEW_LABELS } from './format'
+import { HighlightedText } from './highlightedText'
+import { ListSubrow } from './listSubrow'
 import { FilterMenu, SectionActionsMenu } from './menus'
 import type { TaskAction } from './taskActions'
 import { tick } from './perf'
 import { taskKeyOf } from './taskRef'
 import { TaskRow } from './taskRow'
 import type { TaskListShape, TaskRow as ListRow } from './taskRows'
+import type { ConversationMatch } from './taskSearch'
 import type { TaskView, TaskWithProject, TimeFilter } from './types'
 
 const TASK_VIEWS: TaskView[] = ['inbox', 'unread', 'archived']
 const TIME_FILTERS: TimeFilter[] = ['today', 'week', 'older', 'any']
+
+// How many of a task's search matches show under it at first, and how many
+// more each "Show N more" adds.
+const MATCHES_SHOWN = 3
+const MATCHES_MORE = 20
 
 // A sticky header over a run of tasks: a status, or a date bucket within a
 // status split into dates. Faint rules bracket each contiguous run of task rows
@@ -99,6 +107,7 @@ export const TaskList = memo(function TaskList({
   onFocusChange,
   onTaskAction,
   onArchiveSection,
+  onOpenMatch,
 }: {
   shape: TaskListShape
   // Whether the unfiltered task list is empty (distinguishes "No tasks yet"
@@ -117,11 +126,13 @@ export const TaskList = memo(function TaskList({
   onFocusChange: (focused: boolean) => void
   onTaskAction: (task: TaskWithProject, action: TaskAction) => void
   onArchiveSection: (targets: TaskWithProject[]) => void
+  // Opens a task at one of its search matches.
+  onOpenMatch: (task: TaskWithProject, match: ConversationMatch) => void
 }) {
   // Opt-in profiling (see perf.ts): count re-renders of the list pane
   // separately from App's own churn.
   tick('TaskList.render')
-  const { orderedTasks, taskRows, statusCounts, todayStart } = shape
+  const { orderedTasks, taskRows, statusCounts, todayStart, query } = shape
 
   const searchInputRef = useRef<HTMLInputElement>(null)
 
@@ -140,9 +151,36 @@ export const TaskList = memo(function TaskList({
   }, [])
 
   // Roving-tabindex bookkeeping: the selected row is the one reachable with
-  // Tab, and arrow keys move DOM focus between rows.
-  const taskItemRefs = useRef<(HTMLLIElement | null)[]>([])
+  // Tab, and arrow keys move DOM focus through the stops — every task row and,
+  // while searching, the match rows under it — in list order. Stops are
+  // numbered during render.
+  const stopRefs = useRef<(HTMLLIElement | null)[]>([])
+  const stopCountRef = useRef(0)
+  // A stop to focus once the next render lands: where "Show N more" stood,
+  // which the first of the newly shown matches takes over.
+  const pendingFocusRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (pendingFocusRef.current == null) return
+    stopRefs.current[pendingFocusRef.current]?.focus()
+    pendingFocusRef.current = null
+  })
   const taskListRef = useRef<HTMLUListElement>(null)
+
+  // How many matches each task shows, by task key, for the query they were
+  // shown under — a new query starts every task back at the default.
+  const [matchLimits, setMatchLimits] = useState<{
+    query: string
+    byTask: Map<string, number>
+  }>({ query: '', byTask: new Map() })
+  const matchLimit = (key: string) =>
+    (matchLimits.query === query ? matchLimits.byTask.get(key) : undefined) ??
+    MATCHES_SHOWN
+  function showMoreMatches(key: string, stop: number) {
+    const byTask = new Map(matchLimits.query === query ? matchLimits.byTask : [])
+    byTask.set(key, matchLimit(key) + MATCHES_MORE)
+    setMatchLimits({ query, byTask })
+    pendingFocusRef.current = stop
+  }
   // A zero-height, non-sticky anchor sits just before each status header, keyed
   // by status, so the count chips can scroll its section to the top. We can't
   // measure the header itself: the headers all share top:0, so a header you've
@@ -161,40 +199,47 @@ export const TaskList = memo(function TaskList({
   const selectedIndex = orderedTasks.findIndex((t) => taskKeyOf(t) === selected)
   const rovingIndex = selectedIndex >= 0 ? selectedIndex : 0
 
-  function focusTaskAt(index: number) {
-    const clamped = Math.max(0, Math.min(orderedTasks.length - 1, index))
-    taskItemRefs.current[clamped]?.focus()
+  function focusStop(stop: number) {
+    const clamped = Math.max(0, Math.min(stopCountRef.current - 1, stop))
+    stopRefs.current[clamped]?.focus()
   }
 
-  function onTaskKeyDown(
+  function onStopKeyDown(
     e: React.KeyboardEvent<HTMLLIElement>,
-    index: number,
-    task: TaskWithProject,
+    stop: number,
+    activate: () => void,
   ) {
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault()
-        focusTaskAt(index + 1)
+        focusStop(stop + 1)
         break
       case 'ArrowUp':
         e.preventDefault()
-        focusTaskAt(index - 1)
+        focusStop(stop - 1)
         break
       case 'Home':
         e.preventDefault()
-        focusTaskAt(0)
+        focusStop(0)
         break
       case 'End':
         e.preventDefault()
-        focusTaskAt(orderedTasks.length - 1)
+        focusStop(stopCountRef.current - 1)
         break
       case 'Enter':
       case ' ':
         e.preventDefault()
-        onSelect(task.id, task.projectSlug)
+        activate()
         break
     }
   }
+
+  // Numbered as the rows render below; the effect reads the final count.
+  let stops = 0
+  useEffect(() => {
+    stopCountRef.current = stops
+    stopRefs.current.length = stops
+  })
 
   return (
     <>
@@ -285,21 +330,71 @@ export const TaskList = memo(function TaskList({
               />
             )
           }
-          const { task, index } = row
+          const { task, index, matches } = row
+          const select = () => onSelect(task.id, task.projectSlug)
+          const stop = stops++
+          // While searching, the task's conversation matches follow it as
+          // subrows: the first few, then a link to show more.
+          const shown = matches?.list(matchLimit(row.key)) ?? []
+          const more = matches
+            ? Math.min(matches.count - shown.length, MATCHES_MORE)
+            : 0
           return (
-            <TaskRow
-              key={row.key}
-              ref={(el) => {
-                taskItemRefs.current[index] = el
-              }}
-              task={task}
-              selected={taskKeyOf(task) === selected}
-              tabbable={index === rovingIndex}
-              todayStart={todayStart}
-              onSelect={() => onSelect(task.id, task.projectSlug)}
-              onKeyDown={(e) => onTaskKeyDown(e, index, task)}
-              onAction={(action) => onTaskAction(task, action)}
-            />
+            <Fragment key={row.key}>
+              <TaskRow
+                ref={(el) => {
+                  stopRefs.current[stop] = el
+                }}
+                task={task}
+                selected={taskKeyOf(task) === selected}
+                tabbable={index === rovingIndex}
+                todayStart={todayStart}
+                query={query}
+                onSelect={select}
+                onKeyDown={(e) => onStopKeyDown(e, stop, select)}
+                onAction={(action) => onTaskAction(task, action)}
+              />
+              {shown.map((match, mi) => {
+                const matchStop = stops++
+                const open = () => onOpenMatch(task, match)
+                return (
+                  <ListSubrow
+                    key={mi}
+                    ref={(el) => {
+                      stopRefs.current[matchStop] = el
+                    }}
+                    onClick={open}
+                    onKeyDown={(e) => onStopKeyDown(e, matchStop, open)}
+                  >
+                    <HighlightedText text={match.snippet} query={query} />
+                  </ListSubrow>
+                )
+              })}
+              {more > 0 &&
+                (() => {
+                  const moreStop = stops++
+                  const showMore = () => showMoreMatches(row.key, moreStop)
+                  return (
+                    <ListSubrow
+                      link
+                      ref={(el) => {
+                        stopRefs.current[moreStop] = el
+                      }}
+                      onClick={showMore}
+                      onKeyDown={(e) => onStopKeyDown(e, moreStop, showMore)}
+                    >
+                      Show {more} more
+                    </ListSubrow>
+                  )
+                })()}
+              {shown.length > 0 && (
+                <li
+                  className="list-subrow-end"
+                  role="presentation"
+                  aria-hidden="true"
+                />
+              )}
+            </Fragment>
           )
         })}
       </ul>

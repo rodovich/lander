@@ -2,6 +2,7 @@ import { dateCategory } from './format'
 import { isUnread } from './taskMeta'
 import { taskKeyOf } from './taskRef'
 import { conversationMatches } from './taskSearch'
+import type { ConversationMatches } from './taskSearch'
 import type {
   DateCategory,
   TaskView,
@@ -36,7 +37,14 @@ export type TaskRow =
       first: boolean
       tasks: TaskWithProject[]
     }
-  | { kind: 'task'; key: string; task: TaskWithProject; index: number }
+  | {
+      kind: 'task'
+      key: string
+      task: TaskWithProject
+      index: number
+      // Where the search query matched the task's conversation, if it did.
+      matches?: ConversationMatches
+    }
 
 // Everything the list rendering needs, derived in one pass from the raw task
 // list and the active filters. Pure — time enters only through `now`.
@@ -51,6 +59,8 @@ export type TaskListShape = {
   statusCounts: [string, number][]
   // Start of today in local-time ms, for formatting each row's time.
   todayStart: number
+  // The search query the tasks were matched against ('' when not searching).
+  query: string
 }
 
 // Group tasks by status — wedged (needs the user) first, then riding,
@@ -190,7 +200,13 @@ export function buildTaskRows(
     }
     statusRow.tasks.push(task)
     dateRow?.tasks.push(task)
-    taskRows.push({ kind: 'task', key: taskKeyOf(task), task, index })
+    taskRows.push({
+      kind: 'task',
+      key: taskKeyOf(task),
+      task,
+      index,
+      matches: conversationHits?.get(task),
+    })
   })
 
   const statusCounts = (() => {
@@ -203,5 +219,5 @@ export function buildTaskRows(
     ) as [string, number][]
   })()
 
-  return { orderedTasks, taskRows, statusCounts, todayStart }
+  return { orderedTasks, taskRows, statusCounts, todayStart, query }
 }

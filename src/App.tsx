@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Composer } from './composer'
-import { Conversation } from './conversation'
+import { Conversation, type ConversationReveal } from './conversation'
 import { conversationMarkdown } from './conversationMarkdown'
 import { DetailHeader } from './detailHeader'
 import { dataTransferHasFiles } from './fileDrop'
@@ -15,6 +15,7 @@ import { StatsPanel } from './statsPanel'
 import { TaskList } from './taskList'
 import { TaskLinkProvider } from './taskLinkContext'
 import { buildTaskRows } from './taskRows'
+import type { ConversationMatch } from './taskSearch'
 import { TelemetryPanel } from './telemetry'
 import { buildTimeline } from './timeline'
 import { useSeenMarker, useViewingState } from './useSeenMarker'
@@ -193,6 +194,30 @@ export function App() {
   })
   currentRef.current = current
 
+  // The search match last opened from the list, which the conversation brings
+  // into view while that task stays open and the query stands.
+  const [openedMatch, setOpenedMatch] = useState<{
+    key: string
+    reveal: ConversationReveal
+  } | null>(null)
+  const openMatch = useCallback(
+    (task: TaskWithProject, match: ConversationMatch) => {
+      setOpenedMatch({
+        key: taskKeyOf(task),
+        reveal: { itemId: match.itemId, occurrence: match.occurrence, query },
+      })
+      selectTask(task.id, task.projectSlug)
+    },
+    [query, selectTask],
+  )
+  const reveal =
+    openedMatch &&
+    current &&
+    openedMatch.key === taskKeyOf(current) &&
+    openedMatch.reveal.query === query
+      ? openedMatch.reveal
+      : null
+
   // Advance the open task's seen marker per the viewing rules (the 2s dwell,
   // immediate marking while actively viewing).
   useSeenMarker({ current, atBottom, tabActive, markSeen })
@@ -255,6 +280,7 @@ export function App() {
             onFocusChange={setListFocused}
             onTaskAction={runTaskAction}
             onArchiveSection={archiveSection}
+            onOpenMatch={openMatch}
           />
 
           <ResizeHandle
@@ -312,6 +338,7 @@ export function App() {
               <Conversation
                 task={current}
                 disclosure={disclosure}
+                reveal={reveal}
                 answering={answeringBy[taskKeyOf(current)] ?? false}
                 onAtBottomChange={setAtBottom}
                 allowTool={allowTool}

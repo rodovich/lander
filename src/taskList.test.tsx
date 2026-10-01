@@ -52,6 +52,7 @@ const render = (
       onFocusChange={() => {}}
       onTaskAction={() => {}}
       onArchiveSection={() => {}}
+      onOpenMatch={() => {}}
       {...over}
     />,
   )
@@ -130,6 +131,47 @@ describe('TaskList row badges', () => {
     ])
     expect(html).toContain('task-archived-tag')
     expect(html).toContain('unseen-dot')
+  })
+})
+
+describe('TaskList search matches', () => {
+  const said = (id: string, text: string) => ({
+    id,
+    at: at(0),
+    kind: 'message' as const,
+    role: 'user' as const,
+    text,
+  })
+
+  it('marks the query in the title and lists conversation matches under the row', () => {
+    const html = render(
+      [
+        task({ title: 'Permission audit' }),
+        task({ title: 'Other', items: [said('m1', 'needs permissioning first')] }),
+      ],
+      {},
+      'inbox',
+      'permission',
+    )
+    expect(html).toContain('<mark class="text-highlight">Permission</mark> audit')
+    expect(html).toContain('needs <mark class="text-highlight">permission</mark>ing first')
+    // Only the conversation match gets a subrow; the title match has none.
+    expect(html.split('class="list-subrow"').length - 1).toBe(1)
+    expect(html).toContain('list-subrow-end')
+  })
+
+  it('shows the first three matches, then a link to the rest', () => {
+    const items = Array.from({ length: 5 }, (_, i) => said(`m${i}`, `hit ${i}`))
+    const html = render([task({ items })], {}, 'inbox', 'hit')
+    expect(html.split('class="list-subrow"').length - 1).toBe(3)
+    expect(html).toContain('class="list-subrow link"')
+    expect(html).toContain('Show 2 more')
+  })
+
+  it('lists nothing under the rows when not searching', () => {
+    const html = render([task({ items: [said('m1', 'anything')] })])
+    expect(html).not.toContain('list-subrow')
+    expect(html).not.toContain('text-highlight')
   })
 })
 

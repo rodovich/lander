@@ -45,7 +45,7 @@ export function AskForm({
   )
 
   return (
-    <div className="ask">
+    <div className="ask" data-item-id={ask.id}>
       {ask.prompt && (
         <div className="ask-prompt">
           <Markdown text={ask.prompt} linkTask={linkTask} />

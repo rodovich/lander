@@ -1,5 +1,6 @@
 import { forwardRef } from 'react'
 import { formatTaskTime } from './format'
+import { HighlightedText } from './highlightedText'
 import { TaskActionsMenu } from './menus'
 import { availableTaskActions } from './taskActions'
 import type { TaskAction } from './taskActions'
@@ -61,12 +62,23 @@ export const TaskRow = forwardRef<
     tabbable: boolean
     // Midnight today, which decides whether the time reads as a clock or a date.
     todayStart: number
+    // The search query, marked wherever it appears in the title.
+    query: string
     onSelect: () => void
     onKeyDown: (e: React.KeyboardEvent<HTMLLIElement>) => void
     onAction: (action: TaskAction) => void
   }
 >(function TaskRow(
-  { task, selected, tabbable, todayStart, onSelect, onKeyDown, onAction },
+  {
+    task,
+    selected,
+    tabbable,
+    todayStart,
+    query,
+    onSelect,
+    onKeyDown,
+    onAction,
+  },
   ref,
 ) {
   const unseen = isUnread(task)
@@ -101,7 +113,9 @@ export const TaskRow = forwardRef<
               title="Unviewed updates"
             />
           )}
-          <div className="task-title">{task.title}</div>
+          <div className="task-title">
+            <HighlightedText text={task.title} query={query} />
+          </div>
         </div>
         {task.archived && (
           <div className="task-meta-row">

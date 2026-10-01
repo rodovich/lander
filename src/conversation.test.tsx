@@ -92,6 +92,7 @@ const render = (
         toggleDetail: () => {},
         toggleTurn: () => {},
       }}
+      reveal={null}
       answering={false}
       onAtBottomChange={() => {}}
       allowTool={async () => true}
