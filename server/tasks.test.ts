@@ -15,6 +15,7 @@ import {
   applyRelaunch,
   applyDueMessages,
   armScheduledRelaunch,
+  attributedPrompt,
   nextRepeatMessage,
   openRide,
   startRide,
@@ -607,6 +608,42 @@ describe('lastTurnPrompts', () => {
       ],
     }
     expect(lastTurnPrompts(t)).toEqual(['p1'])
+  })
+
+  // A retry re-sends a task's message as it was first delivered, sender named.
+  it('re-sends a message from another task with its sender named', () => {
+    const t = {
+      items: [
+        userItem('p1', later(1), { from: { task: 'tsk-s', via: 'send' } }),
+        flowItem('failed', 'r1', later(2)),
+      ],
+    }
+    expect(lastTurnPrompts(t)).toEqual(['From tsk-s:\n\np1'])
+  })
+})
+
+describe('attributedPrompt', () => {
+  it('names a sending task ahead of its words, by how it sent them', () => {
+    const from = (via: 'launch' | 'send' | 'notify') => ({ task: 'tsk-s', via })
+    expect(attributedPrompt({ text: 'go', from: from('launch') })).toBe('Launched by tsk-s:\n\ngo')
+    expect(attributedPrompt({ text: 'go', from: from('send') })).toBe('From tsk-s:\n\ngo')
+    expect(attributedPrompt({ text: 'done', from: from('notify') })).toBe(
+      'tsk-s finished a turn:\n\ndone',
+    )
+    // A child whose turn closed without a word still wakes its launcher.
+    expect(attributedPrompt({ text: '', from: from('notify') })).toBe('tsk-s finished a turn.')
+  })
+
+  // The human's words, and a hook's nudge, which carries its attribution in
+  // its text, go out as they are stored.
+  it('leaves an unattributed or hook message as it is', () => {
+    expect(attributedPrompt({ text: 'go' })).toBe('go')
+    expect(
+      attributedPrompt({
+        text: 'From hook s:\n\nhm',
+        from: { hook: 's', path: 'p', fireId: 'f' },
+      }),
+    ).toBe('From hook s:\n\nhm')
   })
 })
 
@@ -1304,6 +1341,9 @@ describe('applyDueMessages', () => {
     const t = task()
     applyDueMessages(t, [{ text: 'a', from: { task: 'tsk-s', via: 'send' } }, { text: 'b' }], AT2)
     expect(userItems(t).map((u) => u.from)).toEqual([{ task: 'tsk-s', via: 'send' }, undefined])
+    // Stored as the sender's words; queued for the agent with the sender named.
+    expect(userItems(t).map((u) => u.text)).toEqual(['a', 'b'])
+    expect(t.queued).toEqual(['From tsk-s:\n\na', 'b'])
   })
 
   it('seals once and leads with the relaunch text when a relaunch is due', () => {

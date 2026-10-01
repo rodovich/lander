@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { normalizeProjectPath, projectSlug } from './projects'
 import { observeWrites } from './store'
+import { attributedPrompt, type MessageItem } from './tasks'
 
 // What a resumed session is told about why it is awake. Driven through one real
 // sweep over a seeded data dir, because launchTask decides the wording from
@@ -74,13 +75,14 @@ async function writesDuring(
   }
 }
 
-// The prompt the wakeup pushed. Read off the items rather than `queued`: the
-// sweep fire-and-forgets the drive that drains the queue, so `queued` is a race
-// while the item it pushed is not.
+// The prompt the wakeup pushed, as the agent reads it. Read off the items rather
+// than `queued`: the sweep fire-and-forgets the drive that drains the queue, so
+// `queued` is a race while the item it pushed is not.
 async function lastPrompt(id: string): Promise<string> {
   const raw = await readRaw(id)
-  const items = (raw.items ?? []) as { role?: string; text?: string }[]
-  return items.filter((i) => i.role === 'user').at(-1)?.text ?? ''
+  const items = (raw.items ?? []) as MessageItem[]
+  const last = items.filter((i) => i.role === 'user').at(-1)
+  return last ? attributedPrompt(last) : ''
 }
 
 beforeAll(async () => {
@@ -192,10 +194,11 @@ describe('a notify delivery supersedes the launcher’s wakeup timer', () => {
     expect(await lastPrompt('notify-launcher')).toBe(
       'notify-child finished a turn:\n\non it',
     )
-    // From the child, not the launcher's human.
-    expect((raw.items as { from?: unknown }[]).at(-1)?.from).toEqual({
-      task: 'notify-child',
-      via: 'notify',
+    // From the child, not the launcher's human: the record holds the child's
+    // words alone, and the header above is composed for the agent.
+    expect((raw.items as { text?: string; from?: unknown }[]).at(-1)).toMatchObject({
+      text: 'on it',
+      from: { task: 'notify-child', via: 'notify' },
     })
     // The fallback the launcher armed against the child never speaking is moot
     // now, and would otherwise fire in 2099 against a task that moved on.

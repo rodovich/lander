@@ -503,6 +503,26 @@ export type HookSender = { hook: string; path: string; fireId: string }
 // a send may cross a project.
 export type TaskSender = { task: string; via: 'launch' | 'send' | 'notify' }
 
+// A prompt item as the agent receives it: a message from another task with its
+// sender named ahead of its words. Composed whenever the item is queued for a
+// turn — its first delivery, a retry, a replay after a restart — so the record
+// holds the words alone and `from` says who sent them. Plain text, so one
+// wording serves every provider; the queue is joined into one turn before any
+// flow sees it.
+export function attributedPrompt(m: {
+  text: string
+  from?: HookSender | TaskSender
+}): string {
+  if (!m.from || !('task' in m.from)) return m.text
+  const { task, via } = m.from
+  if (via === 'launch') return `Launched by ${task}:\n\n${m.text}`
+  if (via === 'send') return `From ${task}:\n\n${m.text}`
+  // A `--notify` wake says "finished a turn" rather than "is done": a clean
+  // turn-end is not a claim that the work is complete, and the launcher has to
+  // decide that for itself.
+  return m.text ? `${task} finished a turn:\n\n${m.text}` : `${task} finished a turn.`
+}
+
 export type MessageItem = ItemCommon & {
   kind: 'message'
   // `hook` is a task hook's nudge: a finding appended and driven as a turn. It is
@@ -914,8 +934,9 @@ export type ScheduledMessage = {
   // carried until delivery when they land on the appended user message (like an
   // immediate send). Absent when the deferred message had none.
   attachments?: Attachment[]
-  // The task that sent it, stamped on the delivered message. Absent for the
-  // human's own sends and a task's relaunch of itself.
+  // The task that sent it, stamped on the delivered message and named to the
+  // agent ahead of `text` (attributedPrompt). Absent for the human's own sends
+  // and a task's relaunch of itself.
   from?: TaskSender
 }
 
@@ -1481,7 +1502,7 @@ export function applyDueMessages(
       ...(m.attachments?.length ? { attachments: m.attachments } : {}),
       ...(m.from ? { from: m.from } : {}),
     })
-    ;(task.queued ??= []).push(m.text)
+    ;(task.queued ??= []).push(attributedPrompt(m))
   }
   // Re-arm the next occurrence of any repeating relaunch (`--interval`) that just
   // delivered, measured off this delivery — the deferred analog of applyRelaunch's
@@ -1613,7 +1634,7 @@ export function lastTurnPrompts(task: { items?: Item[] }): string[] {
   // generic "try again" — the right recovery for a turn nobody typed.
   while (i >= 0 && isPrompt(items[i])) {
     const it = items[i] as MessageItem
-    if (it.role === 'user') prompts.unshift(it.text)
+    if (it.role === 'user') prompts.unshift(attributedPrompt(it))
     i--
   }
   return prompts

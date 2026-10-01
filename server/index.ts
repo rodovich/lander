@@ -57,6 +57,7 @@ import {
   applyRelaunch,
   applyRetryRecovery,
   applyDueMessages,
+  attributedPrompt,
   resumePrompt,
   taskSessionId,
   setTaskSessionId,
@@ -252,8 +253,8 @@ type Task = {
   allowEdits: boolean
   // The id of the task that spawned this one (`lander launch`), or absent
   // for tasks a human started from the UI. Records provenance — the same
-  // relationship the opening message's "Launched by" backlink shows in prose —
-  // in a form the server can check: it gates `lander land <id>`, which lets a task
+  // relationship the opening message's `from` names — on the task, where the
+  // server can check it: it gates `lander land <id>`, which lets a task
   // wind down only the tasks it launched, not arbitrary ones. Absent on tasks
   // saved before this field existed (treated as "no known spawner").
   spawnedBy?: string
@@ -1283,14 +1284,9 @@ async function deliverNotification(
     closing.length > NOTIFY_TEXT_MAX_CHARS
       ? `${closing.slice(0, NOTIFY_TEXT_MAX_CHARS)}…`
       : closing
-  // Lead with the bare child id so the client's task-mention linking renders it
-  // as a status-tinted chip, the same convention a task→task message uses. The
-  // wording says "finished a turn" rather than "is done": a clean turn-end is
-  // not a claim that the work is complete, and the launcher has to decide that
-  // for itself.
+  // The child is the message's sender: the record holds its closing words alone,
+  // and the agent reads them under a "finished a turn" header (attributedPrompt).
   const text = clipped
-    ? `${childId} finished a turn:\n\n${clipped}`
-    : `${childId} finished a turn.`
 
   let drive = false
   let claimed = false
@@ -2491,19 +2487,19 @@ app.post('/api/:project/tasks', async (c) => {
       }
     }
 
-    // When a task spawns this one, lead the opening message with a reference back
-    // to the spawner so both the agent and a human reader can trace its origin.
-    // Emitting the bare spawner id (not a markdown link) lets the client's
-    // task-mention linking render it as a status-tinted chip like any other task
-    // reference. The title is generated from rawMessage so the backlink can't skew it.
+    // When a task spawns this one, the opening message records the spawner as its
+    // sender, and the agent reads it named ahead of the words (attributedPrompt).
     // A hook's backlink names the hook and the task it fired on, and is composed
     // from the credential rather than from anything the body sent, so a body
-    // cannot attribute its launch to a hook that is not itself.
+    // cannot attribute its launch to a hook that is not itself. The title is
+    // generated from rawMessage so the backlink can't skew it.
+    const from =
+      !cred && principal.kind === 'task'
+        ? { task: principal.id, via: 'launch' as const }
+        : undefined
     const message = cred
       ? `Launched by hook ${cred.name} on ${cred.target}:\n\n${rawMessage}`
-      : principal.kind === 'task'
-        ? `Launched by ${principal.id}:\n\n${rawMessage}`
-        : rawMessage
+      : rawMessage
 
     // Title is optional; when omitted, show a "…" placeholder and have haiku
     // name the task in the background so creation never blocks on it.
@@ -2585,7 +2581,7 @@ app.post('/api/:project/tasks', async (c) => {
       // The opening message rides the same queue as follow-ups; driveTask drains
       // it (immediately, or when the scheduler launches a deferred task). It stays
       // as a user item in the log above for display.
-      queued: message.trim() ? [message] : [],
+      queued: message.trim() ? [attributedPrompt({ text: message, from })] : [],
       // Both triggers persist when deferred; the scheduler fires on whichever
       // comes first. Omitted entirely on an immediate task.
       ...(deferred && scheduledFor ? { scheduledFor } : {}),
@@ -2611,9 +2607,7 @@ app.post('/api/:project/tasks', async (c) => {
     )
     pushUserItem(task, message, now, {
       ...(attachments ? { attachments } : {}),
-      ...(principal.kind === 'task'
-        ? { from: { task: principal.id, via: 'launch' as const } }
-        : {}),
+      ...(from ? { from } : {}),
     })
 
     // A hook's launch is recorded against the TARGET before the new task is
@@ -3683,20 +3677,18 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
         403,
       )
 
-    // When one task messages another, lead with a backlink to the sender, just
-    // like the spawn backlink, so the recipient (and a human reader) can trace
-    // who sent it. Emitting the bare sender id (not a markdown link) lets the
-    // client's task-mention linking render it as a status-tinted chip like any
-    // other task reference. A task messaging itself, or the human via the UI, is
-    // bare.
+    // When one task messages another, the message records its sender, so the
+    // recipient's agent reads it named ahead of the words (attributedPrompt) and
+    // a human reader sees who sent it. A task messaging itself, or the human via
+    // the UI, is unattributed.
     const from =
       principal.kind === 'task' && principal.id !== id
         ? { task: principal.id, via: 'send' as const }
         : undefined
-    const message = from ? `From ${from.task}:\n\n${rawMessage}` : rawMessage
+    const message = rawMessage
 
-    // What an action record echoes back on the sender: their own words, not the
-    // backlink-prefixed copy above — the actor's timeline already knows who it is.
+    // What an action record echoes back on the sender: their own words — the
+    // actor's timeline already knows who it is.
     const sentText = actionText(rawMessage)
 
     // A `--date`/`--time` and/or `--await` send defers delivery; absent all,
@@ -3806,7 +3798,7 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
       t.updatedAt = now
       // Queue the prompt for the session and go "riding". driveTask clears it to
       // "paced" once the queue drains.
-      t.queued = [...(t.queued ?? []), message]
+      t.queued = [...(t.queued ?? []), attributedPrompt({ text: message, from })]
       t.status = 'riding'
       // A fresh message is the user's new intent; drop any pending retry so its
       // button doesn't linger over the revived conversation.
@@ -4260,7 +4252,7 @@ export async function recoverQueues(): Promise<void> {
             // re-queueing the user message before it would re-run work the task
             // already did while dropping the nudge entirely.
             const opening = promptItems(t).at(-1)
-            if (opening) (t.queued ??= []).push(opening.text)
+            if (opening) (t.queued ??= []).push(attributedPrompt(opening))
           }
         }
       }).catch(() => {})

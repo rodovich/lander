@@ -1261,8 +1261,8 @@ describe('the launch', () => {
     expect(child.spawnedBy).toBe(first.id)
     expect(child.spawnedByProject).toBe(slug)
     expect(
-      child.items.find((i: { role?: string }) => i.role === 'user').from,
-    ).toEqual({ task: first.id, via: 'launch' })
+      child.items.find((i: { role?: string }) => i.role === 'user'),
+    ).toMatchObject({ text: 'help with this', from: { task: first.id, via: 'launch' } })
   })
 })
 
@@ -2290,16 +2290,32 @@ describe('acting task coordination history', () => {
     ).toBe(200)
 
     const [row] = await actions(actor.id)
-    // The recipient is told who sent it; the sender's own record is not, so the
-    // echo is the words they typed — trimmed, and clamped with an ellipsis.
+    // The echo is the words they typed — trimmed, and clamped with an ellipsis.
     expect(row.text).toBe('x'.repeat(MAX_ACTION_TEXT) + '\n…')
     expect(row.text).not.toContain(`From ${actor.id}:`)
+    // The recipient's record holds the same words, with the sender beside them
+    // rather than written into them.
     const delivered = ((await rawTask(recipient.id)).items as Raw[]).at(-1) as {
       text: string
       from?: unknown
     }
-    expect(delivered.text.startsWith(`From ${actor.id}:`)).toBe(true)
+    expect(delivered.text).toBe(`  ${long}  `)
     expect(delivered.from).toEqual({ task: actor.id, via: 'send' })
+  })
+
+  // What the agent reads is composed from the record: the sender named ahead of
+  // the words, on the queue a turn drains.
+  it('queues a task’s message for the agent with its sender named', async () => {
+    const actor = await createTask('Queued sender')
+    const recipient = await createTask('Queued recipient')
+    const { writes } = await writesDuring(recipient.id, () =>
+      asTask(actor.id, `/api/${slug}/tasks/${recipient.id}/messages`, 'POST', {
+        message: 'look at this',
+      }),
+    )
+    expect(writes).toContainEqual(
+      expect.objectContaining({ queued: [`From ${actor.id}:\n\nlook at this`] }),
+    )
   })
 
   it('names the sender on a deferred message once it delivers', async () => {
