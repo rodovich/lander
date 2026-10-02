@@ -155,10 +155,9 @@ describe('the prompt a fired wakeup drives', () => {
     expect((await readRaw('fallback-timer')).waitingFor).toBeUndefined()
   })
 
-  // A human pressing Launch fires no trigger at all, so the timestamp is the
-  // only claim left that is true: `at` is the actual moment, not the schedule
-  // the human jumped.
-  it('falls back to the moment for a launch that fired no trigger', async () => {
+  // A human pressing Launch fires no trigger at all: it is the human telling the
+  // task to proceed, so it reads as their message and claims no condition.
+  it('delivers the human’s Launch as their own “go ahead”', async () => {
     await seed('hand-launched', {
       scheduledFor: LATE,
       waitingFor: ['fallback-sibling'],
@@ -170,7 +169,9 @@ describe('the prompt a fired wakeup drives', () => {
     )
     expect(res.status).toBe(200)
 
-    expect(await lastPrompt('hand-launched')).toMatch(/^Resumed at /)
+    expect(await lastPrompt('hand-launched')).toBe('go ahead')
+    const items = (await readRaw('hand-launched')).items as MessageItem[]
+    expect(items.at(-1)!.from).toBeUndefined()
   })
 })
 

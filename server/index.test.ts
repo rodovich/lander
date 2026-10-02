@@ -3196,9 +3196,9 @@ describe('asks', () => {
     const raw = await readRaw(id)
     expect(asksOf(raw)[0].state).toBe('withdrawn')
     expect(raw.status).toBe('riding')
-    // The wakeup still drives its synthetic resume prompt — withdrawing the ask
-    // doesn't swallow the turn the launch exists to start.
-    expect(userMsgsOf(raw).at(-1)!.text).toMatch(/^Resumed at /)
+    // The launch still drives its prompt — withdrawing the ask doesn't swallow
+    // the turn the launch exists to start.
+    expect(userMsgsOf(raw).at(-1)!.text).toBe('go ahead')
   })
 
   // Withdrawal rides on the status crossing (recordStatusTransition, unit-tested

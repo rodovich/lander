@@ -1100,6 +1100,11 @@ async function driveClaimedTask(project: Project, id: string): Promise<void> {
   if (continueDriving) void driveClaimedTask(project, id)
 }
 
+type LaunchTrigger =
+  | { kind: 'time' }
+  | { kind: 'await'; landed: string[] }
+  | { kind: 'manual' }
+
 // Launch a deferred (scheduled) task now: clear its scheduledFor, record the
 // "launched" event, mark it riding, and drive its queued opening message.
 // Drives "start" if it never established a session, "resume" otherwise. A no-op
@@ -1110,15 +1115,15 @@ async function driveClaimedTask(project: Project, id: string): Promise<void> {
 // scheduler when the sweep reaches a due task, the human when they press Launch.
 // Parameterized rather than assumed `system` because both callers are real, and
 // the UI's button is the one a `wedged/human/` hook would care about.
-// `landed` names the awaited tasks whose landing fired this launch, for the
-// resume prompt's wording. Only the sweep's await arm passes it; a hand-launch
-// fired no trigger, so it has no condition to name.
+// `trigger` is what fired: the sweep's time or await arm (naming the awaited
+// tasks whose landing fired it), or the human's Launch button.
 async function launchTask(
   project: Project,
   id: string,
   by: string,
-  landed?: string[],
+  trigger: LaunchTrigger,
 ): Promise<boolean> {
+  const landed = trigger.kind === 'await' ? trigger.landed : undefined
   const file = path.join(project.dataDir, `${id}.json`)
   let go = false
   let everRan = false
@@ -1160,9 +1165,14 @@ async function launchTask(
     // A task that armed a wakeup with `lander ride` has already run its opening
     // turn, so nothing is queued to wake it — give the agent a prompt announcing it's
     // back. A task scheduled at creation (`new --date`) still has its opening
-    // message queued and drives that instead, so skip the synthetic prompt.
+    // message queued and drives that instead, so skip the synthetic prompt. The
+    // human's Launch button fired no trigger: it is the human telling the task
+    // to proceed, in their own voice.
     if (everRan && !(t.queued && t.queued.length)) {
-      const text = resumePrompt(at, fired ? landed : undefined)
+      const text =
+        trigger.kind === 'manual'
+          ? 'go ahead'
+          : resumePrompt(at, fired ? landed : undefined)
       pushUserItem(t, text, at)
       ;(t.queued ??= []).push(text)
     }
@@ -1463,7 +1473,9 @@ async function sweepOnce(): Promise<void> {
           project,
           id,
           'system',
-          awaitDue ? task.waitingFor : undefined,
+          awaitDue
+            ? { kind: 'await', landed: task.waitingFor! }
+            : { kind: 'time' },
         )
     }
   }
@@ -3011,7 +3023,9 @@ app.post('/api/:project/tasks/:id/launch', async (c) => {
     const id = c.req.param('id')
     if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
     const principal = await resolvePrincipal(c.req)
-    const launched = await launchTask(project, id, hookBy(principal, project.slug, id))
+    const launched = await launchTask(project, id, hookBy(principal, project.slug, id), {
+      kind: 'manual',
+    })
     if (!launched)
       return c.json({ error: 'task is not scheduled' }, 409)
     // Pressing Launch is human contact, so it resets the hook action bound.

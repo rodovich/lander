@@ -1584,9 +1584,7 @@ export function applyDueMessages(
 // work out for itself: it remembers only its own last act.
 //
 // Only the time arm carries a timestamp — for the others the moment is not the
-// condition that was met. That leaves it as the wording for a launch which
-// fired no trigger at all (the UI's Launch button, ahead of the schedule),
-// where `at` is the actual moment rather than the schedule the human jumped.
+// condition that was met.
 //
 // Awaited tasks go in as bare ids: the client renders each as a chip carrying
 // the task's title as it stands when the conversation is read, so naming them
