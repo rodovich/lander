@@ -121,12 +121,10 @@ describe('TaskList row badges', () => {
   it('marks archived and unread rows', () => {
     const html = render([
       task({ archived: true }),
-      // seenAt behind the latest user message → unread dot.
+      // readThrough behind the latest event → unread dot.
       task({
-        seenAt: at(1),
-        items: [
-          { id: 'm1', at: at(0), kind: 'message', role: 'user', text: 'hi' },
-        ],
+        readThrough: at(1),
+        items: [{ id: 'e1', at: at(0), kind: 'event', eventKind: 'wedged' }],
       }),
     ])
     expect(html).toContain('task-archived-tag')

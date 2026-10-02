@@ -1795,11 +1795,11 @@ describe('server task provider behavior', () => {
       // seeing whether it was ever recorded. Stripped from the summary
       // projection below, which exists to be small.
       'pendingHooks',
+      'readThrough',
       'reportsCost',
       'revived',
       'rides',
       'scheduledMessages',
-      'seenAt',
       'shape',
       'status',
       'title',
@@ -4237,4 +4237,24 @@ describe('flow dispatch gate', () => {
     ws.close()
     await waitFor(() => !daemonConnected())
   }, 20_000)
+})
+
+describe('POST /api/:project/tasks/:id/seen and /unread', () => {
+  it('advances readThrough monotonically, and sets it back on unread', async () => {
+    const { id } = await createTask('read marker')
+    expect(typeof (await readTaskField(id, 'readThrough'))).toBe('string')
+
+    const later = '2099-01-01T00:00:00.000Z'
+    await post(`/api/${slug}/tasks/${id}/seen`, { at: later })
+    expect(await readTaskField(id, 'readThrough')).toBe(later)
+    // A stale mark never moves it back.
+    await post(`/api/${slug}/tasks/${id}/seen`, { at: AT })
+    expect(await readTaskField(id, 'readThrough')).toBe(later)
+
+    // Unread sets it to the client's pick, or to nothing without one.
+    await post(`/api/${slug}/tasks/${id}/unread`, { at: AT })
+    expect(await readTaskField(id, 'readThrough')).toBe(AT)
+    await post(`/api/${slug}/tasks/${id}/unread`, {})
+    expect(await readTaskField(id, 'readThrough')).toBe('')
+  })
 })

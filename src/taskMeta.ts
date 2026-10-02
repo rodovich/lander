@@ -12,55 +12,6 @@ export function openRide(task: { rides?: Ride[] }): Ride | undefined {
   return undefined
 }
 
-// The timestamp of a task's most recent *completed* update, drives the unseen
-// dot. Byte-for-byte the value the pre-item-log helper produced (so a `seenAt`
-// stored before this migration stays valid and read tasks don't re-surface as
-// unread): the newest of the user messages, the *settled* rides' start times
-// (the old per-turn assistant message carried the turn's start as its
-// `createdAt`, and only that — never its streamed steps), and the lifecycle
-// events. The in-flight ride (its items and its own start) is skipped, so
-// per-chunk churn doesn't count until the turn lands. ISO timestamps compare
-// lexicographically, so the string max is a chronological max; empty string for
-// a task with nothing complete yet.
-export function latestUpdateAt(task: Task): string {
-  const open = openRide(task)
-  let latest = ''
-  for (const it of task.items ?? []) {
-    // User messages and lifecycle events stamp their own moment; a settled
-    // ride's flow/tool items don't (the turn's timestamp is its ride start).
-    if (it.kind === 'message' && it.role === 'user') {
-      if (it.at > latest) latest = it.at
-    } else if (it.kind === 'event') {
-      if (it.at > latest) latest = it.at
-    } else if (it.kind === 'message' && it.role === 'hook') {
-      // A hook's nudge is new activity on the task, so it lights the unseen dot
-      // like any other arriving message.
-      if (it.at > latest) latest = it.at
-    } else if (it.kind === 'hook') {
-      // A hook run's report — a finding, or an account of why one could not run.
-      // Counted here so a bound refusal is visible rather than silent; the
-      // stored record deliberately does not bump `updatedAt` for it, so this is
-      // the only thing that surfaces it.
-      if (it.at > latest) latest = it.at
-    }
-  }
-  for (const r of task.rides ?? []) {
-    // Skip the open ride (the in-flight turn); a settled turn contributes its
-    // start time, matching the old assistant message's `createdAt`.
-    if (open && r.id === open.id) continue
-    if (r.startedAt > latest) latest = r.startedAt
-  }
-  return latest
-}
-
-// Whether a task has unviewed updates: it carries a seen marker (set on
-// creation or backfilled) and its latest completed update is newer than it.
-// Drives the unseen dot, the kebab's "Mark unread" item, and the "Unread"
-// filter view. A task with no marker yet reads as caught up.
-export function isUnread(task: Task): boolean {
-  return task.seenAt != null && latestUpdateAt(task) > task.seenAt
-}
-
 // Takes a flow NAME, not a closed agent union: agentDisplayName falls back to
 // the trimmed raw string, so an `open-pr` task renders "open-pr".
 export function taskAgentModelName(agent: string | undefined, model?: string): string {

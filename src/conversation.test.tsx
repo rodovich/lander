@@ -94,7 +94,7 @@ const render = (
       }}
       reveal={null}
       answering={false}
-      onAtBottomChange={() => {}}
+      onReadUpTo={() => {}}
       allowTool={async () => true}
       answerAsk={async () => {}}
       onTaskAction={() => {}}

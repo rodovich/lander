@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { uiHeaders } from './api'
-import { latestUpdateAt } from './taskMeta'
+import { unreadMarker } from './readMarker'
 import { taskKeyOf } from './taskRef'
 import type { TaskAction } from './taskActions'
 import type { TaskMutationHandle, TaskPatch } from './taskMutationFence'
@@ -17,7 +17,7 @@ export function useTaskActions(opts: {
   // derived, read only from event handlers and effects).
   currentRef: { current: TaskWithProject | null }
   // Latest tasks readable from timer callbacks that outlive the render that
-  // scheduled them (the seen-marker dwell timer marks a task seen 2s later).
+  // scheduled them (the read-marker dwell timer marks a task read 3s later).
   tasksRef: { current: TaskWithProject[] }
   refresh: () => Promise<void>
   beginTaskMutation: (
@@ -99,35 +99,39 @@ export function useTaskActions(opts: {
     [setError, beginTaskMutation, finishTaskMutation],
   )
 
-  // Mark a task caught-up: advance its server-side `seenAt` to its latest
-  // completed update, which clears its unseen dot. Written through the fence so
-  // the dot clears at once and a poll issued before the mark can't bring it
-  // back. The server stores the marker monotonically, so a stale/older value
-  // never moves it back. Reads tasksRef so a delayed (dwell-timer) call sees the
-  // freshest data.
+  // Advance a task's server-side read marker to `at`, the conversation read up
+  // through it. Written through the fence so the dot clears at once and a poll
+  // issued before the mark can't bring it back. The server stores the marker
+  // monotonically, so a stale/older value never moves it back. Reads tasksRef
+  // so a delayed (dwell-timer) call sees the freshest data.
   const markSeen = useCallback(
-    async (key: string) => {
+    async (key: string, at: string) => {
       const task = tasksRef.current.find((t) => taskKeyOf(t) === key)
       if (!task) return
-      const at = latestUpdateAt(task)
-      if (!at || (task.seenAt && task.seenAt >= at)) return
+      if (!at || (task.readThrough && task.readThrough >= at)) return
       await writeTask(
         task,
-        { seenAt: at },
+        { readThrough: at },
         { action: 'seen', body: { at }, quiet: true },
       )
     },
     [tasksRef, writeTask],
   )
 
-  // Mark a task unread: reset its server-side `seenAt` so the task's latest
-  // update reads as unviewed again, re-showing its dot at once. The next time
-  // the viewer reads the task, markSeen advances the marker forward again.
+  // Mark a task unread: set its read marker back to the human's last message
+  // (see unreadMarker), re-showing its dot at once. The next time the viewer
+  // reads the task, markSeen advances the marker forward again.
   const markUnread = useCallback(
     async (key: string) => {
       const task = tasksRef.current.find((t) => taskKeyOf(t) === key)
       if (!task) return
-      await writeTask(task, { seenAt: '' }, { action: 'unread', quiet: true })
+      const at = unreadMarker(task)
+      if (at === null) return
+      await writeTask(
+        task,
+        { readThrough: at },
+        { action: 'unread', body: { at }, quiet: true },
+      )
     },
     [tasksRef, writeTask],
   )

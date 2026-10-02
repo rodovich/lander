@@ -184,16 +184,14 @@ describe('buildTaskRows', () => {
 
   it('unread view keeps unread tasks and sticky-held read ones', () => {
     const tasks = [
-      // seenAt behind the latest user message → unread.
+      // readThrough behind the latest event → unread.
       task({
         id: 'unread',
-        seenAt: at(1),
-        items: [
-          { id: 'm1', at: at(0), kind: 'message', role: 'user', text: 'hi' },
-        ],
+        readThrough: at(1),
+        items: [{ id: 'e1', at: at(0), kind: 'event', eventKind: 'wedged' }],
       }),
-      task({ id: 'read', seenAt: at(0) }),
-      task({ id: 'held', seenAt: at(0) }),
+      task({ id: 'read', readThrough: at(0) }),
+      task({ id: 'held', readThrough: at(0) }),
     ]
     expect(
       build(tasks, { view: 'unread', stickyUnread: new Set(['proj/held']) })

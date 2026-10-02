@@ -1172,27 +1172,54 @@ export function taskSummary<T extends object>(task: T, opts?: { caps?: FlowCaps 
   }
 }
 
-// The timestamp of a task's most recent *completed* update: the newest of its
-// finished messages (the in-flight, still-streaming one is skipped) and its
-// lifecycle events. Mirrors the client's helper of the same name; used to seed
-// `seenAt` for tasks that predate the field. ISO timestamps compare
-// lexicographically, so the string max is a chronological max. Empty string
-// when nothing has completed yet (e.g. only an in-flight message exists).
-export function latestUpdateAt(task: {
-  items?: Item[]
-  rides?: Ride[]
-}): string {
-  // Items belonging to the still-open ride are the in-flight turn — skip them, the
-  // v2 analog of skipping the pending message. A ride's completion timestamp is its
-  // endedAt (there's no single "message" carrying it now).
+// The one-time move from `seenAt`, a "caught up to the latest update" boolean
+// in timestamp's clothing, to `readThrough`, the point in the conversation the
+// viewer has read up to (the client's readMarker.ts owns what it means). A task
+// that read as caught up stays so: it's read through now, which covers every
+// entry it has. One that read as unread is read through the human's last
+// message, so what the task did after it is what reads as new. Idempotent: a
+// task already carrying `readThrough` only sheds a stray `seenAt`.
+export function migrateSeenAt(
+  task: { items?: Item[]; rides?: Ride[]; seenAt?: string; readThrough?: string },
+  now: string,
+): void {
+  if (task.readThrough === undefined) {
+    const seen = task.seenAt
+    if (seen != null && legacyLatestUpdateAt(task) > seen) {
+      let lastOwn = ''
+      for (const it of task.items ?? [])
+        if (it.kind === 'message' && it.role === 'user' && !it.from && it.at > lastOwn)
+          lastOwn = it.at
+      task.readThrough = lastOwn
+    } else {
+      task.readThrough = now
+    }
+  }
+  delete task.seenAt
+}
+
+export function needsSeenAtMigration(task: { seenAt?: string; readThrough?: string }): boolean {
+  return task.readThrough === undefined || 'seenAt' in task
+}
+
+// The update `seenAt` was compared against, exactly as the client computed it
+// before `readThrough` replaced it — kept only so the migration reads each
+// task's unread state as the UI last showed it: the newest of the user and hook
+// messages, lifecycle events and hook reports, and the settled rides' *start*
+// times. The open ride counts for nothing.
+function legacyLatestUpdateAt(task: { items?: Item[]; rides?: Ride[] }): string {
   const open = openRide(task)
   let latest = ''
   for (const it of task.items ?? []) {
-    if (open && it.rideId === open.id) continue
-    if (it.at > latest) latest = it.at
+    const counts =
+      (it.kind === 'message' && (it.role === 'user' || it.role === 'hook')) ||
+      it.kind === 'event' ||
+      it.kind === 'hook'
+    if (counts && it.at > latest) latest = it.at
   }
   for (const r of task.rides ?? []) {
-    if (r.endedAt && r.endedAt > latest) latest = r.endedAt
+    if (open && r.id === open.id) continue
+    if (r.startedAt > latest) latest = r.startedAt
   }
   return latest
 }

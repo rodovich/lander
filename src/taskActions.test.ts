@@ -54,9 +54,9 @@ describe('availableTaskActions', () => {
   })
 
   it('withholds Mark unread from a task already showing unviewed updates', () => {
-    const unread = { seenAt: AT, items: [{ id: 'm1', at: LATER, kind: 'message', role: 'user', text: 'hi' }] } as Partial<TaskWithProject>
-    expect(actions(unread)).not.toContain('markUnread')
-    expect(actions({ seenAt: LATER })).toContain('markUnread')
+    const items = [{ id: 'e1', at: LATER, kind: 'event', eventKind: 'wedged' }] as TaskWithProject['items']
+    expect(actions({ readThrough: AT, items })).not.toContain('markUnread')
+    expect(actions({ readThrough: LATER, items })).toContain('markUnread')
   })
 
   it('collapses an archived task to a single Restore', () => {

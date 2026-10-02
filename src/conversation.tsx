@@ -5,6 +5,7 @@ import { LifecycleNote } from './lifecycleNote'
 import { MessageBubble } from './messageBubble'
 import { MessageText } from './messageText'
 import { tick, timed } from './perf'
+import { entryReadStamp, readThroughOf } from './readMarker'
 import { PendingRow, RideTurn } from './rideTurn'
 import type { TaskAction } from './taskActions'
 import { SentMessageNote } from './sentMessageNote'
@@ -12,9 +13,33 @@ import { TaskActionNote } from './taskActionNote'
 import { openRide, taskAgentModelName } from './taskMeta'
 import { taskKeyOf } from './taskRef'
 import { findTextRanges, paintRanges } from './textRanges'
-import { buildTimeline } from './timeline'
+import { buildTimeline, type TimelineEntry } from './timeline'
 import type { AskItem, TaskWithProject } from './types'
+import type { ReadUpTo } from './useReadMarker'
 import type { TimelineDisclosure } from './useTimelineDisclosure'
+
+// A timeline entry's React key, stable across polls.
+function entryKey(entry: TimelineEntry): string {
+  switch (entry.kind) {
+    case 'event':
+      return `e-${entry.event.id}`
+    case 'task-action':
+      return `ta-${entry.action.id}`
+    case 'ask':
+      return `a-${entry.ask.id}`
+    case 'hook':
+      return `h-${entry.hook.id}`
+    case 'user':
+      return `u-${entry.item.id}`
+    case 'ride':
+      return `r-${entry.ride.id}`
+  }
+}
+
+// Whether the pane is scrolled to (within a few pixels of) its bottom.
+function isAtBottom(el: HTMLElement): boolean {
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 32
+}
 
 // Where a search match lies in a task's conversation: the item, which of the
 // query's occurrences in it, and the query itself (lowercased).
@@ -35,7 +60,7 @@ export const Conversation = memo(function Conversation({
   disclosure,
   reveal,
   answering,
-  onAtBottomChange,
+  onReadUpTo,
   allowTool,
   answerAsk,
   onTaskAction,
@@ -45,7 +70,8 @@ export const Conversation = memo(function Conversation({
   // A search match on this task to bring into view, if one was just opened.
   reveal: ConversationReveal | null
   answering: boolean
-  onAtBottomChange: (atBottom: boolean) => void
+  // How far the conversation is read, each time that moves (see measureRead).
+  onReadUpTo: (readUpTo: ReadUpTo) => void
   allowTool: (rule: string, scope: 'task' | 'project') => Promise<boolean>
   answerAsk: (
     askId: string,
@@ -96,24 +122,56 @@ export const Conversation = memo(function Conversation({
   const openRideHasItems =
     !!openR && (task.items?.some((it) => it.rideId === openR.id) ?? false)
 
-  // Keep the conversation pinned to the latest content. We always jump to the
-  // bottom when switching tasks, but when new content streams in we only follow
-  // along if the reader was already at the bottom — otherwise scrolling up to
-  // read earlier messages would be yanked back down on every poll.
+  // Each timeline entry's read stamp (see readMarker.ts), in timeline order.
+  const stamps = useMemo(
+    () => timeline.map((e) => entryReadStamp(e, openR?.id)),
+    [timeline, openR?.id],
+  )
+
+  // Keep the conversation pinned to the latest content. On switching tasks we
+  // open at the first unread entry (or the bottom, when there's none), but when
+  // new content streams in we only follow along if the reader was already at
+  // the bottom — otherwise scrolling up to read earlier messages would be
+  // yanked back down on every poll.
   const messagesRef = useRef<HTMLDivElement>(null)
   const atBottomRef = useRef(true)
   const prevTaskIdRef = useRef<string | null>(null)
 
+  // Measure how far the conversation is read and report it when it moves: the
+  // marker reading every entry whose bottom edge is on screen or scrolled past
+  // it. Entries stack in order, so those form a prefix, found by bisecting
+  // their wrappers (the pane's first `timeline.length` children).
+  const lastReadRef = useRef<ReadUpTo | null>(null)
+  function measureRead() {
+    const el = messagesRef.current
+    if (!el) return
+    const limit = el.getBoundingClientRect().bottom + 1
+    let lo = 0
+    let hi = Math.min(stamps.length, el.children.length)
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (el.children[mid].getBoundingClientRect().bottom <= limit) lo = mid + 1
+      else hi = mid
+    }
+    const next = { key: taskKeyOf(task), at: readThroughOf(stamps, lo) }
+    const last = lastReadRef.current
+    if (last && last.key === next.key && last.at === next.at) return
+    lastReadRef.current = next
+    onReadUpTo(next)
+  }
+  const measureReadRef = useRef(measureRead)
+  measureReadRef.current = measureRead
+
   function onMessagesScroll() {
-    // Fires on every scroll frame; the at-bottom flip re-renders App, though
-    // the memoized panes hold still unless their props changed. Counted so the
-    // profile shows scroll-driven churn separately from poll/stream churn.
+    // Fires on every scroll frame; a change in what's read re-renders App,
+    // though the memoized panes hold still unless their props changed. Counted
+    // so the profile shows scroll-driven churn separately from poll/stream
+    // churn.
     tick('scroll.event')
     const el = messagesRef.current
     if (!el) return
-    const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < 32
-    atBottomRef.current = bottom
-    onAtBottomChange(bottom)
+    atBottomRef.current = isAtBottom(el)
+    measureRead()
   }
 
   // Changes whenever the task's in-flight ride grows — a new item, or the
@@ -143,20 +201,40 @@ export const Conversation = memo(function Conversation({
     const key = taskKeyOf(task)
     const switched = prevTaskIdRef.current !== key
     prevTaskIdRef.current = key
-    if (switched) atBottomRef.current = true
-    if (switched || atBottomRef.current) {
+    const marker = task.readThrough
+    const unread =
+      switched && marker != null
+        ? stamps.findIndex((s) => s !== null && s > marker)
+        : -1
+    const target = unread >= 0 ? el.children[unread] : undefined
+    if (target) {
+      // Open at the top of the first unread entry.
+      el.scrollTop +=
+        target.getBoundingClientRect().top - el.getBoundingClientRect().top
+      atBottomRef.current = isAtBottom(el)
+    } else if (switched || atBottomRef.current) {
       el.scrollTop = el.scrollHeight
-      // Pinning leaves us at the bottom; mirror that into the state the
-      // active-viewing logic reads (a no-op when already true).
-      onAtBottomChange(true)
+      atBottomRef.current = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [task.id, task.projectSlug, itemCount, streamSignal])
 
+  // Re-measure what's read whenever the entries change (the pin above may have
+  // moved them, or something new landed on screen) or the pane resizes.
+  // Declared after the pin so it measures where the pin left the pane.
+  useEffect(() => measureReadRef.current(), [stamps])
+  useEffect(() => {
+    const el = messagesRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => measureReadRef.current())
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
   // Bring a search match into view: scroll its occurrence a third of the way
   // down the pane and paint every occurrence in its item, until the reveal
   // changes or the task does. Declared after the pin above so that, on the
-  // switch a match's click makes, it scrolls after the pin to the bottom. An
+  // switch a match's click makes, it scrolls after the pin's own scroll. An
   // occurrence the rendered text no longer holds (markdown can split or drop
   // it) falls back to the nearest one, then to the item itself.
   useEffect(() => {
@@ -177,126 +255,121 @@ export const Conversation = memo(function Conversation({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reveal])
 
-  return (
-    <div className="messages" ref={messagesRef} onScroll={onMessagesScroll}>
-      {timeline.map((entry) => {
-        if (entry.kind === 'event') {
-          return (
-            <LifecycleNote
-              key={`e-${entry.event.id}`}
-              event={entry.event}
-              slug={task.projectSlug}
-            />
-          )
-        }
-        if (entry.kind === 'task-action') {
-          // An action with no turn to sit in — the task had no ride open when
-          // it acted, or that ride streamed nothing. Everything else reaches
-          // the reader inside its RideTurn.
-          return (
-            <TaskActionNote key={`ta-${entry.action.id}`} item={entry.action} />
-          )
-        }
-        if (entry.kind === 'ask') {
-          // A platform ask, standing where it was raised: its prompt is
-          // the account of what happened, and AskForm drops the buttons
-          // once it's no longer open.
-          return (
-            <MessageBubble
-              key={`a-${entry.ask.id}`}
-              role="lander"
-              at={entry.ask.at}
-              variant="message-platform"
-            >
-              <AskForm
-                ask={entry.ask}
-                disabled={answering}
-                onAnswer={(body) => void answerAsk(entry.ask.id, body)}
-              />
-            </MessageBubble>
-          )
-        }
-        if (entry.kind === 'hook') {
-          // A hook's report, in the platform's voice like a standalone ask:
-          // the run had no task and no ride of its own, so this is its only
-          // account of itself. The hook is named because a project may
-          // declare several, and the outcome because "found nothing" and
-          // "could not run" are different answers.
-          const h = entry.hook
-          return (
-            <MessageBubble
-              key={`h-${h.id}`}
-              role={`hook ${h.hook}`}
-              at={h.at}
-              variant="message-platform"
-              itemId={h.id}
-            >
-              {h.text && <MessageText text={h.text} />}
-              {h.error && <div className="hook-error">{h.error}</div>}
-              {h.output && <pre className="hook-output">{h.output}</pre>}
-            </MessageBubble>
-          )
-        }
-        if (entry.kind === 'user') {
-          const m = entry.item
-          if (m.from && 'task' in m.from)
-            return (
-              <SentMessageNote
-                key={`u-${m.id}`}
-                item={m}
-                sender={m.from.task}
-                slug={task.projectSlug}
-                openOn={reveal?.itemId === m.id ? reveal : undefined}
-              />
-            )
-          // A hook's nudge sits in the same slot as a typed message — it was
-          // queued and drove a turn the same way — but it is not the user
-          // speaking, so it gets its own voice rather than the user's tint.
-          const isHook = m.role === 'hook'
-          return (
-            <MessageBubble
-              key={`u-${m.id}`}
-              role={
-                isHook
-                  ? `hook ${m.from && 'hook' in m.from ? m.from.hook : ''}`.trim()
-                  : 'you'
-              }
-              at={m.at}
-              itemId={m.id}
-              variant={
-                `message-${isHook ? 'hook' : 'user'}` +
-                (m.queued ? ' message-queued' : '')
-              }
-            >
-              <MessageText text={m.text} />
-              {m.attachments && m.attachments.length > 0 && (
-                <MessageAttachments
-                  attachments={m.attachments}
-                  slug={task.projectSlug}
-                />
-              )}
-            </MessageBubble>
-          )
-        }
-        // A ride — one assistant turn, carrying all its items.
+  function renderEntry(entry: TimelineEntry) {
+    if (entry.kind === 'event') {
+      return <LifecycleNote event={entry.event} slug={task.projectSlug} />
+    }
+    if (entry.kind === 'task-action') {
+      // An action with no turn to sit in — the task had no ride open when it
+      // acted, or that ride streamed nothing. Everything else reaches the
+      // reader inside its RideTurn.
+      return <TaskActionNote item={entry.action} />
+    }
+    if (entry.kind === 'ask') {
+      // A platform ask, standing where it was raised: its prompt is the
+      // account of what happened, and AskForm drops the buttons once it's no
+      // longer open.
+      return (
+        <MessageBubble
+          role="lander"
+          at={entry.ask.at}
+          variant="message-platform"
+        >
+          <AskForm
+            ask={entry.ask}
+            disabled={answering}
+            onAnswer={(body) => void answerAsk(entry.ask.id, body)}
+          />
+        </MessageBubble>
+      )
+    }
+    if (entry.kind === 'hook') {
+      // A hook's report, in the platform's voice like a standalone ask: the
+      // run had no task and no ride of its own, so this is its only account
+      // of itself. The hook is named because a project may declare several,
+      // and the outcome because "found nothing" and "could not run" are
+      // different answers.
+      const h = entry.hook
+      return (
+        <MessageBubble
+          role={`hook ${h.hook}`}
+          at={h.at}
+          variant="message-platform"
+          itemId={h.id}
+        >
+          {h.text && <MessageText text={h.text} />}
+          {h.error && <div className="hook-error">{h.error}</div>}
+          {h.output && <pre className="hook-output">{h.output}</pre>}
+        </MessageBubble>
+      )
+    }
+    if (entry.kind === 'user') {
+      const m = entry.item
+      if (m.from && 'task' in m.from)
         return (
-          <RideTurn
-            key={`r-${entry.ride.id}`}
-            ride={entry.ride}
-            items={entry.items}
-            actions={entry.actions}
-            agent={task.flow ?? task.agent}
+          <SentMessageNote
+            item={m}
+            sender={m.from.task}
             slug={task.projectSlug}
-            grants={task.grants}
-            disclosure={disclosure}
-            openAsk={openAsk}
-            answering={answering}
-            onAnswerAsk={answerAsk}
-            onAllow={allowTool}
-            onPace={pace}
+            openOn={reveal?.itemId === m.id ? reveal : undefined}
           />
         )
-      })}
+      // A hook's nudge sits in the same slot as a typed message — it was
+      // queued and drove a turn the same way — but it is not the user
+      // speaking, so it gets its own voice rather than the user's tint.
+      const isHook = m.role === 'hook'
+      return (
+        <MessageBubble
+          role={
+            isHook
+              ? `hook ${m.from && 'hook' in m.from ? m.from.hook : ''}`.trim()
+              : 'you'
+          }
+          at={m.at}
+          itemId={m.id}
+          variant={
+            `message-${isHook ? 'hook' : 'user'}` +
+            (m.queued ? ' message-queued' : '')
+          }
+        >
+          <MessageText text={m.text} />
+          {m.attachments && m.attachments.length > 0 && (
+            <MessageAttachments
+              attachments={m.attachments}
+              slug={task.projectSlug}
+            />
+          )}
+        </MessageBubble>
+      )
+    }
+    // A ride — one assistant turn, carrying all its items.
+    return (
+      <RideTurn
+        ride={entry.ride}
+        items={entry.items}
+        actions={entry.actions}
+        agent={task.flow ?? task.agent}
+        slug={task.projectSlug}
+        grants={task.grants}
+        disclosure={disclosure}
+        openAsk={openAsk}
+        answering={answering}
+        onAnswerAsk={answerAsk}
+        onAllow={allowTool}
+        onPace={pace}
+      />
+    )
+  }
+
+  return (
+    <div className="messages" ref={messagesRef} onScroll={onMessagesScroll}>
+      {/* Each entry in a bare wrapper, so the read measurement and the
+          open-at-first-unread scroll can find it by its index. */}
+      {timeline.map((entry) => (
+        <div key={entryKey(entry)} className="timeline-entry">
+          {renderEntry(entry)}
+        </div>
+      ))}
       {/* No ride output yet but the task is riding: the assistant has been
           launched and we're waiting for its first item. The model isn't
           known until that output arrives, so this stays model-agnostic. */}

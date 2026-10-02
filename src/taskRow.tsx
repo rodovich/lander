@@ -4,7 +4,7 @@ import { HighlightedText } from './highlightedText'
 import { TaskActionsMenu } from './menus'
 import { availableTaskActions } from './taskActions'
 import type { TaskAction } from './taskActions'
-import { isUnread } from './taskMeta'
+import { isUnread } from './readMarker'
 import type { TaskWithProject } from './types'
 
 // A clock face: the task has something armed to fire later.

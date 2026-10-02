@@ -1,5 +1,5 @@
 import { dateCategory } from './format'
-import { isUnread } from './taskMeta'
+import { isUnread } from './readMarker'
 import { taskKeyOf } from './taskRef'
 import { conversationMatches } from './taskSearch'
 import type { ConversationMatches } from './taskSearch'

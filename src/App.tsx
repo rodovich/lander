@@ -18,7 +18,7 @@ import { buildTaskRows } from './taskRows'
 import type { ConversationMatch } from './taskSearch'
 import { TelemetryPanel } from './telemetry'
 import { buildTimeline } from './timeline'
-import { useSeenMarker, useViewingState } from './useSeenMarker'
+import { useReadMarker, useViewingState } from './useReadMarker'
 import { useTaskActions } from './useTaskActions'
 import { useTaskData } from './useTaskData'
 import { useReplyDrafts } from './useReplyDrafts'
@@ -145,9 +145,10 @@ export function App() {
     }
   }, [])
 
-  // The ambient viewing signals (tab focus, scroll position, list focus) and
-  // the sticky-unread set the Unread view's filter consumes.
-  const { atBottom, setAtBottom, tabActive, setListFocused, stickyUnread } =
+  // The ambient viewing signals (tab focus, how far the open conversation is
+  // read, list focus) and the sticky-unread set the Unread view's filter
+  // consumes.
+  const { readUpTo, setReadUpTo, tabActive, setListFocused, stickyUnread } =
     useViewingState(view, tasks)
 
   const pathBySlug = useMemo(
@@ -218,9 +219,9 @@ export function App() {
       ? openedMatch.reveal
       : null
 
-  // Advance the open task's seen marker per the viewing rules (the 2s dwell,
-  // immediate marking while actively viewing).
-  useSeenMarker({ current, atBottom, tabActive, markSeen })
+  // Advance the open task's read marker over whatever has stayed read for the
+  // dwell.
+  useReadMarker({ current, readUpTo, tabActive, markSeen })
 
   // What the reader has opened on the open task's timeline, shared by the
   // timeline that draws it and the header's copy, which writes out what's showing.
@@ -338,7 +339,7 @@ export function App() {
                 disclosure={disclosure}
                 reveal={reveal}
                 answering={answeringBy[taskKeyOf(current)] ?? false}
-                onAtBottomChange={setAtBottom}
+                onReadUpTo={setReadUpTo}
                 allowTool={allowTool}
                 answerAsk={answerAsk}
                 onTaskAction={runTaskAction}

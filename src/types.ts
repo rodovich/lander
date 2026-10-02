@@ -275,11 +275,10 @@ export type Task = {
   status: string
   createdAt: string
   updatedAt?: string
-  // ISO timestamp of the latest completed update the viewer has caught up to;
-  // a task shows the unseen-update dot when its latest update is newer. Advanced
-  // server-side (monotonically) via the /seen endpoint. Absent on tasks saved
-  // before this field existed, until the server backfills it.
-  seenAt?: string
+  // The read marker: an ISO timestamp the viewer has read the conversation up
+  // through. Timeline entries stamped after it are unread (see readMarker.ts).
+  // Advanced monotonically via the /seen endpoint, set back by /unread.
+  readThrough?: string
   allowEdits: boolean
   // Set on tasks the server reads from the archive dir (when the list is
   // fetched with ?archived=1). Marks the row and swaps the kebab's Archive item

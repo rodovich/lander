@@ -3,7 +3,8 @@ import {
   publicTask,
   taskSummary,
   taskFlow,
-  latestUpdateAt,
+  migrateSeenAt,
+  needsSeenAtMigration,
   recordStatusTransition,
   recordAttachmentOnMessage,
   migrateArtifactsToAttachments,
@@ -410,24 +411,55 @@ describe('taskSummary', () => {
   })
 })
 
-describe('latestUpdateAt', () => {
-  it('takes the newest completed item and ride endedAt, skipping open-ride items', () => {
-    const t = {
-      items: [
-        userItem('u', AT),
-        { id: 'e', at: later(1), kind: 'event', eventKind: 'launched' } as Item,
-        flowItem('open', 'open-ride', later(9)), // in the open ride — skipped
-      ],
-      rides: [
-        { id: 'closed', startedAt: AT, endedAt: later(2), outcome: 'done' } as Ride,
-        { id: 'open-ride', startedAt: later(5) } as Ride,
-      ],
-    }
-    expect(latestUpdateAt(t)).toBe(later(2))
+describe('migrateSeenAt', () => {
+  const NOW = '2026-01-02T00:00:00.000Z'
+  const conversation = () => ({
+    items: [
+      userItem('u1', AT),
+      flowItem('f1', 'r1', later(1)),
+      userItem('u2', later(3)),
+      flowItem('f2', 'r2', later(4)),
+    ],
+    rides: [
+      { id: 'r1', startedAt: later(1), endedAt: later(2), outcome: 'done' } as Ride,
+      { id: 'r2', startedAt: later(4), endedAt: later(5), outcome: 'done' } as Ride,
+    ],
   })
 
-  it('is empty when nothing has completed', () => {
-    expect(latestUpdateAt({ items: [], rides: [] })).toBe('')
+  it('reads a caught-up task through now', () => {
+    // The old marker sat at the last ride's start, which was "caught up".
+    const t = { ...conversation(), seenAt: later(4) } as Parameters<typeof migrateSeenAt>[0]
+    migrateSeenAt(t, NOW)
+    expect(t.readThrough).toBe(NOW)
+    expect('seenAt' in t).toBe(false)
+  })
+
+  it('reads an unread task through the human’s last message', () => {
+    const t = { ...conversation(), seenAt: later(3) } as Parameters<typeof migrateSeenAt>[0]
+    migrateSeenAt(t, NOW)
+    expect(t.readThrough).toBe(later(3))
+  })
+
+  it('does not take another task’s message for the human’s', () => {
+    const c = conversation()
+    c.items.push(userItem('sent', later(6), { from: { task: 'other', via: 'send' } }))
+    const t = { ...c, seenAt: '' } as Parameters<typeof migrateSeenAt>[0]
+    migrateSeenAt(t, NOW)
+    expect(t.readThrough).toBe(later(3))
+  })
+
+  it('reads a task with no marker through now', () => {
+    const t = conversation() as Parameters<typeof migrateSeenAt>[0]
+    migrateSeenAt(t, NOW)
+    expect(t.readThrough).toBe(NOW)
+  })
+
+  it('keeps a marker already migrated, shedding a stray seenAt', () => {
+    const t = { ...conversation(), readThrough: later(1), seenAt: '' }
+    expect(needsSeenAtMigration(t)).toBe(true)
+    migrateSeenAt(t, NOW)
+    expect(t).toMatchObject({ readThrough: later(1) })
+    expect(needsSeenAtMigration(t)).toBe(false)
   })
 })
 

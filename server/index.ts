@@ -51,6 +51,8 @@ import {
   recordAttachmentOnMessage,
   migrateArtifactsToAttachments,
   hasArtifactRecords,
+  migrateSeenAt,
+  needsSeenAtMigration,
   turnAttachments,
   deliverQueuedBatch,
   worktreeName,
@@ -245,10 +247,13 @@ type Task = {
   // streaming churn in between. Falls back to createdAt for tasks saved before
   // this field existed.
   updatedAt: string
-  // ISO timestamp of the latest completed update (message/event) the viewer has
-  // caught up to; drives the UI's unseen-update dot. Set to creation time on a
-  // new task, advanced monotonically by the /seen endpoint as the viewer reads,
-  // and backfilled at startup for tasks saved before this field existed.
+  // The read marker: the ISO timestamp the viewer has read the conversation up
+  // through, which the client compares each timeline entry against (see
+  // src/readMarker.ts). Set to creation time on a new task, advanced
+  // monotonically by /seen as the viewer reads, set back by /unread, and
+  // migrated at boot from the `seenAt` it replaced (see migrateSeenAt).
+  readThrough?: string
+  // The replaced marker, present only until the boot migration drops it.
   seenAt?: string
   allowEdits: boolean
   // The id of the task that spawned this one (`lander launch`), or absent
@@ -2535,11 +2540,11 @@ app.post('/api/:project/tasks', async (c) => {
       status: message.trim() || deferred ? 'riding' : 'wedged',
       createdAt: now,
       updatedAt: now,
-      // Caught up as of creation: the opening message (and launch event) are the
+      // Read as of creation: the opening message (and launch event) are the
       // creator's own, so they don't warrant an unseen dot. Anything that lands
       // afterwards — the assistant reply, lifecycle events — is newer than this and
-      // shows as unseen until viewed.
-      seenAt: now,
+      // shows as unread until viewed.
+      readThrough: now,
       allowEdits,
       // Provenance: when another task spawned this one, remember which, so it can
       // later land what it launched (see the PATCH land gate). A UI-started task
@@ -4088,10 +4093,10 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
   }
 })
 
-// Mark a task seen up to the given ISO timestamp, clearing its unseen-update dot
-// in the UI. Advances `seenAt` monotonically — a stale or out-of-order `at`
-// never moves the marker backwards — so the browser can fire these freely as the
-// viewer reads. This is harmless view-state, so it isn't principal-gated.
+// Mark a task read up through the given ISO timestamp. Advances `readThrough`
+// monotonically — a stale or out-of-order `at` never moves the marker
+// backwards — so the browser can fire these freely as the viewer reads. This is
+// harmless view-state, so it isn't principal-gated.
 app.post('/api/:project/tasks/:id/seen', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
@@ -4104,7 +4109,7 @@ app.post('/api/:project/tasks/:id/seen', async (c) => {
     if (!at) return c.json({ error: 'at is required' }, 400)
 
     const updated = await mutateTaskInPools(project, id, (t) => {
-        if (!t.seenAt || at > t.seenAt) t.seenAt = at
+        if (!t.readThrough || at > t.readThrough) t.readThrough = at
       })
     if (!updated) return c.json({ error: 'task not found' }, 404)
     return c.json(publicTask(updated))
@@ -4113,11 +4118,12 @@ app.post('/api/:project/tasks/:id/seen', async (c) => {
   }
 })
 
-// Mark a task unread, re-showing its unseen-update dot in the UI. Resets
-// `seenAt` to "" — "caught up to nothing" — so the task's latest update reads as
-// unviewed again; the next /seen call advances the marker forward as the viewer
-// reads. Unlike /seen this deliberately moves the marker backwards, so it sets
-// unconditionally. Harmless view-state, so it isn't principal-gated.
+// Mark a task unread, re-showing its unseen-update dot in the UI: set
+// `readThrough` back to the given `at` (the client picks it — it owns what an
+// entry's stamp is), or to "" — read through nothing — when none is given. The
+// next /seen call advances the marker forward as the viewer reads. Unlike /seen
+// this deliberately moves the marker backwards, so it sets unconditionally.
+// Harmless view-state, so it isn't principal-gated.
 app.post('/api/:project/tasks/:id/unread', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
@@ -4125,8 +4131,11 @@ app.post('/api/:project/tasks/:id/unread', async (c) => {
     const id = c.req.param('id')
     if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
 
+    const body = await c.req.json<{ at?: unknown }>().catch(() => ({}))
+    const at =
+      'at' in body && typeof body.at === 'string' ? body.at : ''
     const updated = await mutateTaskInPools(project, id, (t) => {
-        t.seenAt = ''
+        t.readThrough = at
       })
     if (!updated) return c.json({ error: 'task not found' }, 404)
     return c.json(publicTask(updated))
@@ -4334,6 +4343,18 @@ async function backfillArtifactsToAttachments(): Promise<void> {
     )
 }
 
+// Replace every task's `seenAt` with the `readThrough` marker (see
+// migrateSeenAt). One clock reading for the whole pass: a caught-up task is read
+// through the moment the migration ran.
+async function backfillReadThrough(): Promise<void> {
+  const now = new Date().toISOString()
+  await backfillTasks({
+    label: 'seenAt→readThrough',
+    needsWork: needsSeenAtMigration,
+    apply: (t) => migrateSeenAt(t, now),
+  })
+}
+
 const port = Number(process.env.PORT ?? 6181)
 if (process.env.NODE_ENV !== 'test' && process.env.VITEST !== 'true') {
   // Before the boot work below, so a slow boot shows up as a blocked loop.
@@ -4345,6 +4366,7 @@ if (process.env.NODE_ENV !== 'test' && process.env.VITEST !== 'true') {
   // synchronously before its first await, so recoverQueues may return while the
   // daemon reattachment proceeds without leaving an unguarded move window.
   await backfillArtifactsToAttachments()
+  await backfillReadThrough()
   await recoverQueues()
 
   // Loopback only: this API spawns agent processes, and an unauthenticated

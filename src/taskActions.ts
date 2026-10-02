@@ -1,4 +1,4 @@
-import { isUnread } from './taskMeta'
+import { isUnread } from './readMarker'
 import type { TaskWithProject } from './types'
 
 // The status actions a task's kebab menu can fire, mirroring the buttons the
