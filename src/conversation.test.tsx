@@ -176,6 +176,27 @@ describe('Conversation timeline dispatch', () => {
     expect(revealed).toContain('sender-words')
   })
 
+  // A relaunch's brief is the task's own words to its next session: told inside
+  // the divider that delivered it, folded, rather than as the user speaking.
+  it('folds a relaunch’s brief into its relaunched note', () => {
+    const brief = user('b1', 'brief-words', {
+      from: { task: 'task1', via: 'relaunch' },
+    })
+    const items = [{ ...ev('e1', 'relaunched'), title: 'Fix the parser', message: 'b1' }, brief]
+    const html = render(baseTask({ items }))
+    expect(html).not.toContain('message-user')
+    expect(html).toContain('Fix the parser <span class="timeline-note-label relaunched">relaunched')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).not.toContain('brief-words')
+
+    const revealed = render(baseTask({ items }), {
+      reveal: { itemId: 'b1', occurrence: 0, query: 'brief' },
+    })
+    expect(revealed).toContain('aria-expanded="true"')
+    expect(revealed).toContain('data-item-id="b1"')
+    expect(revealed).toContain('brief-words')
+  })
+
   it('marks a queued follow-up bubble', () => {
     const html = render(
       baseTask({ items: [user('u1', 'later', { queued: true })] }),

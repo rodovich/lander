@@ -119,11 +119,11 @@ export type MessageItem = ItemCommon & {
   role: 'user' | 'flow' | 'hook'
   text: string
   // Who spoke, when it was not the task's human: the hook on a `hook` message,
-  // or the task that launched, messaged, or `--notify`-woke this one on a
-  // `user` message.
+  // or on a `user` message the task that launched, messaged, or `--notify`-woke
+  // this one — or this task itself, briefing its next session in a relaunch.
   from?:
     | { hook: string; path: string; fireId: string }
-    | { task: string; via: 'launch' | 'send' | 'notify' }
+    | { task: string; via: 'launch' | 'send' | 'notify' | 'relaunch' }
   attachments?: Attachment[]
   // Set on a user message once a queued batch delivers it: the ride that
   // consumed it. Absent on converted history.
@@ -159,6 +159,9 @@ export type EventItem = ItemCommon & {
   title?: string
   scheduledFor?: string
   awaiting?: { id: string; title: string }[]
+  // The user item this event delivered (a relaunch's brief), told inside the
+  // event's note rather than as the user speaking. See buildTimeline.
+  message?: string
 }
 
 // An action this task took on another project-qualified task. Kept distinct

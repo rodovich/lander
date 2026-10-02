@@ -91,6 +91,14 @@ describe('conversationMatches', () => {
       expect(ids([t], q)).toEqual([])
   })
 
+  it('matches a message an event delivered, though it renders folded', () => {
+    const t = task('a', [
+      { id: 'e1', at: AT, kind: 'event', eventKind: 'relaunched', message: 'b1' },
+      user('b1', 'the relaunch brief'),
+    ])
+    expect(matchesOf(t, 'relaunch brief')?.list(5).map((m) => m.itemId)).toEqual(['b1'])
+  })
+
   it('skips a subagent trace, which nests under its closed chip', () => {
     const t = task('a', [
       user('u1', 'go'),

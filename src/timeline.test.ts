@@ -175,6 +175,39 @@ describe('buildTimeline events in place', () => {
   })
 })
 
+describe('buildTimeline messages events delivered', () => {
+  // The immediate-relaunch shape: the divider and its brief are written mid-turn,
+  // the turn streams on, and the drain moves the still-queued brief to the tail.
+  const items = (queued: boolean) => [
+    user('p1', T('10:00:00')),
+    flow('r1a', 'r1', T('10:00:05')),
+    { ...ev('relaunched', T('10:00:06')), message: 'brief' },
+    flow('r1b', 'r1', T('10:00:07')),
+    user('brief', T('10:00:06'), queued),
+  ]
+  const rides = [ride('r1', T('10:00:05'), T('10:00:08'))]
+
+  it('carries the message on its event, with no slot of its own', () => {
+    const { items: out } = build({ items: items(false), rides })
+    expect(seq(out)).toEqual(['user:p1', 'asst:r1', 'event:relaunched'])
+    const entry = out[2]
+    expect(entry.kind === 'event' && entry.message?.id).toBe('brief')
+  })
+
+  it('keeps it at its event while queued rather than sinking it', () => {
+    const { items: out } = build({ items: [...items(true), user('p2', T('10:00:09'))], rides })
+    expect(seq(out)).toEqual(['user:p1', 'asst:r1', 'event:relaunched', 'user:p2'])
+  })
+
+  it('leaves an event that names no message, or a missing one, bare', () => {
+    const { items: out } = build({
+      items: [{ ...ev('relaunched', T('10:00:00')), message: 'gone' }, ev('launched', T('10:00:01'))],
+      rides: [],
+    })
+    expect(out.map((e) => e.kind === 'event' && !!e.message)).toEqual([false, false])
+  })
+})
+
 describe('buildTimeline task actions on their turn', () => {
   const actionsOf = (out: ReturnType<typeof buildTimeline>['items']) => {
     const asst = out.find((e) => e.kind === 'ride')

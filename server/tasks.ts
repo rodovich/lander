@@ -497,11 +497,14 @@ type ItemCommon = {
 
 export type HookSender = { hook: string; path: string; fireId: string }
 
-// A task that put a message in another task's conversation, and how: its
-// `lander launch` opening message, a `lander send`, or the `--notify` wake
-// carrying its closing message. Named by id alone, because neither a launch nor
-// a send may cross a project.
-export type TaskSender = { task: string; via: 'launch' | 'send' | 'notify' }
+// A task that put a message in a task's conversation, and how: its `lander
+// launch` opening message, a `lander send`, or the `--notify` wake carrying its
+// closing message to another task — or its `lander relaunch` brief to its own
+// next session. Named by id alone, because none of them may cross a project.
+export type TaskSender = {
+  task: string
+  via: 'launch' | 'send' | 'notify' | 'relaunch'
+}
 
 // A prompt item as the agent receives it: a message from another task with its
 // sender named ahead of its words. Composed whenever the item is queued for a
@@ -517,6 +520,9 @@ export function attributedPrompt(m: {
   const { task, via } = m.from
   if (via === 'launch') return `Launched by ${task}:\n\n${m.text}`
   if (via === 'send') return `From ${task}:\n\n${m.text}`
+  // A relaunch brief is the task's own words to its next session, which knows
+  // from its prompt that a relaunch is how it starts; there is no one to name.
+  if (via === 'relaunch') return m.text
   // A `--notify` wake says "finished a turn" rather than "is done": a clean
   // turn-end is not a claim that the work is complete, and the launcher has to
   // decide that for itself.
@@ -569,6 +575,10 @@ export type EventItem = ItemCommon & {
   title?: string
   scheduledFor?: string
   awaiting?: { id: string; title: string }[]
+  // The id of the user item this event delivered — a relaunch's brief — which
+  // the timeline tells inside the event's note rather than as the user speaking.
+  // Set by pushEventPrompt in the mutation that writes both.
+  message?: string
 }
 
 // A task-management action attributed to another task. Unlike EventItem, this
@@ -699,6 +709,22 @@ export function pushUserItem(
     ...(opts.deliveredIn ? { deliveredIn: opts.deliveredIn } : {}),
   }
   ;(task.items ??= []).push(item)
+  return item
+}
+
+// Append the prompt a lifecycle event delivers, and point the event at it, so the
+// two are told as one note. Written in the event's own mutation, so the pairing
+// is recorded rather than inferred from adjacency, which a queued message's move
+// to the tail on delivery would break (deliverQueuedBatch).
+export function pushEventPrompt(
+  task: { items?: Item[] },
+  event: EventItem,
+  text: string,
+  at: string,
+  from: TaskSender,
+): MessageItem {
+  const item = pushUserItem(task, text, at, { from })
+  event.message = item.id
   return item
 }
 
@@ -1402,7 +1428,8 @@ export function clearTaskThread(task: ThreadStateTask): void {
 // not the delivery record alone (daemon/task-management.ts).
 //
 // Touches only session + event state; the caller owns the message/queue/status
-// for the next turn.
+// for the next turn, and links the returned divider to the message it appends
+// (pushEventPrompt).
 export function sealForRelaunch(
   task: {
     sessionId?: string
@@ -1413,7 +1440,7 @@ export function sealForRelaunch(
     items?: Item[]
   },
   at: string,
-): void {
+): EventItem {
   // Clear the provider thread (session + the context baseline that belongs to it,
   // so the fresh session's first turn gets the full dynamic context block again)
   // through the accessor seam.
@@ -1423,7 +1450,7 @@ export function sealForRelaunch(
   // session/context clear above. Inert in step 1 — no flow writes flowState yet.
   delete task.flowState
   delete task.flowStateRev
-  pushEventItem(task, { eventKind: 'relaunched', title: task.title }, at)
+  return pushEventItem(task, { eventKind: 'relaunched', title: task.title }, at)
 }
 
 // The immediate `lander relaunch <message>` mutation: seal the session, then
@@ -1436,6 +1463,7 @@ export function sealForRelaunch(
 // pending retry.
 export function applyRelaunch(
   task: {
+    id: string
     sessionId?: string
     status: string
     title: string
@@ -1458,9 +1486,12 @@ export function applyRelaunch(
     new Date(Date.parse(at) - 1).toISOString(),
     by,
   )
-  sealForRelaunch(task, at)
-  pushUserItem(task, message, at)
-  ;(task.queued ??= []).push(message)
+  const divider = sealForRelaunch(task, at)
+  const item = pushEventPrompt(task, divider, message, at, {
+    task: task.id,
+    via: 'relaunch',
+  })
+  ;(task.queued ??= []).push(attributedPrompt(item))
   task.status = 'riding'
   task.updatedAt = at
   delete task.retry
@@ -1504,13 +1535,14 @@ export function nextRepeatMessage(
 
 // Append a batch of now-due scheduled messages and queue them for the session —
 // the shared tail of an immediate and a scheduled delivery. If any due entry is
-// a relaunch (`lander relaunch --date/--time/--await`), seal the session once and
-// lead with the relaunch text so the fresh session reads it first; ordinary due
+// a relaunch (`lander relaunch --date/--time/--await`), seal the session and lead
+// with the relaunch text so the fresh session reads it first; ordinary due
 // messages keep their order and follow. The caller has already split due from
 // not-yet-due and recorded the riding transition; this only mutates the
 // session/message/queue state.
 export function applyDueMessages(
   task: {
+    id: string
     sessionId?: string
     title: string
     items?: Item[]
@@ -1522,9 +1554,16 @@ export function applyDueMessages(
 ): void {
   const relaunch = due.filter((m) => m.relaunch)
   const rest = due.filter((m) => !m.relaunch)
-  // Seal once even if several relaunch entries are due in the same sweep.
-  if (relaunch.length) sealForRelaunch(task, at)
-  for (const m of [...relaunch, ...rest]) {
+  // Each relaunch brief gets its own divider to be told under. Several due in
+  // one sweep seal an already-sealed session, which is harmless.
+  for (const m of relaunch) {
+    const item = pushEventPrompt(task, sealForRelaunch(task, at), m.text, at, {
+      task: task.id,
+      via: 'relaunch',
+    })
+    ;(task.queued ??= []).push(attributedPrompt(item))
+  }
+  for (const m of rest) {
     pushUserItem(task, m.text, at, {
       ...(m.attachments?.length ? { attachments: m.attachments } : {}),
       ...(m.from ? { from: m.from } : {}),

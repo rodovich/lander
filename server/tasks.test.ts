@@ -1316,6 +1316,7 @@ describe('thread-state accessors', () => {
 describe('applyRelaunch', () => {
   const AT2 = '2026-06-01T00:00:00.000Z'
   type RelaunchTask = {
+    id: string
     sessionId?: string
     turnContext?: string
     status: string
@@ -1327,6 +1328,7 @@ describe('applyRelaunch', () => {
     retry?: unknown
   }
   const task = (over: Partial<RelaunchTask> = {}): RelaunchTask => ({
+    id: 'tsk-self',
     sessionId: 'sess-old',
     status: 'riding',
     title: 'My task',
@@ -1345,6 +1347,15 @@ describe('applyRelaunch', () => {
     expect(t.status).toBe('riding')
   })
 
+  it('records the brief as the task’s own, delivered by the divider', () => {
+    const t = task()
+    applyRelaunch(t, 'go again', AT2, 'human')
+    const brief = userItems(t).at(-1)!
+    expect(brief.from).toEqual({ task: 'tsk-self', via: 'relaunch' })
+    const divider = eventItems(t).find((e) => e.eventKind === 'relaunched')!
+    expect(divider.message).toBe(brief.id)
+  })
+
   it('revives a wedged task, recording the un-wedge ahead of the divider', () => {
     const t = task({ status: 'wedged' })
     applyRelaunch(t, 'go', AT2, 'human')
@@ -1360,7 +1371,7 @@ describe('applyRelaunch', () => {
 
 describe('applyDueMessages', () => {
   const AT2 = '2026-06-01T00:00:00.000Z'
-  const task = () => ({ title: 'T', items: [] as Item[], queued: [] as string[] })
+  const task = () => ({ id: 'tsk-self', title: 'T', items: [] as Item[], queued: [] as string[] })
 
   it('appends and queues each due message as a user item', () => {
     const t = task()
@@ -1378,11 +1389,23 @@ describe('applyDueMessages', () => {
     expect(t.queued).toEqual(['From tsk-s:\n\na', 'b'])
   })
 
-  it('seals once and leads with the relaunch text when a relaunch is due', () => {
+  it('seals and leads with the relaunch text when a relaunch is due', () => {
     const t = task()
     applyDueMessages(t, [{ text: 'ordinary' }, { text: 'fresh', relaunch: true }], AT2)
-    expect(eventItems(t).filter((e) => e.eventKind === 'relaunched')).toHaveLength(1)
+    const dividers = eventItems(t).filter((e) => e.eventKind === 'relaunched')
+    expect(dividers).toHaveLength(1)
     expect(t.queued).toEqual(['fresh', 'ordinary'])
+    const [brief, ordinary] = userItems(t)
+    expect(brief.from).toEqual({ task: 'tsk-self', via: 'relaunch' })
+    expect(dividers[0].message).toBe(brief.id)
+    expect(ordinary.from).toBeUndefined()
+  })
+
+  it('gives each relaunch due in one sweep its own divider', () => {
+    const t = task()
+    applyDueMessages(t, [{ text: 'one', relaunch: true }, { text: 'two', relaunch: true }], AT2)
+    const dividers = eventItems(t).filter((e) => e.eventKind === 'relaunched')
+    expect(dividers.map((e) => e.message)).toEqual(userItems(t).map((u) => u.id))
   })
 })
 

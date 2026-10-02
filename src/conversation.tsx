@@ -257,7 +257,18 @@ export const Conversation = memo(function Conversation({
 
   function renderEntry(entry: TimelineEntry) {
     if (entry.kind === 'event') {
-      return <LifecycleNote event={entry.event} slug={task.projectSlug} />
+      return (
+        <LifecycleNote
+          event={entry.event}
+          message={entry.message}
+          slug={task.projectSlug}
+          openOn={
+            entry.message && reveal?.itemId === entry.message.id
+              ? reveal
+              : undefined
+          }
+        />
+      )
     }
     if (entry.kind === 'task-action') {
       // An action with no turn to sit in — the task had no ride open when it

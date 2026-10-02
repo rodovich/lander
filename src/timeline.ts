@@ -34,6 +34,10 @@
 //     did to another one, not something that happened to this task, and the
 //     stream is this task's own story — so the turn carries it and the rail
 //     doesn't. Where inside the turn is the turn's business.
+//   - A message an event delivered (a relaunch's brief), named by the event's
+//     `message`, goes to that event's entry and takes no slot of its own. It is
+//     exempt from the queued sink: it is queued only until the next drain, and
+//     a note that jumped up the stream on delivery would read as a glitch.
 
 import type {
   Item,
@@ -67,8 +71,9 @@ export type TimelineEntry =
       items: RideItem[]
       actions: TaskActionItem[]
     }
-  // A lifecycle event (launch, wedge, schedule, …).
-  | { kind: 'event'; at: string; event: EventItem }
+  // A lifecycle event (launch, wedge, schedule, …), with the message it
+  // delivered when it names one.
+  | { kind: 'event'; at: string; event: EventItem; message?: MessageItem }
   // An attributed task-management action with no turn to sit in — the actor had
   // no ride open, or the ride streamed nothing to anchor against. Everything
   // else reaches the reader inside its ride entry's `actions`.
@@ -101,13 +106,20 @@ export function buildTimeline(
     ),
   )
 
+  // The messages events delivered, which their events carry.
+  const delivered = new Set(
+    all.flatMap((it) => (it.kind === 'event' && it.message ? [it.message] : [])),
+  )
+  const carried = new Map<string, MessageItem>()
+
   // Hold aside the queued follow-ups (trailing user items the server flagged) so
   // they sink below everything — including any items of a still-open ride that
   // were appended after the user hit send.
   const sunk: MessageItem[] = []
   const kept: Item[] = []
   for (const it of all) {
-    if (
+    if (it.kind === 'message' && delivered.has(it.id)) carried.set(it.id, it)
+    else if (
       it.kind === 'message' &&
       (it.role === 'user' || it.role === 'hook') &&
       it.queued
@@ -171,7 +183,15 @@ export function buildTimeline(
       entry.items.push(it)
       continue
     }
-    if (it.kind === 'event') out.push({ kind: 'event', at: it.at, event: it })
+    if (it.kind === 'event') {
+      const message = it.message ? carried.get(it.message) : undefined
+      out.push({
+        kind: 'event',
+        at: it.at,
+        event: it,
+        ...(message ? { message } : {}),
+      })
+    }
     else if (it.kind === 'hook') out.push({ kind: 'hook', at: it.at, hook: it })
     else if (it.kind === 'message')
       out.push({ kind: 'user', at: it.at, item: it })

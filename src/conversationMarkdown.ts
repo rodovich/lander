@@ -5,8 +5,9 @@
 // summary the fold shows in its place. What is on screen is what lands on the
 // clipboard.
 //
-// Two disclosures stay closed here whatever the reader did with them: a task
-// action's sent message, and a message another task sent this one. Their
+// Three disclosures stay closed here whatever the reader did with them: a task
+// action's sent message, a message another task sent this one, and a message a
+// lifecycle event delivered (a relaunch's brief). Their
 // open/closed state lives inside the row's own component rather than in the
 // pane's state, so this module can't see it. The collapsed reading is the one a
 // freshly-opened task shows.

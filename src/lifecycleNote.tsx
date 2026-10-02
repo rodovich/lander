@@ -1,7 +1,8 @@
 import { formatTimestamp } from './format'
+import { MessageNote } from './messageNote'
 import { useTaskLink } from './taskLinkContext'
 import { TaskChip, TimelineNote } from './timelineNote'
-import type { EventItem } from './types'
+import type { EventItem, MessageItem } from './types'
 
 // How each lifecycle event verb reads in the timeline. Exported so the
 // conversation's markdown copy words an event the way this row does.
@@ -21,13 +22,19 @@ export const EVENT_VERB: Record<EventItem['eventKind'], string> = {
 // that moment) followed by the verb — e.g. "Fix the parser launched". The verb
 // is set apart by weight/color (each verb wears its status color — launched
 // like riding, wedged, landed — plain otherwise). It rides the shared timeline
-// note, so it reads exactly like an attributed task action.
+// note, so it reads exactly like an attributed task action. An event that
+// delivered a message (a relaunch's brief) carries it behind its disclosure.
 export function LifecycleNote({
   event,
+  message,
   slug,
+  openOn,
 }: {
   event: EventItem
+  message?: MessageItem
   slug: string
+  // Opens the message when a search match lands inside it (see TimelineNote).
+  openOn?: unknown
 }) {
   const linkTask = useTaskLink()
   // The name the task went by at the time, leading the sentence.
@@ -65,8 +72,8 @@ export function LifecycleNote({
       </TimelineNote>
     )
   }
-  return (
-    <TimelineNote at={event.at}>
+  const sentence = (
+    <>
       {name}
       <span className={`timeline-note-label ${event.eventKind}`}>
         {EVENT_VERB[event.eventKind]}
@@ -81,6 +88,13 @@ export function LifecycleNote({
             </span>
           )}
       </span>
-    </TimelineNote>
+    </>
+  )
+  return message ? (
+    <MessageNote item={message} at={event.at} slug={slug} openOn={openOn}>
+      {sentence}
+    </MessageNote>
+  ) : (
+    <TimelineNote at={event.at}>{sentence}</TimelineNote>
   )
 }

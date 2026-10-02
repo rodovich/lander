@@ -15,8 +15,8 @@ type Part = { itemId: string; text: string }
 // step, not something the conversation says — as does the scaffolding around
 // the text: headings, fold summaries, lifecycle sentences. Every agent turn
 // collapses, a still-running one included. One exception: a message another
-// task sent renders folded, but is searched all the same — it can be the task's
-// whole brief — and opening a match unfolds it.
+// task sent, or one an event delivered, renders folded, but is searched all the
+// same — it can be the task's whole brief — and opening a match unfolds it.
 function conversationParts(task: TaskWithProject): Part[] {
   const parts: Part[] = []
   const push = (itemId: string, text: string | undefined) => {
@@ -24,6 +24,8 @@ function conversationParts(task: TaskWithProject): Part[] {
   }
   for (const entry of buildTimeline(task, '').items) {
     if (entry.kind === 'user') push(entry.item.id, entry.item.text)
+    else if (entry.kind === 'event' && entry.message)
+      push(entry.message.id, entry.message.text)
     else if (entry.kind === 'ask') push(entry.ask.id, entry.ask.prompt)
     else if (entry.kind === 'hook') {
       const h = entry.hook
