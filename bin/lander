@@ -431,11 +431,23 @@ async function rideTask(args) {
     die(`usage: lander ${USAGE.ride}`)
   validateSchedule(o)
   o.await = resolveAwait(o.await, { self: TASK })
-  await call(PROJECT, `/tasks/${TASK}/ride`, {
+  const armed = await call(PROJECT, `/tasks/${TASK}/ride`, {
     method: 'POST',
     body: JSON.stringify(o),
   })
-  console.log('wakeup armed')
+  // The trigger as the server resolved it: a `--time` is relative to a moment
+  // the session never sees, so this line is its only record of when it asked
+  // to wake, in the local wording the wakeup itself will use.
+  const when = armed.scheduledFor && new Date(armed.scheduledFor).toLocaleString()
+  const awaited = armed.waitingFor ?? []
+  const awaiting = awaited.length
+    ? `${awaited.join(', ')} ${awaited.length > 1 ? 'land' : 'lands'}`
+    : ''
+  console.log(
+    awaiting
+      ? `wakeup armed for when ${awaiting}${when ? `, or ${when} at the latest` : ''}`
+      : `wakeup armed for ${when}`,
+  )
 }
 
 // --interval (minutes) makes a relaunch repeat: each occurrence arms the next one
