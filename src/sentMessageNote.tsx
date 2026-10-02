@@ -1,7 +1,6 @@
-import { MessageAttachments } from './attachments'
-import { MessageText } from './messageText'
+import { MessageNote } from './messageNote'
 import { useTaskLink } from './taskLinkContext'
-import { TaskChip, TimelineNote } from './timelineNote'
+import { TaskChip } from './timelineNote'
 import type { MessageItem } from './types'
 
 // A message another task put in this one's conversation — its launch brief, a
@@ -24,29 +23,8 @@ export function SentMessageNote({
   openOn?: unknown
 }) {
   const current = useTaskLink()(sender, slug)
-  const files = item.attachments ?? []
-  const hasBody = !!item.text || files.length > 0
   return (
-    <TimelineNote
-      at={item.at}
-      variant={item.queued ? 'message-queued' : undefined}
-      detail={
-        hasBody
-          ? {
-              label: 'message',
-              openOn,
-              body: (
-                <>
-                  <MessageText text={item.text} itemId={item.id} />
-                  {files.length > 0 && (
-                    <MessageAttachments attachments={files} slug={slug} />
-                  )}
-                </>
-              ),
-            }
-          : undefined
-      }
-    >
+    <MessageNote item={item} slug={slug} openOn={openOn}>
       received message from{' '}
       <TaskChip
         id={sender}
@@ -54,6 +32,6 @@ export function SentMessageNote({
         title={current?.title || sender}
         status={current?.status}
       />
-    </TimelineNote>
+    </MessageNote>
   )
 }
