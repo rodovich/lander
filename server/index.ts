@@ -60,7 +60,9 @@ import {
   applyRetryRecovery,
   applyDueMessages,
   attributedPrompt,
-  resumePrompt,
+  wakeupNotification,
+  INTERRUPTED_NOTIFICATION,
+  pushEventPrompt,
   taskSessionId,
   setTaskSessionId,
   taskTurnContext,
@@ -1159,22 +1161,26 @@ async function launchTask(
       new Date(Date.parse(at) - 1).toISOString(),
       by,
     )
-    pushEventItem(t, { eventKind: 'launched', title: t.title }, at)
     t.status = 'riding'
     t.updatedAt = at
     // A task that armed a wakeup with `lander ride` has already run its opening
-    // turn, so nothing is queued to wake it — give the agent a prompt announcing it's
-    // back. A task scheduled at creation (`new --date`) still has its opening
-    // message queued and drives that instead, so skip the synthetic prompt. The
-    // human's Launch button fired no trigger: it is the human telling the task
-    // to proceed, in their own voice.
-    if (everRan && !(t.queued && t.queued.length)) {
-      const text =
-        trigger.kind === 'manual'
-          ? 'go ahead'
-          : resumePrompt(at, fired ? landed : undefined)
-      pushUserItem(t, text, at)
-      ;(t.queued ??= []).push(text)
+    // turn, so nothing is queued to wake it — lander notifies it of the trigger
+    // that fired, under a 'notified' event that carries the notification. A task
+    // scheduled at creation (`new --date`) still has its opening message queued
+    // and drives that instead, so it records a plain launch. The human's Launch
+    // button fired no trigger: it is the human telling the task to proceed, in
+    // their own voice.
+    const prompted = everRan && !(t.queued && t.queued.length)
+    if (prompted && trigger.kind !== 'manual') {
+      const { text, from } = wakeupNotification(at, fired ? landed : undefined)
+      const event = pushEventItem(t, { eventKind: 'notified', title: t.title }, at)
+      ;(t.queued ??= []).push(attributedPrompt(pushEventPrompt(t, event, text, at, from)))
+    } else {
+      pushEventItem(t, { eventKind: 'launched', title: t.title }, at)
+      if (prompted) {
+        pushUserItem(t, 'go ahead', at)
+        ;(t.queued ??= []).push('go ahead')
+      }
     }
     go = true
   }, () => {
@@ -4261,9 +4267,11 @@ export async function recoverQueues(): Promise<void> {
         if (interrupted) {
           if (everRan) {
             const at = new Date().toISOString()
-            const text = `Resumed at ${new Date(at).toLocaleString()} after the previous run was interrupted.`
-            pushUserItem(t, text, at)
-            ;(t.queued ??= []).push(text)
+            const { text, from } = INTERRUPTED_NOTIFICATION
+            const event = pushEventItem(t, { eventKind: 'notified', title: t.title }, at)
+            ;(t.queued ??= []).push(
+              attributedPrompt(pushEventPrompt(t, event, text, at, from)),
+            )
             t.updatedAt = at
           } else {
             // The opening run died before any reply. Replay the original opening

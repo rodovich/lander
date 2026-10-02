@@ -162,7 +162,7 @@ its own repo. Two mechanisms keep a reload clean:
   persisted cursor, so no output is lost and the agent is never re-run. Only a run
   no connected daemon still owns after the reconnect grace is treated as
   interrupted and **replayed** — pending flags cleared and the turn re-queued (a
-  "Resumed at … after the previous run was interrupted" nudge for one that already
+  "The previous ride was interrupted." notification for one that already
   replied, or the opening message replayed for one that never did). Tasks with
   leftover `queued` messages are drained the same way.
 

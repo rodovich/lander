@@ -4,7 +4,7 @@ import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { normalizeProjectPath, projectSlug } from './projects'
 import { observeWrites } from './store'
-import { attributedPrompt, type MessageItem } from './tasks'
+import { attributedPrompt, type EventItem, type Item, type MessageItem } from './tasks'
 
 // What a resumed session is told about why it is awake. Driven through one real
 // sweep over a seeded data dir, because launchTask decides the wording from
@@ -85,6 +85,18 @@ async function lastPrompt(id: string): Promise<string> {
   return last ? attributedPrompt(last) : ''
 }
 
+// The wakeup is told as lander's notification: a 'notified' event carrying the
+// prompt, which is lander's and not the human's.
+async function expectNotified(id: string, trigger: string): Promise<void> {
+  const items = (await readRaw(id)).items as Item[]
+  const prompt = items
+    .filter((i): i is MessageItem => i.kind === 'message' && i.role === 'user')
+    .at(-1)!
+  expect(prompt.from).toEqual({ lander: trigger })
+  const event = items.filter((i): i is EventItem => i.kind === 'event').at(-1)!
+  expect(event).toMatchObject({ eventKind: 'notified', message: prompt.id })
+}
+
 beforeAll(async () => {
   originalEnv = { ...process.env }
   projectDir = await mkdtemp(path.join(tmpdir(), 'lander-wakeup-project-'))
@@ -117,6 +129,7 @@ describe('the prompt a fired wakeup drives', () => {
 
     expect(await lastPrompt('awaits-one')).toBe('Task landed: await-one-landed')
     expect((await readRaw('awaits-one')).waitingFor).toBeUndefined()
+    await expectNotified('awaits-one', 'await')
   })
 
   it('pluralizes the noun alone, listing every awaited id', async () => {
@@ -131,12 +144,13 @@ describe('the prompt a fired wakeup drives', () => {
     )
   })
 
-  it('reads as the moment when the condition was a time', async () => {
+  it('states the date when the condition was a time', async () => {
     await seed('due-timer', { scheduledFor: AT })
 
     await launchScheduled()
 
-    expect(await lastPrompt('due-timer')).toMatch(/^Resumed at .*[^.]$/)
+    expect(await lastPrompt('due-timer')).toMatch(/^Current date: .*[^.]$/)
+    await expectNotified('due-timer', 'time')
   })
 
   // The OR fallback with only the timer due: the await condition was never met,
@@ -150,7 +164,8 @@ describe('the prompt a fired wakeup drives', () => {
 
     await launchScheduled()
 
-    expect(await lastPrompt('fallback-timer')).toMatch(/^Resumed at /)
+    expect(await lastPrompt('fallback-timer')).toMatch(/^Current date: /)
+    await expectNotified('fallback-timer', 'time')
     // Both arms are cleared by the launch, the unfired one included.
     expect((await readRaw('fallback-timer')).waitingFor).toBeUndefined()
   })
@@ -170,8 +185,12 @@ describe('the prompt a fired wakeup drives', () => {
     expect(res.status).toBe(200)
 
     expect(await lastPrompt('hand-launched')).toBe('go ahead')
-    const items = (await readRaw('hand-launched')).items as MessageItem[]
-    expect(items.at(-1)!.from).toBeUndefined()
+    const items = (await readRaw('hand-launched')).items as Item[]
+    expect(items.at(-1)).not.toHaveProperty('from')
+    // A plain launch, carrying nothing: the message stands as the human's.
+    const event = items.filter((i): i is EventItem => i.kind === 'event').at(-1)!
+    expect(event.eventKind).toBe('launched')
+    expect(event.message).toBeUndefined()
   })
 })
 

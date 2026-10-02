@@ -66,8 +66,8 @@ export function resolveLaunchDir({
 
 // Wait between CI polls, and the cap on how many times we do it. The interval
 // is deliberately realistic rather than short: every wakeup of an
-// already-ridden task pushes a synthetic "Resumed at …" USER item, so a tight
-// poll would write a wall of fake user turns. 12 attempts ≈ 1 hour ≈ 12 such
+// already-ridden task pushes a "Current date: …" notification and its event, so
+// a tight poll would write a wall of them. 12 attempts ≈ 1 hour ≈ 12 such
 // items, which is the noise budget that made it acceptable to defer "quieter
 // wakeups" to step 6 (where watch-ci actually motivates it).
 const WATCH_INTERVAL_MIN = 5

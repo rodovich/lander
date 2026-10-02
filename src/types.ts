@@ -20,7 +20,8 @@ export type TokenUsage = {
 export type Attachment = { id: string; name: string; mime: string; size: number }
 
 // The lifecycle event kinds carried by an event item (see EventItem): the task's
-// launch, a rename, a schedule/await, a `relaunch` divider, or a crossing into/
+// launch, a rename, a schedule/await, a `relaunch` divider, lander notifying the
+// task why it woke, or a crossing into/
 // out of the wedged (needs the user) or terminal landed state.
 export type EventKind =
   | 'launched'
@@ -32,6 +33,7 @@ export type EventKind =
   | 'unlanded'
   | 'renamed'
   | 'relaunched'
+  | 'notified'
 
 // One option in a choice ask. `at` schedules the answer's delivery for that time
 // (e.g. "retry when the limit resets"); `value` + `editable` prefill a text the
@@ -120,10 +122,12 @@ export type MessageItem = ItemCommon & {
   text: string
   // Who spoke, when it was not the task's human: the hook on a `hook` message,
   // or on a `user` message the task that launched, messaged, or `--notify`-woke
-  // this one — or this task itself, briefing its next session in a relaunch.
+  // this one — or this task itself, briefing its next session in a relaunch —
+  // or lander, notifying the task why it woke.
   from?:
     | { hook: string; path: string; fireId: string }
     | { task: string; via: 'launch' | 'send' | 'notify' | 'relaunch' }
+    | { lander: 'time' | 'await' | 'restart' }
   attachments?: Attachment[]
   // Set on a user message once a queued batch delivers it: the ride that
   // consumed it. Absent on converted history.
@@ -159,7 +163,8 @@ export type EventItem = ItemCommon & {
   title?: string
   scheduledFor?: string
   awaiting?: { id: string; title: string }[]
-  // The user item this event delivered (a relaunch's brief), told inside the
+  // The user item this event delivered (a relaunch's brief, a wakeup's
+  // notification), told inside the
   // event's note rather than as the user speaking. See buildTimeline.
   message?: string
 }

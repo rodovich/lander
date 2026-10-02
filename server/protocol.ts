@@ -106,7 +106,7 @@ export type AttachmentRef = {
 //   `waitingUntil` — the display time of a wakeup timer the message cleared,
 //                    since an out-of-band revival supersedes a *timer*. Absent
 //                    when no timer was armed. Preformatted by the server, which
-//                    owns the "Resumed at …" wording this echoes; the daemon
+//                    owns the "Current date: …" wording this echoes; the daemon
 //                    only interpolates it.
 // An `await` is deliberately NOT represented: it survives an early revival (a
 // real dependency an unrelated message must not cancel), so there is nothing to

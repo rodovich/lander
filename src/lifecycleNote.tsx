@@ -16,6 +16,7 @@ export const EVENT_VERB: Record<EventItem['eventKind'], string> = {
   unlanded: 'un-landed',
   renamed: 'renamed',
   relaunched: 'relaunched',
+  notified: 'received a notification',
 }
 
 // A lifecycle event shown inline in the conversation: the task's name (as of
@@ -23,7 +24,8 @@ export const EVENT_VERB: Record<EventItem['eventKind'], string> = {
 // is set apart by weight/color (each verb wears its status color — launched
 // like riding, wedged, landed — plain otherwise). It rides the shared timeline
 // note, so it reads exactly like an attributed task action. An event that
-// delivered a message (a relaunch's brief) carries it behind its disclosure.
+// delivered a message (a relaunch's brief, a wakeup's notification) carries it
+// behind its disclosure.
 export function LifecycleNote({
   event,
   message,

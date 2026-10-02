@@ -62,6 +62,11 @@ export type TaskEvent = {
     // (the actual divider) — the same pattern a deferred `ride` shows as a
     // 'scheduled' then a 'launched'.
     | 'relaunched'
+    // A wakeup the task armed came due — a time, awaited tasks landing — or the
+    // server found its turn cut off by a restart: lander told it so, in the
+    // message the event carries. Not a 'launched': the task is only queued to
+    // ride, which no daemon may yet have taken up.
+    | 'notified'
   // The task's title at the time of the event. Absent on a launch/schedule event
   // until the first generated name amends it, and on events saved before titles
   // were captured.
@@ -506,15 +511,19 @@ export type TaskSender = {
   via: 'launch' | 'send' | 'notify' | 'relaunch'
 }
 
+// Lander itself, telling a task why it is awake: the time it set came, the
+// tasks it awaited landed, or a restart cut off its previous ride.
+export type LanderSender = { lander: 'time' | 'await' | 'restart' }
+
 // A prompt item as the agent receives it: a message from another task with its
 // sender named ahead of its words. Composed whenever the item is queued for a
 // turn — its first delivery, a retry, a replay after a restart — so the record
 // holds the words alone and `from` says who sent them. Plain text, so one
 // wording serves every provider; the queue is joined into one turn before any
-// flow sees it.
+// flow sees it. Lander's own notifications already say who they are from.
 export function attributedPrompt(m: {
   text: string
-  from?: HookSender | TaskSender
+  from?: HookSender | TaskSender | LanderSender
 }): string {
   if (!m.from || !('task' in m.from)) return m.text
   const { task, via } = m.from
@@ -540,11 +549,11 @@ export type MessageItem = ItemCommon & {
   role: 'user' | 'flow' | 'hook'
   text: string
   // Who spoke, when it was not the task's human: the hook on a `hook` message,
-  // or the task behind a `user` message another task put there. Carried rather
-  // than left to be parsed out of the attributed text: `path` is a hook's
-  // identity, and a body asking "did I already nudge this span" must not have
-  // to regex a display prefix.
-  from?: HookSender | TaskSender
+  // or on a `user` message the task that put it there, or lander telling the
+  // task why it woke. Carried rather than left to be parsed out of the
+  // attributed text: `path` is a hook's identity, and a body asking "did I
+  // already nudge this span" must not have to regex a display prefix.
+  from?: HookSender | TaskSender | LanderSender
   attachments?: Attachment[]
   // Set on a user message once a queued batch delivers it: the ride that consumed
   // it, making the batching visible. Absent on converted history.
@@ -575,9 +584,10 @@ export type EventItem = ItemCommon & {
   title?: string
   scheduledFor?: string
   awaiting?: { id: string; title: string }[]
-  // The id of the user item this event delivered — a relaunch's brief — which
-  // the timeline tells inside the event's note rather than as the user speaking.
-  // Set by pushEventPrompt in the mutation that writes both.
+  // The id of the user item this event delivered — a relaunch's brief, or the
+  // notification on a 'notified' (always present there) — which the timeline
+  // tells inside the event's note rather than as the user speaking. Set by
+  // pushEventPrompt in the mutation that writes both.
   message?: string
 }
 
@@ -696,7 +706,11 @@ export function pushUserItem(
   task: { items?: Item[] },
   text: string,
   at: string,
-  opts: { attachments?: Attachment[]; deliveredIn?: string; from?: TaskSender } = {},
+  opts: {
+    attachments?: Attachment[]
+    deliveredIn?: string
+    from?: TaskSender | LanderSender
+  } = {},
 ): MessageItem {
   const item: MessageItem = {
     id: nextItemId(task, at),
@@ -721,7 +735,7 @@ export function pushEventPrompt(
   event: EventItem,
   text: string,
   at: string,
-  from: TaskSender,
+  from: TaskSender | LanderSender,
 ): MessageItem {
   const item = pushUserItem(task, text, at, { from })
   event.message = item.id
@@ -1579,21 +1593,38 @@ export function applyDueMessages(
   }
 }
 
-// The prompt a wakeup drives into a task that has already run, which names the
-// condition that fired because that is the one thing the resumed session cannot
-// work out for itself: it remembers only its own last act.
+// The notification a wakeup drives into a task that has already run, which
+// names the condition that fired because that is the one thing the woken
+// session cannot work out for itself: it remembers only its own last act. Each
+// says what happened, never what the task is doing about it — it is queued to
+// ride, which no daemon may yet have taken up.
 //
-// Only the time arm carries a timestamp — for the others the moment is not the
-// condition that was met.
+// The time arm states the date, which the session matches against the time
+// `lander ride` printed when it armed; the moment is not the condition for the
+// others.
 //
 // Awaited tasks go in as bare ids: the client renders each as a chip carrying
 // the task's title as it stands when the conversation is read, so naming them
 // here would both duplicate that and freeze a title that can still change.
-export function resumePrompt(at: string, landed?: string[]): string {
-  if (!landed?.length) return `Resumed at ${new Date(at).toLocaleString()}`
+export function wakeupNotification(
+  at: string,
+  landed?: string[],
+): { text: string; from: LanderSender } {
+  if (!landed?.length)
+    return {
+      text: `Current date: ${new Date(at).toLocaleString()}`,
+      from: { lander: 'time' },
+    }
   const noun = landed.length > 1 ? 'Tasks' : 'Task'
-  return `${noun} landed: ${landed.join(', ')}`
+  return { text: `${noun} landed: ${landed.join(', ')}`, from: { lander: 'await' } }
 }
+
+// The notification a restart drives into a task whose turn it cut off after
+// the task had already replied once (recoverQueues).
+export const INTERRUPTED_NOTIFICATION = {
+  text: 'The previous ride was interrupted.',
+  from: { lander: 'restart' },
+} as const satisfies { text: string; from: LanderSender }
 
 // Arm a scheduled relaunch: stash a relaunch-flagged scheduled message whose own
 // `deliverAt`/`waitFor` trigger seals the session on delivery, and record a

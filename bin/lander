@@ -708,8 +708,8 @@ function conversationBlocks(items, { tools }) {
       // A hook's nudge drove the reply that follows it. Dropping it (it is
       // neither role `user` nor ride-attached) would show that reply with no
       // visible cause.
-      // A message another task sent is named by its sender, not the user, and
-      // a relaunch brief as the task's own.
+      // A message another task sent is named by its sender, not the user, a
+      // relaunch brief as the task's own, and a wakeup's notice as lander's.
       blocks.push({
         role:
           it.role === 'hook'
@@ -718,7 +718,9 @@ function conversationBlocks(items, { tools }) {
               ? 'relaunch'
               : it.from?.task
                 ? `from ${it.from.task}`
-                : 'user',
+                : it.from?.lander
+                  ? 'notification'
+                  : 'user',
         parts: [it.text ?? ''],
       })
     } else if (it.kind === 'hook') {

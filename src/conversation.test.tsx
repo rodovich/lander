@@ -197,6 +197,15 @@ describe('Conversation timeline dispatch', () => {
     expect(revealed).toContain('brief-words')
   })
 
+  it('folds a wakeup’s notification into its notified note', () => {
+    const notice = user('n1', 'Task landed: other', { from: { lander: 'await' } })
+    const items = [{ ...ev('e1', 'notified'), title: 'Fix the parser', message: 'n1' }, notice]
+    const html = render(baseTask({ items }))
+    expect(html).not.toContain('message-user')
+    expect(html).toContain('received a notification')
+    expect(html).not.toContain('Task landed')
+  })
+
   it('marks a queued follow-up bubble', () => {
     const html = render(
       baseTask({ items: [user('u1', 'later', { queued: true })] }),

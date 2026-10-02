@@ -115,6 +115,32 @@ describe('boot recovery leaves a deferred task to the scheduler', () => {
   })
 })
 
+// A turn the restart cut off, in a task that had already replied once: lander
+// tells the task so, as its notification rather than as the human speaking.
+describe('boot recovery notifies a task its ride was interrupted', () => {
+  it('records a notified event carrying lander’s notice', async () => {
+    await seed('boot-interrupted', {
+      queued: [],
+      items: [
+        { id: 'u0', at: AT, kind: 'message', role: 'user', text: 'opening' },
+        { id: 'f0', at: AT, rideId: 'r0', kind: 'message', role: 'flow', text: 'working' },
+      ],
+      rides: [{ id: 'r0', startedAt: AT }],
+    })
+
+    await recoverQueues()
+
+    await vi.waitFor(async () => {
+      const items = (await readRaw('boot-interrupted')).items as Record<string, unknown>[]
+      const notice = items.find((i) => i.text === 'The previous ride was interrupted.')
+      expect(notice).toMatchObject({ role: 'user', from: { lander: 'restart' } })
+      expect(items).toContainEqual(
+        expect.objectContaining({ eventKind: 'notified', message: notice!.id }),
+      )
+    })
+  })
+})
+
 // A restart is what strands a name in the first place — the naming child belongs
 // to the process it killed — so the boot that follows is the natural place to
 // try again.
