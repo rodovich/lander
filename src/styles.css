@@ -1244,7 +1244,7 @@ body {
 .attachment-preview-markdown {
   width: 100%;
   min-height: 0;
-  padding: 20px 28px;
+  padding: 20px 100px;
   overflow: auto;
   background: var(--bg);
   color: var(--fg);
