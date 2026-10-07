@@ -38,13 +38,15 @@ const render = (
   )
 
 describe('DetailHeader', () => {
-  it('renders the title, status, and the worktree line only when recorded', () => {
-    const html = render(baseTask({ status: 'wedged', worktree: 'wt-fix' }))
+  it('renders the title, status, and the branch line only when there is a branch', () => {
+    const html = render(baseTask({ status: 'wedged', branch: 'fix-parser' }))
     expect(html).toContain('Fix the parser')
     expect(html).toContain('task-status wedged')
-    expect(html).toContain('detail-worktree')
-    expect(html).toContain('wt-fix')
-    expect(render(baseTask())).not.toContain('detail-worktree')
+    expect(html).toContain('detail-branch')
+    expect(html).toContain('fix-parser')
+    expect(render(baseTask())).not.toContain('detail-branch')
+    // The legacy EnterWorktree name is no longer what the header shows.
+    expect(render(baseTask({ worktree: 'wt-fix' }))).not.toContain('wt-fix')
   })
 
   it('carries both copy buttons — the task id and the conversation', () => {

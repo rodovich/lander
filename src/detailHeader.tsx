@@ -136,10 +136,10 @@ export const DetailHeader = memo(function DetailHeader({
           <CopyConversationButton markdown={copyMarkdown} />
         </div>
       )}
-      {/* The task's recorded worktree — what its flow's worktree hooks stored,
-          never derived from its cwd, which only records where the shell stood
-          when the last turn ended. The project it's in is the navbar's. */}
-      {task.worktree && <div className="detail-worktree">{task.worktree}</div>}
+      {/* The branch checked out in the task's lander-managed worktree as of its
+          last turn — nothing while that worktree is detached, or for a task
+          that has none. The project it's in is the navbar's. */}
+      {task.branch && <div className="detail-branch">{task.branch}</div>}
       <div className="detail-meta">
         <span
           className={

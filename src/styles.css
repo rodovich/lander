@@ -1404,7 +1404,7 @@ body {
   flex-direction: column;
 }
 
-/* The title row, worktree line, and meta row are direct children stacked by the
+/* The title row, branch line, and meta row are direct children stacked by the
    column gap; none of them carry their own margins. */
 .detail-header {
   display: flex;
@@ -1420,7 +1420,7 @@ body {
   font-size: 20px;
 }
 
-.detail-worktree {
+.detail-branch {
   color: var(--muted);
   font-size: 12px;
   overflow: hidden;
