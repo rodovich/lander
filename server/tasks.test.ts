@@ -21,6 +21,7 @@ import {
   openRide,
   startRide,
   closeRide,
+  checkoutReleasable,
   nextItemId,
   pushUserItem,
   pushFlowItem,
@@ -937,6 +938,37 @@ describe('migrateArtifactsToAttachments', () => {
       surfaced: 0,
     })
     expect(host.attachments).toHaveLength(1)
+  })
+})
+
+describe('checkoutReleasable', () => {
+  const fire = { id: 'f1', trigger: 'landed', by: 'human', at: 't' } as PendingHook
+  const openRideOf: Ride[] = [{ id: 'r1', startedAt: 't' }]
+  const closedRide: Ride[] = [{ id: 'r1', startedAt: 't', endedAt: 't2', outcome: 'done' }]
+
+  it('releases a landed task once its fires are dispatched and nothing runs', () => {
+    expect(checkoutReleasable({ status: 'landed', rides: closedRide }, { archived: false })).toBe(true)
+    expect(
+      checkoutReleasable({ status: 'landed', pendingHooks: [fire] }, { archived: false }),
+    ).toBe(false)
+  })
+
+  it('never releases under a live run or an open ride', () => {
+    expect(checkoutReleasable({ status: 'landed', runId: 'r1' }, { archived: false })).toBe(false)
+    expect(checkoutReleasable({ status: 'landed', rides: openRideOf }, { archived: false })).toBe(false)
+    expect(checkoutReleasable({ status: 'landed', runId: 'r1' }, { archived: true })).toBe(false)
+  })
+
+  it('keeps the checkout of a task that is not landed', () => {
+    expect(checkoutReleasable({ status: 'riding' }, { archived: false })).toBe(false)
+    expect(checkoutReleasable({ status: 'wedged' }, { archived: false })).toBe(false)
+  })
+
+  it('releases an archived task whatever its status, ignoring dropped fires', () => {
+    expect(checkoutReleasable({ status: 'wedged' }, { archived: true })).toBe(true)
+    expect(
+      checkoutReleasable({ status: 'landed', pendingHooks: [fire] }, { archived: true }),
+    ).toBe(true)
   })
 })
 

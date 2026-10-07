@@ -71,6 +71,7 @@ import {
   startRide,
   closeRide,
   openRide,
+  checkoutReleasable,
   pushUserItem,
   pushFlowItem,
   pushEventItem,
@@ -451,6 +452,12 @@ type Task = {
   // worktree support their worktree flag; providers without it resume from
   // Task.cwd. Absent when the task isn't in a worktree.
   worktree?: string
+  // The branch checked out in the worktree the daemon manages for this task
+  // (`worktrees: true` in the lander config), as of the last run that reported
+  // one. Absent while that worktree's HEAD is detached, and on tasks that never
+  // ran in one. A name, never a path: the daemon derives the worktree's location
+  // from the project and task id.
+  branch?: string
   // The flow's opaque durable state, folded here from `state-patch` batches by
   // applyStatePatch. Convention (flow-inversion.md §Durable state): it records the
   // flow's decisions, identities, and user-visible progress — the PR number, the
@@ -979,6 +986,12 @@ async function reduceRunWs(
             at,
             askId: nextAskId(t, Date.parse(at)),
           })
+          // Only a done that reports its checkout says anything about the
+          // branch; a crash or a pre-spawn failure leaves the last one standing.
+          if (ev.msg.checkout) {
+            if (ev.msg.checkout.branch) t.branch = ev.msg.checkout.branch
+            else delete t.branch
+          }
         }).catch(() => {})
         // Tell the daemon it can drop this run's replay buffer.
         sendToDaemon({ type: 'ack', runId })
@@ -1100,6 +1113,35 @@ async function driveClaimedTask(project: Project, id: string): Promise<void> {
     })
   }
   if (continueDriving) void driveClaimedTask(project, id)
+  // A task that landed itself mid-turn kept its checkout for the rest of that
+  // turn; this is where it lets go.
+  else void releaseCheckoutIfAtRest(project, id)
+}
+
+// Tell the daemon a task is done with its checkout, once nothing can still
+// need it: landed (or archived), no drainer, no run or open ride — archive's
+// own test for a live run, which also holds across a server restart before
+// recovery reclaims the task — and, for a landed task, no hook fires still to
+// dispatch, so a `landed` hook reads the worktree rather than the root it
+// falls back to once the worktree is gone. Archive drops pending fires, so an
+// archived task waits on none.
+//
+// Called wherever one of those conditions can come true: a status write that
+// lands, an archive, a drainer exiting, a hook dispatch finishing. Sent for
+// every project — the daemon owns whether there is a worktree to remove.
+async function releaseCheckoutIfAtRest(project: Project, id: string): Promise<void> {
+  try {
+    if (running.has(taskKey(project.slug, id))) return
+    const live = await readTask(project.dataDir, id)
+    const task = live ?? (await readTask(project.archiveDir, id))
+    if (!task || !checkoutReleasable(task, { archived: !live })) return
+    sendToDaemon({ type: 'release-checkout', project: project.slug, taskId: id })
+  } catch (e) {
+    console.warn(
+      `release-checkout for ${project.slug}/${id} failed:`,
+      e instanceof Error ? e.message : String(e),
+    )
+  }
 }
 
 type LaunchTrigger =
@@ -1454,7 +1496,11 @@ async function sweepOnce(): Promise<void> {
         dispatched < MAX_HOOK_DISPATCHES_PER_SWEEP
       ) {
         dispatched++
-        void dispatchPendingHooks(project, id, { api })
+        // A landed task's checkout waits for its fires (releaseCheckoutIfAtRest),
+        // so each dispatch that finishes is a chance it can now go.
+        void dispatchPendingHooks(project, id, { api }).then(() =>
+          releaseCheckoutIfAtRest(project, id),
+        )
       }
       // Then launch a deferred task whose trigger has fired.
       if (running.has(taskKey(project.slug, id))) continue
@@ -1777,7 +1823,7 @@ app.get('/api/:project/hooks', async (c) => {
           ? [{ by }]
           : undefined
 
-  let checkout: Awaited<ReturnType<typeof taskCheckout>> = {}
+  let checkout: Awaited<ReturnType<typeof taskCheckout>> | {} = {}
   const taskId = c.req.query('task')
   if (taskId) {
     if (!TASK_ID.test(taskId)) return c.json({ error: 'invalid task id' }, 400)
@@ -3010,6 +3056,8 @@ app.patch('/api/:project/tasks/:id', async (c) => {
     }
 
     if (interrupt && runId) await interruptRun(project, id, runId)
+    if (changedStatusAt && body.status === 'landed')
+      void releaseCheckoutIfAtRest(project, id)
 
     const updated = await readTask(project.dataDir, id)
     return c.json(publicTask(updated ?? task))
@@ -3486,6 +3534,7 @@ app.post('/api/:project/tasks/:id/archive', async (c) => {
       return c.json({ error: 'task already exists in destination pool' }, 409)
     if (riding)
       return c.json({ error: 'cannot archive a task while it is riding' }, 409)
+    if (archived) void releaseCheckoutIfAtRest(project, id)
     return c.json(publicTask({ ...task!, archived }))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)

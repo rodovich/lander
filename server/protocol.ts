@@ -305,6 +305,10 @@ export type HooksResolveMessage = {
   // Which checkout to read, as cwd hints the daemon resolves the same way it
   // resolves a run's launch dir — so a task working in a worktree is answered
   // from that worktree's HEAD. All absent → the project root.
+  //
+  // `taskId` locates a checkout the daemon manages for the task, which it
+  // derives from the id rather than from any hint the task wrote.
+  taskId?: string
   flow?: string
   recordedCwd?: string
   worktree?: string
@@ -406,6 +410,17 @@ export type HookRunResultMessage = {
   report?: HookRunReport
 }
 
+// The task is done with its checkout — landed with nothing left to run against
+// it, or archived. The daemon removes the git worktree it manages for the task,
+// if there is one; it owns whether there is, so this is sent for any landing or
+// archive and is a no-op otherwise. Fire-and-forget: a lost one leaves a
+// worktree on disk, which is the whole cost.
+export type ReleaseCheckoutMessage = {
+  type: 'release-checkout'
+  project: string
+  taskId: string
+}
+
 export type ServerToDaemon =
   | StartRunMessage
   | ProjectGrantMessage
@@ -414,6 +429,7 @@ export type ServerToDaemon =
   | AckMessage
   | HooksResolveMessage
   | HookRunMessage
+  | ReleaseCheckoutMessage
 
 // ── Daemon → server ────────────────────────────────────────────────────────
 
@@ -506,6 +522,10 @@ export type DoneMessage = {
   // time rather than a wrong one, the way a turn that never reached its result
   // event reports no cost.
   durationMs?: number
+  // Present only for a run launched in a checkout the daemon manages for the
+  // task: the branch checked out there as the run ended, absent when HEAD is
+  // detached. A done without this field says nothing about the branch.
+  checkout?: { branch?: string }
 }
 
 // The provider session id learned for a task's first turn. For Claude today, the

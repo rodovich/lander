@@ -331,6 +331,7 @@ export async function resolveProjectHooks(input: {
   select?: HookSelector[]
   // The target's checkout, when resolving for a particular task: the tree that
   // matters is the one it is working in.
+  taskId?: string
   flow?: string
   recordedCwd?: string
   worktree?: string
@@ -349,6 +350,7 @@ export async function resolveProjectHooks(input: {
     store.trustRoot && isSafeTrustRoot(store.trustRoot) ? store.trustRoot : undefined
   const target = {
     project: project.slug,
+    ...(input.taskId ? { taskId: input.taskId } : {}),
     ...(input.flow ? { flow: input.flow } : {}),
     ...(input.recordedCwd ? { recordedCwd: input.recordedCwd } : {}),
     ...(input.worktree ? { worktree: input.worktree } : {}),
@@ -460,7 +462,12 @@ export function selectorsFor(trigger: string, by: string): HookSelector[] {
 export async function taskCheckout(
   project: Project,
   id: string,
-): Promise<{ flow?: string; recordedCwd?: string; worktree?: string } | null> {
+): Promise<{
+  taskId: string
+  flow?: string
+  recordedCwd?: string
+  worktree?: string
+} | null> {
   const task = await readTask<{
     flow?: string
     agent?: string
@@ -470,6 +477,7 @@ export async function taskCheckout(
   if (!task) return null
   const flow = task.flow ?? task.agent
   return {
+    taskId: id,
     ...(flow ? { flow } : {}),
     ...(task.cwd ? { recordedCwd: task.cwd } : {}),
     ...(task.worktree ? { worktree: task.worktree } : {}),

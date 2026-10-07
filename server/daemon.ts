@@ -180,7 +180,8 @@ export function sendToDaemon(msg: ServerToDaemon): boolean {
   } else if (
     msg.type === 'project-grant' ||
     msg.type === 'hooks-resolve' ||
-    msg.type === 'hook-run'
+    msg.type === 'hook-run' ||
+    msg.type === 'release-checkout'
   ) {
     // Not tied to a run, so there is no owner to follow — the primary answers.
     //

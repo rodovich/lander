@@ -423,6 +423,25 @@ export function recordRideEnded(
   })
 }
 
+// Whether a task is done with the checkout the daemon manages for it: landed or
+// archived, with no run or open ride, and — for a landed task — no hook fires
+// left to dispatch, since a `landed` hook reads the task's checkout. (Archive
+// drops pending fires, so an archived task waits on none.) The caller also
+// rules out a live drainer, which only it can see.
+export function checkoutReleasable(
+  task: {
+    status: string
+    runId?: string
+    rides?: Ride[]
+    pendingHooks?: PendingHook[]
+  },
+  { archived }: { archived: boolean },
+): boolean {
+  if (task.runId || openRide(task)) return false
+  if (archived) return true
+  return task.status === 'landed' && !task.pendingHooks?.length
+}
+
 // The task's currently-open ride (the last one without an `endedAt`), if any —
 // what a riding task is streaming into. Undefined when no run is in flight, and
 // for tasks saved before rides existed (no `rides` array).
