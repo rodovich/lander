@@ -30,6 +30,8 @@ npm run dev
 
 `npm run dev /path/to/project [/path/to/another ...]` serves those paths instead, for a one-off run. Either way, each path is resolved and the list is exported as `PROJECT_DIRS` (newline-separated); these are the working directories where agent subprocesses run. Then open the web UI on port 41414.
 
+A project entry with `"worktrees": true` gives each of its tasks a git worktree of its own at `<project>/.worktrees/<task id>`. The daemon creates it when a ride starts and finds none — detached at whatever the main checkout has checked out — and launches the agent inside it; it removes it, leaving branches alone, once the task is landed (and its hooks have run) or archived. Lander does nothing project-specific in either step: no dependency installs, no database setup or teardown. Add `.worktrees` to the project's `.gitignore`. The flag is re-read whenever the file changes, so turning it on or off applies from each task's next ride.
+
 Each project gets a URL slug from its path (e.g. `/Users/me/code/app` → `users-me-code-app`). The sidebar shows a dropdown to switch projects; choosing one pushes its slug into the URL (`/users-me-code-app/`). Visiting `/` redirects to the first project listed.
 
 ## Architecture

@@ -159,6 +159,34 @@ describe('Codex flow launch', () => {
     expect(launch.args.join('\0')).toContain('":workspace_roots"={".git"="write"}')
   })
 
+  it('makes a lander checkout the whole workspace and tells the agent about it', async () => {
+    const wt = '/repo/.worktrees/t1'
+    const launch = await runCodex(
+      { task: { allowEdits: true }, prompt: 'work', root: '/repo', cwd: wt, checkout: wt },
+      {
+        resolveGitCommonDir: (cwd) => {
+          expect(cwd).toBe(wt)
+          return '/repo/.git'
+        },
+      },
+    )
+    const joined = launch.args.join('\0')
+    expect(joined).toContain(permissionArgs(true, wt, '/repo/.git')[3])
+    expect(joined).not.toContain('workspace_roots={"/repo"=true}')
+    expect(launch.args.slice(-4, -2)).toEqual(['--cd', wt])
+    expect(launch.args.at(-1)).toContain(
+      'This task works in a git worktree lander created for it at `/repo/.worktrees/t1`',
+    )
+
+    const outside = await runCodex({
+      task: { allowEdits: true },
+      prompt: 'work',
+      root: '/repo',
+      cwd: '/repo',
+    })
+    expect(outside.args.at(-1)).not.toContain('git worktree lander created')
+  })
+
   it('grants editable worktrees access to the resolved Git common directory', async () => {
     const options: Partial<CodexFlowDeps> = {
       taskPromptTemplate: TASK_PROMPT_TEMPLATE,

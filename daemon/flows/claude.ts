@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
   addUsage,
+  checkoutNote,
   fillTaskPrompt,
   forwardableAccess,
   gitContext as realGitContext,
@@ -123,6 +124,9 @@ export function makeFlow({
       if (ctx.turn.revivedBlock) promptParts.push(ctx.turn.revivedBlock)
       if (sendContext) promptParts.push(block)
 
+      // The tree the agent works in, when that isn't the root: the task's
+      // checkout, or a worktree it re-enters through argv.
+      const docDir = ctx.task.checkout ?? ctx.task.effectiveCwd
       const args = [
         ...sessionArgs,
         // The worktree re-entry argv rides right after the session args and
@@ -138,9 +142,8 @@ export function makeFlow({
           // there. Deliberately NOT stateful: this channel is request-scoped, so
           // an edit takes effect on the next turn with nothing to remember.
           projectDoc:
-            (ctx.task.effectiveCwd !== undefined
-              ? readProjectDoc(ctx.task.effectiveCwd)
-              : undefined) ?? readProjectDoc(ctx.task.root),
+            (docDir !== undefined ? readProjectDoc(docDir) : undefined) ??
+            readProjectDoc(ctx.task.root),
         }),
       ]
 
@@ -354,7 +357,15 @@ function buildContextBlock(
   // A manual `cd` last turn recorded that dir as the task cwd, but this turn
   // launches at root and won't restore it. Fires only when the landed dir
   // differs; a worktree re-entry lands back where it was, so it stays silent.
-  if (ctx.task.recordedCwd && ctx.task.recordedCwd !== landed)
+  //
+  // In a lander-managed checkout it fires only for a dir inside the checkout.
+  // One outside it is where the task worked before it had a checkout — the
+  // root, for a task adopted into one — and "cd back" would send it there.
+  if (
+    ctx.task.recordedCwd &&
+    ctx.task.recordedCwd !== landed &&
+    (!ctx.task.checkout || isInside(ctx.task.checkout, ctx.task.recordedCwd))
+  )
     parts.push(
       manualCdHint(
         ctx.task.root,
@@ -373,12 +384,17 @@ function buildContextBlock(
   ].join('\n')
 }
 
+// Whether `p` is strictly below `dir`.
+function isInside(dir: string, p: string): boolean {
+  const rel = path.relative(dir, p)
+  return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel)
+}
+
 // Whether a path sits inside `<root>/.claude/worktrees/`, where EnterWorktree
 // roots the worktrees it creates — so a recorded cwd there is one the agent
 // walked into itself, by name or by hand.
 function insideWorktreesDir(root: string, p: string): boolean {
-  const rel = path.relative(path.join(root, '.claude', 'worktrees'), p)
-  return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel)
+  return isInside(path.join(root, '.claude', 'worktrees'), p)
 }
 
 // When the recorded dir was inside a worktree and the task has none recorded,
@@ -494,6 +510,7 @@ function buildClaudeArgs(
     [
       fillTaskPrompt(taskPromptTemplate, FORWARDABLE_POINTER, ctx.task.taskId),
       GIT_TIPS,
+      ...(ctx.task.checkout ? [checkoutNote(ctx.task.checkout, ctx.task.root)] : []),
       ...(projectDoc ? [projectDocBlock(projectDoc)] : []),
     ].join('\n\n'),
     '--output-format',

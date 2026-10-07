@@ -28,15 +28,23 @@ import type {
   HookRunMessage,
   ProjectGrantMessage,
   RegisterMessage,
+  ReleaseCheckoutMessage,
   TelemetryMessage,
 } from '../server/protocol'
 import { createReply, type ReplyBody, type ReplyMessage } from './reply'
 import { taskApiHeaders } from './task-api'
 import { gitExec, resolveHooks } from './hooks'
 import { createHookRuns, runHook } from './hook-run'
-import { statSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
+import { createProjectOptions } from './config'
+import {
+  checkoutPath,
+  createTaskLocks,
+  ensureCheckout,
+  removeCheckout,
+} from './checkout'
 import { homedir } from 'node:os'
-import { createRunManager, type RunManagerMessage } from './run'
+import { createRunManager, type RunManagerMessage, type RunPaths } from './run'
 import { createDrain } from './drain'
 import { createWakeHold } from './power'
 import {
@@ -179,18 +187,69 @@ function isDir(p: string): boolean {
   }
 }
 
+// Per-project options from the lander config, re-read when the file changes —
+// so turning a project's worktrees on or off applies from its next ride.
+const projectOptions = createProjectOptions()
+
+// Create and remove for one task's checkout never interleave.
+const checkoutLock = createTaskLocks()
+const checkoutKey = (project: string, taskId: string) => `${project}\0${taskId}`
+
+// Create the task's checkout before its run spawns, when the run launches in
+// one. Undefined (nothing to wait for) otherwise.
+function prepareRun(msg: StartRunMessage, paths: RunPaths): Promise<void> | undefined {
+  if (!paths.checkout) return undefined
+  return checkoutLock(checkoutKey(msg.project, msg.taskId), async () => {
+    await ensureCheckout(paths.root, msg.taskId)
+  })
+}
+
+// Removals in progress, counted by the drain like runs and hook hosts: a
+// daemon on its way out must not exit halfway through `git worktree remove`.
+let releasesHeld = 0
+
+function releaseCheckout(msg: ReleaseCheckoutMessage): void {
+  const root = pathBySlug.get(msg.project)
+  if (!root) return
+  // Whatever the config says now: the path is ours either way, and turning a
+  // project's worktrees off must not strand the ones it already has.
+  releasesHeld++
+  void checkoutLock(checkoutKey(msg.project, msg.taskId), () =>
+    removeCheckout(root, msg.taskId),
+  )
+    .then((removed) => {
+      if (removed) console.log(`removed worktree for ${msg.project}/${msg.taskId}`)
+    })
+    .catch((e) => {
+      console.error(
+        `could not remove worktree for ${msg.project}/${msg.taskId}:`,
+        e instanceof Error ? e.message : String(e),
+      )
+    })
+    .finally(() => {
+      releasesHeld--
+      drain.check()
+    })
+}
+
 // Resolve a start-run's launch directories from the project slug + cwd hints. The
 // cwd rule (launch at root + re-enter a worktree, or resume from the recorded cwd)
 // belongs to the flow, and
 // the daemon just launches where it says, threading the re-entry argv + landed
 // dir on to the host. It runs here rather than in the host because it stats
 // directories on the daemon's own filesystem to make the call.
-function resolveRunPaths(
-  msg: StartRunMessage,
-  caps: ProviderCaps,
-): { root: string; cwd: string; reentryArgs: string[]; effectiveCwd?: string } {
+//
+// A project that enables worktrees overrides all of that: the run launches in
+// the task's own checkout, whatever the flow would have chosen (prepareRun
+// creates it first). That is daemon policy, not a provider's, so the flows'
+// resolvers never see it.
+function resolveRunPaths(msg: StartRunMessage, caps: ProviderCaps): RunPaths {
   const root = pathBySlug.get(msg.project)
   if (!root) throw new Error(`daemon serves no project for slug ${msg.project}`)
+  if (projectOptions.worktrees(root)) {
+    const checkout = checkoutPath(root, msg.taskId)
+    return { root, cwd: checkout, reentryArgs: [], checkout }
+  }
   const launch = caps.resolveLaunchDir({
     root,
     recordedCwd: msg.recordedCwd,
@@ -222,13 +281,19 @@ function resolveRunPaths(
 // directory being under the project root does not make it the project's tree.
 function resolveHooksCwd(
   project: string,
-  hints: { flow?: string; recordedCwd?: string; worktree?: string },
+  hints: { taskId?: string; flow?: string; recordedCwd?: string; worktree?: string },
 ): {
   root: string
   cwd: string
 } {
   const root = pathBySlug.get(project)
   if (!root) throw new Error(`daemon serves no project for slug ${project}`)
+  // The task's own checkout, while there is one to read — which is why a
+  // landed task's checkout outlives its pending `landed` fires.
+  if (hints.taskId && projectOptions.worktrees(root)) {
+    const checkout = checkoutPath(root, hints.taskId)
+    if (existsSync(path.join(checkout, '.git'))) return { root, cwd: checkout }
+  }
   const caps = hints.flow ? CAPS[hints.flow] : undefined
   if (!caps) return { root, cwd: root }
   const launch = caps.resolveLaunchDir({
@@ -308,6 +373,7 @@ const wake = createWakeHold()
 const runManager = createRunManager({
   caps: CAPS,
   resolveRunPaths,
+  prepare: prepareRun,
   send,
   // Point LANDER_FILES_DIR at the task's persistent store every turn, so a file
   // attached on an earlier turn stays reachable via `lander attachment cat/ls`.
@@ -338,7 +404,7 @@ const runManager = createRunManager({
 const hookRuns = createHookRuns()
 
 const drain = createDrain({
-  runsHeld: () => runManager.size() + hookRuns.held(),
+  runsHeld: () => runManager.size() + hookRuns.held() + releasesHeld,
   exit: () => {
     console.log('drained; exiting for handoff')
     process.exit(0)
@@ -398,6 +464,9 @@ function onMessage(raw: string): void {
       return
     case 'hook-run':
       return runHookFire(msg)
+    // Taken while draining too: it spawns no run, and the drain waits for it.
+    case 'release-checkout':
+      return releaseCheckout(msg)
   }
 }
 
@@ -488,7 +557,10 @@ function runHookFire(msg: HookRunMessage): void {
     // are asked to tolerate.
     if (hookRuns.has(msg.fireId))
       return { ok: true, report: { outcome: 'already-running', reports: [] } }
-    const { root, cwd } = resolveHooksCwd(msg.project, msg.target)
+    const { root, cwd } = resolveHooksCwd(msg.project, {
+      ...msg.target,
+      taskId: msg.target.id,
+    })
     // Registered before the spawn, and synchronously with this message, so a
     // shutdown in the gap still counts it and a duplicate fire finds it held;
     // the real kill replaces this as soon as the host exists.

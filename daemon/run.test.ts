@@ -545,6 +545,82 @@ describe('daemon run manager', () => {
     expect(h.hosts).toHaveLength(0)
   })
 
+  describe('a run launched in the task’s checkout', () => {
+    const checkoutPaths = () => ({
+      root: '/repo',
+      cwd: '/repo/.worktrees/task-1',
+      reentryArgs: [],
+      checkout: '/repo/.worktrees/task-1',
+    })
+
+    it('waits for prepare, then launches there and reports its branch on done', async () => {
+      let release!: () => void
+      const prepare = vi.fn(() => new Promise<void>((r) => (release = r)))
+      const h = harness({
+        resolveRunPaths: checkoutPaths,
+        prepare,
+        checkoutBranch: (dir) => (dir === '/repo/.worktrees/task-1' ? 'feature' : undefined),
+      })
+      h.manager.startRun(makeStart())
+      expect(prepare).toHaveBeenCalledWith(
+        expect.objectContaining({ taskId: 'task-1' }),
+        expect.objectContaining({ checkout: '/repo/.worktrees/task-1' }),
+      )
+      expect(h.hosts).toHaveLength(0)
+      expect(h.manager.heldRunIds()).toEqual(['run-1'])
+      release()
+      await vi.waitFor(() => expect(h.hosts).toHaveLength(1))
+      const input = hostInputOf(h.hosts[0])
+      expect(input.cwd).toBe('/repo/.worktrees/task-1')
+      expect(input.checkout).toBe('/repo/.worktrees/task-1')
+      push(h.hosts[0], { kind: 'done', exitCode: 0, stderr: '' })
+      expect(h.messages.at(-1)).toMatchObject({
+        type: 'done',
+        checkout: { branch: 'feature' },
+      })
+    })
+
+    it('reports a detached checkout as one with no branch', () => {
+      const h = harness({
+        resolveRunPaths: checkoutPaths,
+        prepare: () => undefined,
+        checkoutBranch: () => undefined,
+      })
+      h.manager.startRun(makeStart())
+      push(h.hosts[0], { kind: 'done', exitCode: 0, stderr: '' })
+      expect(h.messages.at(-1)).toMatchObject({ type: 'done', checkout: {} })
+    })
+
+    it('says nothing about a checkout for a run outside one', () => {
+      const h = harness()
+      h.manager.startRun(makeStart())
+      push(h.hosts[0], { kind: 'done', exitCode: 0, stderr: '' })
+      expect(h.messages.at(-1)).not.toHaveProperty('checkout')
+    })
+
+    it('fails the run, naming the worktree, when prepare rejects', async () => {
+      const onEmpty = vi.fn()
+      const h = harness({
+        resolveRunPaths: checkoutPaths,
+        prepare: () => Promise.reject(new Error('not a git worktree')),
+        onEmpty,
+      })
+      h.manager.startRun(makeStart())
+      await vi.waitFor(() =>
+        expect(h.messages).toContainEqual(
+          expect.objectContaining({
+            type: 'done',
+            exitCode: 1,
+            stderr: 'failed to prepare the task’s worktree: not a git worktree',
+          }),
+        ),
+      )
+      expect(h.hosts).toHaveLength(0)
+      expect(h.manager.size()).toBe(0)
+      expect(onEmpty).toHaveBeenCalledTimes(1)
+    })
+  })
+
   describe('a run still before its spawn', () => {
     function gated(fail = false) {
       let release!: () => void

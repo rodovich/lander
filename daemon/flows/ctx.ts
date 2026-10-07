@@ -147,6 +147,10 @@ export type CtxTask = {
   // Where the shell lands once reentryArgs apply. The git snapshot and the
   // manual-cd hint read from `effectiveCwd ?? cwd`.
   effectiveCwd?: string
+  // The git worktree the daemon created for this task and launched it in (so
+  // also `cwd`), when the project enables them. The flow's writable workspace,
+  // and what the agent is told about. Absent otherwise.
+  checkout?: string
   // The cwd the previous turn's shell ended in, for the manual-cd hint.
   recordedCwd?: string
   allowEdits: boolean
@@ -370,7 +374,7 @@ export function createCtxRuntime(
   input: HostInput,
   deps: CtxRuntimeDeps,
 ): CtxRuntime {
-  const { start, root, cwd, effectiveCwd, materialized } = input
+  const { start, root, cwd, effectiveCwd, checkout, materialized } = input
   const emitEvent = deps.emit
   const now = deps.now ?? (() => new Date().toISOString())
   const spawnFn = deps.spawn ?? nodeSpawn
@@ -938,6 +942,7 @@ export function createCtxRuntime(
       root,
       reentryArgs: input.reentryArgs ?? [],
       ...(effectiveCwd !== undefined ? { effectiveCwd } : {}),
+      ...(checkout !== undefined ? { checkout } : {}),
       ...(start.recordedCwd !== undefined
         ? { recordedCwd: start.recordedCwd }
         : {}),

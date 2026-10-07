@@ -113,6 +113,46 @@ describe('Claude flow', () => {
     expect(settings.includeGitInstructions).toBe(false)
   })
 
+  it('tells an agent in a lander checkout where it is, in the stable system prompt', async () => {
+    const wt = '/repo/.worktrees/t1'
+    const launch = await runClaude({
+      task: { allowEdits: true },
+      root: '/repo',
+      cwd: wt,
+      checkout: wt,
+    })
+    const systemPrompt = launch.args[launch.args.indexOf('--append-system-prompt') + 1]
+    expect(systemPrompt).toContain(
+      'This task works in a git worktree lander created for it at `/repo/.worktrees/t1`',
+    )
+    expect(systemPrompt).toContain('Commit on a branch you create')
+    // Spawned in the checkout, so acceptEdits covers it and nothing else.
+    expect(launch.cwd).toBe(wt)
+
+    const outside = await runClaude({ task: { allowEdits: true }, root: '/repo', cwd: '/repo' })
+    expect(
+      outside.args[outside.args.indexOf('--append-system-prompt') + 1],
+    ).not.toContain('git worktree lander created')
+  })
+
+  it('reads LANDER.md from the checkout, falling back to the root', async () => {
+    const wt = '/repo/.worktrees/t1'
+    const docs: Record<string, string> = { '/repo': 'ROOT DOC' }
+    const read = (dir: string) => docs[dir]
+    const fromRoot = await runClaude(
+      { task: { allowEdits: false }, root: '/repo', cwd: wt, checkout: wt },
+      { readProjectDoc: read },
+    )
+    expect(fromRoot.args.join('\n')).toContain('ROOT DOC')
+    docs[wt] = 'BRANCH DOC'
+    const fromCheckout = await runClaude(
+      { task: { allowEdits: false }, root: '/repo', cwd: wt, checkout: wt },
+      { readProjectDoc: read },
+    )
+    expect(fromCheckout.args.join('\n')).toContain('BRANCH DOC')
+    expect(fromCheckout.args.join('\n')).not.toContain('ROOT DOC')
+  })
+
   it('adds the files dir as a Read workspace root when one exists', async () => {
     const launch = await runClaude({
       task: { allowEdits: false },
@@ -312,6 +352,32 @@ describe('Claude flow', () => {
       })
       expect(context).toContain("previous turn's shell ended in sub")
       expect(context).not.toContain('EnterWorktree')
+    })
+
+    // An adopted task's last shell was at the root, outside the checkout it now
+    // launches in — "cd back" would send it to the main checkout.
+    it('stays silent in a lander checkout about a dir outside it', async () => {
+      const wt = '/repo/.worktrees/t1'
+      const { context } = await runClaude({
+        task: { allowEdits: false },
+        root: '/repo',
+        cwd: wt,
+        checkout: wt,
+        recordedCwd: '/repo',
+      })
+      expect(context).not.toContain("previous turn's shell ended")
+    })
+
+    it('still notes a cd within a lander checkout', async () => {
+      const wt = '/repo/.worktrees/t1'
+      const { context } = await runClaude({
+        task: { allowEdits: false },
+        root: '/repo',
+        cwd: wt,
+        checkout: wt,
+        recordedCwd: `${wt}/app`,
+      })
+      expect(context).toContain("previous turn's shell ended in .worktrees/t1/app")
     })
 
     // The task is already bound: the shell wandering within its worktree is an

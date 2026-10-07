@@ -17,6 +17,9 @@ export type HostInput = {
   // worktree path) — the dir the git snapshot reads from and the manual-cd hint
   // compares against. Absent when the shell stays in cwd.
   effectiveCwd?: string
+  // The git worktree the daemon manages for this task, when its project enables
+  // them — also `cwd`, since the run launches inside it. Absent otherwise.
+  checkout?: string
   // LANDER_FILES_DIR — the persistent per-task store, resolved daemon-side (a pure
   // function of project/task, with the just-materialized dir as a fallback).
   filesDir?: string

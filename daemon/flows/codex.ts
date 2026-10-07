@@ -23,6 +23,7 @@ import {
   readThreadUsage,
   reduceCodexStreamLine,
   shouldDeliver,
+  checkoutNote,
   taskManagementPrompt,
   type Usage,
 } from 'lander/flow'
@@ -98,7 +99,7 @@ export function makeFlow({
       // The commit is deferred to after the read loop, gated on the turn having
       // produced output. See deliveryDigest/shouldDeliver for why that ordering
       // is the whole safety argument.
-      const rendered = taskManagementPrompt(
+      const taskPrompt = taskManagementPrompt(
         {
           agent: 'codex',
           allowEdits: ctx.task.allowEdits,
@@ -111,6 +112,11 @@ export function makeFlow({
         taskPromptTemplate,
         ctx.task.taskId,
       )
+      // The checkout note rides with it, so a task adopted into a checkout gets
+      // it on its next turn through the digest change.
+      const rendered = ctx.task.checkout
+        ? `${taskPrompt}\n\n${checkoutNote(ctx.task.checkout, ctx.task.root)}`
+        : taskPrompt
       const digest = deliveryDigest(rendered)
       const sendTaskPrompt = shouldDeliver(
         sessionId,
@@ -131,10 +137,10 @@ export function makeFlow({
       // unlike claude — where this rides --append-system-prompt with no record
       // at all — it has to be tracked. Read from the tree the shell lands in,
       // falling back to root.
+      const docDir = ctx.task.checkout ?? ctx.task.effectiveCwd
       const doc =
-        (ctx.task.effectiveCwd !== undefined
-          ? readProjectDoc(ctx.task.effectiveCwd)
-          : undefined) ?? readProjectDoc(ctx.task.root)
+        (docDir !== undefined ? readProjectDoc(docDir) : undefined) ??
+        readProjectDoc(ctx.task.root)
       const docDigest = doc === undefined ? undefined : deliveryDigest(doc)
       const sendDoc =
         docDigest !== undefined &&
@@ -312,9 +318,11 @@ function buildCodexArgs(
 ): string[] {
   const configOverridesWithLanderDefaults = [
     ...configOverrides,
+    // The task's checkout is its whole workspace when it has one, matching
+    // Claude, whose edit boundary is the dir it is spawned in.
     ...codexPermissionConfigOverrides(
       ctx.task.allowEdits,
-      ctx.task.root,
+      ctx.task.checkout ?? ctx.task.root,
       gitCommonDir,
     ),
     ...codexShellEnvConfigOverrides(),

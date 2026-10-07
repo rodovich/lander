@@ -120,6 +120,19 @@ export function buildRevivedBlock(revived: RevivedMarker): string {
   return ['<task-revived>', sentence, '</task-revived>'].join('\n')
 }
 
+// What an agent working in a lander-managed checkout must know about it: where
+// it is, that it starts with no branch, and that it does not outlive the task.
+// Constant for the task's life, so it can ride Claude's byte-stable appended
+// system prompt.
+export function checkoutNote(checkout: string, root: string): string {
+  return (
+    `This task works in a git worktree lander created for it at \`${checkout}\`, ` +
+    `starting detached at whatever the project's main checkout (\`${root}\`) had ` +
+    'checked out. Commit on a branch you create: lander removes this worktree ' +
+    'when the task is landed or archived, and leaves branches alone.'
+  )
+}
+
 export function forwardableAccess(task: AgentTaskView): string {
   if (task.agent === 'codex') {
     const permissions = task.allowEdits

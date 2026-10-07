@@ -11,6 +11,7 @@ import type {
   UpdateMessage,
 } from '../server/protocol'
 import type { MaterializedFiles } from './attachments'
+import { checkoutBranch as readCheckoutBranch } from './checkout'
 import { ROOT } from './paths'
 import type { HostEvent, HostInput } from './host-protocol'
 import {
@@ -74,13 +75,28 @@ type Run = {
   dropTimer?: ReturnType<typeof setTimeout>
 }
 
+// Where a run launches, as the daemon resolved it. `checkout` is set when the
+// launch dir is the git worktree the daemon manages for the task (and is then
+// also `cwd`).
+export type RunPaths = {
+  root: string
+  cwd: string
+  reentryArgs: string[]
+  effectiveCwd?: string
+  checkout?: string
+}
+
 export type RunManagerOptions = {
   // Flow capabilities needed before starting a host, keyed by flow name.
   caps: Partial<Record<string, ProviderCaps>>
-  resolveRunPaths: (
-    msg: StartRunMessage,
-    caps: ProviderCaps,
-  ) => { root: string; cwd: string; reentryArgs: string[]; effectiveCwd?: string }
+  resolveRunPaths: (msg: StartRunMessage, caps: ProviderCaps) => RunPaths
+  // Readies the launch dir before spawn — creating the task's checkout — when
+  // there is something to do; undefined when there isn't, so the common path
+  // still spawns synchronously. A rejection fails the run with its message.
+  prepare?: (msg: StartRunMessage, paths: RunPaths) => Promise<void> | undefined
+  // The branch a run's checkout has checked out as it ends, for its done.
+  // Injectable for tests; reads the worktree's files by default.
+  checkoutBranch?: (dir: string) => string | undefined
   send: (msg: RunManagerMessage) => void
   // The deterministic per-task file store dir (pure function of the run's
   // project/task). Set as LANDER_FILES_DIR on EVERY turn so `lander attachment`
@@ -106,6 +122,8 @@ const DEFAULT_RUN_BUFFER_TTL_MS = 120_000
 export function createRunManager({
   caps,
   resolveRunPaths,
+  prepare,
+  checkoutBranch = readCheckoutBranch,
   send,
   resolveFilesDir,
   materialize,
@@ -145,23 +163,22 @@ export function createRunManager({
     }
     const activeCaps = known
 
-    let paths: {
-      root: string
-      cwd: string
-      reentryArgs: string[]
-      effectiveCwd?: string
-    }
+    let paths: RunPaths
+    let prepared: Promise<void> | undefined
     try {
       paths = resolveRunPaths(msg, activeCaps)
+      prepared = prepare?.(msg, paths)
     } catch (e) {
       done(msg.runId, 1, e instanceof Error ? e.message : String(e))
       return
     }
 
-    // The common case — no attachments — spawns synchronously. Only a turn that
-    // carries attachments takes the async detour to materialize them (fetch
-    // bytes, write LANDER_FILES_DIR, build the manifest block) before spawning.
-    if (!(msg.attachments?.length && materialize)) {
+    // The common case — no checkout to create, no attachments — spawns
+    // synchronously. Otherwise the run takes an async detour first: create the
+    // task's checkout, then materialize its attachments (fetch bytes, write
+    // LANDER_FILES_DIR, build the manifest block).
+    const attachments = !!(msg.attachments?.length && materialize)
+    if (!prepared && !attachments) {
       spawnRun(msg, activeCaps, paths, undefined)
       return
     }
@@ -170,20 +187,33 @@ export function createRunManager({
     // a re-register would leave the run out — so a server that restarted in the
     // window would declare it crashed while it went on to spawn.
     pending.add(msg.runId)
-    materialize(msg, { visionNative: activeCaps.visionNative }).then(
-      (materialized) => spawnAfterDetour(msg, activeCaps, paths, materialized),
-      (e) => {
-        preSpawnInterrupts.delete(msg.runId)
-        leavePending(msg.runId)
-        done(
-          msg.runId,
-          1,
-          `failed to materialize attachments: ${
-            e instanceof Error ? e.message : String(e)
-          }`,
-        )
-      },
-    )
+    const failBeforeSpawn = (what: string) => (e: unknown) => {
+      preSpawnInterrupts.delete(msg.runId)
+      leavePending(msg.runId)
+      done(msg.runId, 1, `${what}: ${e instanceof Error ? e.message : String(e)}`)
+    }
+    void (async () => {
+      try {
+        await prepared
+      } catch (e) {
+        return failBeforeSpawn('failed to prepare the task’s worktree')(e)
+      }
+      let materialized: MaterializedFiles | undefined
+      if (attachments)
+        try {
+          materialized = await materialize!(msg, {
+            visionNative: activeCaps.visionNative,
+          })
+        } catch (e) {
+          return failBeforeSpawn('failed to materialize attachments')(e)
+        }
+      spawnAfterDetour(msg, activeCaps, paths, materialized)
+    })()
+  }
+
+  function branchReport(dir: string): { branch?: string } {
+    const branch = checkoutBranch(dir)
+    return branch ? { branch } : {}
   }
 
   // A pending run that ends without spawning leaves nothing else to nudge the
@@ -212,12 +242,7 @@ export function createRunManager({
   function spawnRun(
     msg: StartRunMessage,
     activeCaps: ProviderCaps,
-    paths: {
-      root: string
-      cwd: string
-      reentryArgs: string[]
-      effectiveCwd?: string
-    },
+    paths: RunPaths,
     materialized: MaterializedFiles | undefined,
   ): void {
     // A human wedged the task while we were materializing — before a Run record
@@ -239,6 +264,7 @@ export function createRunManager({
       cwd: paths.cwd,
       reentryArgs: paths.reentryArgs,
       ...(paths.effectiveCwd ? { effectiveCwd: paths.effectiveCwd } : {}),
+      ...(paths.checkout ? { checkout: paths.checkout } : {}),
       filesDir,
       materialized,
     }
@@ -313,6 +339,9 @@ export function createRunManager({
         durationMs: Math.round(lastOutputAt - startedAt),
         ...(d.cause ? { cause: d.cause } : {}),
         ...(d.idleMs ? { idleMs: d.idleMs } : {}),
+        // Read here, like durationMs, so every way a run ends reports the branch
+        // its checkout was left on.
+        ...(paths.checkout ? { checkout: branchReport(paths.checkout) } : {}),
       }
       rec.done = doneMsg
       rec.dropTimer = setTimeout(() => {
