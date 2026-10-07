@@ -544,4 +544,75 @@ describe('daemon run manager', () => {
     // The interrupt landed before any host spawned.
     expect(h.hosts).toHaveLength(0)
   })
+
+  describe('a run still before its spawn', () => {
+    function gated(fail = false) {
+      let release!: () => void
+      const gate = new Promise<void>((r) => (release = r))
+      const onEmpty = vi.fn()
+      const h = harness({
+        onEmpty,
+        materialize: async () => {
+          await gate
+          if (fail) throw new Error('fetch failed')
+          return { filesDir: '/mat', images: [], manifestBlock: '' }
+        },
+      })
+      h.manager.startRun(
+        makeStart({
+          agent: 'codex',
+          attachments: [{ id: 'a', name: 'a', mime: 'text/plain', size: 1 }],
+        }),
+      )
+      return { ...h, release, onEmpty }
+    }
+
+    it('counts as held, so a drain waits and a re-register names it', async () => {
+      const h = gated()
+      expect(h.manager.size()).toBe(1)
+      expect(h.manager.heldRunIds()).toEqual(['run-1'])
+      h.release()
+      await vi.waitFor(() => expect(h.hosts).toHaveLength(1))
+      // Spawned: the Run record holds it now, once.
+      expect(h.manager.size()).toBe(1)
+      expect(h.manager.heldRunIds()).toEqual(['run-1'])
+      expect(h.onEmpty).not.toHaveBeenCalled()
+    })
+
+    it('ignores a resume-from rather than aborting it', async () => {
+      const h = gated()
+      h.manager.resumeFrom('run-1', 0)
+      expect(h.messages).toEqual([])
+      h.release()
+      await vi.waitFor(() => expect(h.hosts).toHaveLength(1))
+      push(h.hosts[0], { kind: 'done', exitCode: 0, stderr: '' })
+      expect(h.messages.map((m) => m.type)).toEqual(['done'])
+      expect(h.messages[0]).toMatchObject({ exitCode: 0 })
+    })
+
+    it('releases its hold when it fails before spawning', async () => {
+      const h = gated(true)
+      h.release()
+      await vi.waitFor(() =>
+        expect(h.messages).toContainEqual(
+          expect.objectContaining({ type: 'done', runId: 'run-1', exitCode: 1 }),
+        ),
+      )
+      expect(h.manager.size()).toBe(0)
+      expect(h.onEmpty).toHaveBeenCalledTimes(1)
+    })
+
+    it('releases its hold when interrupted before spawning', async () => {
+      const h = gated()
+      h.manager.interrupt('run-1')
+      h.release()
+      await vi.waitFor(() =>
+        expect(h.messages).toContainEqual(
+          expect.objectContaining({ type: 'done', interrupted: true }),
+        ),
+      )
+      expect(h.manager.size()).toBe(0)
+      expect(h.onEmpty).toHaveBeenCalledTimes(1)
+    })
+  })
 })

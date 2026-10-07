@@ -119,6 +119,9 @@ export function createRunManager({
   // materialization) — before a Run record exists to interrupt. Spawn checks this
   // and aborts cleanly instead of starting a child a human already wedged.
   const preSpawnInterrupts = new Set<string>()
+  // Runs accepted but not yet spawned (still in that async window). Counted as
+  // held by size() and heldRunIds() — see startRun.
+  const pending = new Set<string>()
 
   function done(
     runId: string,
@@ -162,10 +165,16 @@ export function createRunManager({
       spawnRun(msg, activeCaps, paths, undefined)
       return
     }
+    // Held from here until it spawns or settles: no Run record exists during
+    // the detour, and without this a drain would see nothing held and exit, and
+    // a re-register would leave the run out — so a server that restarted in the
+    // window would declare it crashed while it went on to spawn.
+    pending.add(msg.runId)
     materialize(msg, { visionNative: activeCaps.visionNative }).then(
       (materialized) => spawnRun(msg, activeCaps, paths, materialized),
       (e) => {
         preSpawnInterrupts.delete(msg.runId)
+        leavePending(msg.runId)
         done(
           msg.runId,
           1,
@@ -175,6 +184,12 @@ export function createRunManager({
         )
       },
     )
+  }
+
+  // A pending run that ends without spawning leaves nothing else to nudge the
+  // drain or the wake hold, so it does that itself.
+  function leavePending(runId: string): void {
+    if (pending.delete(runId)) onEmpty()
   }
 
   function spawnRun(
@@ -191,6 +206,7 @@ export function createRunManager({
     // A human wedged the task while we were materializing — before a Run record
     // existed to interrupt. Abort cleanly instead of spawning a child they killed.
     if (preSpawnInterrupts.delete(msg.runId)) {
+      leavePending(msg.runId)
       done(msg.runId, 0, '', true)
       return
     }
@@ -375,6 +391,8 @@ export function createRunManager({
       },
     }
     runs.set(msg.runId, rec)
+    // The record holds it now; no onEmpty, since nothing was released.
+    pending.delete(msg.runId)
 
     // Hand the host its input as one JSON line on stdin, then close the pipe.
     endStdin(host, JSON.stringify(hostInput) + '\n')
@@ -434,6 +452,9 @@ export function createRunManager({
   }
 
   function resumeFrom(runId: string, seq: number): void {
+    // Still before its spawn: nothing has been sent to replay, and its updates
+    // will stream from seq 1 once it starts.
+    if (pending.has(runId)) return
     const run = runs.get(runId)
     if (!run) {
       done(
@@ -477,9 +498,12 @@ export function createRunManager({
     failRun: (runId: string, stderr: string): void => {
       const rec = runs.get(runId)
       if (rec) rec.fail(stderr)
-      else done(runId, 1, stderr)
+      else {
+        leavePending(runId)
+        done(runId, 1, stderr)
+      }
     },
-    heldRunIds: () => [...runs.keys()],
-    size: () => runs.size,
+    heldRunIds: () => [...runs.keys(), ...pending],
+    size: () => runs.size + pending.size,
   }
 }
