@@ -602,6 +602,46 @@ describe('daemon run manager', () => {
       expect(h.onEmpty).toHaveBeenCalledTimes(1)
     })
 
+    it('releases its hold when failed by the daemon before spawning', () => {
+      const h = gated()
+      h.manager.failRun('run-1', 'daemon error: boom')
+      expect(h.manager.size()).toBe(0)
+      expect(h.onEmpty).toHaveBeenCalledTimes(1)
+      expect(h.messages).toContainEqual(
+        expect.objectContaining({ type: 'done', exitCode: 1, stderr: 'daemon error: boom' }),
+      )
+    })
+
+    it('settles, rather than crashing the daemon, when the spawn after it throws', async () => {
+      let release!: () => void
+      const gate = new Promise<void>((r) => (release = r))
+      const onEmpty = vi.fn()
+      const h = harness({
+        onEmpty,
+        spawnHost: () => {
+          throw new Error('no host')
+        },
+        materialize: async () => {
+          await gate
+          return { filesDir: '/mat', images: [], manifestBlock: '' }
+        },
+      })
+      h.manager.startRun(
+        makeStart({
+          agent: 'codex',
+          attachments: [{ id: 'a', name: 'a', mime: 'text/plain', size: 1 }],
+        }),
+      )
+      release()
+      await vi.waitFor(() =>
+        expect(h.messages).toContainEqual(
+          expect.objectContaining({ type: 'done', exitCode: 1, stderr: 'daemon error: no host' }),
+        ),
+      )
+      expect(h.manager.size()).toBe(0)
+      expect(onEmpty).toHaveBeenCalledTimes(1)
+    })
+
     it('releases its hold when interrupted before spawning', async () => {
       const h = gated()
       h.manager.interrupt('run-1')

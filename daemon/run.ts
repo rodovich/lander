@@ -171,7 +171,7 @@ export function createRunManager({
     // window would declare it crashed while it went on to spawn.
     pending.add(msg.runId)
     materialize(msg, { visionNative: activeCaps.visionNative }).then(
-      (materialized) => spawnRun(msg, activeCaps, paths, materialized),
+      (materialized) => spawnAfterDetour(msg, activeCaps, paths, materialized),
       (e) => {
         preSpawnInterrupts.delete(msg.runId)
         leavePending(msg.runId)
@@ -190,6 +190,23 @@ export function createRunManager({
   // drain or the wake hold, so it does that itself.
   function leavePending(runId: string): void {
     if (pending.delete(runId)) onEmpty()
+  }
+
+  // The spawn at the end of an async detour runs outside the daemon's per-message
+  // try/catch, where a throw would be an unhandled rejection that takes down the
+  // daemon and every run it holds. Settle this one run instead, through the same
+  // path a synchronous throw takes.
+  function spawnAfterDetour(
+    msg: StartRunMessage,
+    activeCaps: ProviderCaps,
+    paths: Parameters<typeof spawnRun>[2],
+    materialized: MaterializedFiles | undefined,
+  ): void {
+    try {
+      spawnRun(msg, activeCaps, paths, materialized)
+    } catch (e) {
+      failRun(msg.runId, `daemon error: ${e instanceof Error ? e.message : String(e)}`)
+    }
   }
 
   function spawnRun(
@@ -486,23 +503,25 @@ export function createRunManager({
     for (const run of runs.values()) run.kill()
   }
 
+  // Settle a run as failed. If the run was never registered (the throw beat
+  // runs.set), there is nothing holding it but a pending entry, so a plain done
+  // is correct and cannot bypass a gate that doesn't exist yet.
+  function failRun(runId: string, stderr: string): void {
+    const rec = runs.get(runId)
+    if (rec) rec.fail(stderr)
+    else {
+      leavePending(runId)
+      done(runId, 1, stderr)
+    }
+  }
+
   return {
     startRun,
     interrupt,
     resumeFrom,
     ack,
     killChildren,
-    // Settle a run as failed. If the run was never registered (the throw beat
-    // runs.set), there is nothing holding it, so a plain done is correct and
-    // cannot bypass a gate that doesn't exist yet.
-    failRun: (runId: string, stderr: string): void => {
-      const rec = runs.get(runId)
-      if (rec) rec.fail(stderr)
-      else {
-        leavePending(runId)
-        done(runId, 1, stderr)
-      }
-    },
+    failRun,
     heldRunIds: () => [...runs.keys(), ...pending],
     size: () => runs.size + pending.size,
   }
