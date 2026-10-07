@@ -2,14 +2,18 @@ import { concurrently } from 'concurrently'
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import { devProjectPaths } from './daemon/config.ts'
+import { SCRUBBED_ENV_KEYS } from './server/secrets.ts'
 
-const args = process.argv.slice(2)
-if (args.length === 0) {
-  console.error('usage: npm run dev /path/to/project [/path/to/another ...]')
+// The projects come from ~/.lander/config.json, or from argv for a one-off run
+// (argv wins). Per-project options are the daemon's to read from the same file.
+let projects
+try {
+  projects = devProjectPaths(process.argv.slice(2))
+} catch (e) {
+  console.error(e instanceof Error ? e.message : String(e))
   process.exit(1)
 }
-
-const projects = args.map((a) => path.resolve(a))
 console.log('projects:')
 for (const p of projects) console.log(`  ${p}`)
 
@@ -47,16 +51,7 @@ if (!uiToken) {
 // The delete is load-bearing, not tidiness: per-command env merges OVER
 // process.env and can only add, so an ambient value exported in the developer's
 // shell would otherwise reach all three commands and reinstate the leak.
-//
-// Duplicated from SCRUBBED_ENV_KEYS in server/secrets.ts — keep in sync. This
-// file runs under plain node, so it cannot import the TypeScript module.
-for (const key of [
-  'LANDER_UI_TOKEN',
-  'VITE_LANDER_UI_TOKEN',
-  'LANDER_DAEMON_TOKEN',
-]) {
-  delete process.env[key]
-}
+for (const key of SCRUBBED_ENV_KEYS) delete process.env[key]
 // The daemon authenticates its WS upgrade with LANDER_DAEMON_TOKEN and the
 // server accepts it. Same host/user, so the two share the one secret; splitting
 // them is worth doing alongside moving it out of a served project directory,

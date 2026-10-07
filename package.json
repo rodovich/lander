@@ -7,7 +7,7 @@
     "./flow": "./flow/index.ts"
   },
   "scripts": {
-    "dev": "node dev.mjs",
+    "dev": "node --import tsx dev.mjs",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

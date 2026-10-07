@@ -12,14 +12,25 @@ A web UI for spawning and managing coding agents against target project director
 
 ## Usage
 
-```sh
-npm install
-npm run dev /path/to/project [/path/to/another ...]
+List the projects lander serves in `~/.lander/config.json` (or the file `LANDER_CONFIG` names):
+
+```json
+{
+  "projects": [
+    { "path": "~/code/app" },
+    { "path": "~/code/other" }
+  ]
+}
 ```
 
-Each path is resolved and the list is exported as `PROJECT_DIRS` (newline-separated); these are the working directories where agent subprocesses run. Then open the web UI on port 41414.
+```sh
+npm install
+npm run dev
+```
 
-Each project gets a URL slug from its path (e.g. `/Users/me/code/app` → `users-me-code-app`). The sidebar shows a dropdown to switch projects; choosing one pushes its slug into the URL (`/users-me-code-app/`). Visiting `/` redirects to the first project passed on the command line.
+`npm run dev /path/to/project [/path/to/another ...]` serves those paths instead, for a one-off run. Either way, each path is resolved and the list is exported as `PROJECT_DIRS` (newline-separated); these are the working directories where agent subprocesses run. Then open the web UI on port 41414.
+
+Each project gets a URL slug from its path (e.g. `/Users/me/code/app` → `users-me-code-app`). The sidebar shows a dropdown to switch projects; choosing one pushes its slug into the URL (`/users-me-code-app/`). Visiting `/` redirects to the first project listed.
 
 ## Architecture
 
