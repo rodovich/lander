@@ -49,7 +49,7 @@ describe('Codex flow launch', () => {
           recordedCwd: '/repo/sub',
           isDir: yes,
         }),
-      ).toEqual({ cwd: '/repo/sub', reentryArgs: [] })
+      ).toEqual({ cwd: '/repo/sub' })
     })
 
     it('falls back to root when the recorded cwd is gone', async () => {
@@ -59,7 +59,7 @@ describe('Codex flow launch', () => {
           recordedCwd: '/repo/sub',
           isDir: () => false,
         }),
-      ).toEqual({ cwd: '/repo', reentryArgs: [] })
+      ).toEqual({ cwd: '/repo' })
     })
 
     it('falls back to root when the recorded cwd is root or absent', async () => {
@@ -69,10 +69,8 @@ describe('Codex flow launch', () => {
           recordedCwd: '/repo',
           isDir: yes,
         }),
-      ).toEqual({ cwd: '/repo', reentryArgs: [] })
-      expect(
-        resolveLaunchDir({ root: '/repo', isDir: yes }),
-      ).toEqual({ cwd: '/repo', reentryArgs: [] })
+      ).toEqual({ cwd: '/repo' })
+      expect(resolveLaunchDir({ root: '/repo', isDir: yes })).toEqual({ cwd: '/repo' })
     })
   })
 

@@ -160,7 +160,6 @@ export type DriverTurnFixture = {
   prompt?: string
   root: string
   cwd: string
-  effectiveCwd?: string
   checkout?: string
   recordedCwd?: string
   env?: Record<string, string>
@@ -185,7 +184,6 @@ export async function captureDriverTurn(
     input: {
       root: fixture.root,
       cwd: fixture.cwd,
-      effectiveCwd: fixture.effectiveCwd,
       ...(fixture.checkout !== undefined ? { checkout: fixture.checkout } : {}),
       filesDir: fixture.filesDir,
       materialized: fixture.images ? {

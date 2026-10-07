@@ -26,7 +26,6 @@ function meta(name: string, over: Partial<FlowMeta['capabilities']> = {}): FlowM
     description: `the ${name} flow`,
     driver: true,
     capabilities: {
-      worktrees: false,
       vision: 'read',
       grants: { task: false, project: false },
       usageSnapshot: false,

@@ -41,7 +41,7 @@ export function scratchDir({ git }: { git: boolean }): string {
 }
 
 // A `lander` stand-in for the Claude flow's hooks and allow rule. The real
-// binary would post the probe's cwd and worktree to a server; this one exits 0.
+// binary would post the probe's cwd to a server; this one exits 0.
 export function landerStub(): string {
   const dir = path.join(scratchDir({ git: false }), 'bin')
   mkdirSync(dir)

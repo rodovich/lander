@@ -28,6 +28,7 @@ import {
   type Usage,
 } from 'lander/flow'
 import type { Ctx, FlowMeta, ToolHandle, TurnResult } from './ctx'
+import type { AgentLaunchDir, AgentLaunchDirInput } from '../agent'
 
 export { codexOptionsFromEnv } from '../codex-config'
 
@@ -37,8 +38,6 @@ export const meta: FlowMeta = {
   description: 'Drive a task as a Codex conversation',
   driver: true,
   capabilities: {
-    // Codex has no worktree flag: it resumes from the recorded cwd instead.
-    worktrees: false,
     // Codex takes image paths on the CLI and delivers them to its own vision,
     // so the manifest block words them as already attached.
     vision: 'flag',
@@ -104,9 +103,6 @@ export function makeFlow({
           agent: 'codex',
           allowEdits: ctx.task.allowEdits,
           ...(ctx.task.allow !== undefined ? { allow: ctx.task.allow } : {}),
-          ...(ctx.task.worktree !== undefined
-            ? { worktree: ctx.task.worktree }
-            : {}),
           ...(sessionId !== undefined ? { sessionId } : {}),
         },
         taskPromptTemplate,
@@ -137,10 +133,10 @@ export function makeFlow({
       // unlike claude — where this rides --append-system-prompt with no record
       // at all — it has to be tracked. Read from the tree the shell lands in,
       // falling back to root.
-      const docDir = ctx.task.checkout ?? ctx.task.effectiveCwd
       const doc =
-        (docDir !== undefined ? readProjectDoc(docDir) : undefined) ??
-        readProjectDoc(ctx.task.root)
+        (ctx.task.checkout !== undefined
+          ? readProjectDoc(ctx.task.checkout)
+          : undefined) ?? readProjectDoc(ctx.task.root)
       const docDigest = doc === undefined ? undefined : deliveryDigest(doc)
       const sendDoc =
         docDigest !== undefined &&
@@ -153,16 +149,13 @@ export function makeFlow({
       if (sendDoc && doc !== undefined) promptParts.unshift(projectDocBlock(doc))
       if (sendTaskPrompt) promptParts.unshift(rendered)
 
-      const args = [
-        ...ctx.task.reentryArgs,
-        ...buildCodexArgs(ctx, promptParts.join('\n\n'), sessionId, {
-          profile,
-          configOverrides,
-          gitCommonDir: ctx.task.allowEdits
-            ? resolveGitCommonDir(ctx.task.cwd)
-            : undefined,
-        }),
-      ]
+      const args = buildCodexArgs(ctx, promptParts.join('\n\n'), sessionId, {
+        profile,
+        configOverrides,
+        gitCommonDir: ctx.task.allowEdits
+          ? resolveGitCommonDir(ctx.task.cwd)
+          : undefined,
+      })
 
       const child = ctx.spawn('codex', args, {
         env: {
@@ -446,17 +439,12 @@ export function resolveLaunchDir({
   root,
   recordedCwd,
   isDir,
-}: {
-  root: string
-  recordedCwd?: string
-  worktree?: string
-  isDir(p: string): boolean
-}): { cwd: string; reentryArgs: string[]; effectiveCwd?: string } {
-  // Codex has no worktree flag: it resumes from the cwd the previous turn ended
-  // in (relayed as --cd), falling back to root when that cwd is missing, gone, or
-  // already root. Its writable sandbox is pinned to the project root independent
-  // of --cd, so a wandered cwd never loses project access.
-  const cwd =
-    recordedCwd && recordedCwd !== root && isDir(recordedCwd) ? recordedCwd : root
-  return { cwd, reentryArgs: [] }
+}: AgentLaunchDirInput): AgentLaunchDir {
+  // It resumes from the cwd the previous turn ended in (relayed as --cd),
+  // falling back to root when that cwd is missing, gone, or already root. Its
+  // writable sandbox is pinned to the project root independent of --cd, so a
+  // wandered cwd never loses project access.
+  return {
+    cwd: recordedCwd && recordedCwd !== root && isDir(recordedCwd) ? recordedCwd : root,
+  }
 }

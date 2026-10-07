@@ -42,22 +42,17 @@ export type TelemetryItem =
 // (kept in sync by hand, like TelemetryItem above).
 //
 // `capabilities` is the announced replacement for the compiled-in adapter
-// booleans. Two of them are advisory at step 4 and deliberately have no
-// consumer — see docs/flow-inversion.md's step-4 as-built notes:
-//   - `worktrees` documents whether a flow can launch into a worktree, but the
-//     mechanics live in the flow's own resolveLaunchDir and the header badge now
-//     gates on the *datum* (`task.worktree` present), which only such a flow's
-//     worktree hooks produce — so there is no affordance to gate.
-//   - `rateLimitRetry` documents whether a flow can supply a reset timestamp,
-//     but the scheduled-retry option already gates on the *datum* (`resetsAt`
-//     present), which only such a flow can produce.
+// booleans. One of them is advisory at step 4 and deliberately has no consumer
+// — see docs/flow-inversion.md's step-4 as-built notes: `rateLimitRetry`
+// documents whether a flow can supply a reset timestamp, but the
+// scheduled-retry option already gates on the *datum* (`resetsAt` present),
+// which only such a flow can produce.
 export type FlowMeta = {
   api: number
   name: string
   description: string
   driver: boolean
   capabilities: {
-    worktrees: boolean
     vision: 'read' | 'flag'
     grants: { task: boolean; project: boolean }
     usageSnapshot: boolean
@@ -117,9 +112,10 @@ export type RevivedMarker = {
 }
 
 // Launch a run: like today's RunJob minus the file paths and the absolute cwd.
-// The server sends the project slug plus cwd hints (the recorded task cwd and the
-// worktree flag) and the daemon resolves the actual directory from the host paths
-// it owns (decision 8).
+// The server sends the project slug plus a cwd hint (the recorded task cwd) and
+// the daemon resolves the actual directory from the host paths it owns
+// (decision 8) — including the task's own checkout, which it derives from the
+// project and task id.
 export type StartRunMessage = {
   type: 'start-run'
   runId: string
@@ -138,8 +134,8 @@ export type StartRunMessage = {
   flowConfig?: Record<string, unknown>
   // The project slug; the daemon maps it to a host path.
   project: string
-  // cwd hints — the recorded task.cwd and whether the run wants its worktree. The
-  // daemon does the stat/fallback/worktree resolution locally.
+  // cwd hint — the recorded task.cwd. The daemon does the stat/fallback
+  // resolution locally.
   recordedCwd?: string
   // Set only on the first turn after an incoming message revived this task. The
   // daemon renders it as a small `<task-revived>` prompt block. One-shot: the
@@ -150,7 +146,6 @@ export type StartRunMessage = {
   task: {
     allowEdits: boolean
     allow?: string[]
-    worktree?: string
   }
   // The provider session to resume, when the task already has one (a prior turn
   // reported it — see SessionMessage). Absent on a task's first turn. For Claude
@@ -302,16 +297,15 @@ export type HooksResolveMessage = {
   requestId: string
   // The project slug; the daemon maps it to a host path.
   project: string
-  // Which checkout to read, as cwd hints the daemon resolves the same way it
-  // resolves a run's launch dir — so a task working in a worktree is answered
-  // from that worktree's HEAD. All absent → the project root.
+  // Which checkout to read, as hints the daemon resolves the same way it
+  // resolves a run's launch dir — so a task working in its own checkout is
+  // answered from that checkout's HEAD. All absent → the project root.
   //
   // `taskId` locates a checkout the daemon manages for the task, which it
   // derives from the id rather than from any hint the task wrote.
   taskId?: string
   flow?: string
   recordedCwd?: string
-  worktree?: string
   // The remote-tracking ref this project approves wholesale, when it designates
   // one. The server holds the setting; the daemon only reads the ref.
   trustRoot?: string
@@ -340,14 +334,13 @@ export type HookRunMessage = {
   // across retries, so an interrupted run's retry is recognizable as the same
   // fire on both sides.
   fireId: string
-  // The target, plus the cwd hints that locate its checkout — resolved the same
-  // way a run's launch dir is, so a task working in a worktree is answered from
-  // that worktree.
+  // The target, plus the hints that locate its checkout — resolved the same way
+  // a run's launch dir is, so a task working in its own checkout is answered
+  // from that checkout.
   target: {
     id: string
     flow?: string
     recordedCwd?: string
-    worktree?: string
   }
   trigger: {
     kind: string

@@ -72,7 +72,6 @@ export type StoredTask = {
   queued?: string[]
   updatedAt?: string
   cwd?: string
-  worktree?: boolean
 }
 
 const CROSSINGS = new Set(['landed', 'unlanded', 'wedged', 'unwedged'])

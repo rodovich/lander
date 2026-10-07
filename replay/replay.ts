@@ -104,7 +104,6 @@ export function buildReplayCtx(
       // task never left it, and a body that goes on to USE it reaches `spawn`,
       // which refuses and says so in the report.
       cwd: process.cwd(),
-      worktree: undefined,
       read: async () => c.record,
     },
     trigger: c.trigger,

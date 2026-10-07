@@ -334,7 +334,6 @@ export async function resolveProjectHooks(input: {
   taskId?: string
   flow?: string
   recordedCwd?: string
-  worktree?: string
   now?: () => string
   // The daemon round trip, injectable so the join, the tip ingestion and the
   // two-phase scan can be driven without one. Everything below is the half of
@@ -353,7 +352,6 @@ export async function resolveProjectHooks(input: {
     ...(input.taskId ? { taskId: input.taskId } : {}),
     ...(input.flow ? { flow: input.flow } : {}),
     ...(input.recordedCwd ? { recordedCwd: input.recordedCwd } : {}),
-    ...(input.worktree ? { worktree: input.worktree } : {}),
     ...(trustRoot ? { trustRoot } : {}),
   }
 
@@ -462,17 +460,11 @@ export function selectorsFor(trigger: string, by: string): HookSelector[] {
 export async function taskCheckout(
   project: Project,
   id: string,
-): Promise<{
-  taskId: string
-  flow?: string
-  recordedCwd?: string
-  worktree?: string
-} | null> {
+): Promise<{ taskId: string; flow?: string; recordedCwd?: string } | null> {
   const task = await readTask<{
     flow?: string
     agent?: string
     cwd?: string
-    worktree?: string
   }>(project.dataDir, id)
   if (!task) return null
   const flow = task.flow ?? task.agent
@@ -480,6 +472,5 @@ export async function taskCheckout(
     taskId: id,
     ...(flow ? { flow } : {}),
     ...(task.cwd ? { recordedCwd: task.cwd } : {}),
-    ...(task.worktree ? { worktree: task.worktree } : {}),
   }
 }

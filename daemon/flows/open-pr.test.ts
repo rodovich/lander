@@ -479,12 +479,12 @@ describe('open-pr — helpers', () => {
     expect(scriptedCheck(2, 'failed')).toBe('failed')
   })
 
-  it('launches into the recorded cwd with no re-entry argv', () => {
+  it('launches into the recorded cwd while it exists', () => {
     expect(
       resolveLaunchDir({ root: '/repo', recordedCwd: '/repo/sub', isDir: () => true }),
-    ).toEqual({ cwd: '/repo/sub', reentryArgs: [] })
+    ).toEqual({ cwd: '/repo/sub' })
     expect(
       resolveLaunchDir({ root: '/repo', recordedCwd: '/gone', isDir: () => false }),
-    ).toEqual({ cwd: '/repo', reentryArgs: [] })
+    ).toEqual({ cwd: '/repo' })
   })
 })

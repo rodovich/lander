@@ -20,6 +20,7 @@ import {
 import { fetchUsage, usageTelemetry } from '../../server/usage'
 import type { TelemetryItem } from '../../server/protocol'
 import type { Ctx, FlowMeta, GroupHandle, ToolHandle, TurnResult } from './ctx'
+import type { AgentLaunchDir, AgentLaunchDirInput } from '../agent'
 
 export const meta: FlowMeta = {
   api: 1,
@@ -27,7 +28,6 @@ export const meta: FlowMeta = {
   description: 'Drive a task as a Claude Code conversation',
   driver: true,
   capabilities: {
-    worktrees: true,
     // Claude has no vision flag on the CLI: it Reads an image by its local path,
     // which the manifest block words accordingly.
     vision: 'read',
@@ -124,26 +124,20 @@ export function makeFlow({
       if (ctx.turn.revivedBlock) promptParts.push(ctx.turn.revivedBlock)
       if (sendContext) promptParts.push(block)
 
-      // The tree the agent works in, when that isn't the root: the task's
-      // checkout, or a worktree it re-enters through argv.
-      const docDir = ctx.task.checkout ?? ctx.task.effectiveCwd
       const args = [
         ...sessionArgs,
-        // The worktree re-entry argv rides right after the session args and
-        // before the rest of the launch, which ends in `-- <prompt>` — so it must
-        // precede that terminator, not trail it.
-        ...ctx.task.reentryArgs,
         ...buildClaudeArgs(ctx, promptParts.join('\n\n'), {
           landerBin,
           taskPromptTemplate,
-          // Read from the tree the shell actually lands in, so a worktree task
-          // gets its own branch's conventions rather than the main checkout's;
-          // falls back to root when there is no worktree or none is present
-          // there. Deliberately NOT stateful: this channel is request-scoped, so
-          // an edit takes effect on the next turn with nothing to remember.
+          // Read from the task's checkout when it has one, so it gets its own
+          // branch's conventions rather than the main checkout's; falls back to
+          // root when there is none there. Deliberately NOT stateful: this
+          // channel is request-scoped, so an edit takes effect on the next turn
+          // with nothing to remember.
           projectDoc:
-            (docDir !== undefined ? readProjectDoc(docDir) : undefined) ??
-            readProjectDoc(ctx.task.root),
+            (ctx.task.checkout !== undefined
+              ? readProjectDoc(ctx.task.checkout)
+              : undefined) ?? readProjectDoc(ctx.task.root),
         }),
       ]
 
@@ -348,32 +342,23 @@ function buildContextBlock(
       'Tool permissions granted to this task (beyond the defaults): ' +
         ctx.task.allow.map((rule) => `\`${rule}\``).join(', '),
     )
-  // A worktree task launches from the project root and re-enters the worktree
-  // through argv, so read the snapshot from where the shell actually lands —
-  // reading root would describe the wrong branch and dirty tree.
-  const landed = ctx.task.effectiveCwd ?? ctx.task.cwd
+  // Read from where the shell starts — the task's checkout, when it has one.
+  const landed = ctx.task.cwd
   const git = gitContext(landed)
   if (git) parts.push(git)
-  // A manual `cd` last turn recorded that dir as the task cwd, but this turn
-  // launches at root and won't restore it. Fires only when the landed dir
-  // differs; a worktree re-entry lands back where it was, so it stays silent.
+  // The last turn's shell ended somewhere other than where this one launches.
+  // Fires only when the two differ.
   //
   // In a lander-managed checkout it fires only for a dir inside the checkout.
   // One outside it is where the task worked before it had a checkout — the
-  // root, for a task adopted into one — and "cd back" would send it there.
+  // root, for a task adopted into one — and pointing back there would send it
+  // out of its checkout.
   if (
     ctx.task.recordedCwd &&
     ctx.task.recordedCwd !== landed &&
     (!ctx.task.checkout || isInside(ctx.task.checkout, ctx.task.recordedCwd))
   )
-    parts.push(
-      manualCdHint(
-        ctx.task.root,
-        ctx.task.recordedCwd,
-        landed,
-        ctx.task.worktree,
-      ),
-    )
+    parts.push(manualCdHint(ctx.task.root, ctx.task.recordedCwd))
   return [
     '<task-context>',
     'Task state as of this message — background context from lander, not ' +
@@ -390,36 +375,15 @@ function isInside(dir: string, p: string): boolean {
   return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel)
 }
 
-// Whether a path sits inside `<root>/.claude/worktrees/`, where EnterWorktree
-// roots the worktrees it creates — so a recorded cwd there is one the agent
-// walked into itself, by name or by hand.
-function insideWorktreesDir(root: string, p: string): boolean {
-  return isInside(path.join(root, '.claude', 'worktrees'), p)
-}
-
-// When the recorded dir was inside a worktree and the task has none recorded,
-// the note also names the tool that makes the return automatic. A `cd` lives
-// only in the turn's own shell, while an EnterWorktree binding outlives it — so
-// an agent working a worktree over several turns re-walks in every time, and
-// lander, with nothing recorded, cannot show where it is.
-function manualCdHint(
-  root: string,
-  recordedCwd: string,
-  landed: string,
-  worktree: string | undefined,
-): string {
-  const rel = (p: string) => path.relative(root, p) || 'the project root'
-  const note =
-    `Note: your previous turn's shell ended in ${rel(recordedCwd)}, but this ` +
-    `turn starts at ${rel(landed)} (a manual cd isn't carried across turns) — ` +
-    `cd back if you still need to work there.`
-  if (worktree || !insideWorktreesDir(root, recordedCwd)) return note
+// Deliberately silent on HOW: whether a location carries into the next turn
+// depends on how the agent got there (a plain `cd` doesn't; Claude restores a
+// worktree it entered itself), and that has changed under us before.
+function manualCdHint(root: string, recordedCwd: string): string {
+  const rel = path.relative(root, recordedCwd) || 'the project root'
   return (
-    `${note} That is a git worktree you entered by hand. To keep working there ` +
-    `across turns, enter it with EnterWorktree instead, passing the worktree's ` +
-    "`path` — later turns then start inside it, and it shows against this task. " +
-    'Entering by path borrows the worktree rather than owning it, so exiting ' +
-    'will not remove it.'
+    `Note: your previous turn ended in ${rel}. Depending how you moved there, ` +
+    'that location may or may not have been preserved in this new turn. Check ' +
+    '`pwd` before relying on the location.'
   )
 }
 
@@ -477,16 +441,6 @@ function buildClaudeArgs(
           hooks: [{ type: 'command', command: `${landerBin} bash-guard` }],
         },
       ],
-      PostToolUse: [
-        {
-          matcher: 'EnterWorktree',
-          hooks: [{ type: 'command', command: `${landerBin} record-worktree` }],
-        },
-        {
-          matcher: 'ExitWorktree',
-          hooks: [{ type: 'command', command: `${landerBin} clear-worktree` }],
-        },
-      ],
       Stop: [{ hooks: [{ type: 'command', command: `${landerBin} record-cwd` }] }],
     },
   })
@@ -525,33 +479,19 @@ function buildClaudeArgs(
 // Where claude launches its next turn. Pure, and called by the DAEMON before the
 // host spawns — it stats directories on the daemon host to decide the spawn cwd,
 // which is why it is a module export rather than something onTurn does.
-export function resolveLaunchDir({
-  root,
-  worktree,
-}: {
-  root: string
-  recordedCwd?: string
-  worktree?: string
-  isDir(p: string): boolean
-}): { cwd: string; reentryArgs: string[]; effectiveCwd?: string } {
+export function resolveLaunchDir({ root }: AgentLaunchDirInput): AgentLaunchDir {
   // This flow launches every turn at the project root. Nothing in the CLI asks
   // for that — `claude` runs wherever it is spawned — but the dir it is spawned
   // in *becomes* its permission boundary and config-load root, so choosing the
   // root here is what holds those fixed instead of letting them follow the agent
-  // around. A worktree is re-entered through argv, landing the shell inside it
-  // while the launch dir stays root.
+  // around. (A project that enables worktrees launches in the task's checkout
+  // instead; the daemon decides that before this is consulted.)
   //
   // recordedCwd is deliberately ignored: a manual `cd` last turn does not become
   // this turn's root. Honoring it would make one stray cd permanent — the Stop
   // hook records where the shell ended and the launch would read it back, with
   // nothing in the loop to ever move it home again.
-  if (worktree)
-    return {
-      cwd: root,
-      reentryArgs: ['--worktree', worktree],
-      effectiveCwd: path.join(root, '.claude', 'worktrees', worktree),
-    }
-  return { cwd: root, reentryArgs: [] }
+  return { cwd: root }
 }
 
 // The other out-of-turn hook, and the reason the global usage panel's content

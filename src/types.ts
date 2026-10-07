@@ -319,17 +319,9 @@ export type Task = {
   // (see the server's Task.cwd). Absent until the first turn completes, or when
   // the task never left the project root.
   //
-  // NOT where the next turn starts, and not evidence of a worktree: a flow that
-  // launches at the project root ignores this entirely, so a `cd` recorded here
-  // is a place the agent visited, not a place it will be again. Read `worktree`
-  // for that.
+  // NOT where the next turn starts: a `cd` recorded here is a place the agent
+  // visited, not necessarily a place it will be again.
   cwd?: string
-  // The git worktree this task is in, by name under `.claude/worktrees/`, as the
-  // flow's worktree hooks recorded it — set only while the task is really bound
-  // to a worktree the next turn will land in, cleared on exit. Absent for a task
-  // at the project root, and for a flow whose capabilities.worktrees is false
-  // (it can never produce one).
-  worktree?: string
   // The branch checked out in the worktree lander manages for this task (in a
   // project whose config enables them), as of its last turn — what the detail
   // header shows. Absent while that worktree is detached, and for a task that
@@ -390,7 +382,6 @@ export type FlowMeta = {
   description: string
   driver: boolean
   capabilities: {
-    worktrees: boolean
     vision: 'read' | 'flag'
     grants: { task: boolean; project: boolean }
     usageSnapshot: boolean

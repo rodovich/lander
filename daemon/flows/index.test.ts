@@ -34,7 +34,6 @@ describe('provider caps', () => {
         description: 'an orchestration flow',
         driver: true,
         capabilities: {
-          worktrees: false,
           vision: 'read' as const,
           grants: { task: false, project: false },
           usageSnapshot: false,
@@ -51,7 +50,6 @@ describe('provider caps', () => {
       }),
       resolveLaunchDir: ({ recordedCwd, root }: AgentLaunchDirInput) => ({
         cwd: recordedCwd ?? root,
-        reentryArgs: [],
       }),
     }
     FLOW_MODULES.synthetic = synthetic
@@ -92,7 +90,7 @@ describe('provider caps', () => {
           recordedCwd: '/repo/sub',
           isDir: () => true,
         }),
-      ).toEqual({ cwd: '/repo/sub', reentryArgs: [] })
+      ).toEqual({ cwd: '/repo/sub' })
     } finally {
       delete FLOW_MODULES.synthetic
     }
@@ -102,24 +100,15 @@ describe('provider caps', () => {
     const caps = providerCaps()
     const isDir = (p: string) => p === '/repo/sub'
 
-    // Claude: root is the permission boundary; a worktree is re-entered by argv.
+    // Claude: root is the permission boundary, whatever the last turn's cwd.
     expect(
-      caps.claude.resolveLaunchDir({
-        root: '/repo',
-        worktree: 'feature',
-        recordedCwd: '/repo/sub',
-        isDir,
-      }),
-    ).toEqual(
-      { cwd: '/repo', reentryArgs: ['--worktree', 'feature'], effectiveCwd: '/repo/.claude/worktrees/feature' },
-    )
+      caps.claude.resolveLaunchDir({ root: '/repo', recordedCwd: '/repo/sub', isDir }),
+    ).toEqual({ cwd: '/repo' })
 
     // Codex: resumes from the recorded cwd when it still exists.
     expect(
       caps.codex.resolveLaunchDir({ root: '/repo', recordedCwd: '/repo/sub', isDir }),
-    ).toEqual(
-      { cwd: '/repo/sub', reentryArgs: [] },
-    )
+    ).toEqual({ cwd: '/repo/sub' })
   })
 
   it('declares rateLimitRetry iff the flow actually emits a reset timestamp', () => {

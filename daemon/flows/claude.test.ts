@@ -49,7 +49,6 @@ describe('Claude flow', () => {
       task: {
         allowEdits: true,
         allow: ['Bash(npm test)'],
-        worktree: 'feature',
       },
       prompt: '-starts-with-dash',
       root: '/repo',
@@ -58,9 +57,6 @@ describe('Claude flow', () => {
     })
 
     expect(launch.env).toMatchObject({ LANDER_TASK: 'task-1' })
-    // The --worktree re-entry argv is no longer built here — it moved to
-    // resolveLaunchDir().reentryArgs (asserted separately). buildLaunch ignores
-    // task.worktree entirely now.
     expect(launch.args).not.toContain('--worktree')
     // Edit access rides --permission-mode, not the allowlist: only Bash(lander:*)
     // and the per-task allow rule ride --allowedTools. git and other Bash follow
@@ -88,12 +84,7 @@ describe('Claude flow', () => {
     expect(settings.hooks.PreToolUse[0].hooks[0].command).toBe(
       '/repo/bin/lander bash-guard',
     )
-    expect(settings.hooks.PostToolUse[0].hooks[0].command).toBe(
-      '/repo/bin/lander record-worktree',
-    )
-    expect(settings.hooks.PostToolUse[1].hooks[0].command).toBe(
-      '/repo/bin/lander clear-worktree',
-    )
+    expect(settings.hooks.PostToolUse).toBeUndefined()
     expect(settings.hooks.Stop[0].hooks[0].command).toBe(
       '/repo/bin/lander record-cwd',
     )
@@ -256,24 +247,8 @@ describe('Claude flow', () => {
   describe('resolveLaunchDir', () => {
     const yes = () => true
 
-    it('launches at root with no re-entry when the task has no worktree', async () => {
-      expect(
-        resolveLaunchDir({ root: '/repo', isDir: yes }),
-      ).toEqual({ cwd: '/repo', reentryArgs: [] })
-    })
-
-    it('launches at root and re-enters a worktree via argv', async () => {
-      expect(
-        resolveLaunchDir({
-          root: '/repo',
-          worktree: 'feature',
-          isDir: yes,
-        }),
-      ).toEqual({
-        cwd: '/repo',
-        reentryArgs: ['--worktree', 'feature'],
-        effectiveCwd: '/repo/.claude/worktrees/feature',
-      })
+    it('launches at root', async () => {
+      expect(resolveLaunchDir({ root: '/repo', isDir: yes })).toEqual({ cwd: '/repo' })
     })
 
     it('ignores a wandered recordedCwd — it never becomes the launch dir', async () => {
@@ -283,32 +258,23 @@ describe('Claude flow', () => {
           recordedCwd: '/tmp',
           isDir: yes,
         }),
-      ).toEqual({ cwd: '/repo', reentryArgs: [] })
+      ).toEqual({ cwd: '/repo' })
     })
   })
 
   describe('manual-cd hint in the context block', () => {
-    it('warns when the previous shell ended somewhere this turn will not restore', async () => {
+    it('notes where the previous turn ended when that differs from the launch dir', async () => {
       const { context } = await runClaude({
         task: { allowEdits: false },
         root: '/repo',
         cwd: '/repo',
         recordedCwd: '/repo/sub',
       })
-      expect(context).toContain("previous turn's shell ended in sub")
-      expect(context).toContain('this turn starts at the project root')
-    })
-
-    it('stays silent on an EnterWorktree re-entry (landed == recorded)', async () => {
-      const wt = '/repo/.claude/worktrees/feature'
-      const { context } = await runClaude({
-        task: { allowEdits: false, worktree: 'feature' },
-        root: '/repo',
-        cwd: '/repo',
-        effectiveCwd: wt,
-        recordedCwd: wt,
-      })
-      expect(context).not.toContain("previous turn's shell ended")
+      expect(context).toContain(
+        'Note: your previous turn ended in sub. Depending how you moved there, ' +
+          'that location may or may not have been preserved in this new turn. ' +
+          'Check `pwd` before relying on the location.',
+      )
     })
 
     it('stays silent on a plain root-to-root turn', async () => {
@@ -318,44 +284,11 @@ describe('Claude flow', () => {
         cwd: '/repo',
         recordedCwd: '/repo',
       })
-      expect(context).not.toContain("previous turn's shell ended")
-    })
-
-    it('points a hand-entered worktree at EnterWorktree', async () => {
-      const { context } = await runClaude({
-        task: { allowEdits: false },
-        root: '/repo',
-        cwd: '/repo',
-        recordedCwd: '/repo/.claude/worktrees/feature',
-      })
-      expect(context).toContain('git worktree you entered by hand')
-      expect(context).toContain('enter it with EnterWorktree')
-      expect(context).toContain('borrows the worktree rather than owning it')
-    })
-
-    it('points a subdirectory of a hand-entered worktree there too', async () => {
-      const { context } = await runClaude({
-        task: { allowEdits: false },
-        root: '/repo',
-        cwd: '/repo',
-        recordedCwd: '/repo/.claude/worktrees/feature/app/models',
-      })
-      expect(context).toContain('enter it with EnterWorktree')
-    })
-
-    it('does not suggest EnterWorktree for a plain subdirectory cd', async () => {
-      const { context } = await runClaude({
-        task: { allowEdits: false },
-        root: '/repo',
-        cwd: '/repo',
-        recordedCwd: '/repo/sub',
-      })
-      expect(context).toContain("previous turn's shell ended in sub")
-      expect(context).not.toContain('EnterWorktree')
+      expect(context).not.toContain('your previous turn ended')
     })
 
     // An adopted task's last shell was at the root, outside the checkout it now
-    // launches in — "cd back" would send it to the main checkout.
+    // launches in — pointing back there would send it to the main checkout.
     it('stays silent in a lander checkout about a dir outside it', async () => {
       const wt = '/repo/.worktrees/t1'
       const { context } = await runClaude({
@@ -365,7 +298,7 @@ describe('Claude flow', () => {
         checkout: wt,
         recordedCwd: '/repo',
       })
-      expect(context).not.toContain("previous turn's shell ended")
+      expect(context).not.toContain('your previous turn ended')
     })
 
     it('still notes a cd within a lander checkout', async () => {
@@ -377,21 +310,7 @@ describe('Claude flow', () => {
         checkout: wt,
         recordedCwd: `${wt}/app`,
       })
-      expect(context).toContain("previous turn's shell ended in .worktrees/t1/app")
-    })
-
-    // The task is already bound: the shell wandering within its worktree is an
-    // ordinary cd, and telling it to enter the worktree it is in would be noise.
-    it('does not suggest EnterWorktree when a worktree is already recorded', async () => {
-      const { context } = await runClaude({
-        task: { allowEdits: false, worktree: 'feature' },
-        root: '/repo',
-        cwd: '/repo',
-        effectiveCwd: '/repo/.claude/worktrees/feature',
-        recordedCwd: '/repo/.claude/worktrees/feature/app',
-      })
-      expect(context).toContain("previous turn's shell ended")
-      expect(context).not.toContain('EnterWorktree')
+      expect(context).toContain('your previous turn ended in .worktrees/t1/app')
     })
   })
 
@@ -422,7 +341,7 @@ describe('Claude flow', () => {
     expect(gitContext(dir)).toBeUndefined()
   })
 
-  it('snapshots the worktree, not root, for a worktree task', async () => {
+  it('snapshots the task checkout, not root', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'lander-wt-'))
     tempDirs.push(root)
     const git = (cwd: string, ...args: string[]) =>
@@ -435,28 +354,25 @@ describe('Claude flow', () => {
     await writeFile(path.join(root, 'a.txt'), 'a')
     git(root, 'add', 'a.txt')
     git(root, 'commit', '-m', 'root commit')
-    // The worktree lives where `--worktree <name>` re-enters it, on its own
-    // branch with its own dirty file.
-    const wtPath = path.join(root, '.claude', 'worktrees', 'feature')
+    // The task's checkout, on its own branch with its own dirty file.
+    const wtPath = path.join(root, '.worktrees', 't1')
     git(root, 'worktree', 'add', '-b', 'feature', wtPath)
     await writeFile(path.join(wtPath, 'wt-only.txt'), 'x')
 
-    // A worktree Claude task launches from root (resolveLaunchDir → cwd=root)
-    // and lands in the worktree via --worktree; the daemon threads that landed
-    // dir back as effectiveCwd, and the block must describe the worktree the
-    // agent actually edits, not root.
+    // The run launches in its checkout, and the block must describe the tree
+    // the agent actually edits, not root.
     const { context } = await runClaude({
-      task: { allowEdits: true, worktree: 'feature' },
+      task: { allowEdits: true },
       root,
-      cwd: root,
-      effectiveCwd: wtPath,
+      cwd: wtPath,
+      checkout: wtPath,
     }, { gitContext })
     expect(context).toContain('Current branch: feature')
     expect(context).toContain('?? wt-only.txt')
     expect(context).not.toContain('Current branch: main')
 
-    // Guard the divergence the fix relies on: reading root (the launch cwd)
-    // would report the wrong branch and miss the worktree's dirt.
+    // Guard the divergence this relies on: reading root would report the wrong
+    // branch and miss the checkout's dirt.
     const rootSnapshot = gitContext(root)
     expect(rootSnapshot).toContain('Current branch: main')
     expect(rootSnapshot).not.toContain('wt-only.txt')

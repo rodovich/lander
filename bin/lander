@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // lander — the CLI an in-task agent uses to call back into the lander server
 // (launch/list/send/…), plus the hook handlers the server wires into claude
-// (bash-guard, record-cwd, record/clear-worktree). Run execution now lives in the
+// (bash-guard, record-cwd). Run execution now lives in the
 // host daemon (daemon/index.ts), not here.
 // Identity is injected when the server runs a turn: LANDER_API, LANDER_PROJECT,
 // LANDER_TASK, and LANDER_TOKEN (the per-task secret that authenticates these
@@ -1323,10 +1323,9 @@ async function bashGuard() {
 // Wired in by the server as a Stop hook (see ClaudeAdapter). At the end of
 // each turn claude pipes the session state as JSON on stdin —
 // { cwd, transcript_path, session_id, ... } — and we persist cwd and
-// transcript_path onto the task. Without this, every turn re-spawns claude at
-// the project root, so a directory the agent moved into mid-turn (most notably a
-// git worktree it entered via EnterWorktree) is lost between turns; recording it
-// lets the server resume the next turn there. Strictly best-effort: a Stop
+// transcript_path onto the task, so the next turn can be told where the last
+// one ended (Claude's cd note) and a flow that resumes from it can. Strictly
+// best-effort: a Stop
 // hook's stdout is not surfaced and nothing here may keep the turn from ending,
 // so it swallows every error and never exits non-zero. It calls fetch directly
 // rather than going through call() — call() die()s on a non-ok response, which
@@ -1343,65 +1342,6 @@ async function recordCwd() {
       method: 'POST',
       headers,
       body: JSON.stringify({ cwd, transcriptPath: input.transcript_path }),
-    })
-  } catch {
-    // best-effort: never let a hook failure interfere with turn completion
-  }
-}
-
-// --- record-worktree / clear-worktree (PostToolUse hooks) ------------------
-// Wired in by the server as PostToolUse hooks on EnterWorktree / ExitWorktree
-// (see ClaudeAdapter). claude pipes the tool call and its result as JSON on
-// stdin. On EnterWorktree we forward the new worktree's root path (the result's
-// `worktreePath`, falling back to the post-entry `cwd`) so the server tracks it;
-// on ExitWorktree we clear it.
-//
-// What the record buys is lander's own knowledge of where the task works: the
-// turn-context block snapshots that checkout's git state instead of the root's,
-// and the UI badges it beside the project. It is NOT what makes re-entry work.
-// Measured against claude 2.1.245, a worktree entered with EnterWorktree
-// survives `--resume` on its own — the session lands back inside it and its own
-// ExitWorktree still acts on it — with no flag passed, while a plain Bash `cd`
-// does not survive. The `--worktree <name>` relaunch (resolveLaunchDir's
-// reentryArgs) is kept as a belt: re-passing it for a worktree the session
-// already holds is a no-op, and it would restore the binding if that behavior
-// ever changed. Re-measure before relying on either half.
-//
-// Best-effort like record-cwd: swallow every error and never exit non-zero, so a
-// hook blip can't wedge a turn or undo the tool that ran.
-async function recordWorktree() {
-  try {
-    const input = JSON.parse((await readStdin()) || '{}')
-    const worktreePath = input.tool_response?.worktreePath ?? input.cwd
-    if (
-      !API ||
-      !PROJECT ||
-      !TASK ||
-      typeof worktreePath !== 'string' ||
-      !worktreePath
-    )
-      return
-    const headers = { 'content-type': 'application/json', 'x-lander-task': TASK }
-    headers['x-lander-project'] = PROJECT
-    if (TOKEN) headers['x-lander-token'] = TOKEN
-    await fetch(`${API}/api/${PROJECT}/tasks/${TASK}/worktree`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ worktreePath }),
-    })
-  } catch {
-    // best-effort: never let a hook failure interfere with turn completion
-  }
-}
-
-async function clearWorktree() {
-  try {
-    if (!API || !PROJECT || !TASK) return
-    const headers = { 'x-lander-task': TASK, 'x-lander-project': PROJECT }
-    if (TOKEN) headers['x-lander-token'] = TOKEN
-    await fetch(`${API}/api/${PROJECT}/tasks/${TASK}/worktree`, {
-      method: 'DELETE',
-      headers,
     })
   } catch {
     // best-effort: never let a hook failure interfere with turn completion
@@ -1474,8 +1414,6 @@ const run = {
   flow: () => runFlow(rest),
   'bash-guard': () => bashGuard(),
   'record-cwd': () => recordCwd(),
-  'record-worktree': () => recordWorktree(),
-  'clear-worktree': () => clearWorktree(),
 }[cmd]
 if (!run) {
   console.error(`lander: unknown command: ${cmd}`)

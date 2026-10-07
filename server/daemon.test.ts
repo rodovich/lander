@@ -378,7 +378,6 @@ const flowAnn = (name: string): FlowAnnouncement => ({
     description: `the ${name} flow`,
     driver: true,
     capabilities: {
-      worktrees: false,
       vision: 'read',
       grants: { task: false, project: false },
       usageSnapshot: false,

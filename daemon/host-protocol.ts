@@ -9,14 +9,6 @@ export type HostInput = {
   start: StartRunMessage
   root: string
   cwd: string
-  // Extra argv the flow needs to reach its intended working state, prepended to
-  // the launch (Claude re-enters a worktree with ['--worktree', name]). Empty when
-  // the spawn cwd already suffices.
-  reentryArgs?: string[]
-  // Where the shell lands once reentryArgs apply, if different from cwd (Claude's
-  // worktree path) — the dir the git snapshot reads from and the manual-cd hint
-  // compares against. Absent when the shell stays in cwd.
-  effectiveCwd?: string
   // The git worktree the daemon manages for this task, when its project enables
   // them — also `cwd`, since the run launches inside it. Absent otherwise.
   checkout?: string

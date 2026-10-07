@@ -137,15 +137,15 @@ Project permission grants are unsupported for Codex. A project-scope grant for a
 Codex task is routed to the daemon, and the Codex flow reports that project
 permission grants are not supported yet.
 
-Codex worktree integration is cwd-based only. Lander can keep provider-neutral
-cwd/worktree metadata on the task, and the Codex flow passes the resolved cwd
-with `--cd`. When that cwd is already in a linked Git worktree, the flow
-grants its resolved Git common directory to the edit profile. Codex still does
-not use Claude's `--worktree` flag, `.claude/worktrees` session convention, or
-EnterWorktree/ExitWorktree hook flow.
+Worktrees are the daemon's, not a provider's: in a project whose lander config
+enables them, each task launches in its own `<project>/.worktrees/<task id>`,
+and the Codex flow passes it with `--cd` and makes it the edit profile's
+workspace root. Because a linked worktree's cwd resolves to the main
+repository's Git common directory, the flow grants that to the edit profile, so
+commits and branch switches work.
 
 Codex hooks are not wired into Lander. Claude still has provider-specific hooks
-for background-shell advisory context, cwd recording, and worktree bookkeeping.
+for background-shell advisory context and cwd recording.
 Codex currently relies on explicit launch cwd, prompt instructions, permission
 profiles, and environment config rather than equivalent per-turn hooks.
 

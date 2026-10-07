@@ -348,25 +348,14 @@ export const CLAUDE_GOLDENS: Golden[] = [
     input: { filesDir: '/definitely/not/here/xyz' },
   },
   {
-    name: 'worktree task re-enters via argv and snapshots the worktree',
+    name: 'a task checkout is the launch dir, snapshotted and named in the system prompt',
     chunks: [[init(), assistantText('ok')], [result()]],
-    start: { task: { allowEdits: false, worktree: 'feature' } },
-    input: {
-      reentryArgs: ['--worktree', 'feature'],
-      effectiveCwd: '/repo/.claude/worktrees/feature',
-    },
+    input: { cwd: '/repo/.worktrees/task-1', checkout: '/repo/.worktrees/task-1' },
   },
   {
     name: 'manual cd hint when the recorded cwd differs from the landed dir',
     chunks: [[init(), assistantText('ok')], [result()]],
     start: { recordedCwd: '/repo/sub/dir' },
-  },
-  {
-    // The same hint, but the recorded dir is a worktree with nothing recorded
-    // against the task — so it also points at EnterWorktree.
-    name: 'manual cd hint from a hand-entered worktree names EnterWorktree',
-    chunks: [[init(), assistantText('ok')], [result()]],
-    start: { recordedCwd: '/repo/.claude/worktrees/feature' },
   },
   {
     name: 'attachment manifest rides the prompt with an --add-dir',

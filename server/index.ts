@@ -55,7 +55,6 @@ import {
   needsSeenAtMigration,
   turnAttachments,
   deliverQueuedBatch,
-  worktreeName,
   applyRelaunch,
   applyRetryRecovery,
   applyDueMessages,
@@ -430,28 +429,15 @@ type Task = {
   // stamp beside it the list cannot answer the only question it exists for.
   hookActions?: HookAction[]
   // The working directory the previous turn ended in, recorded by the Stop hook
-  // (see ClaudeAdapter / `lander record-cwd`). Each turn is a fresh `claude`
-  // process; without this it always restarts at the project root, so a directory
-  // the agent moved into during a turn — most notably a git worktree it entered
-  // (EnterWorktree) — would be lost the moment the turn ends. runTurn passes it
-  // to the daemon as a hint, and the daemon resolves the next turn's launch dir
-  // from it, falling back to the project root when unset or no longer present.
-  // Named for the hook's `cwd` payload (which carries no worktree-specific
-  // field); a worktree is just one kind of cwd. Absent until the first turn
-  // completes.
+  // (`lander record-cwd`). runTurn passes it to the daemon as a hint: a flow may
+  // resume there (Codex does), and Claude's manual-cd note compares against it.
+  // Absent until the first turn completes.
   cwd?: string
   // The absolute path to this session's transcript JSONL, from the same Stop
   // hook payload. Stored alongside cwd so the session file can be located
   // directly rather than re-deriving it from the launch directory. Absent until
   // the first turn completes.
   transcriptPath?: string
-  // The name of the git worktree the agent is currently working in, set by a
-  // provider hook such as Claude's EnterWorktree PostToolUse hook
-  // (`lander record-worktree`) and cleared by the matching exit hook
-  // (`lander clear-worktree`). While set, the daemon gives providers with real
-  // worktree support their worktree flag; providers without it resume from
-  // Task.cwd. Absent when the task isn't in a worktree.
-  worktree?: string
   // The branch checked out in the worktree the daemon manages for this task
   // (`worktrees: true` in the lander config), as of the last run that reported
   // one. Absent while that worktree's HEAD is detached, and on tasks that never
@@ -774,7 +760,7 @@ async function runTurn(
     flow,
     ...(task.flowConfig !== undefined ? { flowConfig: task.flowConfig } : {}),
     project: project.slug,
-    // cwd hints — the daemon does the stat/fallback/worktree resolution locally.
+    // cwd hint — the daemon does the stat/fallback resolution locally.
     recordedCwd: task.cwd,
     // Present only on the turn an incoming message revived, so the daemon can
     // tell the resumed session which of its own last acts no longer holds — the
@@ -784,7 +770,6 @@ async function runTurn(
     task: {
       allowEdits: task.allowEdits,
       allow: task.allow,
-      worktree: task.worktree,
     },
     // The provider session to resume; absent on the first turn, so the daemon
     // reports one back (reduceRunWs persists it onto the task's thread state).
@@ -3344,9 +3329,9 @@ app.post('/api/:project/tasks/:id/relaunch', async (c) => {
   }
 })
 
-// Whether a path is the project root or lives under it (a subdir or a worktree at
-// `.claude/worktrees/<name>`, both of which sit inside root). Used to bound the
-// recorded cwd so a wandered `/tmp` or sibling-repo path is never persisted.
+// Whether a path is the project root or lives under it (a subdir, or a worktree
+// inside it). Used to bound the recorded cwd so a wandered `/tmp` or
+// sibling-repo path is never persisted.
 function isUnderRoot(root: string, p: string): boolean {
   const rel = path.relative(root, p)
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
@@ -3380,8 +3365,8 @@ app.post('/api/:project/tasks/:id/cwd', async (c) => {
       return c.json({ error: 'cwd is required' }, 400)
     const cwd = body.cwd
     // An independent server-side bound: only persist a cwd under the project root
-    // (the root itself, a subdir, or a `.claude/worktrees/<name>` — all of which
-    // live under it). A wandered `/tmp` or sibling-repo cwd is dropped, so it can
+    // (the root itself, a subdir, or a worktree inside it). A wandered `/tmp` or
+    // sibling-repo cwd is dropped, so it can
     // never become the next turn's launch dir regardless of adapter. The daemon's
     // launch-at-root already neutralizes the practical harm for Claude; this caps
     // Codex's resume-from-recorded-cwd (and its one cross-repo gitCommonDir edge).
@@ -3393,77 +3378,6 @@ app.post('/api/:project/tasks/:id/cwd', async (c) => {
     await mutateTask(file, (t) => {
       t.cwd = cwd
       if (transcriptPath) t.transcriptPath = transcriptPath
-    })
-    const task = await readTask(project.dataDir, id)
-    if (!task) return c.json({ error: 'task not found' }, 404)
-    return c.json(publicTask(task))
-  } catch (e) {
-    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
-  }
-})
-
-// The git worktree the agent is currently in, tracked by provider hooks such as
-// Claude's Enter/ExitWorktree PostToolUse hooks (`lander record-worktree` /
-// `clear-worktree`) so every turn can relaunch with the right daemon-side
-// worktree behavior.
-// POST records it from EnterWorktree's reported `worktreePath` (only a path under
-// this project's worktrees dir is accepted, so a stray path can't strand turns
-// behind a bogus flag); DELETE clears it on exit. Like /cwd, only the task itself
-// or the UI may write, and neither is a turn boundary (no updatedAt, no event).
-app.post('/api/:project/tasks/:id/worktree', async (c) => {
-  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
-  if (!project) return c.json({ error: 'unknown project' }, 404)
-  try {
-    const id = c.req.param('id')
-    if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
-    const file = path.join(project.dataDir, `${id}.json`)
-    const existing = await readTask(project.dataDir, id)
-    if (!existing)
-      return c.json({ error: 'task not found' }, 404)
-
-    const principal = await resolvePrincipal(c.req)
-    if (
-      principal.kind !== 'ui' &&
-      !isSelfPrincipal(principal, project, id)
-    )
-      return c.json({ error: 'only the task itself may record its worktree' }, 403)
-
-    const body = await c.req.json<{ worktreePath?: unknown }>()
-    if (typeof body.worktreePath !== 'string' || !body.worktreePath)
-      return c.json({ error: 'worktreePath is required' }, 400)
-    const name = worktreeName(project.path, body.worktreePath)
-    if (!name) return c.json({ error: 'not a worktree of this project' }, 400)
-
-    await mutateTask(file, (t) => {
-      t.worktree = name
-    })
-    const task = await readTask(project.dataDir, id)
-    if (!task) return c.json({ error: 'task not found' }, 404)
-    return c.json(publicTask(task))
-  } catch (e) {
-    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
-  }
-})
-
-app.delete('/api/:project/tasks/:id/worktree', async (c) => {
-  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
-  if (!project) return c.json({ error: 'unknown project' }, 404)
-  try {
-    const id = c.req.param('id')
-    if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
-    const file = path.join(project.dataDir, `${id}.json`)
-    if (!(await readTask(project.dataDir, id)))
-      return c.json({ error: 'task not found' }, 404)
-
-    const principal = await resolvePrincipal(c.req)
-    if (
-      principal.kind !== 'ui' &&
-      !isSelfPrincipal(principal, project, id)
-    )
-      return c.json({ error: 'only the task itself may clear its worktree' }, 403)
-
-    await mutateTask(file, (t) => {
-      delete t.worktree
     })
     const task = await readTask(project.dataDir, id)
     if (!task) return c.json({ error: 'task not found' }, 404)

@@ -45,8 +45,6 @@ describe('DetailHeader', () => {
     expect(html).toContain('detail-branch')
     expect(html).toContain('fix-parser')
     expect(render(baseTask())).not.toContain('detail-branch')
-    // The legacy EnterWorktree name is no longer what the header shows.
-    expect(render(baseTask({ worktree: 'wt-fix' }))).not.toContain('wt-fix')
   })
 
   it('carries both copy buttons — the task id and the conversation', () => {

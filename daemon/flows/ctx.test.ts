@@ -570,12 +570,9 @@ describe('ctx runtime — turn inputs', () => {
       makeInput(
         {
           recordedCwd: '/repo/sub',
-          task: { allowEdits: true, allow: ['Bash(npm test)'], worktree: 'feat' },
+          task: { allowEdits: true, allow: ['Bash(npm test)'] },
         },
-        {
-          reentryArgs: ['--worktree', 'feat'],
-          effectiveCwd: '/repo/.claude/worktrees/feat',
-        },
+        { cwd: '/repo/.worktrees/task-1', checkout: '/repo/.worktrees/task-1' },
       ),
     )
     await runFlow(h, async (ctx) => {
@@ -583,13 +580,11 @@ describe('ctx runtime — turn inputs', () => {
         taskId: 'task-1',
         project: 'proj',
         root: '/repo',
-        cwd: '/repo',
-        reentryArgs: ['--worktree', 'feat'],
-        effectiveCwd: '/repo/.claude/worktrees/feat',
+        cwd: '/repo/.worktrees/task-1',
+        checkout: '/repo/.worktrees/task-1',
         recordedCwd: '/repo/sub',
         allowEdits: true,
         allow: ['Bash(npm test)'],
-        worktree: 'feat',
       })
       expect(ctx.turn.prompts).toEqual(['hello'])
       return { exitCode: 0 }

@@ -232,12 +232,11 @@ function releaseCheckout(msg: ReleaseCheckoutMessage): void {
     })
 }
 
-// Resolve a start-run's launch directories from the project slug + cwd hints. The
-// cwd rule (launch at root + re-enter a worktree, or resume from the recorded cwd)
-// belongs to the flow, and
-// the daemon just launches where it says, threading the re-entry argv + landed
-// dir on to the host. It runs here rather than in the host because it stats
-// directories on the daemon's own filesystem to make the call.
+// Resolve a start-run's launch directory from the project slug + cwd hint. The
+// cwd rule (launch at root, or resume from the recorded cwd) belongs to the
+// flow, and the daemon just launches where it says. It runs here rather than in
+// the host because it stats directories on the daemon's own filesystem to make
+// the call.
 //
 // A project that enables worktrees overrides all of that: the run launches in
 // the task's own checkout, whatever the flow would have chosen (prepareRun
@@ -248,40 +247,29 @@ function resolveRunPaths(msg: StartRunMessage, caps: ProviderCaps): RunPaths {
   if (!root) throw new Error(`daemon serves no project for slug ${msg.project}`)
   if (projectOptions.worktrees(root)) {
     const checkout = checkoutPath(root, msg.taskId)
-    return { root, cwd: checkout, reentryArgs: [], checkout }
+    return { root, cwd: checkout, checkout }
   }
-  const launch = caps.resolveLaunchDir({
-    root,
-    recordedCwd: msg.recordedCwd,
-    worktree: msg.task.worktree,
-    isDir,
-  })
-  return {
-    root,
-    cwd: launch.cwd,
-    reentryArgs: launch.reentryArgs,
-    ...(launch.effectiveCwd ? { effectiveCwd: launch.effectiveCwd } : {}),
-  }
+  const launch = caps.resolveLaunchDir({ root, recordedCwd: msg.recordedCwd, isDir })
+  return { root, cwd: launch.cwd }
 }
 
 // Which checkout a hook resolution reads. The tree that matters is the one the
-// target task is working in, so this goes through the same provider-owned
-// resolveLaunchDir a run does — `effectiveCwd` being where the agent actually
-// works when the flow re-enters a worktree through argv.
+// target task is working in: its own checkout when it has one, otherwise
+// wherever the same provider-owned resolveLaunchDir a run uses would launch it.
 //
 // It falls back to the project root twice over: for a flow the daemon does not
 // know (a resolve can arrive for any task, including one whose flow this build
-// has never heard of), and for a resolved directory that is no longer there (a
-// removed worktree). Answering from the root is the honest degradation — that
-// tree's hooks are the project's — where answering from a missing directory would
-// report "not a git repository" for a repository that plainly is one.
+// has never heard of), and for a resolved directory that is no longer there.
+// Answering from the root is the honest degradation — that tree's hooks are the
+// project's — where answering from a missing directory would report "not a git
+// repository" for a repository that plainly is one.
 //
 // The root travels with it because resolution checks that the two are the same
-// repository before reading the target's: both hints are task-writable, so a
-// directory being under the project root does not make it the project's tree.
+// repository before reading the target's: the recorded cwd is task-writable, so
+// a directory being under the project root does not make it the project's tree.
 function resolveHooksCwd(
   project: string,
-  hints: { taskId?: string; flow?: string; recordedCwd?: string; worktree?: string },
+  hints: { taskId?: string; flow?: string; recordedCwd?: string },
 ): {
   root: string
   cwd: string
@@ -296,14 +284,8 @@ function resolveHooksCwd(
   }
   const caps = hints.flow ? CAPS[hints.flow] : undefined
   if (!caps) return { root, cwd: root }
-  const launch = caps.resolveLaunchDir({
-    root,
-    recordedCwd: hints.recordedCwd,
-    worktree: hints.worktree,
-    isDir,
-  })
-  const dir = launch.effectiveCwd ?? launch.cwd
-  return { root, cwd: isDir(dir) ? dir : root }
+  const { cwd } = caps.resolveLaunchDir({ root, recordedCwd: hints.recordedCwd, isDir })
+  return { root, cwd: isDir(cwd) ? cwd : root }
 }
 
 // Root under which each task's materialized attachment blobs live (cached across

@@ -81,8 +81,6 @@ type Run = {
 export type RunPaths = {
   root: string
   cwd: string
-  reentryArgs: string[]
-  effectiveCwd?: string
   checkout?: string
 }
 
@@ -262,8 +260,6 @@ export function createRunManager({
       start: msg,
       root: paths.root,
       cwd: paths.cwd,
-      reentryArgs: paths.reentryArgs,
-      ...(paths.effectiveCwd ? { effectiveCwd: paths.effectiveCwd } : {}),
       ...(paths.checkout ? { checkout: paths.checkout } : {}),
       filesDir,
       materialized,

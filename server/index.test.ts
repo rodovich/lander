@@ -1941,7 +1941,7 @@ describe('server task provider behavior', () => {
     expect(await res.json()).toMatchObject({ id: task.id, agent: 'codex' })
   })
 
-  it('delegates project grants to the daemon and records worktrees neutrally', async () => {
+  it('delegates project grants to the daemon', async () => {
     const task = await createTask('Neutral Codex affordances')
 
     const grant = await post(`/api/${slug}/tasks/${task.id}/allow`, {
@@ -1952,12 +1952,6 @@ describe('server task provider behavior', () => {
     expect(await grant.json()).toEqual({
       error: 'no daemon connected for this project',
     })
-
-    const worktree = await post(`/api/${slug}/tasks/${task.id}/worktree`, {
-      worktreePath: path.join(projectDir, '.claude', 'worktrees', 'feat'),
-    })
-    expect(worktree.status).toBe(200)
-    expect(await worktree.json()).toMatchObject({ id: task.id, worktree: 'feat' })
   })
 
   it('stores Codex task allow rules with an unsupported warning', async () => {
@@ -1991,8 +1985,8 @@ describe('server task provider behavior', () => {
     expect(subRes.status).toBe(200)
     expect(await readTaskField(task.id, 'cwd')).toBe(sub)
 
-    // A worktree path (under .claude/worktrees) is accepted too.
-    const wt = path.join(projectDir, '.claude', 'worktrees', 'feat')
+    // A worktree path inside the project is accepted too.
+    const wt = path.join(projectDir, '.worktrees', 'feat')
     const wtRes = await post(`/api/${slug}/tasks/${task.id}/cwd`, { cwd: wt })
     expect(wtRes.status).toBe(200)
     expect(await readTaskField(task.id, 'cwd')).toBe(wt)

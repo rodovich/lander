@@ -12,7 +12,6 @@ import {
   lastTurnPrompts,
   turnAttachments,
   deliverQueuedBatch,
-  worktreeName,
   applyRelaunch,
   applyDueMessages,
   armScheduledRelaunch,
@@ -1527,19 +1526,5 @@ describe('closeRide costing from the previous ride', () => {
     const t = { rides: [ride('2026-09-25T15:15:00.000Z', 2.02, 92.14)] }
     close(t, undefined, 1.5)
     expect(costs(t)).toEqual([2.02, undefined])
-  })
-})
-
-describe('worktreeName', () => {
-  const project = '/home/me/proj'
-  it('returns a worktree name directly under the worktrees dir', () => {
-    expect(worktreeName(project, '/home/me/proj/.claude/worktrees/feat-x')).toBe('feat-x')
-  })
-  it('keeps a slash-segmented worktree name whole', () => {
-    expect(worktreeName(project, '/home/me/proj/.claude/worktrees/feature/x')).toBe('feature/x')
-  })
-  it('rejects a path outside this project and the worktrees dir itself', () => {
-    expect(worktreeName(project, '/somewhere/else/.claude/worktrees/x')).toBe(undefined)
-    expect(worktreeName(project, '/home/me/proj/.claude/worktrees')).toBe(undefined)
   })
 })

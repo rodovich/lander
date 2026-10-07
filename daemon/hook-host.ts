@@ -277,7 +277,6 @@ function buildCtx(input: HookHostInput, reports: string[]) {
       // must use this rather than assuming the project root, or it will examine
       // the wrong checkout and report a confident pass.
       cwd: input.targetCwd,
-      worktree: run.target.worktree,
       // The target's public record, fetched once. Lazy because a body that
       // decides from the trigger alone should not pay for a whole item log.
       //

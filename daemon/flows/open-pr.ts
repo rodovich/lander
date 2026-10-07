@@ -39,8 +39,6 @@ export const meta: FlowMeta = {
   description: 'Review the working tree, ask for approval, open a PR, watch CI',
   driver: true,
   capabilities: {
-    // No worktree re-entry: it runs in the recorded cwd.
-    worktrees: false,
     vision: 'read',
     // It runs git and gh, not a permission-gated agent, so there is nothing to
     // grant.
@@ -51,15 +49,13 @@ export const meta: FlowMeta = {
   },
 }
 
-// Required by FLOW_MODULES. Trivial: the recorded cwd if it still exists, and
-// no re-entry argv.
+// Required by FLOW_MODULES. Trivial: the recorded cwd if it still exists.
 export function resolveLaunchDir({
   root,
   recordedCwd,
   isDir,
 }: AgentLaunchDirInput): AgentLaunchDir {
-  const cwd = recordedCwd && isDir(recordedCwd) ? recordedCwd : root
-  return { cwd, reentryArgs: [] }
+  return { cwd: recordedCwd && isDir(recordedCwd) ? recordedCwd : root }
 }
 
 // ── Tunables ────────────────────────────────────────────────────────────────

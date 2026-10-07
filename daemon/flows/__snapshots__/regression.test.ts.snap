@@ -1,5 +1,136 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`claude transcript regressions > a task checkout is the launch dir, snapshotted and named in the system prompt 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--session-id",
+        "minted-session-id",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.
+
+This task works in a git worktree lander created for it at \`/repo/.worktrees/task-1\`, starting detached at whatever the project's main checkout (\`/repo\`) had checked out. Commit on a branch you create: lander removes this worktree when the task is landed or archived, and leaves branches alone.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo/.worktrees/task-1",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "minted-session-id",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "all done",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "ok",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "kind": "text",
+          "text": "ok",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "all done",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
 exports[`claude transcript regressions > agent stderr is aggregated into the done 1`] = `
 {
   "done": {
@@ -15,7 +146,7 @@ exports[`claude transcript regressions > agent stderr is aggregated into the don
         "--allowedTools",
         "Bash(lander:*)",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
 
@@ -146,7 +277,7 @@ exports[`claude transcript regressions > attachment manifest rides the prompt wi
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
 
@@ -280,7 +411,7 @@ exports[`claude transcript regressions > blocked call via permission_denials 1`]
         "--allowedTools",
         "Bash(lander:*)",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
 
@@ -447,7 +578,7 @@ exports[`claude transcript regressions > edit access adds acceptEdits and scratc
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
 
@@ -576,7 +707,7 @@ exports[`claude transcript regressions > edit and write produce diff hunks 1`] =
         "--allowedTools",
         "Bash(lander:*)",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
 
@@ -781,7 +912,7 @@ exports[`claude transcript regressions > errored result event carries no in-stre
         "--allowedTools",
         "Bash(lander:*)",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
 
@@ -900,7 +1031,7 @@ exports[`claude transcript regressions > legacy top-level session resumes withou
         "--allowedTools",
         "Bash(lander:*)",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
 
@@ -1014,139 +1145,6 @@ GIT-SNAPSHOT-STUB
 }
 `;
 
-exports[`claude transcript regressions > manual cd hint from a hand-entered worktree names EnterWorktree 1`] = `
-{
-  "done": {
-    "exitCode": 0,
-    "kind": "done",
-    "stderr": "",
-  },
-  "launch": [
-    {
-      "args": [
-        "--session-id",
-        "minted-session-id",
-        "--allowedTools",
-        "Bash(lander:*)",
-        "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
-        "--append-system-prompt",
-        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
-
-# Git
-- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
-- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "-p",
-        "--",
-        "do the thing
-
-<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
-GIT-SNAPSHOT-STUB
-
-Note: your previous turn's shell ended in .claude/worktrees/feature, but this turn starts at the project root (a manual cd isn't carried across turns) — cd back if you still need to work there. That is a git worktree you entered by hand. To keep working there across turns, enter it with EnterWorktree instead, passing the worktree's \`path\` — later turns then start inside it, and it shows against this task. Entering by path borrows the worktree rather than owning it, so exiting will not remove it.
-</task-context>",
-      ],
-      "command": "claude",
-      "cwd": "/repo",
-      "envDelta": {
-        "LANDER_PROJECT": "proj",
-        "LANDER_RUN": "ride-1",
-        "LANDER_TASK": "task-1",
-      },
-    },
-  ],
-  "task": {
-    "allowEdits": false,
-    "createdAt": "2026-01-01T00:00:00.000Z",
-    "flowState": {
-      "sessionId": "minted-session-id",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
-GIT-SNAPSHOT-STUB
-
-Note: your previous turn's shell ended in .claude/worktrees/feature, but this turn starts at the project root (a manual cd isn't carried across turns) — cd back if you still need to work there. That is a git worktree you entered by hand. To keep working there across turns, enter it with EnterWorktree instead, passing the worktree's \`path\` — later turns then start inside it, and it shows against this task. Entering by path borrows the worktree rather than owning it, so exiting will not remove it.
-</task-context>",
-    },
-    "flowStateRev": 2,
-    "hookFireSeq": 1,
-    "id": "task-1",
-    "items": [
-      {
-        "at": "2026-01-01T00:00:00.000Z",
-        "groupId": "group:ride-1:0",
-        "id": "itm-mjuohs00-0",
-        "kind": "message",
-        "rideId": "ride-1",
-        "role": "flow",
-        "text": "all done",
-      },
-    ],
-    "pendingHooks": [
-      {
-        "at": "2026-01-01T00:00:00.000Z",
-        "by": "agent",
-        "id": "fire-1-mjuohs00",
-        "outcome": "done",
-        "rideId": "ride-1",
-        "trigger": "ride-ended",
-      },
-    ],
-    "rides": [
-      {
-        "endedAt": "2026-01-01T00:00:00.000Z",
-        "id": "ride-1",
-        "outcome": "done",
-        "startedAt": "2026-01-01T00:00:00.000Z",
-      },
-    ],
-    "shape": 2,
-    "status": "riding",
-    "title": "Parity task",
-    "updatedAt": "2026-01-01T00:00:00.000Z",
-  },
-  "updates": [
-    {
-      "blockedIds": [],
-      "drivingModel": "claude-opus-4-8",
-      "finalText": "ok",
-      "kind": "update",
-      "rateLimitResetsAt": undefined,
-      "steps": [
-        {
-          "createdAt": "2026-01-01T00:00:00.000Z",
-          "inferenceId": "group:ride-1:0",
-          "kind": "text",
-          "text": "ok",
-        },
-      ],
-      "usage": undefined,
-      "usageChanged": false,
-    },
-    {
-      "blockedIds": [],
-      "drivingModel": "claude-opus-4-8",
-      "finalText": "all done",
-      "kind": "update",
-      "rateLimitResetsAt": undefined,
-      "steps": [],
-      "usage": undefined,
-      "usageChanged": false,
-    },
-  ],
-}
-`;
-
 exports[`claude transcript regressions > manual cd hint when the recorded cwd differs from the landed dir 1`] = `
 {
   "done": {
@@ -1162,7 +1160,7 @@ exports[`claude transcript regressions > manual cd hint when the recorded cwd di
         "--allowedTools",
         "Bash(lander:*)",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
 
@@ -1184,7 +1182,7 @@ You currently have no edit permission, so a spawned task cannot be granted it ei
 
 GIT-SNAPSHOT-STUB
 
-Note: your previous turn's shell ended in sub/dir, but this turn starts at the project root (a manual cd isn't carried across turns) — cd back if you still need to work there.
+Note: your previous turn ended in sub/dir. Depending how you moved there, that location may or may not have been preserved in this new turn. Check \`pwd\` before relying on the location.
 </task-context>",
       ],
       "command": "claude",
@@ -1208,7 +1206,7 @@ You currently have no edit permission, so a spawned task cannot be granted it ei
 
 GIT-SNAPSHOT-STUB
 
-Note: your previous turn's shell ended in sub/dir, but this turn starts at the project root (a manual cd isn't carried across turns) — cd back if you still need to work there.
+Note: your previous turn ended in sub/dir. Depending how you moved there, that location may or may not have been preserved in this new turn. Check \`pwd\` before relying on the location.
 </task-context>",
     },
     "flowStateRev": 2,
@@ -1295,7 +1293,7 @@ exports[`claude transcript regressions > no edit access omits acceptEdits and sc
         "--allowedTools",
         "Bash(lander:*)",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
 
@@ -1424,7 +1422,7 @@ exports[`claude transcript regressions > nonexistent filesDir still sets the env
         "--allowedTools",
         "Bash(lander:*)",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
 
@@ -1554,7 +1552,7 @@ exports[`claude transcript regressions > parallel batch in one inference 1`] = `
         "--allowedTools",
         "Bash(lander:*)",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
 
@@ -1743,7 +1741,7 @@ exports[`claude transcript regressions > plain text reply 1`] = `
         "--allowedTools",
         "Bash(lander:*)",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
 
@@ -1872,7 +1870,7 @@ exports[`claude transcript regressions > rejecting rate limit event 1`] = `
         "--allowedTools",
         "Bash(lander:*)",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
 
@@ -2028,7 +2026,7 @@ exports[`claude transcript regressions > resume of an existing session 1`] = `
         "--allowedTools",
         "Bash(lander:*)",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
 
@@ -2158,7 +2156,7 @@ exports[`claude transcript regressions > revival notice names a cleared wakeup t
         "--allowedTools",
         "Bash(lander:*)",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
 
@@ -2291,7 +2289,7 @@ exports[`claude transcript regressions > revival notice rides the prompt of the 
         "--allowedTools",
         "Bash(lander:*)",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
 
@@ -2424,7 +2422,7 @@ exports[`claude transcript regressions > second ride seeded with a nonzero flowS
         "--allowedTools",
         "Bash(lander:*)",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
 
@@ -2554,7 +2552,7 @@ exports[`claude transcript regressions > single tool call and result in one chun
         "--allowedTools",
         "Bash(lander:*)",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
 
@@ -2714,7 +2712,7 @@ exports[`claude transcript regressions > subagent report closes its trace 1`] = 
         "--allowedTools",
         "Bash(lander:*)",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
 
@@ -2936,7 +2934,7 @@ exports[`claude transcript regressions > subagent trace with sub-subagent nestin
         "--allowedTools",
         "Bash(lander:*)",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
 
@@ -3147,7 +3145,7 @@ exports[`claude transcript regressions > task allow rules extend allowedTools 1`
         "Bash(npm test)",
         "Bash(npm run build)",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
 
@@ -3280,7 +3278,7 @@ exports[`claude transcript regressions > unchanged turn context is not re-sent 1
         "--allowedTools",
         "Bash(lander:*)",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
 
@@ -3408,7 +3406,7 @@ exports[`claude transcript regressions > usage across inferences with cache miss
         "--allowedTools",
         "Bash(lander:*)",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
 
@@ -3598,137 +3596,6 @@ GIT-SNAPSHOT-STUB
         "sessionCostUsd": 0.0421,
       },
       "usageChanged": true,
-    },
-  ],
-}
-`;
-
-exports[`claude transcript regressions > worktree task re-enters via argv and snapshots the worktree 1`] = `
-{
-  "done": {
-    "exitCode": 0,
-    "kind": "done",
-    "stderr": "",
-  },
-  "launch": [
-    {
-      "args": [
-        "--session-id",
-        "minted-session-id",
-        "--worktree",
-        "feature",
-        "--allowedTools",
-        "Bash(lander:*)",
-        "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"PostToolUse":[{"matcher":"EnterWorktree","hooks":[{"type":"command","command":"/repo/bin/lander record-worktree"}]},{"matcher":"ExitWorktree","hooks":[{"type":"command","command":"/repo/bin/lander clear-worktree"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
-        "--append-system-prompt",
-        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
-
-# Git
-- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
-- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "-p",
-        "--",
-        "do the thing
-
-<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
-      ],
-      "command": "claude",
-      "cwd": "/repo",
-      "envDelta": {
-        "LANDER_PROJECT": "proj",
-        "LANDER_RUN": "ride-1",
-        "LANDER_TASK": "task-1",
-      },
-    },
-  ],
-  "task": {
-    "allowEdits": false,
-    "createdAt": "2026-01-01T00:00:00.000Z",
-    "flowState": {
-      "sessionId": "minted-session-id",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
-    },
-    "flowStateRev": 2,
-    "hookFireSeq": 1,
-    "id": "task-1",
-    "items": [
-      {
-        "at": "2026-01-01T00:00:00.000Z",
-        "groupId": "group:ride-1:0",
-        "id": "itm-mjuohs00-0",
-        "kind": "message",
-        "rideId": "ride-1",
-        "role": "flow",
-        "text": "all done",
-      },
-    ],
-    "pendingHooks": [
-      {
-        "at": "2026-01-01T00:00:00.000Z",
-        "by": "agent",
-        "id": "fire-1-mjuohs00",
-        "outcome": "done",
-        "rideId": "ride-1",
-        "trigger": "ride-ended",
-      },
-    ],
-    "rides": [
-      {
-        "endedAt": "2026-01-01T00:00:00.000Z",
-        "id": "ride-1",
-        "outcome": "done",
-        "startedAt": "2026-01-01T00:00:00.000Z",
-      },
-    ],
-    "shape": 2,
-    "status": "riding",
-    "title": "Parity task",
-    "updatedAt": "2026-01-01T00:00:00.000Z",
-  },
-  "updates": [
-    {
-      "blockedIds": [],
-      "drivingModel": "claude-opus-4-8",
-      "finalText": "ok",
-      "kind": "update",
-      "rateLimitResetsAt": undefined,
-      "steps": [
-        {
-          "createdAt": "2026-01-01T00:00:00.000Z",
-          "inferenceId": "group:ride-1:0",
-          "kind": "text",
-          "text": "ok",
-        },
-      ],
-      "usage": undefined,
-      "usageChanged": false,
-    },
-    {
-      "blockedIds": [],
-      "drivingModel": "claude-opus-4-8",
-      "finalText": "all done",
-      "kind": "update",
-      "rateLimitResetsAt": undefined,
-      "steps": [],
-      "usage": undefined,
-      "usageChanged": false,
     },
   ],
 }

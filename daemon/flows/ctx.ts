@@ -138,15 +138,10 @@ export type StructuredAnswer = {
 export type CtxTask = {
   taskId: string
   project: string
-  // The dir the child is spawned in — whatever resolveLaunchDir chose.
+  // The dir the child is spawned in — the task's checkout, or whatever
+  // resolveLaunchDir chose.
   cwd: string
   root: string
-  // Argv the flow MUST prepend to its agent launch to reach its working state
-  // (claude re-enters a worktree with ['--worktree', name]). Empty when none.
-  reentryArgs: string[]
-  // Where the shell lands once reentryArgs apply. The git snapshot and the
-  // manual-cd hint read from `effectiveCwd ?? cwd`.
-  effectiveCwd?: string
   // The git worktree the daemon created for this task and launched it in (so
   // also `cwd`), when the project enables them. The flow's writable workspace,
   // and what the agent is told about. Absent otherwise.
@@ -155,7 +150,6 @@ export type CtxTask = {
   recordedCwd?: string
   allowEdits: boolean
   allow?: string[]
-  worktree?: string
   // The run env (LANDER_API/TOKEN/TASK…). The flow merges this into its child
   // env; ctx.spawn merges the result over process.env.
   env: Record<string, string>
@@ -374,7 +368,7 @@ export function createCtxRuntime(
   input: HostInput,
   deps: CtxRuntimeDeps,
 ): CtxRuntime {
-  const { start, root, cwd, effectiveCwd, checkout, materialized } = input
+  const { start, root, cwd, checkout, materialized } = input
   const emitEvent = deps.emit
   const now = deps.now ?? (() => new Date().toISOString())
   const spawnFn = deps.spawn ?? nodeSpawn
@@ -940,17 +934,12 @@ export function createCtxRuntime(
       project: start.project,
       cwd,
       root,
-      reentryArgs: input.reentryArgs ?? [],
-      ...(effectiveCwd !== undefined ? { effectiveCwd } : {}),
       ...(checkout !== undefined ? { checkout } : {}),
       ...(start.recordedCwd !== undefined
         ? { recordedCwd: start.recordedCwd }
         : {}),
       allowEdits: start.task.allowEdits,
       ...(start.task.allow !== undefined ? { allow: start.task.allow } : {}),
-      ...(start.task.worktree !== undefined
-        ? { worktree: start.task.worktree }
-        : {}),
       env: start.env,
       // The task's opaque per-flow config, echoed by the server from the task
       // and handed to the flow verbatim. Absent when the task carries none.
