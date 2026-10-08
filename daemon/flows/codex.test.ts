@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { makeFlow, resolveLaunchDir, codexOptionsFromEnv, type CodexFlowDeps } from './codex'
 import { captureDriverTurn, type DriverTurnFixture } from './testCtx'
 
@@ -7,7 +11,7 @@ function runCodex(input: DriverTurnFixture, overrides: Partial<CodexFlowDeps> = 
   return captureDriverTurn(makeFlow({
     taskPromptTemplate: TASK_PROMPT_TEMPLATE,
     readProjectDoc: () => undefined,
-    resolveGitCommonDir: () => undefined,
+    resolveGitDirs: () => [],
     ...overrides,
   }), input)
 }
@@ -15,14 +19,15 @@ function runCodex(input: DriverTurnFixture, overrides: Partial<CodexFlowDeps> = 
 function permissionArgs(
   allowEdits: boolean,
   projectRoot = '/repo',
-  gitCommonDir?: string,
+  gitDirs: string[] = [],
 ): string[] {
   const profileId = allowEdits ? 'lander-edit' : 'lander-read-only'
   const description = allowEdits
     ? 'Lander workspace edit access'
     : 'Lander workspace read-only access'
-  const commonDirRule =
-    allowEdits && gitCommonDir ? `,"${gitCommonDir}"="write"` : ''
+  const commonDirRule = allowEdits
+    ? gitDirs.map((dir) => `,"${dir}"="write"`).join('')
+    : ''
   const profile = allowEdits
     ? `description="${description}",extends=":workspace",workspace_roots={"${projectRoot}"=true},filesystem={":workspace_roots"={".git"="write"}${commonDirRule}},network={enabled=true,allow_local_binding=true}`
     : `description="${description}",extends=":read-only",network={enabled=true,allow_local_binding=true}`
@@ -162,14 +167,16 @@ describe('Codex flow launch', () => {
     const launch = await runCodex(
       { task: { allowEdits: true }, prompt: 'work', root: '/repo', cwd: wt, checkout: wt },
       {
-        resolveGitCommonDir: (cwd) => {
+        resolveGitDirs: (cwd) => {
           expect(cwd).toBe(wt)
-          return '/repo/.git'
+          return ['/repo/.git', '/repo/.git/worktrees/t1']
         },
       },
     )
     const joined = launch.args.join('\0')
-    expect(joined).toContain(permissionArgs(true, wt, '/repo/.git')[3])
+    expect(joined).toContain(
+      permissionArgs(true, wt, ['/repo/.git', '/repo/.git/worktrees/t1'])[3],
+    )
     expect(joined).not.toContain('workspace_roots={"/repo"=true}')
     expect(launch.args.slice(-4, -2)).toEqual(['--cd', wt])
     expect(launch.args.at(-1)).toContain(
@@ -185,12 +192,33 @@ describe('Codex flow launch', () => {
     expect(outside.args.at(-1)).not.toContain('git worktree lander created')
   })
 
-  it('grants editable worktrees access to the resolved Git common directory', async () => {
+  it('resolves a linked worktree’s own git dir as well as the common dir', async () => {
+    const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'lander-codex-gitdirs-')))
+    try {
+      const git = (cwd: string, ...args: string[]) =>
+        execFileSync('git', ['-C', cwd, ...args], { stdio: 'ignore' })
+      git(root, 'init', '-q')
+      git(root, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'x')
+      const wt = path.join(root, '.worktrees', 't1')
+      git(root, 'worktree', 'add', '-q', '--detach', wt)
+      const launch = await runCodex(
+        { task: { allowEdits: true }, prompt: 'work', root, cwd: wt, checkout: wt },
+        { resolveGitDirs: undefined },
+      )
+      const joined = launch.args.join('\0')
+      expect(joined).toContain(`"${path.join(root, '.git')}"="write"`)
+      expect(joined).toContain(`"${path.join(root, '.git', 'worktrees', 't1')}"="write"`)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('grants editable worktrees access to the resolved Git dirs', async () => {
     const options: Partial<CodexFlowDeps> = {
       taskPromptTemplate: TASK_PROMPT_TEMPLATE,
-      resolveGitCommonDir: (cwd) => {
+      resolveGitDirs: (cwd) => {
         expect(cwd).toBe('/worktrees/feature')
-        return '/repo/.git'
+        return ['/repo/.git']
       },
     }
 
@@ -206,7 +234,7 @@ describe('Codex flow launch', () => {
       'exec',
       '--json',
       '--skip-git-repo-check',
-      ...permissionArgs(true, '/worktrees/feature', '/repo/.git'),
+      ...permissionArgs(true, '/worktrees/feature', ['/repo/.git']),
       '--config',
       'shell_environment_policy.inherit=all',
       '--config',

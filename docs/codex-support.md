@@ -88,13 +88,13 @@ maps Lander's edit flag to named Codex permission profiles:
 
 - `allowEdits=false` extends Codex's built-in `:read-only` profile.
 - `allowEdits=true` extends Codex's built-in `:workspace` profile and changes
-  the workspace's `.git` rule from read to write. The daemon also resolves and
-  grants the Git common directory so linked worktrees can update their shared
-  index, objects, and refs.
+  the workspace's `.git` rule from read to write. The flow also resolves and
+  grants the Git common directory and, in a linked worktree, the worktree's own
+  git directory, so it can update its HEAD, index, objects, and refs.
 
 The editable profile otherwise preserves Codex's workspace-write semantics:
 filesystem reads are unrestricted, writes are limited to the workspace, its
-resolved Git common directory, `/tmp`, and `$TMPDIR`, and the usual `.agents`
+resolved Git directories, `/tmp`, and `$TMPDIR`, and the usual `.agents`
 and `.codex` metadata protections remain in place. Both profiles allow network
 access, including the local Lander API used by in-task self-management commands.
 
@@ -140,9 +140,12 @@ permission grants are not supported yet.
 Worktrees are the daemon's, not a provider's: in a project whose lander config
 enables them, each task launches in its own `<project>/.worktrees/<task id>`,
 and the Codex flow passes it with `--cd` and makes it the edit profile's
-workspace root. Because a linked worktree's cwd resolves to the main
-repository's Git common directory, the flow grants that to the edit profile, so
-commits and branch switches work.
+workspace root. A linked worktree writes outside itself — to the main
+repository's Git common directory and to its own admin directory under
+`.git/worktrees/` — so the flow grants both to the edit profile by path.
+Granting the common directory alone left branch switches failing on
+`.git/worktrees/<id>/HEAD.lock` (codex 0.159.2), even though that directory is
+inside it.
 
 Codex hooks are not wired into Lander. Claude still has provider-specific hooks
 for background-shell advisory context and cwd recording.

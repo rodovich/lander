@@ -33,12 +33,12 @@ function claudeFlow() {
 
 // A stub git-common-dir probe, so codex's permission profile doesn't depend on
 // the host's repo layout.
-const GIT_COMMON_STUB = () => '/repo/.git'
+const GIT_DIRS_STUB = () => ['/repo/.git']
 
 function codexFlow() {
   return makeCodexFlow({
     taskPromptTemplate: TASK_PROMPT,
-    resolveGitCommonDir: GIT_COMMON_STUB,
+    resolveGitDirs: GIT_DIRS_STUB,
     readProjectDoc: NO_PROJECT_DOC,
   })
 }

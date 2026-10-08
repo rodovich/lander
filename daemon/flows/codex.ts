@@ -58,7 +58,10 @@ export type CodexFlowDeps = {
   taskPromptTemplate: string
   profile?: string
   configOverrides?: string[]
-  resolveGitCommonDir?: (cwd: string) => string | undefined
+  // The git dirs a commit from `cwd` writes outside the workspace: the
+  // repository's common dir, and — in a linked worktree — that worktree's own
+  // admin dir. Empty outside a repository.
+  resolveGitDirs?: (cwd: string) => string[]
   // The project's optional LANDER.md. REQUIRED, with no default — see the note
   // on ClaudeFlowDeps: a default makes the goldens green by accident.
   readProjectDoc: (dir: string) => string | undefined
@@ -73,7 +76,7 @@ export function makeFlow({
   taskPromptTemplate,
   profile,
   configOverrides = [],
-  resolveGitCommonDir = resolveGitCommonDirWithGit,
+  resolveGitDirs = resolveGitDirsWithGit,
   readProjectDoc,
 }: CodexFlowDeps): CodexFlow {
   return {
@@ -152,9 +155,7 @@ export function makeFlow({
       const args = buildCodexArgs(ctx, promptParts.join('\n\n'), sessionId, {
         profile,
         configOverrides,
-        gitCommonDir: ctx.task.allowEdits
-          ? resolveGitCommonDir(ctx.task.cwd)
-          : undefined,
+        gitDirs: ctx.task.allowEdits ? resolveGitDirs(ctx.task.cwd) : [],
       })
 
       const child = ctx.spawn('codex', args, {
@@ -302,11 +303,11 @@ function buildCodexArgs(
   {
     profile,
     configOverrides,
-    gitCommonDir,
+    gitDirs,
   }: {
     profile?: string
     configOverrides: string[]
-    gitCommonDir?: string
+    gitDirs: string[]
   },
 ): string[] {
   const configOverridesWithLanderDefaults = [
@@ -316,7 +317,7 @@ function buildCodexArgs(
     ...codexPermissionConfigOverrides(
       ctx.task.allowEdits,
       ctx.task.checkout ?? ctx.task.root,
-      gitCommonDir,
+      gitDirs,
     ),
     ...codexShellEnvConfigOverrides(),
   ]
@@ -365,14 +366,14 @@ function buildCodexArgs(
 function codexPermissionConfigOverrides(
   allowEdits: boolean,
   projectRoot: string,
-  gitCommonDir: string | undefined,
+  gitDirs: string[],
 ): string[] {
   const profileId = allowEdits ? 'lander-edit' : 'lander-read-only'
   const baseProfile = allowEdits ? ':workspace' : ':read-only'
   const filesystemRules = allowEdits
     ? [
         `${tomlString(':workspace_roots')}={${tomlEntry('.git', 'write')}}`,
-        ...(gitCommonDir ? [tomlEntry(path.resolve(gitCommonDir), 'write')] : []),
+        ...gitDirs.map((dir) => tomlEntry(path.resolve(dir), 'write')),
       ].join(',')
     : undefined
   const profileValue = [
@@ -397,16 +398,23 @@ function codexPermissionConfigOverrides(
   ]
 }
 
-function resolveGitCommonDirWithGit(cwd: string): string | undefined {
+// The common dir alone is not enough for a linked worktree. Measured in a
+// lander-made worktree on codex 0.159.2: with the common dir granted,
+// `git switch -c` created the branch ref but could not take
+// `.git/worktrees/<id>/HEAD.lock` (EPERM) — although the recorded sandbox
+// policy put that path under a writable root, and a hand-run `codex exec` with
+// the same argv and env could write it. Granting the worktree's own git dir by
+// name fixed it.
+function resolveGitDirsWithGit(cwd: string): string[] {
   try {
-    const commonDir = execFileSync(
+    const out = execFileSync(
       'git',
-      ['-C', cwd, 'rev-parse', '--git-common-dir'],
+      ['-C', cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir', '--git-dir'],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
-    ).trim()
-    return commonDir ? path.resolve(cwd, commonDir) : undefined
+    )
+    return [...new Set(out.split('\n').map((l) => l.trim()).filter(Boolean))]
   } catch {
-    return undefined
+    return []
   }
 }
 
