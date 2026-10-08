@@ -38,13 +38,34 @@ const render = (
   )
 
 describe('DetailHeader', () => {
-  it('renders the title, status, and the branch line only when there is a branch', () => {
-    const html = render(baseTask({ status: 'wedged', branch: 'fix-parser' }))
+  it('renders the title, status, and the worktree chip only for a task with a worktree', () => {
+    const html = render(
+      baseTask({
+        status: 'wedged',
+        checkout: {
+          path: '/p/.worktrees/task1',
+          branch: 'fix-parser',
+          files: [
+            { path: 'src/a.ts', added: 3, removed: 1 },
+            { path: 'logo.png', added: null, removed: null },
+          ],
+        },
+      }),
+    )
     expect(html).toContain('Fix the parser')
     expect(html).toContain('task-status wedged')
-    expect(html).toContain('detail-branch')
     expect(html).toContain('fix-parser')
-    expect(render(baseTask())).not.toContain('detail-branch')
+    expect(html).toContain('2 files')
+    expect(html).toContain('+3')
+    expect(html).toContain('−1')
+    expect(render(baseTask())).not.toContain('checkout-chip')
+  })
+
+  it('names a detached worktree, and counts nothing when nothing changed', () => {
+    const html = render(baseTask({ checkout: { path: '/p/.worktrees/task1', files: [] } }))
+    expect(html).toContain('detached')
+    expect(html).not.toMatch(/\d files?</)
+    expect(html).not.toContain('diffstat')
   })
 
   it('carries both copy buttons — the task id and the conversation', () => {

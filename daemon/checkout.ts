@@ -1,7 +1,8 @@
 // The git worktree the daemon manages for a task in a project that enables them
 // (`worktrees: true` in the lander config): `<root>/.worktrees/<task id>`. Its
 // location is a pure function of the project and the task, so nothing about it
-// has to be stored anywhere — the server keeps only the branch it last saw.
+// has to be stored for the daemon to find it again — the server keeps the last
+// report of it only to show.
 //
 // Created detached at whatever the main checkout has checked out, when a ride
 // starts and finds none; removed, branches untouched, when the task is landed or
@@ -9,7 +10,9 @@
 
 import { execFile } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { lstat, readFile } from 'node:fs/promises'
 import path from 'node:path'
+import type { ChangedFile, CheckoutReport } from '../server/protocol'
 
 export const CHECKOUTS_DIR = '.worktrees'
 
@@ -32,13 +35,23 @@ function isWorktree(dir: string): boolean {
 // Runs git in `cwd`, resolving with its stdout.
 export type Git = (cwd: string, args: string[]) => Promise<string>
 
-export const gitRun: Git = (cwd, args) =>
-  new Promise((resolve, reject) => {
-    execFile('git', ['-C', cwd, ...args], { maxBuffer: 1 << 20 }, (err, out, stderr) => {
-      if (err) reject(new Error(String(stderr).trim() || err.message))
-      else resolve(String(out))
+// A Git that kills a command still running after `timeoutMs`; 0 never does.
+export const gitWithin =
+  (timeoutMs: number): Git =>
+  (cwd, args) =>
+    new Promise((resolve, reject) => {
+      execFile(
+        'git',
+        ['-C', cwd, ...args],
+        { maxBuffer: 1 << 20, timeout: timeoutMs },
+        (err, out, stderr) => {
+          if (err) reject(new Error(String(stderr).trim() || err.message))
+          else resolve(String(out))
+        },
+      )
     })
-  })
+
+export const gitRun: Git = gitWithin(0)
 
 // Make sure the task's checkout exists. `-f` overrides only a registered entry
 // whose directory has gone missing (deleted by hand); with `--detach` there is no
@@ -91,9 +104,7 @@ function worktreePaths(porcelain: string): string[] {
 }
 
 // The branch checked out in a checkout, or undefined when HEAD is detached or
-// unreadable. Read straight from the files — `.git` names the gitdir, whose HEAD
-// is `ref: refs/heads/<name>` or a bare sha — so a run's done never waits on a
-// git process.
+// unreadable.
 export function checkoutBranch(dir: string): string | undefined {
   try {
     const gitFile = readFileSync(path.join(dir, '.git'), 'utf8').trim()
@@ -106,6 +117,70 @@ export function checkoutBranch(dir: string): string | undefined {
   } catch {
     return undefined
   }
+}
+
+export async function checkoutReport(
+  root: string,
+  dir: string,
+  git: Git = gitRun,
+): Promise<CheckoutReport> {
+  const branch = checkoutBranch(dir)
+  return {
+    path: dir,
+    ...(branch ? { branch } : {}),
+    files: await checkoutChanges(root, dir, git),
+  }
+}
+
+// Diffed from the merge base with the main checkout's HEAD rather than from
+// that HEAD itself, so commits landing on main afterward don't show up as
+// changes here.
+async function checkoutChanges(root: string, dir: string, git: Git): Promise<ChangedFile[]> {
+  const main = (await git(root, ['rev-parse', 'HEAD'])).trim()
+  const base = (await git(dir, ['merge-base', 'HEAD', main])).trim()
+  // `--no-optional-locks` keeps the diff from rewriting the index, which an
+  // agent's next turn may be using.
+  const tracked = parseNumstat(
+    await git(dir, ['--no-optional-locks', 'diff', '--numstat', '-z', base]),
+  )
+  const untrackedPaths = (await git(dir, ['ls-files', '--others', '--exclude-standard', '-z']))
+    .split('\0')
+    .filter(Boolean)
+  const untracked = await Promise.all(untrackedPaths.map((p) => untrackedFile(dir, p)))
+  return [...tracked, ...untracked.flatMap((f) => f ?? [])].sort((a, b) =>
+    a.path < b.path ? -1 : 1,
+  )
+}
+
+// `git diff --numstat -z`: `<added>\t<removed>\t<path>\0` per file, or for a
+// rename an empty path followed by `<old>\0<new>\0`. Binary files count `-`.
+function parseNumstat(out: string): ChangedFile[] {
+  const fields = out.split('\0')
+  const files: ChangedFile[] = []
+  for (let i = 0; i < fields.length; i++) {
+    const m = /^(-|\d+)\t(-|\d+)\t(.*)$/s.exec(fields[i])
+    if (!m) continue
+    const filePath = m[3] || fields[(i += 2)]
+    files.push({ path: filePath, added: count(m[1]), removed: count(m[2]) })
+  }
+  return files
+}
+
+const count = (n: string): number | null => (n === '-' ? null : Number(n))
+
+// Counted the way numstat counts a new file. A nested repository lists as a
+// directory and is left out.
+async function untrackedFile(dir: string, file: string): Promise<ChangedFile | undefined> {
+  const full = path.join(dir, file)
+  const stat = await lstat(full)
+  if (stat.isSymbolicLink()) return { path: file, added: 1, removed: 0 }
+  if (!stat.isFile()) return undefined
+  const bytes = await readFile(full)
+  if (bytes.subarray(0, 8000).includes(0)) return { path: file, added: null, removed: null }
+  let lines = 0
+  for (const b of bytes) if (b === 0x0a) lines++
+  if (bytes.length && bytes[bytes.length - 1] !== 0x0a) lines++
+  return { path: file, added: lines, removed: 0 }
 }
 
 // Serialize work on one task's checkout — a land's remove and an unland-and-

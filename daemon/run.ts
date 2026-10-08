@@ -2,6 +2,7 @@ import type { ChildProcess } from 'node:child_process'
 import path from 'node:path'
 import type { ProviderCaps } from './flows/index'
 import type {
+  CheckoutReport,
   DoneCause,
   DoneMessage,
   SessionMessage,
@@ -11,7 +12,7 @@ import type {
   UpdateMessage,
 } from '../server/protocol'
 import type { MaterializedFiles } from './attachments'
-import { checkoutBranch as readCheckoutBranch } from './checkout'
+import { checkoutReport as readCheckoutReport, gitWithin } from './checkout'
 import { ROOT } from './paths'
 import type { HostEvent, HostInput } from './host-protocol'
 import {
@@ -92,9 +93,8 @@ export type RunManagerOptions = {
   // there is something to do; undefined when there isn't, so the common path
   // still spawns synchronously. A rejection fails the run with its message.
   prepare?: (msg: StartRunMessage, paths: RunPaths) => Promise<void> | undefined
-  // The branch a run's checkout has checked out as it ends, for its done.
-  // Injectable for tests; reads the worktree's files by default.
-  checkoutBranch?: (dir: string) => string | undefined
+  // What a run's checkout holds as it ends, for its done.
+  checkoutReport?: (root: string, dir: string) => Promise<CheckoutReport>
   send: (msg: RunManagerMessage) => void
   // The deterministic per-task file store dir (pure function of the run's
   // project/task). Set as LANDER_FILES_DIR on EVERY turn so `lander attachment`
@@ -117,11 +117,16 @@ export type RunManagerOptions = {
 
 const DEFAULT_RUN_BUFFER_TTL_MS = 120_000
 
+// Per git command. The done waits on the checkout report, so a git that hangs
+// must not hold the task riding.
+const CHECKOUT_REPORT_TIMEOUT_MS = 10_000
+
 export function createRunManager({
   caps,
   resolveRunPaths,
   prepare,
-  checkoutBranch = readCheckoutBranch,
+  checkoutReport = (root, dir) =>
+    readCheckoutReport(root, dir, gitWithin(CHECKOUT_REPORT_TIMEOUT_MS)),
   send,
   resolveFilesDir,
   materialize,
@@ -207,11 +212,6 @@ export function createRunManager({
         }
       spawnAfterDetour(msg, activeCaps, paths, materialized)
     })()
-  }
-
-  function branchReport(dir: string): { branch?: string } {
-    const branch = checkoutBranch(dir)
-    return branch ? { branch } : {}
   }
 
   // A pending run that ends without spawning leaves nothing else to nudge the
@@ -335,10 +335,20 @@ export function createRunManager({
         durationMs: Math.round(lastOutputAt - startedAt),
         ...(d.cause ? { cause: d.cause } : {}),
         ...(d.idleMs ? { idleMs: d.idleMs } : {}),
-        // Read here, like durationMs, so every way a run ends reports the branch
-        // its checkout was left on.
-        ...(paths.checkout ? { checkout: branchReport(paths.checkout) } : {}),
       }
+      // Read here, like durationMs, so every way a run ends reports the state
+      // its checkout was left in. A failed read reports nothing about it.
+      if (paths.checkout)
+        checkoutReport(paths.root, paths.checkout).then(
+          (checkout) => finish({ ...doneMsg, checkout }),
+          (e) => {
+            console.error(`checkout report for ${msg.runId} failed:`, e)
+            finish(doneMsg)
+          },
+        )
+      else finish(doneMsg)
+    }
+    const finish = (doneMsg: DoneMessage): void => {
       rec.done = doneMsg
       rec.dropTimer = setTimeout(() => {
         runs.delete(msg.runId)

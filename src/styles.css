@@ -1404,8 +1404,8 @@ body {
   flex-direction: column;
 }
 
-/* The title row, branch line, and meta row are direct children stacked by the
-   column gap; none of them carry their own margins. */
+/* The title row, worktree row, and meta row are direct children stacked by the
+   column gap; none of them carry their own vertical margins. */
 .detail-header {
   display: flex;
   flex-direction: column;
@@ -1418,14 +1418,6 @@ body {
 .detail-header h1 {
   margin: 0;
   font-size: 20px;
-}
-
-.detail-branch {
-  color: var(--muted);
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* The title row and the inline editor share the h1 box model so swapping
@@ -1526,6 +1518,136 @@ body {
    the header's single row that offset would knock it out of line. */
 .detail-meta .task-time {
   margin-top: 0;
+}
+
+/* The worktree chip on its own header row, and its popover. No transform on
+   the wrapper: that would contain the fixed popup and throw off its viewport
+   coordinates. */
+.checkout {
+  min-width: 0;
+}
+
+/* The negative margin keeps the text flush with the title above while the
+   hover tint gets its padding. */
+.checkout-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: calc(100% + 12px);
+  margin: 0 -6px;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.checkout-chip > svg {
+  align-self: center;
+}
+
+.checkout-chip:hover,
+.checkout-chip[aria-expanded='true'] {
+  background: var(--selected);
+}
+
+.checkout-branch {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, Menlo, monospace;
+}
+
+.diffstat-added {
+  color: var(--landed);
+}
+
+.diffstat-removed {
+  color: var(--wedged);
+}
+
+.diffstat-binary {
+  color: var(--muted);
+}
+
+.checkout-popup {
+  position: fixed;
+  z-index: 100;
+  width: 460px;
+  max-width: 80vw;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px var(--shadow);
+  font-size: 12px;
+}
+
+.checkout-popup-section {
+  padding: 10px 12px;
+}
+
+.checkout-popup-section + .checkout-popup-section {
+  border-top: 1px solid var(--border-secondary);
+}
+
+.checkout-fields {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 4px 12px;
+}
+
+.checkout-label,
+.checkout-detached,
+.checkout-dir {
+  color: var(--muted);
+}
+
+.checkout-value,
+.checkout-file {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11.5px;
+}
+
+/* The detached row has no copy button to fill the third column. */
+.checkout-detached {
+  grid-column: span 2;
+}
+
+/* Path, lines added, lines removed; a binary file's label spans both counts. */
+.checkout-files {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 3px 12px;
+  max-height: 50vh;
+  overflow-y: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.checkout-files > .diffstat-added,
+.checkout-files > .diffstat-removed {
+  text-align: right;
+}
+
+.checkout-files > .diffstat-binary {
+  grid-column: span 2;
+  text-align: right;
+}
+
+.checkout-files-head {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 .messages {

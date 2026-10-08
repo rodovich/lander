@@ -29,6 +29,7 @@ import {
 } from './daemon'
 import type {
   AgentKind,
+  CheckoutReport,
   HookSelector,
   RevivedMarker,
   StartRunMessage,
@@ -438,12 +439,11 @@ type Task = {
   // directly rather than re-deriving it from the launch directory. Absent until
   // the first turn completes.
   transcriptPath?: string
-  // The branch checked out in the worktree the daemon manages for this task
-  // (`worktrees: true` in the lander config), as of the last run that reported
-  // one. Absent while that worktree's HEAD is detached, and on tasks that never
-  // ran in one. A name, never a path: the daemon derives the worktree's location
-  // from the project and task id.
-  branch?: string
+  // The worktree the daemon manages for this task (`worktrees: true` in the
+  // lander config), as the last run that reported it left it. Absent on tasks
+  // that never ran in one. Shown, never read back: the daemon derives the
+  // worktree's location from the project and task id.
+  checkout?: CheckoutReport
   // The flow's opaque durable state, folded here from `state-patch` batches by
   // applyStatePatch. Convention (flow-inversion.md §Durable state): it records the
   // flow's decisions, identities, and user-visible progress — the PR number, the
@@ -971,12 +971,11 @@ async function reduceRunWs(
             at,
             askId: nextAskId(t, Date.parse(at)),
           })
-          // Only a done that reports its checkout says anything about the
-          // branch; a crash or a pre-spawn failure leaves the last one standing.
-          if (ev.msg.checkout) {
-            if (ev.msg.checkout.branch) t.branch = ev.msg.checkout.branch
-            else delete t.branch
-          }
+          // Only a done that reports its checkout says anything about it; a
+          // crash or a pre-spawn failure leaves the last report standing. A
+          // daemon from before `files` reports only the branch, which the
+          // header can't show without the rest.
+          if (ev.msg.checkout?.files) t.checkout = ev.msg.checkout
         }).catch(() => {})
         // Tell the daemon it can drop this run's replay buffer.
         sendToDaemon({ type: 'ack', runId })

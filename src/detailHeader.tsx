@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react'
+import { CheckoutChip } from './checkoutChip'
 import { formatTimestamp } from './format'
 import { GrantControl } from './grants'
 import {
@@ -136,10 +137,7 @@ export const DetailHeader = memo(function DetailHeader({
           <CopyConversationButton markdown={copyMarkdown} />
         </div>
       )}
-      {/* The branch checked out in the task's lander-managed worktree as of its
-          last turn — nothing while that worktree is detached, or for a task
-          that has none. The project it's in is the navbar's. */}
-      {task.branch && <div className="detail-branch">{task.branch}</div>}
+      {task.checkout && <CheckoutChip checkout={task.checkout} />}
       <div className="detail-meta">
         <span
           className={

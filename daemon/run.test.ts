@@ -553,13 +553,20 @@ describe('daemon run manager', () => {
       checkout: '/repo/.worktrees/task-1',
     })
 
-    it('waits for prepare, then launches there and reports its branch on done', async () => {
+    const report = {
+      path: '/repo/.worktrees/task-1',
+      branch: 'feature',
+      files: [{ path: 'a.ts', added: 2, removed: 1 }],
+    }
+
+    it('waits for prepare, then launches there and reports the checkout on done', async () => {
       let release!: () => void
       const prepare = vi.fn(() => new Promise<void>((r) => (release = r)))
+      const checkoutReport = vi.fn(async () => report)
       const h = harness({
         resolveRunPaths: checkoutPaths,
         prepare,
-        checkoutBranch: (dir) => (dir === '/repo/.worktrees/task-1' ? 'feature' : undefined),
+        checkoutReport,
       })
       h.manager.startRun(makeStart())
       expect(prepare).toHaveBeenCalledWith(
@@ -574,21 +581,47 @@ describe('daemon run manager', () => {
       expect(input.cwd).toBe('/repo/.worktrees/task-1')
       expect(input.checkout).toBe('/repo/.worktrees/task-1')
       push(h.hosts[0], { kind: 'done', exitCode: 0, stderr: '' })
-      expect(h.messages.at(-1)).toMatchObject({
-        type: 'done',
-        checkout: { branch: 'feature' },
-      })
+      await vi.waitFor(() =>
+        expect(h.messages.at(-1)).toMatchObject({ type: 'done', checkout: report }),
+      )
+      expect(checkoutReport).toHaveBeenCalledWith('/repo', '/repo/.worktrees/task-1')
     })
 
-    it('reports a detached checkout as one with no branch', () => {
+    it('holds the done until the report is read, and replays it with the report', async () => {
+      let resolve!: (r: typeof report) => void
       const h = harness({
         resolveRunPaths: checkoutPaths,
         prepare: () => undefined,
-        checkoutBranch: () => undefined,
+        checkoutReport: () => new Promise((r) => (resolve = r)),
       })
       h.manager.startRun(makeStart())
       push(h.hosts[0], { kind: 'done', exitCode: 0, stderr: '' })
-      expect(h.messages.at(-1)).toMatchObject({ type: 'done', checkout: {} })
+      h.manager.resumeFrom('run-1', 0)
+      expect(h.messages.filter((m) => m.type === 'done')).toEqual([])
+      resolve(report)
+      await vi.waitFor(() => expect(h.messages.at(-1)).toMatchObject({ type: 'done' }))
+      h.manager.resumeFrom('run-1', 0)
+      expect(h.messages.filter((m) => m.type === 'done')).toEqual([
+        expect.objectContaining({ checkout: report }),
+        expect.objectContaining({ checkout: report }),
+      ])
+    })
+
+    it('sends the done without a checkout when the report fails', async () => {
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        const h = harness({
+          resolveRunPaths: checkoutPaths,
+          prepare: () => undefined,
+          checkoutReport: () => Promise.reject(new Error('git timed out')),
+        })
+        h.manager.startRun(makeStart())
+        push(h.hosts[0], { kind: 'done', exitCode: 0, stderr: '' })
+        await vi.waitFor(() => expect(h.messages.at(-1)).toMatchObject({ type: 'done' }))
+        expect(h.messages.at(-1)).not.toHaveProperty('checkout')
+      } finally {
+        error.mockRestore()
+      }
     })
 
     it('says nothing about a checkout for a run outside one', () => {

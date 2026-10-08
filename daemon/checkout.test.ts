@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   checkoutBranch,
   checkoutPath,
+  checkoutReport,
   createTaskLocks,
   ensureCheckout,
   removeCheckout,
@@ -59,6 +60,41 @@ describe('task checkouts', () => {
     git(dir, 'switch', '-q', '-c', 'feature/x')
     expect(checkoutBranch(dir)).toBe('feature/x')
     expect(checkoutBranch(path.join(root, 'nowhere'))).toBeUndefined()
+  })
+
+  it('reports committed, uncommitted, and untracked changes since it left main', async () => {
+    const commit = (cwd: string, msg: string) =>
+      git(cwd, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-am', msg)
+    git(root, 'config', 'diff.renames', 'true')
+    writeFileSync(path.join(root, 'kept.txt'), 'a\nb\nc\n')
+    writeFileSync(path.join(root, 'old-name.txt'), 'one\ntwo\nthree\nfour\n')
+    git(root, 'add', '.')
+    commit(root, 'base')
+    const dir = await ensureCheckout(root, 't1')
+    const empty = await checkoutReport(root, dir)
+    expect(empty).toEqual({ path: dir, files: [] })
+
+    git(dir, 'switch', '-q', '-c', 'feature')
+    writeFileSync(path.join(dir, 'kept.txt'), 'a\nB\nc\nd\n')
+    commit(dir, 'edit')
+    git(dir, 'mv', 'old-name.txt', 'new-name.txt')
+    writeFileSync(path.join(dir, 'untracked.txt'), 'x\ny')
+    writeFileSync(path.join(dir, 'blob.bin'), Buffer.from([1, 0, 2]))
+    // Main moving on afterward isn't this checkout's change.
+    writeFileSync(path.join(root, 'main-only.txt'), 'm\n')
+    git(root, 'add', 'main-only.txt')
+    commit(root, 'main moves')
+
+    expect(await checkoutReport(root, dir)).toEqual({
+      path: dir,
+      branch: 'feature',
+      files: [
+        { path: 'blob.bin', added: null, removed: null },
+        { path: 'kept.txt', added: 2, removed: 1 },
+        { path: 'new-name.txt', added: 0, removed: 0 },
+        { path: 'untracked.txt', added: 2, removed: 0 },
+      ],
+    })
   })
 
   it('is removed even when dirty or locked, leaving its branch', async () => {

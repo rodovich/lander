@@ -322,11 +322,26 @@ export type Task = {
   // NOT where the next turn starts: a `cd` recorded here is a place the agent
   // visited, not necessarily a place it will be again.
   cwd?: string
-  // The branch checked out in the worktree lander manages for this task (in a
-  // project whose config enables them), as of its last turn — what the detail
-  // header shows. Absent while that worktree is detached, and for a task that
-  // has never run in one.
+  // The worktree lander manages for this task (in a project whose config
+  // enables them), as of its last turn. Absent for a task that has never run in
+  // one.
+  checkout?: CheckoutReport
+}
+
+// Mirrors server/protocol.ts.
+export type CheckoutReport = {
+  path: string
+  // Absent while the worktree is detached.
   branch?: string
+  // Everything changed since the worktree diverged from the main checkout.
+  files: ChangedFile[]
+}
+
+// Line counts are null for a binary file.
+export type ChangedFile = {
+  path: string
+  added: number | null
+  removed: number | null
 }
 
 // A task tagged with the slug of the project it came from, so the merged

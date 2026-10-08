@@ -516,9 +516,25 @@ export type DoneMessage = {
   // event reports no cost.
   durationMs?: number
   // Present only for a run launched in a checkout the daemon manages for the
-  // task: the branch checked out there as the run ended, absent when HEAD is
-  // detached. A done without this field says nothing about the branch.
-  checkout?: { branch?: string }
+  // task, describing that checkout as the run ended. A done without this field
+  // says nothing about the checkout.
+  checkout?: CheckoutReport
+}
+
+export type CheckoutReport = {
+  path: string
+  // Absent while HEAD is detached.
+  branch?: string
+  // Every file that differs from where the checkout diverged from the main
+  // checkout's HEAD: committed, uncommitted, and untracked changes together.
+  files: ChangedFile[]
+}
+
+// Line counts are null for a binary file.
+export type ChangedFile = {
+  path: string
+  added: number | null
+  removed: number | null
 }
 
 // The provider session id learned for a task's first turn. For Claude today, the
