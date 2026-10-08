@@ -1439,12 +1439,12 @@ body {
 .title-row h1.editable-title {
   cursor: text;
   border-radius: 4px;
-  padding: 0 4px;
-  margin: 0 -4px;
+  padding: 2px 6px;
+  margin: 0 -6px;
 }
 
 .editable-title:hover {
-  background: var(--bg-tinted);
+  background: var(--selected);
 }
 
 /* The icon buttons in the detail header's title row: the naming sparkle, the
@@ -1491,7 +1491,7 @@ body {
 .title-input {
   flex: 1;
   min-width: 0;
-  padding: 0 4px;
+  padding: 2px 6px;
   font: inherit;
   font-size: 20px;
   font-weight: 700;
