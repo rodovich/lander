@@ -189,6 +189,31 @@ describe('Markdown rendering', () => {
     expect(html).not.toContain('<code>')
   })
 
+  it('drops the backslash from an escaped punctuation character', () => {
+    expect(render('\\* not a list')).toBe('<p>* not a list</p>')
+    expect(render('\\# not a heading')).toBe('<p># not a heading</p>')
+    expect(render('a\\b \\\\ c')).toBe('<p>a\\b \\ c</p>')
+  })
+
+  it('keeps an escaped delimiter from opening or closing emphasis', () => {
+    expect(render('\\*a\\* and *b \\* c*')).toBe('<p>*a* and <em>b * c</em></p>')
+    expect(render('\\_a_ \\~~b~~')).toBe('<p>_a_ ~~b~~</p>')
+  })
+
+  it('escapes the delimiter after an escaped backslash, not the backslash itself', () => {
+    expect(render('\\\\*a*')).toBe('<p>\\<em>a</em></p>')
+  })
+
+  it('leaves backslashes inside a code span literal', () => {
+    expect(render(`${B}a\\*b${B}`)).toBe('<p><code>a\\*b</code></p>')
+    expect(render(`${B}a\\${B}b${B}`)).toBe('<p><code>a\\</code>b`</p>')
+  })
+
+  it('does not open a code span on an escaped backtick', () => {
+    expect(render(`\\${B}a${B}`)).toBe('<p>`a`</p>')
+    expect(render(`\\\\${B}a${B}`)).toBe('<p>\\<code>a</code></p>')
+  })
+
   it('does not blow up on a long backtick run with no closing delimiter', () => {
     const evil = '*' + '`x'.repeat(400) + ' no close'
     const t0 = performance.now()

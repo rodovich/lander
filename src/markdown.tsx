@@ -7,7 +7,8 @@ import { timed } from './perf'
 // (never HTML strings / dangerouslySetInnerHTML), so React escapes all text
 // for us — raw HTML in the source is rendered as literal text, not markup.
 // Supported: headers, ordered/unordered lists, blockquotes, fenced code
-// blocks, horizontal rules, and inline bold/italic/strikethrough/code/links.
+// blocks, horizontal rules, inline bold/italic/strikethrough/code/links, and
+// backslash escapes.
 // The blocks come from markdownBlocks; this file reads the inline spans inside
 // them and draws both.
 
@@ -43,10 +44,12 @@ function stripCodePad(text: string): string {
 // the next run of the same length, which is how a backtick gets inside code:
 // `` `x` `` is one span whose content is `x`. Both runs must be maximal — the
 // lookarounds — so ``a` stays literal (its opening run of 2 never closes)
-// rather than being read as a shorter run plus a stray.
+// rather than being read as a shorter run plus a stray. An opening run behind an
+// odd number of backslashes is escaped, so it opens nothing; the closing run is
+// inside the code, where a backslash is literal.
 export function findCodeSpans(text: string): CodeSpan[] {
   if (!text.includes('`')) return []
-  const re = /(?<!`)(`+)(?!`)([\s\S]*?)(?<!`)\1(?!`)/g
+  const re = /(?<!`)(?<=(?:^|[^\\])(?:\\\\)*)(`+)(?!`)([\s\S]*?)(?<!`)\1(?!`)/g
   const spans: CodeSpan[] = []
   for (let m = re.exec(text); m; m = re.exec(text)) {
     spans.push({
@@ -70,6 +73,21 @@ function maskCodeSpans(text: string, spans: CodeSpan[]): string {
   return out + text.slice(at)
 }
 
+// A backslash before ASCII punctuation makes that character literal, as in
+// CommonMark: `\*` renders "*" and can neither open nor close emphasis. Each
+// escape is blanked to two \x01s, the way code spans are blanked to \0s, so no
+// other pattern sees its character as a delimiter.
+const ESCAPE = /\\[!-/:-@[-`{-~]/g
+
+function maskEscapes(masked: string): { masked: string; escapeAt: Set<number> } {
+  const escapeAt = new Set<number>()
+  const out = masked.replace(ESCAPE, (_, at: number) => {
+    escapeAt.add(at)
+    return '\x01\x01'
+  })
+  return { masked: out, escapeAt }
+}
+
 // Parse inline spans (bold, italic, strikethrough, code, links) into React
 // nodes. Operates on plain text, so anything it doesn't recognize stays literal.
 function renderInline(
@@ -87,7 +105,7 @@ function renderInline(
   // `Bash(safe-cmd *)` can no longer close an italic opened before it. Emphasis
   // can still span a code span, since the blanks are ordinary body characters.
   const codeSpans = findCodeSpans(text)
-  const masked = maskCodeSpans(text, codeSpans)
+  const { masked, escapeAt } = maskEscapes(maskCodeSpans(text, codeSpans))
   const codeAt = new Map(codeSpans.map((s) => [s.start, s.content]))
 
   // Patterns match against `masked`, so any group whose text gets rendered must
@@ -125,6 +143,11 @@ function renderInline(
       re: /\0+/g,
       accept: (m) => codeAt.has(m.index),
       render: (m, k) => <code key={k}>{codeAt.get(m.index)}</code>,
+    },
+    {
+      re: /\x01\x01/g,
+      accept: (m) => escapeAt.has(m.index),
+      render: (m, k) => <Fragment key={k}>{text[m.index + 1]}</Fragment>,
     },
     {
       re: /\[([^\]]+)\]\(([^)\s]+)\)/gd,
