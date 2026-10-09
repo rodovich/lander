@@ -259,9 +259,9 @@ export type Ctx = {
   state: CtxState
   scratch: CtxScratch
   spawn(cmd: string, args: string[], opts?: SpawnOpts): SpawnedChild
-  // Reserved at v1 and never aborted. Every supervisor kill path SIGKILLs the
-  // host process group, so there is no graceful stop to announce; flows must
-  // tolerate an abrupt kill.
+  // Aborted when the supervisor stops the run, as the runtime SIGTERMs the
+  // flow's children. A flow must still tolerate an abrupt kill: the stop falls
+  // back to SIGKILLing the host's process group.
   signal: AbortSignal
   telemetry: CtxTelemetry
   attachments: CtxAttachments
@@ -362,6 +362,12 @@ export type CtxRuntime = {
   // SIGKILL every child this runtime spawned. The host calls this on exit, so a
   // host that ends mid-turn leaves no orphan.
   killChildren(): void
+  // SIGTERM every child, SIGKILL whatever is still running after `graceMs`,
+  // and resolve once all of them have closed; a spawn after this throws. A
+  // child that cleans up on SIGTERM gets to: Claude stops the background
+  // commands and monitors it started, which run in process groups of their own
+  // and outlive a SIGKILL.
+  terminateChildren(graceMs: number): Promise<void>
 }
 
 export function createCtxRuntime(
@@ -698,22 +704,23 @@ export function createCtxRuntime(
 
   // ── Processes ────────────────────────────────────────────────────────────
 
-  const children = new Set<ChildProcess>()
+  const children = new Map<ChildProcess, Promise<number>>()
+  let terminating = false
 
   function spawn(
     cmd: string,
     args: string[],
     opts: SpawnOpts = {},
   ): SpawnedChild {
+    if (terminating) throw new Error('the run is stopping')
     const child = spawnFn(cmd, args, {
       cwd: opts.cwd ?? cwd,
       // Task-specific values override the host's inherited environment.
       env: { ...process.env, ...(opts.env ?? {}) },
-      // Never detached: the supervisor's group SIGKILL (interrupt / idle /
-      // shutdown) reaches a spawned child only through group membership.
+      // Never detached: the supervisor's fallback group SIGKILL reaches a
+      // spawned child only through group membership.
       stdio: ['ignore', 'pipe', 'pipe'],
     })
-    children.add(child)
 
     const stdoutQ = new LineQueue()
     const stderrQ = new LineQueue()
@@ -757,6 +764,7 @@ export function createCtxRuntime(
         resolve(code == null ? 1 : code)
       })
     })
+    children.set(child, exit)
 
     return {
       // Flushing when the queue drains is what makes the batch boundary the
@@ -770,20 +778,26 @@ export function createCtxRuntime(
         }),
       stderr: stderrQ.drain(() => {}),
       exit,
-      kill: () => {
-        try {
-          child.kill('SIGKILL')
-        } catch {}
-      },
+      kill: () => signal(child, 'SIGKILL'),
     }
   }
 
+  function signal(child: ChildProcess, sig: NodeJS.Signals): void {
+    try {
+      child.kill(sig)
+    } catch {}
+  }
+
   function killChildren(): void {
-    for (const child of children) {
-      try {
-        child.kill('SIGKILL')
-      } catch {}
-    }
+    for (const child of children.keys()) signal(child, 'SIGKILL')
+  }
+
+  function terminateChildren(graceMs: number): Promise<void> {
+    terminating = true
+    abort.abort()
+    for (const child of children.keys()) signal(child, 'SIGTERM')
+    const deadline = setTimeout(killChildren, graceMs)
+    return Promise.all(children.values()).then(() => clearTimeout(deadline))
   }
 
   // ── Assembly ─────────────────────────────────────────────────────────────
@@ -1051,6 +1065,7 @@ export function createCtxRuntime(
     ctx,
     runTurn: runFlowTurn,
     killChildren,
+    terminateChildren,
 
   }
 }

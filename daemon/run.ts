@@ -17,6 +17,7 @@ import { ROOT } from './paths'
 import type { HostEvent, HostInput } from './host-protocol'
 import {
   endStdin,
+  HOST_STOP_GRACE_MS,
   killProcessGroup,
   onLines,
   spawnHostProcess,
@@ -42,7 +43,9 @@ export type RunManager = {
   interrupt: (runId: string) => void
   resumeFrom: (runId: string, seq: number) => void
   ack: (runId: string) => void
-  killChildren: () => void
+  // Stop every spawned run's host and refuse to spawn any more, a pending run's
+  // included; resolves once those hosts have closed.
+  stopAll: () => Promise<void>
   // Settle a run as failed through the settle-once gate — see Run.fail.
   failRun: (runId: string, stderr: string) => void
   heldRunIds: () => string[]
@@ -58,8 +61,8 @@ type Run = {
   // drain.check() would never fire — pinning a draining daemon to the 12h
   // supervisor backstop.
   fail: (stderr: string) => void
-  // Kill the flow host and its process group.
-  kill: () => void
+  // Stop the flow host (see stopHost); resolves once it has closed.
+  stop: () => Promise<void>
   buffer: UpdateMessage[]
   mintedSession?: string
   // The dynamic context block appended to this run's prompt (when it changed),
@@ -113,6 +116,8 @@ export type RunManagerOptions = {
   runBufferTtlMs?: number
   spawnHost?: SpawnHostLike
   onEmpty?: () => void
+  // How long a stopped host gets to exit before its process group is SIGKILLed.
+  stopGraceMs?: number
 }
 
 const DEFAULT_RUN_BUFFER_TTL_MS = 120_000
@@ -134,6 +139,7 @@ export function createRunManager({
   runBufferTtlMs = DEFAULT_RUN_BUFFER_TTL_MS,
   spawnHost = () => spawnHostProcess(HOST_ENTRY),
   onEmpty = () => {},
+  stopGraceMs = 2 * HOST_STOP_GRACE_MS,
 }: RunManagerOptions): RunManager {
   const runs = new Map<string, Run>()
   // Runs interrupted during the async pre-spawn window (attachment
@@ -143,6 +149,10 @@ export function createRunManager({
   // Runs accepted but not yet spawned (still in that async window). Counted as
   // held by size() and heldRunIds() — see startRun.
   const pending = new Set<string>()
+  // Set by stopAll. From then on nothing spawns: the daemon exits once the
+  // hosts it is stopping have closed, and a host spawned meanwhile would be
+  // left running.
+  let stoppingAll = false
 
   function done(
     runId: string,
@@ -250,6 +260,18 @@ export function createRunManager({
       done(msg.runId, 0, '', true)
       return
     }
+    if (stoppingAll) {
+      leavePending(msg.runId)
+      send({
+        type: 'done',
+        runId: msg.runId,
+        exitCode: 1,
+        interrupted: false,
+        stderr: 'daemon stopping; run not started',
+        cause: 'daemon-shutdown',
+      })
+      return
+    }
 
     // The supervisor owns path resolution: LANDER_FILES_DIR points at the
     // persistent per-task store on every turn (so a file attached earlier stays
@@ -278,39 +300,60 @@ export function createRunManager({
 
     // Kill the host's whole process group so the agent grandchild dies with it.
     const killHost = (): void => killProcessGroup(host)
+    let closed = false
+    const hostClosed = new Promise<void>((resolve) =>
+      host.once('close', () => {
+        closed = true
+        resolve()
+      }),
+    )
 
     let seq = 0
     const buffer: UpdateMessage[] = []
     const statePatches: StatePatchMessage[] = []
     let settled = false
-    // Why we killed the host, when we did — stamped onto the synthesized
-    // close-without-done so the server can name the cause instead of wedging
-    // with a generic "run failed" that's indistinguishable from a crash.
-    let endCause: DoneCause | undefined
     // The activity-armed idle watchdog acts *through* the boundary: it arms on any
-    // host output and, on fire, kills the host group. The resulting
-    // close-without-a-natural-done is settled by the gate as exitCode 1.
+    // host output and, on fire, stops the host.
     let timer: ReturnType<typeof setTimeout> | undefined
     const idleWindowMs = msg.idleTimeoutMs
     const arm = () => {
       if (timer) clearTimeout(timer)
-      timer = setTimeout(() => {
-        endCause ??= 'idle-timeout'
-        killHost()
-      }, idleWindowMs)
+      timer = setTimeout(() => stopHost('idle-timeout'), idleWindowMs)
       timer.unref?.()
     }
     // Host output: the run did something. Kept apart from `arm` so the initial arm
     // at the end of this setup doesn't bill the spawn and wiring as working time.
     const sawOutput = () => {
+      if (stopReason) return
       lastOutputAt = performance.now()
       arm()
     }
 
-    // The settle-once `done` gate — the sole place a done reaches the server,
-    // whichever of the three sources fires first: a natural done relayed from the
-    // executor, a synthesized interrupt done, or a synthesized close-without-done
-    // (idle-kill / crash). Later sources are dropped once settled.
+    // Every deliberate stop goes through here. The first one's reason decides
+    // how a run not yet settled (fail() settles before it stops) settles when
+    // the host closes: as interrupted, or as a failure naming the cause so the
+    // server's wedge can say why instead of a generic "run failed". A SIGTERM
+    // lets the host stop its agent the agent's own way —
+    // Claude ends the background commands and monitors it started, which sit
+    // outside the host's process group and would survive killHost — and the host
+    // exits once its flow has wound down. A host still alive after stopGraceMs
+    // gets killHost.
+    let stopReason: 'interrupt' | 'fail' | DoneCause | undefined
+    let stopFallback: ReturnType<typeof setTimeout> | undefined
+    const stopHost = (reason: NonNullable<typeof stopReason>): void => {
+      if (stopReason || closed) return
+      stopReason = reason
+      if (timer) clearTimeout(timer)
+      try {
+        host.kill('SIGTERM')
+      } catch {}
+      stopFallback = setTimeout(killHost, stopGraceMs)
+      stopFallback.unref?.()
+    }
+
+    // The settle-once `done` gate. A run settles from the first of: a natural
+    // done relayed from the executor before any stop, a failed done from fail()
+    // or the host's spawn error, or the host closing after a stop or a crash.
     const settle = (d: {
       exitCode: number
       stderr: string
@@ -327,9 +370,8 @@ export function createRunManager({
         exitCode: d.exitCode,
         interrupted: d.interrupted,
         stderr: d.stderr,
-        // Measured here rather than at each settle site so all three sources —
-        // the host's own done, an interrupt, an idle/shutdown kill — are timed
-        // the same way. Sent even when it is 0 (a host that produced nothing
+        // Measured here rather than at each settle site so every way a run ends
+        // is timed the same way. Sent even when it is 0 (a host that produced nothing
         // still worked no time), so only a run that never reaches this gate at
         // all is silent about its duration.
         durationMs: Math.round(lastOutputAt - startedAt),
@@ -412,6 +454,9 @@ export function createRunManager({
           break
         }
         case 'done':
+          // A stopped run settles from the stop, not from the done its flow
+          // reports while it winds down.
+          if (stopReason) break
           settle({
             exitCode: event.exitCode,
             stderr: event.stderr,
@@ -424,22 +469,14 @@ export function createRunManager({
     const rec: Run = {
       buffer,
       statePatches,
-      kill: () => {
-        // A daemon shutdown (killChildren) is a deliberate platform stop, not a
-        // crash — record it so the synthesized done names the right cause. An
-        // already-set cause (the watchdog fired first) wins.
-        endCause ??= 'daemon-shutdown'
-        killHost()
+      stop: () => {
+        stopHost('daemon-shutdown')
+        return hostClosed
       },
-      interrupt: () => {
-        // Mirror today's interrupt: settle an interrupted done at once (the gate
-        // wins over the host's kill-triggered close), then kill the host group.
-        settle({ exitCode: 0, stderr: '', interrupted: true })
-        killHost()
-      },
+      interrupt: () => stopHost('interrupt'),
       fail: (stderr: string) => {
         settle({ exitCode: 1, stderr, interrupted: false })
-        killHost()
+        stopHost('fail')
       },
     }
     runs.set(msg.runId, rec)
@@ -476,18 +513,19 @@ export function createRunManager({
       })
     })
     host.on('close', () => {
-      // A natural done (or a synthesized interrupt done) already settled the run.
-      // Otherwise the host was killed (idle timeout / daemon shutdown) or crashed
-      // without emitting one — synthesize the failed done, naming which, so the
-      // server's wedge can say why instead of the generic "run failed".
-      if (!settled)
+      if (stopFallback) clearTimeout(stopFallback)
+      if (stopReason === 'interrupt')
+        settle({ exitCode: 0, stderr: '', interrupted: true })
+      else {
+        const cause = stopReason === 'fail' ? undefined : (stopReason ?? 'host-crash')
         settle({
           exitCode: 1,
           stderr: '',
           interrupted: false,
-          cause: endCause ?? 'host-crash',
-          ...(endCause === 'idle-timeout' ? { idleMs: idleWindowMs } : {}),
+          ...(cause ? { cause } : {}),
+          ...(cause === 'idle-timeout' ? { idleMs: idleWindowMs } : {}),
         })
+      }
     })
 
     // Initial arm at spawn (host output re-arms thereafter), matching today's
@@ -534,8 +572,9 @@ export function createRunManager({
     onEmpty()
   }
 
-  function killChildren(): void {
-    for (const run of runs.values()) run.kill()
+  function stopAll(): Promise<void> {
+    stoppingAll = true
+    return Promise.all([...runs.values()].map((run) => run.stop())).then(() => {})
   }
 
   // Settle a run as failed. If the run was never registered (the throw beat
@@ -555,7 +594,7 @@ export function createRunManager({
     interrupt,
     resumeFrom,
     ack,
-    killChildren,
+    stopAll,
     failRun,
     heldRunIds: () => [...runs.keys(), ...pending],
     size: () => runs.size + pending.size,

@@ -158,23 +158,52 @@ describe('daemon run manager', () => {
     expect(hostInputOf(h.hosts[0]).filesDir).toBe('/files/proj/task-1')
   })
 
-  it('interrupts by killing the host group and emitting an interrupted done', () => {
+  it('interrupts by stopping the host and emitting an interrupted done once it exits', () => {
     const h = harness()
     h.manager.startRun(makeStart())
     const host = h.hosts[0]
 
     h.manager.interrupt('run-1')
 
-    expect(host.kill).toHaveBeenCalledWith('SIGKILL')
-    expect(h.messages.at(-1)).toMatchObject({
-      type: 'done',
-      runId: 'run-1',
-      exitCode: 0,
-      interrupted: true,
-    })
+    expect(host.kill).toHaveBeenCalledWith('SIGTERM')
+    expect(host.kill).not.toHaveBeenCalledWith('SIGKILL')
+    expect(h.messages.some((m) => m.type === 'done')).toBe(false)
+
+    // The flow may report its own done while the agent winds down; the
+    // interrupt still decides how the run settles.
+    push(host, { kind: 'done', exitCode: 143, stderr: '' })
+    host.emit('close', 143)
+    expect(h.messages.filter((m) => m.type === 'done')).toEqual([
+      expect.objectContaining({
+        type: 'done',
+        runId: 'run-1',
+        exitCode: 0,
+        interrupted: true,
+      }),
+    ])
   })
 
-  it('idle-kills the host and synthesizes a non-interrupted failed done', () => {
+  it('kills the host group when a stopped host does not exit in time', () => {
+    vi.useFakeTimers()
+    try {
+      const h = harness({ stopGraceMs: 100 })
+      h.manager.startRun(makeStart())
+      const host = h.hosts[0]
+
+      h.manager.interrupt('run-1')
+      vi.advanceTimersByTime(99)
+      expect(host.kill).not.toHaveBeenCalledWith('SIGKILL')
+      vi.advanceTimersByTime(1)
+      expect(host.kill).toHaveBeenCalledWith('SIGKILL')
+
+      host.emit('close', 137)
+      expect(h.messages.at(-1)).toMatchObject({ type: 'done', interrupted: true })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('idle-stops the host and synthesizes a non-interrupted failed done', () => {
     vi.useFakeTimers()
     try {
       const h = harness()
@@ -184,7 +213,7 @@ describe('daemon run manager', () => {
       vi.advanceTimersByTime(49)
       expect(host.kill).not.toHaveBeenCalled()
       vi.advanceTimersByTime(1)
-      expect(host.kill).toHaveBeenCalledWith('SIGKILL')
+      expect(host.kill).toHaveBeenCalledWith('SIGTERM')
 
       // The killed host closes without ever emitting a natural done. The
       // synthesized done names the idle kill and the window that expired.
@@ -273,6 +302,7 @@ describe('daemon run manager', () => {
         } as HostEvent)
         vi.advanceTimersByTime(10_000)
         h.manager.interrupt('run-1')
+        host.emit('close', 143)
 
         // An interrupted turn still reports the work it did — the analog of the
         // partial token counts such a turn keeps, where its cost is lost.
@@ -492,20 +522,27 @@ describe('daemon run manager', () => {
     expect(refreshUsage).toHaveBeenCalled()
   })
 
-  it('kills every held host group on killChildren, naming the shutdown as the cause', () => {
+  it('stops every held host on stopAll, naming the shutdown as the cause', async () => {
     const h = harness()
     h.manager.startRun(makeStart({ runId: 'run-1' }))
     h.manager.startRun(makeStart({ runId: 'run-2' }))
 
-    h.manager.killChildren()
+    let allStopped = false
+    const stopped = h.manager.stopAll().then(() => {
+      allStopped = true
+    })
 
-    expect(h.hosts[0].kill).toHaveBeenCalledWith('SIGKILL')
-    expect(h.hosts[1].kill).toHaveBeenCalledWith('SIGKILL')
+    expect(h.hosts[0].kill).toHaveBeenCalledWith('SIGTERM')
+    expect(h.hosts[1].kill).toHaveBeenCalledWith('SIGTERM')
 
-    // The killed hosts close without a natural done; the synthesized dones name
-    // the deliberate shutdown, not a crash.
-    h.hosts[0].emit('close', 137)
-    h.hosts[1].emit('close', 137)
+    // The shutdown waits for every host, not just the first to close.
+    h.hosts[0].emit('close', 143)
+    await new Promise((r) => setImmediate(r))
+    expect(allStopped).toBe(false)
+    h.hosts[1].emit('close', 143)
+    await stopped
+
+    // The synthesized dones name the deliberate shutdown, not a crash.
     expect(
       h.messages.filter((m) => m.type === 'done').map((m) => m),
     ).toMatchObject([
@@ -749,6 +786,23 @@ describe('daemon run manager', () => {
       )
       expect(h.manager.size()).toBe(0)
       expect(onEmpty).toHaveBeenCalledTimes(1)
+    })
+
+    it('never spawns once the daemon has begun stopping its runs', async () => {
+      const h = gated()
+      await h.manager.stopAll()
+      h.release()
+      await vi.waitFor(() =>
+        expect(h.messages).toContainEqual(
+          expect.objectContaining({ type: 'done', runId: 'run-1', exitCode: 1 }),
+        ),
+      )
+      h.manager.startRun(makeStart({ runId: 'run-2' }))
+      expect(h.messages).toContainEqual(
+        expect.objectContaining({ type: 'done', runId: 'run-2', exitCode: 1 }),
+      )
+      expect(h.hosts).toHaveLength(0)
+      expect(h.manager.size()).toBe(0)
     })
 
     it('releases its hold when interrupted before spawning', async () => {

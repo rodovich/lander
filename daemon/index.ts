@@ -46,6 +46,7 @@ import {
 import { homedir } from 'node:os'
 import { createRunManager, type RunManagerMessage, type RunPaths } from './run'
 import { createDrain } from './drain'
+import { HOST_STOP_GRACE_MS } from './processes'
 import { createWakeHold } from './power'
 import {
   materializeAttachments,
@@ -373,8 +374,8 @@ const runManager = createRunManager({
 
 // The dev supervisor's drain handoff (daemon-watch.mjs sends SIGUSR2 on a daemon
 // source edit): finish the runs we're riding, take no new ones, and exit once
-// they're all done — so a code edit never interrupts an in-flight turn. SIGTERM
-// still hard-kills as the max-drain cap.
+// they're all done — so a code edit never interrupts an in-flight turn. SIGTERM,
+// the max-drain cap, stops them instead.
 // Fire ids whose hook host is alive right now. Held so a hook run counts as work
 // for the drain and is killed with everything else — a hook host is not a
 // `runManager` run, so without this a daemon told to hand off would see
@@ -453,7 +454,7 @@ function onMessage(raw: string): void {
 }
 
 function startRun(msg: StartRunMessage): void {
-  if (drain.draining()) {
+  if (drain.draining() || exiting) {
     // We're handing off; the server routes new runs to the fresh primary, so
     // this shouldn't arrive — but if it does, abort cleanly rather than start
     // work we'd interrupt at exit.
@@ -462,7 +463,7 @@ function startRun(msg: StartRunMessage): void {
       runId: msg.runId,
       exitCode: 1,
       interrupted: false,
-      stderr: 'daemon draining; run not started',
+      stderr: `daemon ${exiting ? 'stopping' : 'draining'}; run not started`,
     })
     return
   }
@@ -532,8 +533,12 @@ function runHookFire(msg: HookRunMessage): void {
     // keeps no per-socket draining state and a SIGUSR2'd daemon never
     // re-registers, so its `primary` still points here for the whole handoff
     // window.
-    if (drain.draining())
-      return { ok: false, error: 'daemon draining; hook not run', status: 503 }
+    if (drain.draining() || exiting)
+      return {
+        ok: false,
+        error: `daemon ${exiting ? 'stopping' : 'draining'}; hook not run`,
+        status: 503,
+      }
     // A fire already running here is not run again. Two live bodies for one
     // fire is a strictly stronger hazard than the retry-after-death that bodies
     // are asked to tolerate.
@@ -566,22 +571,24 @@ function runHookFire(msg: HookRunMessage): void {
   })
 }
 
-// Kill any live agent children — best effort, on our own termination — so a
-// daemon restart doesn't orphan them (decision 2 aborts in-flight turns anyway).
-// Hook hosts too: they are detached process groups this process spawned, and
-// they are not runs, so runManager does not know about them.
-function killChildren(): void {
-  runManager.killChildren()
+// On our own termination (decision 2 aborts in-flight turns anyway), take no
+// new work and stop what we hold. Runs get a graceful stop, which lets a
+// SIGTERMed agent end background work of its own outside its host's process
+// group, and we wait for their hosts to close so that stop's SIGKILL fallback
+// can still fire — though not past STOP_WAIT_CAP_MS, so a host that never
+// reports closing can't keep us running beside our successor. Hook hosts are
+// not runs, so runManager does not know about them; we kill their detached
+// process groups outright.
+const STOP_WAIT_CAP_MS = 3 * HOST_STOP_GRACE_MS
+let exiting = false
+function stopChildrenAndExit(): void {
+  exiting = true
   hookRuns.killAll()
+  setTimeout(() => process.exit(0), STOP_WAIT_CAP_MS).unref()
+  void runManager.stopAll().then(() => process.exit(0))
 }
-process.on('SIGTERM', () => {
-  killChildren()
-  process.exit(0)
-})
-process.on('SIGINT', () => {
-  killChildren()
-  process.exit(0)
-})
+process.on('SIGTERM', stopChildrenAndExit)
+process.on('SIGINT', stopChildrenAndExit)
 
 // Graceful handoff: the dev supervisor sends SIGUSR2 on a daemon source edit
 // instead of killing us (SIGUSR1 is reserved by Node for the inspector). Once

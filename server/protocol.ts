@@ -480,7 +480,7 @@ export type UpdateMessage = {
 }
 
 // Why the daemon synthesized a done itself instead of relaying the host's own:
-// the idle watchdog fired, the daemon was shutting down (killChildren), or the
+// the idle watchdog fired, the daemon was shutting down (stopAll), or the
 // host died without reporting a result. Absent on a natural done — the exit
 // code and stderr carry the story there.
 export type DoneCause = 'idle-timeout' | 'daemon-shutdown' | 'host-crash'

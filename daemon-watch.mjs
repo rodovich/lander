@@ -63,11 +63,11 @@ const sup = createSupervisor({
       env: process.env,
     }),
   // How long to let a draining daemon finish before forcing it down. A last
-  // resort, not a routine bound: the run-level idle watchdog (10m of silence)
+  // resort, not a routine bound: the run-level idle watchdog (15m of silence)
   // already ends hung runs, so a daemon still draining here is either serving a
   // genuinely active long ride — which must not be killed — or stuck in a way
-  // the watchdog failed to catch. Sized accordingly; SIGTERM falls back to the
-  // daemon's hard-kill.
+  // the watchdog failed to catch. Sized accordingly; on SIGTERM the daemon
+  // stops its runs and exits.
   maxDrainMs: Number(process.env.LANDER_MAX_DRAIN_MS ?? 12 * 60 * 60_000),
   log: (m) => console.error(m),
 })

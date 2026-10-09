@@ -58,9 +58,9 @@ export type RunHookDeps = {
   stateDir: string
   spawnHost?: SpawnHookHostLike
   now?: () => number
-  // Handed the group kill once the host exists, so the daemon's own
-  // killChildren can reach a hook host the way it reaches a run's. Without it a
-  // shutdown would leave the body running as an orphan.
+  // Handed the group kill once the host exists, so the daemon's own shutdown
+  // can kill a hook host's group. Without it a shutdown would leave the body
+  // running as an orphan.
   onSpawn?: (kill: () => void) => void
 }
 
@@ -73,7 +73,7 @@ function tail(text: string, limit: number): string {
 // Extracted from the daemon entry so the two properties the drain depends on are
 // testable at all: a live hook host must count as work (or a SIGUSR2 handoff
 // exits straight through a detached body that still holds a credential), and it
-// must be reachable by killChildren (or a shutdown orphans it). Neither is
+// must be reachable by the daemon's shutdown (or it orphans it). Neither is
 // visible to `runManager`, which knows only about agent runs.
 export type HookRuns = {
   // Register a fire before its host exists, so a shutdown in the spawn gap still

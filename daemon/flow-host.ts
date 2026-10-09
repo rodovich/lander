@@ -2,7 +2,7 @@
 
 import { spawn as nodeSpawn } from 'node:child_process'
 import { ROOT } from './paths'
-import { isEntry, readInputLine } from './processes'
+import { HOST_STOP_GRACE_MS, isEntry, readInputLine } from './processes'
 import type { HostEvent, HostInput, SpawnLike } from './host-protocol'
 import { createCtxRuntime } from './flows/ctx'
 import { buildFlows, type BundledFlow } from './flows/index'
@@ -20,8 +20,13 @@ export type RunHostDeps = {
   flows?: Partial<Record<string, BundledFlow>>
 }
 
+export type HostHandle = {
+  kill: () => void
+  terminate: (graceMs: number) => Promise<void>
+}
+
 // The supervisor watches stdout/stderr for idle activity across this boundary.
-export function runHost(input: HostInput, deps: RunHostDeps): { kill: () => void } {
+export function runHost(input: HostInput, deps: RunHostDeps): HostHandle {
   const runtime = createCtxRuntime(input, {
     emit: deps.emit,
     now: deps.now,
@@ -38,11 +43,14 @@ export function runHost(input: HostInput, deps: RunHostDeps): { kill: () => void
       exitCode: 1,
       stderr: `unsupported flow: ${name ?? '(none)'}`,
     })
-    return { kill: () => {} }
+    return { kill: () => {}, terminate: async () => {} }
   }
   // runTurn owns child cleanup, state flushing, and the terminal event.
   void runtime.runTurn(flow)
-  return { kill: () => runtime.killChildren() }
+  return {
+    kill: () => runtime.killChildren(),
+    terminate: (graceMs) => runtime.terminateChildren(graceMs),
+  }
 }
 
 async function main(): Promise<void> {
@@ -52,9 +60,15 @@ async function main(): Promise<void> {
     spawn: nodeSpawn,
     onStderr: (chunk) => process.stderr.write(chunk),
   })
-  // The daemon stops a host only by SIGKILLing its process group, which takes
-  // every ctx.spawn child with it. This covers the host exiting on its own with
-  // a turn still running.
+  // The daemon stops a host with SIGTERM, and SIGKILLs its process group if it
+  // is still alive later. On SIGTERM the host passes the signal on to its
+  // children and lets the turn end as their exit ends it, so an agent can stop
+  // work of its own that the group kill can't reach, and the flow still flushes
+  // its state.
+  process.on('SIGTERM', () => {
+    void handle.terminate(HOST_STOP_GRACE_MS)
+  })
+  // Covers the host exiting on its own with a turn still running.
   process.on('exit', () => handle.kill())
   // The event loop drains once the agent child closes (its `done` already emitted),
   // so the host exits on its own — no explicit exit needed on the happy path.

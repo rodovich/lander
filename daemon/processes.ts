@@ -35,6 +35,11 @@ export function spawnHostProcess(
   })
 }
 
+// How long a host waits for its children to exit after a SIGTERM before it
+// SIGKILLs them. The supervisor waits longer than this before SIGKILLing the
+// host's group itself.
+export const HOST_STOP_GRACE_MS = 5_000
+
 // SIGKILL a host's whole process group, falling back to the host alone when
 // the group signal isn't available.
 export function killProcessGroup(child: ChildProcess): void {

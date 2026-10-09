@@ -463,6 +463,41 @@ describe('ctx runtime — the done contract', () => {
     expect(a!.kill).toHaveBeenCalled()
     expect(b!.kill).toHaveBeenCalled()
   })
+
+  it('terminateChildren asks each child to stop, then kills the ones still running', async () => {
+    vi.useFakeTimers()
+    try {
+      const h = harness()
+      h.runtime.ctx.spawn('quick', [])
+      h.runtime.ctx.spawn('stuck', [])
+      const [quick, stuck] = h.spawns.map((s) => s.child)
+
+      let settled = false
+      const stopped = h.runtime.terminateChildren(1_000).then(() => {
+        settled = true
+      })
+      expect(quick.kill).toHaveBeenCalledWith('SIGTERM')
+      expect(stuck.kill).toHaveBeenCalledWith('SIGTERM')
+      expect(h.runtime.ctx.signal.aborted).toBe(true)
+
+      quick.emit('close', 143)
+      await vi.advanceTimersByTimeAsync(999)
+      expect(settled).toBe(false)
+      expect(stuck.kill).not.toHaveBeenCalledWith('SIGKILL')
+
+      await vi.advanceTimersByTimeAsync(1)
+      expect(stuck.kill).toHaveBeenCalledWith('SIGKILL')
+      stuck.emit('close', null)
+      await stopped
+      expect(settled).toBe(true)
+
+      // A flow that gets as far as spawning after the stop starts nothing.
+      expect(() => h.runtime.ctx.spawn('late', [])).toThrow()
+      expect(h.spawns).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe('ctx runtime — spawn', () => {

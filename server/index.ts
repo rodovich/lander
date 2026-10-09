@@ -584,14 +584,15 @@ async function awaitDaemonServing(
   return daemonServes(slug)
 }
 
-// Stop a turn out from under the agent (a riding task wedged, landed, or paced):
-// ask the daemon to interrupt the run. It SIGKILLs the child and emits a clean
-// done{interrupted:true}, which reduceRunWs folds in — finalizing whatever
-// partial reply streamed without surfacing a crash. Then wait, briefly, for that
-// fold to close the run's ride, so the caller answers with the task as it now
-// stands: a paced task's only record of the pace is its closed ride. Best
-// effort: a run that has already finished is a no-op on the daemon side, and an
-// undelivered interrupt or a slow fold just answers with the ride still open.
+// Stop a turn out from under the agent (a task wedged, landed, or paced): ask
+// the daemon to interrupt the run. It stops the child and, once it has exited,
+// emits a clean done{interrupted:true}, which reduceRunWs folds in — finalizing
+// whatever partial reply streamed without surfacing a crash. Then wait,
+// briefly, for that fold to close the run's ride, so the caller answers with
+// the task as it now stands: a paced task's only record of the pace is its
+// closed ride. Best effort: a run that has already finished is a no-op on the
+// daemon side, and an undelivered interrupt, an agent slower to stop than
+// this wait, or a slow fold just answers with the ride still open.
 async function interruptRun(project: Project, id: string, runId: string): Promise<void> {
   if (!sendToDaemon({ type: 'interrupt', runId })) return
   const deadline = Date.now() + 3000
