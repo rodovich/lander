@@ -33,6 +33,7 @@ const render = (
       generateTitle={async () => {}}
       allowTool={async () => true}
       setAllowEdits={async () => {}}
+      onRetry={async () => true}
       {...over}
     />,
   )

@@ -68,7 +68,7 @@ export const Navbar = memo(function Navbar({
             <button
               key={name}
               type="button"
-              className={'navbar-button' + (panel === name ? ' active' : '')}
+              className={'action-button' + (panel === name ? ' active' : '')}
               aria-pressed={panel === name}
               onClick={() => onTogglePanel(name)}
             >

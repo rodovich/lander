@@ -217,6 +217,7 @@ function RulePopup({
   forgetOnClose,
   grants,
   onAllow,
+  onRetry,
 }: {
   className: string
   trigger: { className: string; label?: string; content: React.ReactNode }
@@ -229,11 +230,15 @@ function RulePopup({
   forgetOnClose?: boolean
   grants: Task['grants']
   onAllow: (rule: string, scope: GrantScope) => Promise<boolean>
+  onRetry?: () => Promise<boolean>
 }) {
   const { open, setOpen, containerRef, triggerRef, popupRef, popupStyle } =
     useAnchoredPopup()
   const [openMenuKey, setOpenMenuKey] = useState<string | null>(null)
   const [granted, setGranted] = useState<Record<string, Granted>>({})
+  const [permissionAdded, setPermissionAdded] = useState(false)
+  const [retrying, setRetrying] = useState(false)
+  const [granting, setGranting] = useState(0)
   // Bumped by each grant from the authoring row, remounting it empty and back in
   // edit mode so several rules can be granted in one open. A seeded row instead
   // keeps its checkmark.
@@ -255,9 +260,15 @@ function RulePopup({
       granted={granted[key] ?? null}
       onGrant={async (committed, scope) => {
         setOpenMenuKey(null)
-        if (!(await onAllow(committed, scope))) return
-        if (extra) setAuthoringRound((n) => n + 1)
-        else setGranted((g) => ({ ...g, [key]: { scope, rule: committed } }))
+        setGranting((n) => n + 1)
+        try {
+          if (!(await onAllow(committed, scope))) return
+          setPermissionAdded(true)
+          if (extra) setAuthoringRound((n) => n + 1)
+          else setGranted((g) => ({ ...g, [key]: { scope, rule: committed } }))
+        } finally {
+          setGranting((n) => n - 1)
+        }
       }}
       {...extra}
     />
@@ -288,6 +299,26 @@ function RulePopup({
               autoEdit: true,
               placeholder: authoring.placeholder,
             })}
+          {permissionAdded && onRetry && (
+            <button
+              type="button"
+              className="action-button rule-popup-retry"
+              disabled={retrying || granting > 0}
+              onClick={async () => {
+                setRetrying(true)
+                try {
+                  if (await onRetry()) {
+                    setPermissionAdded(false)
+                    setOpen(false)
+                  }
+                } finally {
+                  setRetrying(false)
+                }
+              }}
+            >
+              Try again
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -304,10 +335,12 @@ export function BlockedSummary({
   requests,
   grants,
   onAllow,
+  onRetry,
 }: {
   requests: BlockedRequest[]
   grants: Task['grants']
   onAllow: (rule: string, scope: GrantScope) => Promise<boolean>
+  onRetry?: () => Promise<boolean>
 }) {
   return (
     <RulePopup
@@ -325,6 +358,7 @@ export function BlockedSummary({
       rules={requests}
       grants={grants}
       onAllow={onAllow}
+      onRetry={onRetry}
     />
   )
 }
@@ -391,12 +425,14 @@ export function GrantControl({
   grants,
   allow,
   onAllow,
+  onRetry,
 }: {
   grants: Task['grants']
   // The task's own granted rules, listed above the authoring row. Absent on a
   // task that has never been granted one (and on a pre-`allow` payload).
   allow: Task['allow']
   onAllow: (rule: string, scope: GrantScope) => Promise<boolean>
+  onRetry?: () => Promise<boolean>
 }) {
   return (
     <RulePopup
@@ -415,6 +451,7 @@ export function GrantControl({
       forgetOnClose
       grants={grants}
       onAllow={onAllow}
+      onRetry={onRetry}
     />
   )
 }

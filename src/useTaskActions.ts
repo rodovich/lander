@@ -91,9 +91,11 @@ export function useTaskActions(opts: {
           ...(body as TaskWithProject),
           projectSlug: proj,
         })
+        return true
       } catch (err) {
         finishTaskMutation(mutation)
         if (!quiet) setError(err instanceof Error ? err.message : String(err))
+        return false
       }
     },
     [setError, beginTaskMutation, finishTaskMutation],
@@ -261,6 +263,19 @@ export function useTaskActions(opts: {
     [currentRef, writeTask],
   )
 
+  const tryAgain = useCallback(async () => {
+    const current = currentRef.current
+    if (
+      !current || current.archived ||
+      (current.status !== 'wedged' && current.status !== 'paced')
+    ) return false
+    return writeTask(
+      current,
+      { status: 'riding' },
+      { action: 'messages', body: { message: 'try again' } },
+    )
+  }, [currentRef, writeTask])
+
   // Rename the open task; the edit-mode state stays with the caller. A blank
   // or unchanged draft is a no-op.
   const saveTitle = useCallback(
@@ -347,6 +362,7 @@ export function useTaskActions(opts: {
     runTaskAction,
     archiveSection,
     allowTool,
+    tryAgain,
     setAllowEdits,
     saveTitle,
     generateTitle,

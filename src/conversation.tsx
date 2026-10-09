@@ -64,6 +64,7 @@ export const Conversation = memo(function Conversation({
   allowTool,
   answerAsk,
   onTaskAction,
+  onRetry,
 }: {
   task: TaskWithProject
   disclosure: TimelineDisclosure
@@ -78,6 +79,7 @@ export const Conversation = memo(function Conversation({
     body: { optionId?: string; text?: string },
   ) => Promise<void>
   onTaskAction: (task: TaskWithProject, action: TaskAction) => void
+  onRetry: () => Promise<boolean>
 }) {
   // Opt-in profiling (see perf.ts): count re-renders of the conversation pane
   // separately from App's own churn — a high count against little task
@@ -367,6 +369,7 @@ export const Conversation = memo(function Conversation({
         answering={answering}
         onAnswerAsk={answerAsk}
         onAllow={allowTool}
+        onRetry={!task.archived && (task.status === 'wedged' || task.status === 'paced') ? onRetry : undefined}
         onPace={pace}
       />
     )

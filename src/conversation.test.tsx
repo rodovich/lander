@@ -98,6 +98,7 @@ const render = (
       allowTool={async () => true}
       answerAsk={async () => {}}
       onTaskAction={() => {}}
+      onRetry={async () => true}
       {...over}
     />,
   )

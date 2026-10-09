@@ -45,6 +45,7 @@ export const DetailHeader = memo(function DetailHeader({
   generateTitle,
   allowTool,
   setAllowEdits,
+  onRetry,
 }: {
   task: TaskWithProject
   retitling: string | null
@@ -56,6 +57,7 @@ export const DetailHeader = memo(function DetailHeader({
   generateTitle: () => Promise<void>
   allowTool: (rule: string, scope: 'task' | 'project') => Promise<boolean>
   setAllowEdits: (checked: boolean) => Promise<void>
+  onRetry: () => Promise<boolean>
 }) {
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
@@ -122,9 +124,11 @@ export const DetailHeader = memo(function DetailHeader({
           <CopyIdButton id={task.id} />
           {!task.archived && (
             <GrantControl
+              key={taskKeyOf(task)}
               grants={task.grants}
               allow={task.allow}
               onAllow={allowTool}
+              onRetry={task.status === 'wedged' || task.status === 'paced' ? onRetry : undefined}
             />
           )}
           {!task.allowEdits && !task.archived && (

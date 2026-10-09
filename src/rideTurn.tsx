@@ -52,6 +52,7 @@ export const RideTurn = memo(function RideTurn({
   onAnswerAsk,
   onAllow,
   onPace,
+  onRetry,
 }: {
   ride: Ride
   items: RideItem[]
@@ -70,6 +71,7 @@ export const RideTurn = memo(function RideTurn({
   onAllow: (rule: string, scope: 'task' | 'project') => Promise<boolean>
   // Paces the task, from the open turn's spinner row.
   onPace: () => void
+  onRetry?: () => Promise<boolean>
 }) {
   const settled = !!ride.endedAt
   // A finished turn's confirmed denials. Denials are authoritative at ride end,
@@ -96,7 +98,7 @@ export const RideTurn = memo(function RideTurn({
         />
       </div>
       {denied.length > 0 && (
-        <BlockedSummary requests={denied} grants={grants} onAllow={onAllow} />
+        <BlockedSummary requests={denied} grants={grants} onAllow={onAllow} onRetry={onRetry} />
       )}
       {/* The in-flight turn's working spinner, after the ride's last item — an
           open ride (no endedAt) is streaming. */}

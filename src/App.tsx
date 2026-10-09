@@ -84,6 +84,7 @@ export function App() {
     runTaskAction,
     archiveSection,
     allowTool,
+    tryAgain,
     setAllowEdits,
     saveTitle,
     generateTitle,
@@ -333,6 +334,7 @@ export function App() {
                 generateTitle={generateTitle}
                 allowTool={allowTool}
                 setAllowEdits={setAllowEdits}
+                onRetry={tryAgain}
               />
               <Conversation
                 task={current}
@@ -343,6 +345,7 @@ export function App() {
                 allowTool={allowTool}
                 answerAsk={answerAsk}
                 onTaskAction={runTaskAction}
+                onRetry={tryAgain}
               />
               <ResizeHandle
                 height={composerHeight}
