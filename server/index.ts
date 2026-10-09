@@ -790,15 +790,14 @@ async function runTurn(
     attachments: attachments.length ? attachments : undefined,
     env: landerEnv,
     // The idle watchdog window, sent on every run and the only operative one.
-    // It has to clear the Claude CLI's ~600s foreground-Bash cap: at the cap the
-    // CLI moves the command to the background rather than killing it, and
-    // BASH_MAX_TIMEOUT_MS does not raise it (verified on CLI 2.1.216, re-observed
-    // on 2.1.235). That auto-background re-arms this window — so the window
-    // bounds the largest single SILENT gap, never a command's total duration.
-    // Above that floor the value is a policy call: how long silence
-    // from a source the cap doesn't cover — a stalled model or API call, a quiet
-    // MCP server, an agent blocked polling a backgrounded task — may run before
-    // the ride is killed.
+    // It has to clear the Claude CLI's default 600s foreground-Bash cap: at the
+    // cap the CLI moves the command to the background rather than killing it.
+    // That auto-background re-arms this window — so the window bounds the
+    // largest single SILENT gap, never a command's total duration. Above that
+    // floor the value is a policy call: how long silence from a source the cap
+    // doesn't cover — a stalled model or API call, a quiet MCP server, an agent
+    // blocked polling a backgrounded task, a CLI waiting out a background
+    // command after its result — may run before the ride is killed.
     idleTimeoutMs: 15 * 60_000,
   }
   sendToDaemon(start)
