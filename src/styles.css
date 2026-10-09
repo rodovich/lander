@@ -1527,8 +1527,10 @@ body {
 
 /* The worktree chip on its own header row, and its popover. No transform on
    the wrapper: that would contain the fixed popup and throw off its viewport
-   coordinates. */
+   coordinates. The wrapper shrinks to the chip so a click beside it counts as
+   outside the popup. */
 .checkout {
+  align-self: flex-start;
   min-width: 0;
 }
 
