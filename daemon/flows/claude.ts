@@ -165,6 +165,10 @@ export function makeFlow({
       }
 
       let usage: Usage | undefined
+      // The token counts of every result event so far. One process can report
+      // several: a background task finishing after the turn's result wakes the
+      // model again, and each result counts only its own model turns.
+      let resultsUsage: Usage | undefined
       let usageInf: string | undefined
       // The session's running totals as of the previous turn, which this turn's
       // cost is the difference from. A fresh session starts from zero; a resumed
@@ -267,9 +271,10 @@ export function makeFlow({
           if (r.usageFinal) {
             // The result event's total is authoritative for the counts but
             // carries no diagnostics — keep the streamed cache-miss record.
+            resultsUsage = addUsage(resultsUsage, r.usage)
             usage = usage?.cacheMiss
-              ? { ...r.usage, cacheMiss: usage.cacheMiss }
-              : r.usage
+              ? { ...resultsUsage, cacheMiss: usage.cacheMiss }
+              : resultsUsage
             if (r.sessionTotals) {
               const costUsd = sessionCost(r.sessionTotals, priorTotals, usage)
               usage = {

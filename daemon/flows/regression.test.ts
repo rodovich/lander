@@ -176,6 +176,39 @@ describe('claude thread identity', () => {
     expect(task.flowState?.sessionTotals).toEqual({ costUsd: 92.14, tokens: 9550 })
   })
 
+  it('counts every model turn when a background task wakes the model after the result', async () => {
+    // The shape `claude -p` streams when a Monitor fires after the turn's result:
+    // a second init and a second result, whose usage covers only the model turn
+    // the notification started, while total_cost_usd keeps running.
+    const result = (usage: Record<string, number>, cost: number, tokens: number) =>
+      JSON.stringify({
+        type: 'result',
+        result: 'ok',
+        usage,
+        total_cost_usd: cost,
+        modelUsage: { m: { inputTokens: tokens } },
+      })
+    const g: Golden = {
+      name: 'background task wakes the model after the result',
+      chunks: [
+        [
+          '{"type":"system","subtype":"init","model":"m"}',
+          result({ input_tokens: 6, output_tokens: 293, cache_read_input_tokens: 57269 }, 0.1153, 57568),
+        ],
+        [
+          '{"type":"system","subtype":"task_notification","status":"completed"}',
+          '{"type":"system","subtype":"init","model":"m"}',
+          result({ input_tokens: 4, output_tokens: 15, cache_read_input_tokens: 24391 }, 0.1235, 81978),
+        ],
+      ],
+      start: {},
+    }
+    const flow = await driveFlow(g, claudeFlow())
+    const usage = updatesOf(flow.events).at(-1)?.usage
+    expect(usage).toMatchObject({ input: 10, output: 308, cacheRead: 81660 })
+    expect(usage?.costUsd).toBeCloseTo(0.1235)
+  })
+
   it('always sends the full context block when it mints a fresh session', async () => {
     // flowState rides in ungated and a replayed patch can outlive a seal, so a
     // stale baseline must never be able to suppress a new session's context.
