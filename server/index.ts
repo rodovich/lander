@@ -2957,22 +2957,20 @@ app.patch('/api/:project/tasks/:id', async (c) => {
         return c.json({ error: 'a task may only land tasks it launched' }, 403)
     }
 
-    // Any status change to a riding task from anyone but the task's own CLI
-    // stops its in-flight run: the run is being pulled out from under the agent
-    // — the human redirecting a wedge or pacing it, or a spawner winding down a
-    // child it launched. A task wedging or landing *itself* is finishing its own
-    // turn and runs on. The interrupt fires after the status write below; the
-    // run's reducer folds in the partial reply and (applyDone only wedges a
-    // still-riding task on a non-deliberate exit) leaves the new status as-is.
-    // A pace (`paced`, stored as `riding`) is only the interrupt: the closed ride
-    // is what serves the task back as paced.
+    // Any status change from anyone but the task's own CLI stops an in-flight
+    // run: the run is being pulled out from under the agent — the human
+    // redirecting a wedge or pacing it, or a spawner winding down a child it
+    // launched. A task wedging or landing *itself* is finishing its own turn and
+    // runs on, and the run stays live under the new status until its process
+    // exits, which can be long after the agent's last word when it left
+    // background work for the CLI to wait on. The interrupt fires after the
+    // status write below; the run's reducer folds in the partial reply and
+    // (applyDone only wedges a still-riding task on a non-deliberate exit)
+    // leaves the new status as-is. A pace (`paced`, stored as `riding`) is only
+    // the interrupt: the closed ride is what serves the task back as paced.
     const selfInitiated = isSelfPrincipal(principal, project, id)
     const runId = task.runId
-    const interrupt =
-      typeof body.status === 'string' &&
-      !selfInitiated &&
-      task.status === 'riding' &&
-      !!runId
+    const interrupt = typeof body.status === 'string' && !selfInitiated && !!runId
 
     let changedStatusAt: string | undefined
     let changedStatusTitle: string | undefined

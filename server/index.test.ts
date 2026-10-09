@@ -3422,7 +3422,7 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
   const KILL_ERROR =
     'error running assistant: the daemon running this task stopped before the turn finished'
   // When true, the fake daemon answers an interrupt with a clean interrupted done,
-  // mirroring the real daemon's SIGKILL → done{interrupted:true}. Off during the
+  // mirroring the real daemon's stop → done{interrupted:true}. Off during the
   // crash test (which ends the run by disconnecting, not interrupting).
   let answerInterrupt = false
 
@@ -3474,6 +3474,7 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
         createdAt: AT,
         updatedAt: AT,
         allowEdits: false,
+        token: `token-${id}`,
         shape: 2,
         items: [],
         rides: [],
@@ -3594,6 +3595,7 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
   // it to — no message, nothing to close by. Take the ids off disk as well, so a
   // run nobody was ever told about is dropped too.
   afterEach(async () => {
+    answerInterrupt = false
     for (const m of received)
       if (m.type === 'start-run' && m.runId) closeRunChannel(m.runId)
     received.length = 0
@@ -3880,6 +3882,47 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     expect((raw.rides as Raw[]).at(-1)?.outcome).toBe('interrupted')
     expect(asksOf(raw).some((a) => a.origin === 'retry')).toBe(false)
     answerInterrupt = false
+  })
+
+  // A task that wedges itself keeps its run until the process exits, and Claude
+  // keeps that process alive while background work it started is still running.
+  // One pace must stop it, not just clear the wedge.
+  it('a user PATCH to paced interrupts a run the task wedged itself during', async () => {
+    const id = 'kill-self-wedged-pace'
+    await seed(id)
+
+    expect((await post(`/api/${slug}/tasks/${id}/messages`, { message: 'go' })).status).toBe(200)
+    await waitFor(() => startRuns(id).length === 1)
+    const runId = (await waitForRaw(id, (raw) => !!raw.runId)).runId
+
+    const wedge = await app.request(`/api/${slug}/tasks/${id}`, {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        'x-lander-task': id,
+        'x-lander-project': slug,
+        'x-lander-token': `token-${id}`,
+      },
+      body: JSON.stringify({ status: 'wedged' }),
+    })
+    expect(wedge.status).toBe(200)
+    const wedged = await readRaw(id)
+    expect(wedged.status).toBe('wedged')
+    expect(wedged.runId).toBe(runId)
+
+    // Interrupts went unanswered until now, so one sent for the wedge would
+    // have left the run open and would show up below as a second interrupt.
+    answerInterrupt = true
+    const pace = await app.request(`/api/${slug}/tasks/${id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', 'x-lander-ui-token': UI_TOKEN },
+      body: JSON.stringify({ status: 'paced' }),
+    })
+    expect(pace.status).toBe(200)
+    const raw = await waitForRaw(id, (r) => !r.runId)
+    expect(received.filter((m) => m.type === 'interrupt' && m.runId === runId)).toHaveLength(1)
+    expect(raw.status).toBe('riding')
+    expect((raw.rides as Raw[]).at(-1)?.outcome).toBe('interrupted')
   })
 
   // The two tests below wait on the server's reconnect grace, and that wait is
