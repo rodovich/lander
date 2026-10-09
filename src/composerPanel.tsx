@@ -1,5 +1,11 @@
+import { useLayoutEffect, useRef } from 'react'
 import type { RefObject } from 'react'
 import { AttachButton } from './attachButton'
+import {
+  insertAttachmentMarkers,
+  removeAttachmentMarkers,
+  shouldAttachPastedText,
+} from './composerAttachments'
 import { clipboardImageFiles } from './fileDrop'
 import { useFileDrop } from './hooks'
 
@@ -59,7 +65,35 @@ export function ComposerPanel({
   // Hidden where there is nothing to attach to — an archived task.
   showAttach?: boolean
 }) {
-  const drop = useFileDrop<HTMLElement>(onAddFiles, busy)
+  const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  const ordinaryPaste = useRef(false)
+  const pendingCaret = useRef<{ text: string; caret: number } | null>(null)
+
+  useLayoutEffect(() => {
+    const pending = pendingCaret.current
+    pendingCaret.current = null
+    if (pending?.text === value && inputRef.current) {
+      inputRef.current.focus()
+      inputRef.current.setSelectionRange(pending.caret, pending.caret)
+    }
+  }, [value, files])
+
+  function addFiles(picked: File[], replaceSelection = false) {
+    if (busy || textareaDisabled || !showAttach || picked.length === 0) return
+    const input = inputRef.current
+    const insertion = insertAttachmentMarkers(
+      value,
+      input?.selectionStart ?? value.length,
+      (replaceSelection ? input?.selectionEnd : input?.selectionStart) ?? value.length,
+      files.length,
+      picked.length,
+    )
+    pendingCaret.current = insertion
+    onAddFiles(picked)
+    onChange(insertion.text)
+  }
+
+  const drop = useFileDrop<HTMLElement>(addFiles, busy || textareaDisabled || !showAttach)
 
   return (
     <Tag
@@ -77,7 +111,10 @@ export function ComposerPanel({
     >
       {head}
       <textarea
-        ref={textareaRef}
+        ref={(element) => {
+          inputRef.current = element
+          if (textareaRef) textareaRef.current = element
+        }}
         className={textareaClassName}
         placeholder={placeholder}
         rows={rows}
@@ -85,26 +122,48 @@ export function ComposerPanel({
         disabled={textareaDisabled}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
+          ordinaryPaste.current =
+            (e.code === 'KeyV' || e.key.toLowerCase() === 'v') &&
+            (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey
           // Plain Enter submits; Shift+Enter / Option(Alt)+Enter inserts a newline.
           if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
             e.preventDefault()
             onSubmit()
           }
         }}
+        onKeyUp={() => { ordinaryPaste.current = false }}
+        onBlur={() => { ordinaryPaste.current = false }}
+        onPointerDown={() => { ordinaryPaste.current = false }}
+        onContextMenu={() => { ordinaryPaste.current = false }}
         onPaste={(e) => {
-          if (busy) return
+          const convertText = ordinaryPaste.current
+          ordinaryPaste.current = false
+          if (busy || textareaDisabled || !showAttach) return
           const images = clipboardImageFiles(e.clipboardData)
-          if (images.length === 0) return
-          e.preventDefault()
-          onAddFiles(images)
+          if (images.length > 0) {
+            e.preventDefault()
+            addFiles(images, true)
+            return
+          }
+          const text = e.clipboardData.getData('text/plain')
+          if (convertText && shouldAttachPastedText(text)) {
+            e.preventDefault()
+            const number = files.length + 1
+            addFiles([new File([text], number === 1 ? 'paste.txt' : `paste-${number}.txt`, {
+              type: 'text/plain',
+            })], true)
+          }
         }}
       />
       <div className="composer-actions">
         {showAttach && (
           <AttachButton
             files={files}
-            onAdd={onAddFiles}
-            onClear={onClearFiles}
+            onAdd={addFiles}
+            onClear={() => {
+              onClearFiles()
+              onChange(removeAttachmentMarkers(value, files.length))
+            }}
             disabled={busy}
           />
         )}
