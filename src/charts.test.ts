@@ -33,4 +33,11 @@ describe('readout', () => {
   it('falls back to the label for a series with no readout', () => {
     expect(readout(4, { key: 'm', label: 'model-x' })).toEqual(['4', 'model-x'])
   })
+
+  it('lets a series word its value whole, unrounded', () => {
+    expect(readout(1.25, { key: 'c', label: 'Cost', format: (v) => `$${v}` })).toEqual([
+      '$1.25',
+      '',
+    ])
+  })
 })

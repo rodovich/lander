@@ -140,6 +140,20 @@ describe('buildStats', () => {
     expect(vals(view.workingHours)[6]).toEqual([2])
   })
 
+  it('sums the cost of the turns that report one', () => {
+    const view = buildStats(
+      facts({
+        turns: [
+          { project: 'p', flow: 'claude', startedAt: iso(9, 28), costUsd: 0.25 },
+          { project: 'p', flow: 'claude', startedAt: iso(9, 28), costUsd: 1.5 },
+          { project: 'p', flow: 'codex', startedAt: iso(9, 28) },
+        ],
+      }),
+      { range: '7d', project: null, now: NOW },
+    )
+    expect(vals(view.cost)[6]).toEqual([1.75])
+  })
+
   it('maps turns onto a Sunday-first hour grid within the range', () => {
     const view = buildStats(
       facts({

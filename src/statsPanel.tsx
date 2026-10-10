@@ -114,6 +114,7 @@ export function StatsPanel({
           <BarChart title="Tasks by agent" data={view.agents} color={rankedColor} />
           <BarChart title="Turns by model" data={view.models} color={rankedColor} />
           <BarChart title="Thinking time" data={view.workingHours} color={turnColor} />
+          <BarChart title="API cost" data={view.cost} color={turnColor} />
           <HeatmapChart
             title="Tasks launched by hour and weekday"
             grid={view.heatmaps.launches}

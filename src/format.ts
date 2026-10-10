@@ -86,7 +86,18 @@ export function formatDuration(ms: number): string {
   return `${Math.floor(m / 60)}h ${m % 60}m`
 }
 
-// A dollar cost for the corner readout: two decimals up to $100 ("$0.07",
+// A longer span in words, to the nearest minute: "15 minutes", "2 hours",
+// "2 hours, 10 minutes".
+export function formatHoursMinutes(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 60_000))
+  const h = Math.floor(total / 60)
+  const m = total % 60
+  const unit = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`
+  if (!h) return unit(m, 'minute')
+  return m ? `${unit(h, 'hour')}, ${unit(m, 'minute')}` : unit(h, 'hour')
+}
+
+// A dollar cost: two decimals up to $100 ("$0.07",
 // "$1.23"), then whole dollars beyond ("$1,204") where the cents are noise.
 export function formatCost(n: number): string {
   if (n < 100) return `$${n.toFixed(2)}`

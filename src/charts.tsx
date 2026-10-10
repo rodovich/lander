@@ -12,6 +12,9 @@ export type ChartSeries = {
   // The legend's label, and the readout's word when `readout` is absent.
   label: string
   readout?: Noun
+  // Words a value whole, for a series whose numbers aren't counts: "$1.23",
+  // "2 hours, 10 minutes". Takes the place of the number and its word.
+  format?: (value: number) => string
 }
 
 // One bar's worth: its axis label, the fuller name its tooltip leads with, one
@@ -84,9 +87,10 @@ export function heatStep(count: number, max: number): number {
   return Math.min(HEAT_SHADES.length - 1, Math.ceil((count / max) * HEAT_SHADES.length) - 1)
 }
 
-// A readout's number and word. Readouts are whole numbers; the bars carry the
-// precision.
+// A readout's number and word. Counts read as whole numbers, the bars carrying
+// the precision; a series that formats its values reads as that text alone.
 export function readout(value: number, series: ChartSeries): [string, string] {
+  if (series.format) return [series.format(value), '']
   const n = Math.round(value)
   const word = series.readout
     ? n === 1
@@ -339,7 +343,7 @@ export function BarChart({
                   column.values
                     ? `${column.title}: ` +
                       readoutRows(column.values)
-                        .map((r) => `${r.value} ${r.word}`)
+                        .map((r) => (r.word ? `${r.value} ${r.word}` : r.value))
                         .join(', ')
                     : undefined
                 }

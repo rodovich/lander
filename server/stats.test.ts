@@ -21,14 +21,14 @@ describe('projectRecord', () => {
           id: 'r1',
           startedAt: 'S1',
           durationMs: 5,
-          usage: { input: 1, output: 1, cacheRead: 0, cacheCreation: 0, model: 'm' },
+          usage: { input: 1, output: 1, cacheRead: 0, cacheCreation: 0, model: 'm', costUsd: 0.5 },
         },
         { id: 'r2', startedAt: 'S2' },
       ],
     } as never)
     expect(p.task).toEqual({ project: 'proj', flow: 'codex', launchedAt: 'T1', landedAt: ['T2', 'T4'] })
     expect(p.turns).toEqual([
-      { project: 'proj', flow: 'codex', startedAt: 'S1', model: 'm', durationMs: 5 },
+      { project: 'proj', flow: 'codex', startedAt: 'S1', model: 'm', durationMs: 5, costUsd: 0.5 },
       { project: 'proj', flow: 'codex', startedAt: 'S2' },
     ])
   })

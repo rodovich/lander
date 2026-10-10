@@ -33,6 +33,8 @@ export type StatsTurn = {
   model?: string
   // How long the run worked, as the daemon measured it.
   durationMs?: number
+  // The turn's dollar cost, from providers that report one (Claude).
+  costUsd?: number
 }
 
 // When each fact began being recorded in the form it has today. Anything
@@ -80,6 +82,7 @@ export function projectRecord(project: string, record: StatsRecord): Projection 
     startedAt: ride.startedAt,
     ...(ride.usage?.model ? { model: ride.usage.model } : {}),
     ...(ride.durationMs != null ? { durationMs: ride.durationMs } : {}),
+    ...(ride.usage?.costUsd != null ? { costUsd: ride.usage.costUsd } : {}),
   }))
   return {
     task: { project, flow, ...(launchedAt ? { launchedAt } : {}), landedAt },

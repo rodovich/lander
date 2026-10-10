@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatDuration } from './format'
+import { formatDuration, formatHoursMinutes } from './format'
 
 describe('formatDuration', () => {
   it('shows seconds alone under a minute', () => {
@@ -28,5 +28,23 @@ describe('formatDuration', () => {
 
   it('floors a negative span at zero', () => {
     expect(formatDuration(-5_000)).toBe('0s')
+  })
+})
+
+describe('formatHoursMinutes', () => {
+  it('words minutes alone under an hour', () => {
+    expect(formatHoursMinutes(15 * 60_000)).toBe('15 minutes')
+    expect(formatHoursMinutes(60_000)).toBe('1 minute')
+    expect(formatHoursMinutes(20_000)).toBe('0 minutes')
+  })
+
+  it('words hours, and minutes when there are any', () => {
+    expect(formatHoursMinutes(130 * 60_000)).toBe('2 hours, 10 minutes')
+    expect(formatHoursMinutes(61 * 60_000)).toBe('1 hour, 1 minute')
+    expect(formatHoursMinutes(2 * 3_600_000)).toBe('2 hours')
+  })
+
+  it('rounds to the nearest minute', () => {
+    expect(formatHoursMinutes(59 * 60_000 + 40_000)).toBe('1 hour')
   })
 })

@@ -4,6 +4,7 @@
 // `now`, so the calendar edges are testable. Colors are the panel's call.
 
 import type { BarData, ChartSeries, HeatGrid } from './charts'
+import { formatCost, formatHoursMinutes } from './format'
 
 // The last 7 complete days, 13 complete weeks, or 12 complete months, each
 // plus the one in progress.
@@ -23,6 +24,7 @@ export type StatsFacts = {
     startedAt: string
     model?: string
     durationMs?: number
+    costUsd?: number
   }[]
 }
 
@@ -44,6 +46,7 @@ export type StatsView = {
   agents: BarData
   models: BarData
   workingHours: BarData
+  cost: BarData
   heatmaps: { turns: HeatGrid; launches: HeatGrid; landings: HeatGrid }
 }
 
@@ -126,7 +129,7 @@ export function statsBuckets(range: StatsRange, now: Date): Bucket[] {
 }
 
 // A fact to tally: when it happened, which series it counts toward, and how
-// much (1 for a count, hours for working time).
+// much (1 for a count, hours for working time, dollars for cost).
 type Fact = { at: number; series: number; weight: number }
 
 // Sum facts into buckets. A day counts only if it began at or after `since`,
@@ -305,11 +308,20 @@ export function buildStats(
       })),
     ),
     workingHours: chart(
-      [{ key: 'hours', label: 'Hours', readout: noun('hour', 'hours') }],
+      [{ key: 'hours', label: 'Hours', format: (h) => formatHoursMinutes(h * 3_600_000) }],
       workFrom,
       turns.flatMap((t) =>
         t.durationMs != null
           ? [{ at: Date.parse(t.startedAt), series: 0, weight: t.durationMs / 3_600_000 }]
+          : [],
+      ),
+    ),
+    cost: chart(
+      [{ key: 'cost', label: 'Cost', format: formatCost }],
+      turnsFrom,
+      turns.flatMap((t) =>
+        t.costUsd != null
+          ? [{ at: Date.parse(t.startedAt), series: 0, weight: t.costUsd }]
           : [],
       ),
     ),
