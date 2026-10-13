@@ -396,16 +396,16 @@ async function launchTask(rest) {
   console.log(task.id) // print new task id for the orchestrator to track
 }
 
-// Arm a wakeup so the current task rides again when a trigger fires: the same
-// --date/--time/--await flags as `launch`, but one is required (a wakeup needs a
-// trigger). The server records a `scheduled` or `awaiting` event, and once the
-// turn ends the scheduler wakes the task with a generated message naming the
-// trigger that fired.
+// Schedule a ride so the current task rides again when a trigger fires: the same
+// --date/--time/--await flags as `launch`, but one is required (a scheduled ride
+// needs a trigger). The server records a `scheduled` or `awaiting` event, and
+// once the turn ends the scheduler wakes the task with a generated message
+// naming the trigger that fired.
 //
-// --clear is the inverse: it drops a pending wakeup the task no longer needs —
-// e.g. when the user woke it early (a reply leaves the trigger armed, so it would
-// otherwise fire a spurious resume later). It takes no trigger of its own, leaves
-// the task running, and is idempotent (nothing armed → "nothing to clear").
+// --clear is the inverse: it drops a scheduled ride the task no longer needs —
+// e.g. one a message from another task left in place. It takes no trigger of its
+// own, leaves the task running, and is idempotent (nothing scheduled → "nothing
+// to clear").
 async function rideTask(args) {
   if (!TASK) die('no current task (LANDER_TASK unset)')
   const o = {}
@@ -424,7 +424,7 @@ async function rideTask(args) {
       method: 'POST',
       body: JSON.stringify({ clear: true }),
     })
-    console.log(res.cleared ? 'wakeup cleared' : 'nothing to clear')
+    console.log(res.cleared ? 'scheduled ride cleared' : 'nothing to clear')
     return
   }
   if (o.date == null && o.time == null && o.await == null)
@@ -436,17 +436,18 @@ async function rideTask(args) {
     body: JSON.stringify(o),
   })
   // The trigger as the server resolved it: a `--time` is relative to a moment
-  // the session never sees, so this line is its only record of when it asked
-  // to wake, in the local wording the wakeup itself will use.
+  // the session never sees, so this line is the turn's record of when it asked
+  // to wake — in the wording of the `<ride-scheduled>` reminder later turns get,
+  // and with the time as its "Current date: …" will show it.
   const when = armed.scheduledFor && new Date(armed.scheduledFor).toLocaleString()
   const awaited = armed.waitingFor ?? []
-  const awaiting = awaited.length
-    ? `${awaited.join(', ')} ${awaited.length > 1 ? 'land' : 'lands'}`
+  const landing = awaited.length
+    ? `when ${awaited.join(', ')} ${awaited.length > 1 ? 'have all landed' : 'lands'}`
     : ''
   console.log(
-    awaiting
-      ? `wakeup armed for when ${awaiting}${when ? `, or ${when} at the latest` : ''}`
-      : `wakeup armed for ${when}`,
+    `ride scheduled for ${
+      when && landing ? `${when} or ${landing}, whichever comes first` : when || landing
+    }`,
   )
 }
 
@@ -1176,8 +1177,8 @@ function makeLander(inputs) {
       return raiseAsk({ type: 'choice', options }, 'none')
     },
     async ride(opts = {}) {
-      // { clear: true } drops a pending wakeup instead of arming one; returns
-      // whether any trigger was actually disarmed.
+      // { clear: true } drops a scheduled ride instead of scheduling one; returns
+      // whether one was scheduled.
       if (opts.clear) {
         const res = await call(PROJECT, `/tasks/${TASK}/ride`, {
           method: 'POST',

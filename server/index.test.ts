@@ -1163,7 +1163,7 @@ describe('the launch', () => {
   it.each([
     ['wedged', { status: 'wedged' }],
     ['riding', { queued: ['more'], status: 'riding' }],
-    ['waiting on a wakeup', { scheduledFor: '2099-01-01T00:00:00.000Z' }],
+    ['scheduled', { scheduledFor: '2099-01-01T00:00:00.000Z' }],
   ])('launches for a %s target', async (_name, over) => {
     await seed(over)
     expect((await launch(cred().token)).status).toBe(201)

@@ -1428,7 +1428,7 @@ export async function launchScheduled(): Promise<void> {
     console.warn(
       `scheduler sweep has been running for ${Math.round(
         (Date.now() - sweepStartedAt) / 1000,
-      )}s; starting another rather than stalling every wakeup`,
+      )}s; starting another rather than stalling every scheduled ride`,
     )
   }
   sweeping = true
@@ -3086,7 +3086,7 @@ app.post('/api/:project/tasks/:id/launch', async (c) => {
   }
 })
 
-// Arm a wakeup so the task rides again when a trigger fires (`lander ride`).
+// Schedule a ride so the task rides again when a trigger fires (`lander ride`).
 // Mirrors a deferred `new`: it sets scheduledFor and/or waitingFor and records a
 // `scheduled` or `awaiting` event, so the scheduler relaunches it on whichever
 // trigger fires first. Unlike `new`, the task has already run, so launchTask
@@ -3095,14 +3095,13 @@ app.post('/api/:project/tasks/:id/launch', async (c) => {
 // while the agent's turn is in flight, so it goes through mutateTask to avoid
 // clobbering the concurrent streaming writes.
 //
-// `{ clear: true }` (`lander ride --clear`) is the inverse: it disarms whatever
-// triggers a prior ride (or deferred `new`) armed, taking no trigger of its own.
-// The case: the user woke a paced task early (a reply revives it to riding
-// without touching the triggers), so the original wakeup is now stale and would
-// later fire a spurious resume. We only drop the triggers — never touch status,
-// and record no event (the past `scheduled`/`awaiting` event stands as
-// history of the wakeup that was armed). Idempotent: clearing nothing succeeds
-// and reports `cleared: false`.
+// `{ clear: true }` (`lander ride --clear`) is the inverse: it drops whatever
+// triggers a prior ride (or deferred `new`) set, taking no trigger of its own.
+// The case: a ride another task's message left scheduled, or an await a user's
+// message left, that the task no longer wants. We only drop the triggers —
+// never touch status, and record no event (the past `scheduled`/`awaiting`
+// event stands as history of the ride that was scheduled). Idempotent: clearing
+// nothing succeeds and reports `cleared: false`.
 app.post('/api/:project/tasks/:id/ride', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)

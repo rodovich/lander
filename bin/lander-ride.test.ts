@@ -1,7 +1,8 @@
-// `lander ride` reports the wakeup as the server resolved it. A `--time` is
-// relative to a moment the session never sees, so the printed line is its only
-// record of when it asked to wake. Driven against a stub server that answers
-// with the armed task, since the server, not the CLI, resolves the time.
+// `lander ride` reports the scheduled ride as the server resolved it. A `--time`
+// is relative to a moment the session never sees, so the printed line is the
+// turn's record of when it asked to wake. Driven against a stub server that
+// answers with the scheduled task, since the server, not the CLI, resolves the
+// time.
 
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -59,21 +60,21 @@ afterAll(async () => {
 describe('lander ride', () => {
   const local = new Date(AT).toLocaleString()
 
-  it('prints the time a timer wakeup will fire', async () => {
+  it('prints the time a scheduled ride will fire', async () => {
     reply = { scheduledFor: AT }
     const { stdout, code } = await execLander(['ride', '--time', '30'])
     expect(code).toBe(0)
-    expect(stdout.trim()).toBe(`wakeup armed for ${local}`)
+    expect(stdout.trim()).toBe(`ride scheduled for ${local}`)
   })
 
-  it('names the awaited tasks, and a time fallback as the latest', async () => {
+  it('names the awaited tasks, and a time fallback', async () => {
     reply = { waitingFor: ['tsk-a', 'tsk-b'] }
     expect((await execLander(['ride', '--await', 'tsk-a,tsk-b'])).stdout.trim()).toBe(
-      'wakeup armed for when tsk-a, tsk-b land',
+      'ride scheduled for when tsk-a, tsk-b have all landed',
     )
     reply = { waitingFor: ['tsk-a'], scheduledFor: AT }
     expect(
       (await execLander(['ride', '--await', 'tsk-a', '--time', '30'])).stdout.trim(),
-    ).toBe(`wakeup armed for when tsk-a lands, or ${local} at the latest`)
+    ).toBe(`ride scheduled for ${local} or when tsk-a lands, whichever comes first`)
   })
 })
