@@ -1669,17 +1669,23 @@ export function scheduledRideOf(task: {
   }
 }
 
-// Whether what a task has scheduled would hold back work already queued for it —
-// a deferred launch that has not run yet, or a wedged task's deferred retry or
-// answer — rather than being a ride the task scheduled for itself. Inferred from
-// the task's state, since neither records which it is. A message that reaches
-// such a task does that work now, leaving the trigger nothing to do.
-export function scheduleHoldsQueuedWork(task: {
+// Whether what a task has scheduled is a ride it scheduled for itself, rather
+// than a trigger holding back work already queued for it — a deferred launch
+// that has not run yet, or a wedged task's deferred retry or answer. Inferred
+// from the task's state, since neither records which it is. A ride fires as
+// lander's notification of the trigger; a held-back trigger fires by driving
+// its queue, and a message that reaches the task drives it sooner, leaving the
+// trigger nothing to do.
+export function hasOwnScheduledRide(task: {
   status: string
   rides?: Ride[]
   queued?: string[]
+  scheduledFor?: string
+  waitingFor?: string[]
 }): boolean {
-  return !task.rides?.length || (task.status === 'wedged' && !!task.queued?.length)
+  if (!task.scheduledFor && !task.waitingFor?.length) return false
+  if (!task.rides?.length) return false
+  return !(task.status === 'wedged' && task.queued?.length)
 }
 
 // The revival marker carries the cleared time, so the next turn can schedule it

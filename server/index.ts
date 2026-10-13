@@ -82,7 +82,7 @@ import {
   recordRideEnded,
   lastFlowItem,
   scheduledRideOf,
-  scheduleHoldsQueuedWork,
+  hasOwnScheduledRide,
   clearScheduledTime,
   asList,
   type NotifyArming,
@@ -1162,17 +1162,14 @@ async function launchTask(
   const landed = trigger.kind === 'await' ? trigger.landed : undefined
   const file = path.join(project.dataDir, `${id}.json`)
   let go = false
-  let everRan = false
   let claimed = false
   await mutateTask(file, (t) => {
     // Launch on either pending trigger (a scheduled time or an await condition);
     // the scheduler only calls us once one has fired. Clear both so the OR
     // fallback doesn't re-fire the task after it's running.
     if ((!t.scheduledFor && !t.waitingFor) || running.has(taskKey(project.slug, id))) return
-    // "Ever ran" = has driven at least one ride (established a session), so a
-    // rested task gets the synthetic resume prompt while a deferred new task drives
-    // its still-queued opening message instead.
-    everRan = (t.rides?.length ?? 0) > 0
+    // Read before the deletes and the status change below erase what it reads.
+    const prompted = hasOwnScheduledRide(t)
     // The caller resolved `landed` outside this lock, so the arm being cleared
     // here is only known to be the one it measured if the two still match; a
     // task that re-armed in between would otherwise be told a condition nobody
@@ -1197,14 +1194,8 @@ async function launchTask(
     )
     t.status = 'riding'
     t.updatedAt = at
-    // A task that armed a wakeup with `lander ride` has already run its opening
-    // turn, so nothing is queued to wake it — lander notifies it of the trigger
-    // that fired, under a 'notified' event that carries the notification. A task
-    // scheduled at creation (`new --date`) still has its opening message queued
-    // and drives that instead, so it records a plain launch. The human's Launch
-    // button fired no trigger: it is the human telling the task to proceed, in
-    // their own voice.
-    const prompted = everRan && !(t.queued && t.queued.length)
+    // The human's Launch button fired no trigger: it is the human telling the task
+    // to proceed, in their own voice.
     if (prompted && trigger.kind !== 'manual') {
       const { text, from } = wakeupNotification(at, fired ? landed : undefined)
       const event = pushEventItem(t, { eventKind: 'notified', title: t.title }, at)
@@ -1256,7 +1247,7 @@ async function deliverScheduledMessages(
   await mutateTask(file, (t) => {
     // A message waits for a launch that has not happened yet, or a wedged task's
     // deferred recovery — not for a ride the task scheduled for itself.
-    if (scheduleHoldsQueuedWork(t)) {
+    if (!hasOwnScheduledRide(t)) {
       if (t.scheduledFor && Date.parse(t.scheduledFor) > now) return
       if (t.waitingFor?.length) return
     }
@@ -1363,7 +1354,7 @@ async function wakeNotified(
     const at = new Date().toISOString()
     // Treated as a message from another task (POST /messages carries the
     // reasoning). A notified task has always run, so only its time can go.
-    if (scheduleHoldsQueuedWork(t)) delete t.scheduledFor
+    if (!hasOwnScheduledRide(t)) delete t.scheduledFor
     // Revives a wedged target, same as any delivered message, and records the
     // crossing a hair ahead so the timeline orders right. `system`, because the
     // scheduler is what delivered it — the notifying task's turn was over.
@@ -3760,7 +3751,7 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
     let targetTitle = task.title
     await mutateTask(file, (t) => {
       targetTitle = t.title
-      const holdsQueuedWork = scheduleHoldsQueuedWork(t)
+      const ownRide = hasOwnScheduledRide(t)
       // Sending revives a wedged or landed (terminal) task — record the
       // "un-wedged"/"un-landed" transition a hair before the message's own
       // timestamp so the timeline shows it ahead of the message that caused it.
@@ -3786,7 +3777,7 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
       // recordStatusTransition because the paced case can't ride that funnel:
       // riding↔paced isn't a crossing (both store as `riding`), so it returns
       // early.
-      if (holdsQueuedWork) {
+      if (!ownRide) {
         delete t.scheduledFor
         if (!t.rides?.length) delete t.waitingFor
       } else if (!from) clearScheduledTime(t)
@@ -4216,7 +4207,7 @@ export async function recoverQueues(): Promise<void> {
       // a turn another task woke it for is recovered like any other.
       if (
         (task.scheduledFor || task.waitingFor?.length) &&
-        scheduleHoldsQueuedWork(task)
+        !hasOwnScheduledRide(task)
       )
         continue
       const everRan = (task.rides?.length ?? 0) > 0

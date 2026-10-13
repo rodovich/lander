@@ -170,6 +170,29 @@ describe('the prompt a fired wakeup drives', () => {
     expect((await readRaw('fallback-timer')).waitingFor).toBeUndefined()
   })
 
+  it('drives a wedged task’s deferred retry as a plain launch', async () => {
+    await seed('due-retry', {
+      status: 'wedged',
+      scheduledFor: AT,
+      queued: ['try again'],
+    })
+
+    await launchScheduled()
+
+    const items = (await readRaw('due-retry')).items as Item[]
+    const event = items.filter((i): i is EventItem => i.kind === 'event').at(-1)!
+    expect(event.eventKind).toBe('launched')
+  })
+
+  it('notifies a task that scheduled a ride and then wedged itself', async () => {
+    await seed('due-own-ride-wedged', { status: 'wedged', scheduledFor: AT })
+
+    await launchScheduled()
+
+    expect(await lastPrompt('due-own-ride-wedged')).toMatch(/^Current date: /)
+    await expectNotified('due-own-ride-wedged', 'time')
+  })
+
   // A human pressing Launch fires no trigger at all: it is the human telling the
   // task to proceed, so it reads as their message and claims no condition.
   it('delivers the human’s Launch as their own “go ahead”', async () => {
