@@ -204,7 +204,7 @@ describe('a notify delivery supersedes the launcher’s wakeup timer', () => {
       waitingFor: ['notify-child'],
     })
     await seed('notify-child', {
-      pendingNotify: { to: 'notify-launcher', at: AT, rideId: 'r0' },
+      pendingNotify: [{ to: 'notify-launcher', at: AT, rideId: 'r0' }],
     })
 
     const writes = await writesDuring('notify-launcher', launchScheduled)
@@ -239,7 +239,7 @@ describe('a notify delivery supersedes the launcher’s wakeup timer', () => {
   it('leaves a launcher with no timer nothing to report', async () => {
     await seed('notify-plain-launcher', {})
     await seed('notify-plain-child', {
-      pendingNotify: { to: 'notify-plain-launcher', at: AT, rideId: 'r0' },
+      pendingNotify: [{ to: 'notify-plain-launcher', at: AT, rideId: 'r0' }],
     })
 
     await launchScheduled()
@@ -250,5 +250,54 @@ describe('a notify delivery supersedes the launcher’s wakeup timer', () => {
       )
     })
     expect((await readRaw('notify-plain-launcher')).revived).toBeUndefined()
+  })
+
+  // The shape from before several could wait, still on disk if it fired before
+  // an upgrade and was not yet delivered.
+  it('delivers a notification stored as a single object', async () => {
+    await seed('notify-legacy-launcher', {})
+    await seed('notify-legacy-child', {
+      pendingNotify: { to: 'notify-legacy-launcher', at: AT, rideId: 'r0' },
+    })
+
+    await launchScheduled()
+
+    expect(await lastPrompt('notify-legacy-launcher')).toBe(
+      'notify-legacy-child finished a turn:\n\non it',
+    )
+    expect((await readRaw('notify-legacy-child')).pendingNotify).toBeUndefined()
+  })
+
+  // Each waiter hears the turn that fired its notification, which in one drain
+  // need not be the same turn.
+  it('wakes every waiter with the closing message of its own turn', async () => {
+    await seed('notify-many-launcher', {})
+    await seed('notify-many-sender', {})
+    await seed('notify-many-child', {
+      items: [
+        { id: 'u0', at: AT, kind: 'message', role: 'user', text: 'go' },
+        { id: 'f0', at: AT, rideId: 'r0', kind: 'message', role: 'flow', text: 'first' },
+        { id: 'u1', at: AT, kind: 'message', role: 'user', text: 'and?' },
+        { id: 'f1', at: AT, rideId: 'r1', kind: 'message', role: 'flow', text: 'second' },
+      ],
+      rides: [
+        { id: 'r0', startedAt: AT, endedAt: AT, outcome: 'done' },
+        { id: 'r1', startedAt: AT, endedAt: AT, outcome: 'done' },
+      ],
+      pendingNotify: [
+        { to: 'notify-many-launcher', at: AT, rideId: 'r0' },
+        { to: 'notify-many-sender', at: AT, rideId: 'r1' },
+      ],
+    })
+
+    await launchScheduled()
+
+    expect(await lastPrompt('notify-many-launcher')).toBe(
+      'notify-many-child finished a turn:\n\nfirst',
+    )
+    expect(await lastPrompt('notify-many-sender')).toBe(
+      'notify-many-child finished a turn:\n\nsecond',
+    )
+    expect((await readRaw('notify-many-child')).pendingNotify).toBeUndefined()
   })
 })

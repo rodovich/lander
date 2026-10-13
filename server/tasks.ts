@@ -577,6 +577,12 @@ export type MessageItem = ItemCommon & {
   // Set on a user message once a queued batch delivers it: the ride that consumed
   // it, making the batching visible. Absent on converted history.
   deliveredIn?: string
+  // Set on a message another task sent with `lander send --notify`: wake that
+  // task (`from`) with this task's closing message once a turn this message
+  // reached ends cleanly. Armed on delivery rather than on send
+  // (deliverQueuedBatch), so a message queued behind a turn already in progress
+  // is answered by the turn that reads it, not the one that was running.
+  notify?: true
   // Client-facing only: set by publicTask on a trailing user item still in the
   // task's work queue (the agent hasn't read it yet), the item analog of the old
   // Message.queued. Derived at projection time, never stored.
@@ -729,6 +735,7 @@ export function pushUserItem(
     attachments?: Attachment[]
     deliveredIn?: string
     from?: TaskSender | LanderSender
+    notify?: boolean
   } = {},
 ): MessageItem {
   const item: MessageItem = {
@@ -740,6 +747,7 @@ export function pushUserItem(
     ...(opts.from ? { from: opts.from } : {}),
     ...(opts.attachments?.length ? { attachments: opts.attachments } : {}),
     ...(opts.deliveredIn ? { deliveredIn: opts.deliveredIn } : {}),
+    ...(opts.notify ? { notify: true as const } : {}),
   }
   ;(task.items ??= []).push(item)
   return item
@@ -997,6 +1005,9 @@ export type ScheduledMessage = {
   // agent ahead of `text` (attributedPrompt). Absent for the human's own sends
   // and a task's relaunch of itself.
   from?: TaskSender
+  // `lander send --notify`, carried onto the delivered message (see
+  // MessageItem.notify).
+  notify?: true
 }
 
 // The driver flow a task runs under — the single reader every server read of a
@@ -1600,6 +1611,7 @@ export function applyDueMessages(
     pushUserItem(task, m.text, at, {
       ...(m.attachments?.length ? { attachments: m.attachments } : {}),
       ...(m.from ? { from: m.from } : {}),
+      notify: m.notify,
     })
     ;(task.queued ??= []).push(attributedPrompt(m))
   }
@@ -1802,19 +1814,52 @@ export function turnAttachments(
 // re-delivery entries in that window (retry resend, recoverQueues opening-replay
 // re-queue an already-delivered item), leaving them in their correct historical slot.
 // `moving` MUST be computed before the stamp loop — stamping first would empty it.
+//
+// A `send --notify` message arms its sender on its first delivery only: arming
+// is consumed when it fires, so arming again on a re-delivery would wake the
+// sender a second time.
 export function deliverQueuedBatch(
-  task: { items?: Item[] },
+  task: { items?: Item[]; notify?: NotifyArming },
   batchLen: number,
   runId: string,
 ): void {
   const window = promptItems(task).slice(-batchLen)
   const moving = window.filter((u) => !u.deliveredIn)
   for (const u of window) u.deliveredIn = runId
+  for (const u of moving)
+    if (u.notify && u.from && 'task' in u.from) armNotify(task, u.from.task)
   if (moving.length && task.items) {
     const movingSet = new Set<Item>(moving)
     task.items = task.items.filter((it) => !movingSet.has(it))
     for (const u of moving) task.items.push(u)
   }
+}
+
+// The tasks waiting to be woken once, when a task next finishes a turn cleanly:
+// its launcher (`launch --notify`) and any task whose `send --notify` it has read.
+// A bare id is the shape from before `send --notify`, when only the launcher
+// could wait; a task armed then can still be on disk unfired.
+export type NotifyArming = string | string[]
+
+export function armNotify(task: { notify?: NotifyArming }, to: string): void {
+  const targets = asList(task.notify)
+  if (!targets.includes(to)) task.notify = [...targets, to]
+}
+
+// A fired notification waiting for the sweep to deliver it, naming the ride whose
+// closing message it delivers.
+export type PendingNotify = { to: string; at: string; rideId?: string }
+
+// A task can hold one per waiter, and a drain that fires different waiters on
+// different turns holds several turns' worth. A single object is the shape from
+// before there could be several; one can still be on disk undelivered.
+export type PendingNotifies = PendingNotify | PendingNotify[]
+
+// Read a field kept in an older single-value shape (NotifyArming,
+// PendingNotifies) as the list it became.
+export function asList<T>(value: T | T[] | undefined): T[] {
+  if (value === undefined) return []
+  return Array.isArray(value) ? value : [value]
 }
 
 // Record a published attachment on the flow item that produced it, so its chip

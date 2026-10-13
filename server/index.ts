@@ -81,6 +81,9 @@ import {
   recordAssistantError,
   recordRideEnded,
   lastFlowItem,
+  asList,
+  type NotifyArming,
+  type PendingNotifies,
   type ScheduledMessage,
   type RepeatSpec,
   type Ride,
@@ -344,23 +347,23 @@ type Task = {
   // that wakes the task early, since a dependency on siblings outlives that.
   // Absent when not awaiting.
   waitingFor?: string[]
-  // The task to wake once, when THIS task next finishes a turn cleanly
-  // (`lander launch --notify`). Armed at creation and naming the launcher, so
-  // the notification is always "tell the task that spawned me", never an
-  // arbitrary target a caller could point at a stranger. Consumed by applyDone,
-  // which moves it to `pendingNotify`; absent once it has fired, and absent on
-  // tasks launched without the flag.
+  // The tasks to wake once, when THIS task next finishes a turn cleanly: the
+  // launcher, armed at creation by `lander launch --notify`, and any task whose
+  // `lander send --notify` this task has read (deliverQueuedBatch). Each names
+  // the task that asked, so a notification is always "tell the task that asked
+  // me", never an arbitrary target a caller could point at a stranger. Consumed
+  // by applyDone, which moves it to `pendingNotify`; absent when nobody waits.
   //
   // This is the counterpart to `waitingFor`, not a replacement: an await resumes
   // the waiter when a CONDITION holds and is satisfied only by landing, while a
   // notify tells the launcher its child has spoken and leaves it to decide. A
   // notify that arrives mid-job costs one turn; an await that fires mid-job
   // resumes the waiter on unfinished work for good.
-  notify?: string
-  // A fired notification waiting for the sweep to deliver it: who to wake, when
-  // the turn ended, and which ride it ended. Recorded under the child's mutation
-  // lock and delivered outside it, exactly as `pendingHooks` is.
-  pendingNotify?: { to: string; at: string; rideId?: string }
+  notify?: NotifyArming
+  // Fired notifications waiting for the sweep to deliver them. Recorded under
+  // the notifying task's mutation lock and delivered outside it, exactly as
+  // `pendingHooks` is.
+  pendingNotify?: PendingNotifies
   // Transient flag set when a task is read from the project's archive dir, so
   // the UI can mark archived rows and offer "Restore" instead of "Archive". Not
   // persisted: a task's location on disk (archived/ vs tasks/) is the source of
@@ -1294,55 +1297,66 @@ async function deliverScheduledMessages(
 // courtesy note, not a transcript; the launcher can always `lander view`.
 const NOTIFY_TEXT_MAX_CHARS = 2000
 
-// Deliver a child's armed `--notify`: wake the task that launched it with the
-// child's closing message. Clears `pendingNotify` from the child whatever the
-// outcome — a notification is a courtesy, and one that cannot be delivered
-// (target landed, archived, or gone) must not be retried on every sweep for the
-// life of the instance.
+// Deliver a task's fired `--notify`s: wake each task that asked (its launcher, or
+// a task that sent it a `send --notify`) with the closing message of the turn
+// that fired it. Clears `pendingNotify` whatever the outcome — a notification is
+// a courtesy, and one that cannot be delivered (target landed, archived, or gone)
+// must not be retried on every sweep for the life of the instance.
 //
 // The delivery is shaped exactly like a scheduled message rather than going out
-// through POST /messages: the sender is the scheduler, not the child, and the
-// child is waiting by now and may never ride again — so there is no principal to
+// through POST /messages: the sender is the scheduler, not the notifying task,
+// which is waiting by now and may never ride again — so there is no principal to
 // authenticate and nothing to send from.
 async function deliverNotification(
   project: Project,
-  childId: string,
-  child: Task,
+  notifierId: string,
 ): Promise<void> {
-  const pending = child.pendingNotify
-  if (!pending) return
-  // Clear the child's arming FIRST and unconditionally. The alternative —
+  // Clear the fired notifications FIRST and unconditionally. The alternative —
   // clearing after a successful delivery — turns a target that is merely gone
   // into a permanent per-sweep write, and leaves a crash between the two writes
-  // able to wake the launcher twice.
-  await mutateTask(path.join(project.dataDir, `${childId}.json`), (t) => {
+  // able to wake a task twice. Read under the same lock that clears them, so one
+  // appended after the sweep's read is delivered rather than lost.
+  const deliveries: { to: string; text: string }[] = []
+  await mutateTask(path.join(project.dataDir, `${notifierId}.json`), (t) => {
+    for (const pending of asList(t.pendingNotify)) {
+      const closing = lastFlowItem(t, pending.rideId)?.text?.trim() ?? ''
+      deliveries.push({
+        to: pending.to,
+        text:
+          closing.length > NOTIFY_TEXT_MAX_CHARS
+            ? `${closing.slice(0, NOTIFY_TEXT_MAX_CHARS)}…`
+            : closing,
+      })
+    }
     delete t.pendingNotify
   }).catch(() => {})
-  if (pending.to === childId) return
-  const target = await readTask(project.dataDir, pending.to)
+  for (const { to, text } of deliveries)
+    if (to !== notifierId) await wakeNotified(project, notifierId, to, text)
+}
+
+// The record holds the notifying task's closing words alone; the agent reads them
+// under the "finished a turn" header attributedPrompt composes.
+async function wakeNotified(
+  project: Project,
+  notifierId: string,
+  to: string,
+  text: string,
+): Promise<void> {
+  const target = await readTask(project.dataDir, to)
   // A landed target is deliberately not revived. Landing is terminal and the
   // launcher landing before its child spoke means it stopped caring; reviving it
   // to read a courtesy note is the "resurrect a finished task to report it has
   // nothing to do" failure that landing-disarms-wakeups exists to prevent.
   if (!target || target.status === 'landed') return
 
-  const closing = lastFlowItem(child, pending.rideId)?.text?.trim() ?? ''
-  const clipped =
-    closing.length > NOTIFY_TEXT_MAX_CHARS
-      ? `${closing.slice(0, NOTIFY_TEXT_MAX_CHARS)}…`
-      : closing
-  // The child is the message's sender: the record holds its closing words alone,
-  // and the agent reads them under a "finished a turn" header (attributedPrompt).
-  const text = clipped
-
   let drive = false
   let claimed = false
-  await mutateTask(path.join(project.dataDir, `${pending.to}.json`), (t) => {
+  await mutateTask(path.join(project.dataDir, `${to}.json`), (t) => {
     if (t.status === 'landed') return
     const at = new Date().toISOString()
     // Revives a wedged target, same as any delivered message, and records the
     // crossing a hair ahead so the timeline orders right. `system`, because the
-    // scheduler is what delivered it — the child's own turn was over.
+    // scheduler is what delivered it — the notifying task's turn was over.
     recordStatusTransition(
       t,
       'riding',
@@ -1363,14 +1377,14 @@ async function deliverNotification(
       }
       delete t.scheduledFor
     }
-    applyDueMessages(t, [{ text, from: { task: childId, via: 'notify' } }], at)
+    applyDueMessages(t, [{ text, from: { task: notifierId, via: 'notify' } }], at)
     t.status = 'riding'
     t.updatedAt = at
     drive = true
   }, () => {
-    if (drive) claimed = claimTaskRun(project, pending.to)
+    if (drive) claimed = claimTaskRun(project, to)
   }).catch(() => {})
-  if (claimed) void driveClaimedTask(project, pending.to)
+  if (claimed) void driveClaimedTask(project, to)
 }
 
 // Scan every project for scheduled tasks whose launch time has arrived and run
@@ -1495,7 +1509,7 @@ async function sweepOnce(): Promise<void> {
       // chain. Delivering above the guard would wake the launcher between two
       // turns of a drain it never saw start. Here, the notification waits until
       // the child is genuinely waiting.
-      if (task.pendingNotify) await deliverNotification(project, id, task)
+      if (task.pendingNotify) await deliverNotification(project, id)
       const timeDue =
         task.scheduledFor != null && Date.parse(task.scheduledFor) <= now
       const awaitDue =
@@ -2607,7 +2621,7 @@ app.post('/api/:project/tasks', async (c) => {
       // ignored rather than rejected in those cases: the flag is a request for a
       // courtesy that does not apply, not a malformed launch.
       ...(body.notify === true && principal.kind === 'task'
-        ? { notify: principal.id }
+        ? { notify: [principal.id] }
         : {}),
       // The hook that caused this task, or the one inherited from the task that
       // spawned it — so the exemption covers a chain and not just its head. A
@@ -3639,6 +3653,7 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
       await?: unknown
       attachments?: unknown
       key?: unknown
+      notify?: unknown
     }>()
     const rawMessage = typeof body.message === 'string' ? body.message : ''
     if (!rawMessage.trim()) return c.json({ error: 'message is required' }, 400)
@@ -3670,6 +3685,10 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
       principal.kind === 'task' && principal.id !== id
         ? { task: principal.id, via: 'send' as const }
         : undefined
+    // `--notify` wakes the sender, so it applies only where there is a sending
+    // task to wake — ignored, like `launch --notify`, for the human and for a
+    // task messaging itself.
+    const notify = body.notify === true && !!from
     const message = rawMessage
 
     // What an action record echoes back on the sender: their own words — the
@@ -3705,6 +3724,7 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
           waitFor,
           ...(attachments ? { attachments } : {}),
           ...(from ? { from } : {}),
+          ...(notify ? { notify: true as const } : {}),
         })
       })
       const actionAt = new Date().toISOString()
@@ -3779,6 +3799,7 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
       pushUserItem(t, message, now, {
         ...(attachments ? { attachments } : {}),
         ...(from ? { from } : {}),
+        notify,
       })
       t.updatedAt = now
       // Queue the prompt for the session and go "riding". driveTask clears it to

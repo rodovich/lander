@@ -46,6 +46,7 @@ import {
   type MessageItem,
   type PendingHook,
   type ScheduledMessage,
+  type NotifyArming,
   type Ride,
   type TaskActionItem,
 } from './tasks'
@@ -790,6 +791,32 @@ describe('deliverQueuedBatch', () => {
     deliverQueuedBatch(t, 2, 'rB')
     expect(ids(t)).toEqual(['f-a1', 'f-a2', 'u-F1', 'u-F2'])
   })
+
+  it('arms the sender of a `--notify` message alongside the launcher', () => {
+    const t: { items: Item[]; notify?: NotifyArming } = {
+      items: [
+        userItem('ask', AT, { from: { task: 'sender-1', via: 'send' }, notify: true }),
+        userItem('fyi', later(1), { from: { task: 'sender-2', via: 'send' } }),
+      ],
+      notify: 'launcher-1',
+    }
+    deliverQueuedBatch(t, 2, 'rB')
+    expect(t.notify).toEqual(['launcher-1', 'sender-1'])
+  })
+
+  it('does not arm the sender again on a re-delivery', () => {
+    const t: { items: Item[]; notify?: NotifyArming } = {
+      items: [
+        userItem('ask', AT, {
+          from: { task: 'sender-1', via: 'send' },
+          notify: true,
+          deliveredIn: 'rA',
+        }),
+      ],
+    }
+    deliverQueuedBatch(t, 1, 'rB')
+    expect(t.notify).toBeUndefined()
+  })
 })
 
 describe('recordAttachmentOnMessage', () => {
@@ -1418,6 +1445,16 @@ describe('applyDueMessages', () => {
     // Stored as the sender's words; queued for the agent with the sender named.
     expect(userItems(t).map((u) => u.text)).toEqual(['a', 'b'])
     expect(t.queued).toEqual(['From tsk-s:\n\na', 'b'])
+  })
+
+  it('carries a deferred `send --notify` onto the delivered item', () => {
+    const t = task()
+    applyDueMessages(
+      t,
+      [{ text: 'a', from: { task: 'tsk-s', via: 'send' }, notify: true }, { text: 'b' }],
+      AT2,
+    )
+    expect(userItems(t).map((u) => u.notify)).toEqual([true, undefined])
   })
 
   it('seals and leads with the relaunch text when a relaunch is due', () => {

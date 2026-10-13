@@ -27,8 +27,11 @@ import {
   recordStatusTransition,
   recordRideEnded,
   lastTurnPrompts,
+  asList,
   type Item,
+  type NotifyArming,
   type PendingHook,
+  type PendingNotifies,
   type ToolItem,
   type Ride,
 } from './tasks'
@@ -50,8 +53,8 @@ export type ApplyTask = {
   retry?: { committed: boolean; prompts: string[]; resetsAt?: string }
   pendingHooks?: PendingHook[]
   hookFireSeq?: number
-  notify?: string
-  pendingNotify?: { to: string; at: string; rideId?: string }
+  notify?: NotifyArming
+  pendingNotify?: PendingNotifies
 }
 
 // One reduced batch of run output to fold onto the task: the activity it
@@ -339,13 +342,14 @@ export function applyDone(
   // (tasks.ts): recording is synchronous inside the task's mutation lock, while
   // delivery needs another task's file and must not run under this one's lock.
   // Consumed on arming, never on delivery, so a delivery that fails cannot
-  // re-arm the notification and wake the parent twice.
-  if (outcome === 'done' && task.notify) {
-    task.pendingNotify = {
-      to: task.notify,
-      at,
-      ...(rideId ? { rideId } : {}),
-    }
+  // re-arm the notification and wake a waiter twice. An earlier turn's may
+  // still be waiting, since the sweep holds delivery until the whole drain ends.
+  const waiters = asList(task.notify)
+  if (outcome === 'done' && waiters.length) {
+    task.pendingNotify = [
+      ...asList(task.pendingNotify),
+      ...waiters.map((to) => ({ to, at, ...(rideId ? { rideId } : {}) })),
+    ]
     delete task.notify
   }
   // The run's working time, as the daemon measured it. Kept off `closeRide` —

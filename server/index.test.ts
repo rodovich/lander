@@ -2164,7 +2164,7 @@ describe('acting task coordination history', () => {
     })
     expect(child.status).toBe(201)
     const childId = ((await child.json()) as { id: string }).id
-    expect((await rawTask(childId)).notify).toBe(actor.id)
+    expect((await rawTask(childId)).notify).toEqual([actor.id])
 
     // Nothing armed without the flag.
     const plain = await launchAs(actor.id, slug, {
@@ -2265,6 +2265,44 @@ describe('acting task coordination history', () => {
       text: 'Awaiting secret body',
     })
     expect((await rawTask(actor.id)).updatedAt).toBe(before.updatedAt)
+  })
+
+  it('records `send --notify` on the message, and only for a sending task', async () => {
+    const actor = await createTask('Notify sender')
+    const immediate = await createTask('Notify immediate recipient')
+    const deferred = await createTask('Notify deferred recipient')
+    const human = await createTask('Notify human recipient')
+
+    const sends = [
+      asTask(actor.id, `/api/${slug}/tasks/${immediate.id}/messages`, 'POST', {
+        message: 'Answer me',
+        notify: true,
+      }),
+      asTask(actor.id, `/api/${slug}/tasks/${deferred.id}/messages`, 'POST', {
+        message: 'Answer me later',
+        time: 60,
+        notify: true,
+      }),
+      post(`/api/${slug}/tasks/${human.id}/messages`, {
+        message: 'From the human',
+        notify: true,
+      }),
+    ]
+    for (const res of await Promise.all(sends)) expect(res.status).toBe(200)
+
+    const lastUser = async (id: string) => {
+      const raw = JSON.parse(await settled(id)) as { items: Raw[] }
+      return raw.items.filter((i) => i.role === 'user').at(-1)
+    }
+    expect(await lastUser(immediate.id)).toMatchObject({
+      text: 'Answer me',
+      from: { task: actor.id, via: 'send' },
+      notify: true,
+    })
+    expect((await rawTask(deferred.id)).scheduledMessages).toEqual([
+      expect.objectContaining({ text: 'Answer me later', notify: true }),
+    ])
+    expect(await lastUser(human.id)).not.toHaveProperty('notify')
   })
 
   it('echoes the sender’s own words, clamped, not the delivered copy', async () => {
@@ -3830,6 +3868,49 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
       }),
     )
     await waitForRaw(id, (r) => !r.runId)
+  })
+
+  // A `send --notify` that arrives mid-turn must not fire when that turn ends:
+  // the turn that reads the message is the one that answers it.
+  it('fires `send --notify` on the turn that reads the message', async () => {
+    const sender = 'notify-sender'
+    const id = 'notify-recipient'
+    await seed(sender)
+    await seed(id)
+    const sendAs = (message: string, notify?: boolean) =>
+      app.request(`/api/${slug}/tasks/${id}/messages`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-lander-task': sender,
+          'x-lander-project': slug,
+          'x-lander-token': `token-${sender}`,
+        },
+        body: JSON.stringify({ message, ...(notify ? { notify } : {}) }),
+      })
+    const finish = (runId: string) =>
+      ws.send(
+        JSON.stringify({ type: 'done', runId, exitCode: 0, interrupted: false, stderr: '' }),
+      )
+
+    expect((await sendAs('first')).status).toBe(200)
+    await waitFor(() => startRuns(id).length === 1)
+    expect((await sendAs('answer me', true)).status).toBe(200)
+
+    // The turn already running ends without the message: nobody is notified.
+    finish(startRuns(id)[0].runId!)
+    await waitFor(() => startRuns(id).length === 2)
+    const reading = await readRaw(id)
+    expect(reading.pendingNotify).toBeUndefined()
+    expect(reading.notify).toEqual([sender])
+
+    const second = startRuns(id)[1].runId!
+    finish(second)
+    const answered = await waitForRaw(id, (r) => !r.runId)
+    expect(answered.pendingNotify).toEqual([
+      expect.objectContaining({ to: sender, rideId: second }),
+    ])
+    expect(answered.notify).toBeUndefined()
   })
 
   // Runs before the crash test, which disconnects the shared daemon.

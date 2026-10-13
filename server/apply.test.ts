@@ -445,16 +445,41 @@ describe('applyDone arms the one-shot notify', () => {
   const done = (t: ApplyTask, exitCode = 0, interrupted = false) =>
     applyDone(t, { exitCode, interrupted, stderr: '' }, { at: AT, askId: 'ask-0' })
 
-  it('arms on a clean turn, naming the launcher and the ride that closed', () => {
+  it('arms on a clean turn, naming each waiter and the ride that closed', () => {
+    const t = task({ notify: ['parent-1', 'sender-2'] })
+    done(t)
+    expect(t.pendingNotify).toEqual([
+      { to: 'parent-1', at: AT, rideId: 'r1' },
+      { to: 'sender-2', at: AT, rideId: 'r1' },
+    ])
+  })
+
+  // A task armed before several waiters were possible stored the launcher's id
+  // bare, and can still be on disk unfired.
+  it('arms from a bare launcher id', () => {
     const t = task({ notify: 'parent-1' })
     done(t)
-    expect(t.pendingNotify).toEqual({ to: 'parent-1', at: AT, rideId: 'r1' })
+    expect(t.pendingNotify).toEqual([{ to: 'parent-1', at: AT, rideId: 'r1' }])
+  })
+
+  // The sweep holds delivery until the drain ends, so a later turn in the same
+  // drain can fire while an earlier one's notification still waits.
+  it('keeps an undelivered notification from an earlier turn', () => {
+    const t = task({
+      notify: ['sender-2'],
+      pendingNotify: { to: 'parent-1', at: AT, rideId: 'r0' },
+    })
+    done(t)
+    expect(t.pendingNotify).toEqual([
+      { to: 'parent-1', at: AT, rideId: 'r0' },
+      { to: 'sender-2', at: AT, rideId: 'r1' },
+    ])
   })
 
   // One-shot: the arming is consumed here, not at delivery, so a child that
   // rides ten more times wakes its launcher exactly once.
   it('consumes the arming, so a second clean turn notifies nobody', () => {
-    const t = task({ notify: 'parent-1' })
+    const t = task({ notify: ['parent-1'] })
     done(t)
     expect(t.notify).toBeUndefined()
     delete t.pendingNotify
@@ -468,17 +493,17 @@ describe('applyDone arms the one-shot notify', () => {
   // platform's. Neither produced a reply, so reporting one would be a lie — and
   // the arming must survive so the turn that DOES finish still notifies.
   it('does not arm on an interrupt, and keeps the arming for a later turn', () => {
-    const t = task({ notify: 'parent-1' })
+    const t = task({ notify: ['parent-1'] })
     done(t, 0, true)
     expect(t.pendingNotify).toBeUndefined()
-    expect(t.notify).toBe('parent-1')
+    expect(t.notify).toEqual(['parent-1'])
   })
 
   it('does not arm on an assistant error', () => {
-    const t = task({ notify: 'parent-1' })
+    const t = task({ notify: ['parent-1'] })
     done(t, 1)
     expect(t.pendingNotify).toBeUndefined()
-    expect(t.notify).toBe('parent-1')
+    expect(t.notify).toEqual(['parent-1'])
   })
 
   it('arms nothing on a task launched without the flag', () => {
