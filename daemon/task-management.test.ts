@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildRevivedBlock,
+  buildScheduledRideBlock,
   fillTaskPrompt,
   taskManagementPrompt,
   promptWithTaskManagement,
@@ -60,29 +61,58 @@ describe('buildRevivedBlock', () => {
     )
   })
 
-  // The common shape of the cleared-timer case: nothing notable was crossed, so
+  // The common shape of the cleared-ride case: nothing notable was crossed, so
   // "waiting" is all there is to say about it.
-  it('names a cleared wakeup timer, its time, and the way to re-arm it', () => {
+  it('names a cleared scheduled ride, its time, and the way to schedule it again', () => {
     expect(buildRevivedBlock({ waitingUntil: '8/7/2026, 3:00:00 PM' })).toBe(
       '<task-revived>\n' +
         'You were waiting until 8/7/2026, 3:00:00 PM when this message arrived; ' +
-        'the message changed your status to riding and cleared that wakeup. ' +
-        'Re-arm it with `lander ride` if you still want it.\n' +
+        'the message changed your status to riding and cleared the ride you had ' +
+        'scheduled for then. Schedule it again with `lander ride` if you still want it.\n' +
         '</task-revived>',
     )
   })
 
   // Both halves at once — a wedged task holding a deferred session-limit retry
-  // wakeup, revived by a message. One sentence, not two notices.
-  it('folds a crossed status and a cleared timer into one sentence', () => {
+  // ride, revived by a message. One sentence, not two notices.
+  it('folds a crossed status and a cleared ride into one sentence', () => {
     expect(
       buildRevivedBlock({ from: 'wedged', waitingUntil: '3:00:00 PM' }),
     ).toBe(
       '<task-revived>\n' +
         'You were wedged until 3:00:00 PM when this message arrived; ' +
-        'the message changed your status to riding and cleared that wakeup. ' +
-        'Re-arm it with `lander ride` if you still want it.\n' +
+        'the message changed your status to riding and cleared the ride you had ' +
+        'scheduled for then. Schedule it again with `lander ride` if you still want it.\n' +
         '</task-revived>',
+    )
+  })
+})
+
+describe('buildScheduledRideBlock', () => {
+  const sentence = (when: string) =>
+    '<ride-scheduled>\n' +
+    `You have a ride scheduled ${when}. It stays scheduled unless you clear it ` +
+    'with `lander ride --clear`; scheduling another with `lander ride` replaces it.\n' +
+    '</ride-scheduled>'
+
+  it('names the time of a time trigger', () => {
+    expect(buildScheduledRideBlock({ at: '10/10/2026, 1:21:00 PM' })).toBe(
+      sentence('for 10/10/2026, 1:21:00 PM'),
+    )
+  })
+
+  it('names the awaited tasks of an await', () => {
+    expect(buildScheduledRideBlock({ awaiting: ['a1'] })).toBe(
+      sentence('for when a1 lands'),
+    )
+    expect(buildScheduledRideBlock({ awaiting: ['a1', 'b2'] })).toBe(
+      sentence('for when a1, b2 have all landed'),
+    )
+  })
+
+  it('names both triggers of a ride that has both', () => {
+    expect(buildScheduledRideBlock({ at: '1:21:00 PM', awaiting: ['a1'] })).toBe(
+      sentence('for 1:21:00 PM or when a1 lands, whichever comes first'),
     )
   })
 })

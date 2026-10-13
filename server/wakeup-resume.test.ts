@@ -194,11 +194,43 @@ describe('the prompt a fired wakeup drives', () => {
   })
 })
 
-// A `--notify` delivery is a message, not a wakeup — it never drives the
-// synthetic prompt. What it shares with a sent message is the arrival, so it has
-// to settle the wakeup timer that arrival makes moot.
-describe('a notify delivery supersedes the launcher’s wakeup timer', () => {
-  it('disarms the timer, tells the woken turn, and leaves the await armed', async () => {
+describe('a deferred message to a task with a ride scheduled', () => {
+  it('is delivered when due, and the ride stays scheduled', async () => {
+    await seed('ride-holder', {
+      scheduledFor: LATE,
+      waitingFor: ['ride-holder-sibling'],
+      scheduledMessages: [
+        { text: 'due now', deliverAt: AT, from: { task: 'sender-x', via: 'send' } },
+      ],
+    })
+
+    await launchScheduled()
+
+    expect(await lastPrompt('ride-holder')).toBe('From sender-x:\n\ndue now')
+    const raw = await readRaw('ride-holder')
+    expect(raw.scheduledFor).toBe(LATE)
+    expect(raw.waitingFor).toEqual(['ride-holder-sibling'])
+  })
+
+  // The control: a launch that has not happened yet still holds its messages.
+  it('waits for a deferred launch', async () => {
+    await seed('launch-holder', {
+      scheduledFor: LATE,
+      rides: [],
+      scheduledMessages: [{ text: 'due now', deliverAt: AT }],
+    })
+
+    await launchScheduled()
+
+    expect((await readRaw('launch-holder')).scheduledMessages).toHaveLength(1)
+  })
+})
+
+// A `--notify` delivery is a message, not a scheduled ride firing — it never
+// drives the synthetic prompt — and like a message from another task it leaves
+// the ride the woken task scheduled.
+describe('a notify delivery', () => {
+  it('leaves the scheduled ride and the await in place', async () => {
     await seed('notify-launcher', {
       scheduledFor: LATE,
       waitingFor: ['notify-child'],
@@ -220,23 +252,15 @@ describe('a notify delivery supersedes the launcher’s wakeup timer', () => {
       text: 'on it',
       from: { task: 'notify-child', via: 'notify' },
     })
-    // The fallback the launcher armed against the child never speaking is moot
-    // now, and would otherwise fire in 2099 against a task that moved on.
-    expect(raw.scheduledFor).toBeUndefined()
-    // Named to the woken turn, so re-arming is a single actionable step.
-    expect(writes).toContainEqual(
-      expect.objectContaining({
-        revived: { waitingUntil: new Date(LATE).toLocaleString() },
-      }),
-    )
-    // The await is a dependency on the child LANDING, which finishing a turn is
-    // not — it survives, exactly as it does across a sent message.
+    // Nothing cleared, so nothing to tell the woken turn it lost.
+    expect(raw.scheduledFor).toBe(LATE)
+    expect(writes.some((w) => w.revived)).toBe(false)
     expect(raw.waitingFor).toEqual(['notify-child'])
     // One-shot: consumed on delivery so the next sweep doesn't wake it again.
     expect((await readRaw('notify-child')).pendingNotify).toBeUndefined()
   })
 
-  it('leaves a launcher with no timer nothing to report', async () => {
+  it('leaves a launcher with no scheduled ride nothing to report', async () => {
     await seed('notify-plain-launcher', {})
     await seed('notify-plain-child', {
       pendingNotify: [{ to: 'notify-plain-launcher', at: AT, rideId: 'r0' }],

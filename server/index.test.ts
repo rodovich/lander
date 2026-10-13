@@ -16,7 +16,7 @@ import { clearHookRunState, mintHookCredential } from './hook-runs'
 import { observeWrites } from './store'
 import { MAX_ACTION_TEXT } from './task-actions'
 import { TITLE_MAX_CHARS } from './title'
-import type { RevivedMarker } from './protocol'
+import type { RevivedMarker, ScheduledRide } from './protocol'
 
 const UI_TOKEN = 'test-ui-token'
 const AT = '2026-01-01T00:00:00.000Z'
@@ -3502,7 +3502,7 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
   const startRuns = (id: string) =>
     received.filter((m) => m.type === 'start-run' && m.taskId === id)
 
-  async function seed(id: string): Promise<void> {
+  async function seed(id: string, over: Raw = {}): Promise<void> {
     await writeFile(
       path.join(tasksDir, `${id}.json`),
       JSON.stringify({
@@ -3516,6 +3516,7 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
         shape: 2,
         items: [],
         rides: [],
+        ...over,
       }),
     )
   }
@@ -3812,13 +3813,9 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     await waitForRaw(id, (r) => !r.runId)
   })
 
-  // An out-of-band revival supersedes a *timer*: left armed it fires later
-  // against a task that has moved on — in every case observed, one that had
-  // already landed — and burns a whole ride to report there's nothing to do. An
-  // await is the opposite: a real dependency on sibling tasks that an unrelated
-  // message must not cancel. Same split the wake-delivery table draws for the
-  // daemon path (docs/daemon-wakeups.md §Delivery).
-  it('an early revival clears the wakeup timer, keeps the await, and says so', async () => {
+  // The human answering supersedes the time they or the task scheduled; an await
+  // is a real dependency on sibling tasks that no message cancels.
+  it('a human message clears a scheduled time, keeps the await, and says both', async () => {
     const id = 'revived-paced'
     const until = new Date(Date.now() + 3_600_000).toISOString()
     await writeFile(
@@ -3849,10 +3846,12 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     const run = startRuns(id)[0] as unknown as {
       runId: string
       revived?: RevivedMarker
+      scheduledRide?: ScheduledRide
     }
-    // The notice names the time, so re-arming is one actionable step rather than
-    // a guess. Formatted server-side, in the same shape as "Resumed at …".
+    // The notice names the time, so scheduling it again is one actionable step
+    // rather than a guess.
     expect(run.revived).toEqual({ waitingUntil: new Date(until).toLocaleString() })
+    expect(run.scheduledRide).toEqual({ awaiting: ['sibling-x'] })
 
     const raw = await readRaw(id)
     expect(raw.scheduledFor).toBeUndefined()
@@ -3870,6 +3869,134 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     await waitForRaw(id, (r) => !r.runId)
   })
 
+  const sendAs = (sender: string, id: string, body: Record<string, unknown>) =>
+    app.request(`/api/${slug}/tasks/${id}/messages`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-lander-task': sender,
+        'x-lander-project': slug,
+        'x-lander-token': `token-${sender}`,
+      },
+      body: JSON.stringify(body),
+    })
+  const finish = (runId: string) =>
+    ws.send(
+      JSON.stringify({ type: 'done', runId, exitCode: 0, interrupted: false, stderr: '' }),
+    )
+
+  it('a message from another task leaves the scheduled ride, and the turn is reminded', async () => {
+    const sender = 'ride-sender'
+    const id = 'ride-keeper'
+    const until = new Date(Date.now() + 3_600_000).toISOString()
+    await seed(sender)
+    await seed(id, {
+      scheduledFor: until,
+      rides: [{ id: 'r0', startedAt: AT, endedAt: AT, outcome: 'done' }],
+    })
+
+    expect((await sendAs(sender, id, { message: 'report' })).status).toBe(200)
+    await waitFor(() => startRuns(id).length === 1)
+
+    const run = startRuns(id)[0] as unknown as {
+      runId: string
+      revived?: RevivedMarker
+      scheduledRide?: ScheduledRide
+    }
+    expect(run.revived).toBeUndefined()
+    expect(run.scheduledRide).toEqual({ at: new Date(until).toLocaleString() })
+    expect((await readRaw(id)).scheduledFor).toBe(until)
+
+    finish(run.runId)
+    await waitForRaw(id, (r) => !r.runId)
+  })
+
+  // Its first turn is the launch the time was for, so keeping the time would
+  // launch it twice.
+  it('a message from another task clears the time of a deferred launch it starts', async () => {
+    const sender = 'launch-sender'
+    const id = 'deferred-launch'
+    await seed(sender)
+    await seed(id, {
+      scheduledFor: new Date(Date.now() + 3_600_000).toISOString(),
+      waitingFor: ['launch-sibling'],
+    })
+
+    expect((await sendAs(sender, id, { message: 'start now' })).status).toBe(200)
+    await waitFor(() => startRuns(id).length === 1)
+
+    const run = startRuns(id)[0] as unknown as {
+      runId: string
+      scheduledRide?: ScheduledRide
+    }
+    expect(run.scheduledRide).toBeUndefined()
+    const raw = await readRaw(id)
+    expect(raw.scheduledFor).toBeUndefined()
+    expect(raw.waitingFor).toBeUndefined()
+
+    finish(run.runId)
+    await waitForRaw(id, (r) => !r.runId)
+  })
+
+  // Wedged by its own `lander wedge` after `lander ride`: nothing is queued
+  // behind the time, so it is the task's own ride.
+  it('a message from another task leaves a wedged task’s own ride', async () => {
+    const sender = 'own-ride-sender'
+    const id = 'own-ride-wedged'
+    const until = new Date(Date.now() + 3_600_000).toISOString()
+    await seed(sender)
+    await seed(id, {
+      status: 'wedged',
+      scheduledFor: until,
+      rides: [{ id: 'r0', startedAt: AT, endedAt: AT, outcome: 'done' }],
+    })
+
+    expect((await sendAs(sender, id, { message: 'unblocked' })).status).toBe(200)
+    await waitFor(() => startRuns(id).length === 1)
+
+    const run = startRuns(id)[0] as unknown as {
+      runId: string
+      revived?: RevivedMarker
+      scheduledRide?: ScheduledRide
+    }
+    expect(run.revived).toEqual({ from: 'wedged' })
+    expect(run.scheduledRide).toEqual({ at: new Date(until).toLocaleString() })
+    expect((await readRaw(id)).scheduledFor).toBe(until)
+
+    finish(run.runId)
+    await waitForRaw(id, (r) => !r.runId)
+  })
+
+  // The message drives the queued retry now, so the time it waited for would
+  // only ride a second, empty turn.
+  it('a message from another task clears a wedged task’s deferred retry', async () => {
+    const sender = 'retry-sender'
+    const id = 'deferred-retry'
+    await seed(sender)
+    await seed(id, {
+      status: 'wedged',
+      scheduledFor: new Date(Date.now() + 3_600_000).toISOString(),
+      queued: ['try again'],
+      rides: [{ id: 'r0', startedAt: AT, endedAt: AT, outcome: 'error' }],
+    })
+
+    expect((await sendAs(sender, id, { message: 'status?' })).status).toBe(200)
+    await waitFor(() => startRuns(id).length === 1)
+
+    const run = startRuns(id)[0] as unknown as {
+      runId: string
+      revived?: RevivedMarker
+      scheduledRide?: ScheduledRide
+    }
+    // Nothing lost, so nothing to schedule again.
+    expect(run.revived).toEqual({ from: 'wedged' })
+    expect(run.scheduledRide).toBeUndefined()
+    expect((await readRaw(id)).scheduledFor).toBeUndefined()
+
+    finish(run.runId)
+    await waitForRaw(id, (r) => !r.runId)
+  })
+
   // A `send --notify` that arrives mid-turn must not fire when that turn ends:
   // the turn that reads the message is the one that answers it.
   it('fires `send --notify` on the turn that reads the message', async () => {
@@ -3877,25 +4004,12 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     const id = 'notify-recipient'
     await seed(sender)
     await seed(id)
-    const sendAs = (message: string, notify?: boolean) =>
-      app.request(`/api/${slug}/tasks/${id}/messages`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-lander-task': sender,
-          'x-lander-project': slug,
-          'x-lander-token': `token-${sender}`,
-        },
-        body: JSON.stringify({ message, ...(notify ? { notify } : {}) }),
-      })
-    const finish = (runId: string) =>
-      ws.send(
-        JSON.stringify({ type: 'done', runId, exitCode: 0, interrupted: false, stderr: '' }),
-      )
 
-    expect((await sendAs('first')).status).toBe(200)
+    expect((await sendAs(sender, id, { message: 'first' })).status).toBe(200)
     await waitFor(() => startRuns(id).length === 1)
-    expect((await sendAs('answer me', true)).status).toBe(200)
+    expect(
+      (await sendAs(sender, id, { message: 'answer me', notify: true })).status,
+    ).toBe(200)
 
     // The turn already running ends without the message: nobody is notified.
     finish(startRuns(id)[0].runId!)

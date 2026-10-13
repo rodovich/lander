@@ -215,6 +215,11 @@ export const CODEX_GOLDENS: Golden[] = [
     start: { ...codexStart, revived: { from: 'landed' } },
   },
   {
+    name: 'a turn with a ride still scheduled is reminded of it',
+    chunks: [[threadStarted(), agentMessage('ok')]],
+    start: { ...codexStart, scheduledRide: { at: '3:00:00 PM' } },
+  },
+  {
     // Provider-local item ids restart per thread; the runtime's per-run minting
     // is what keeps two rides' items distinct.
     name: 'later ride reusing the same local item ids',

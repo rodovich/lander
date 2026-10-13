@@ -375,25 +375,56 @@ describe('the revival notice reaches the prompt', () => {
     )
   })
 
-  // The cleared-timer half travels the same wire as the wedged/landed half, so
+  // The cleared-ride half travels the same wire as the wedged/landed half, so
   // this is really about the marker being an object now: an early revival that
   // crossed no notable status still has something to say.
-  it('carries a cleared wakeup timer, with the time and the way back', async () => {
+  it('carries a cleared scheduled ride, with the time and the way back', async () => {
     const g = CLAUDE_GOLDENS.find(
-      (x) => x.name === 'revival notice names a cleared wakeup timer',
+      (x) => x.name === 'revival notice names a cleared scheduled ride',
     )!
     const flow = await driveFlow(g, claudeFlow())
     expect(promptOf(flow.spawns[0].args)).toContain(
       '<task-revived>\nYou were waiting until 3:00:00 PM when this message ' +
-        'arrived; the message changed your status to riding and cleared that ' +
-        'wakeup. Re-arm it with `lander ride` if you still want it.\n' +
-        '</task-revived>',
+        'arrived; the message changed your status to riding and cleared the ' +
+        'ride you had scheduled for then. Schedule it again with `lander ride` ' +
+        'if you still want it.\n</task-revived>',
     )
   })
 
   it('is absent from a turn that did not revive anything', async () => {
     const flow = await driveFlow(CLAUDE_GOLDENS[0], claudeFlow())
     expect(promptOf(flow.spawns[0].args)).not.toContain('<task-revived>')
+  })
+})
+
+describe('the scheduled-ride reminder reaches the prompt', () => {
+  const promptOf = (args: string[]) =>
+    args.find((a) => a.includes('do the thing')) as string
+  const name = 'a turn with a ride still scheduled is reminded of it'
+
+  it('rides claude’s prompt, outside the task-context block', async () => {
+    const g = CLAUDE_GOLDENS.find((x) => x.name === name)!
+    const prompt = promptOf((await driveFlow(g, claudeFlow())).spawns[0].args)
+    expect(prompt).toContain(
+      '<ride-scheduled>\nYou have a ride scheduled for 3:00:00 PM or when ' +
+        'sibling-1 lands, whichever comes first.',
+    )
+    expect(
+      prompt.slice(prompt.indexOf('<task-context>')),
+    ).not.toContain('<ride-scheduled>')
+  })
+
+  it('rides codex’s prompt', async () => {
+    const g = CODEX_GOLDENS.find((x) => x.name === name)!
+    const flow = await driveFlow(g, codexFlow())
+    expect(promptOf(flow.spawns[0].args)).toContain(
+      '<ride-scheduled>\nYou have a ride scheduled for 3:00:00 PM.',
+    )
+  })
+
+  it('is absent from a turn with no ride scheduled', async () => {
+    const flow = await driveFlow(CLAUDE_GOLDENS[0], claudeFlow())
+    expect(promptOf(flow.spawns[0].args)).not.toContain('<ride-scheduled>')
   })
 })
 

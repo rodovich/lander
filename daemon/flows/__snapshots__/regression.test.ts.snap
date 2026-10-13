@@ -131,6 +131,139 @@ GIT-SNAPSHOT-STUB
 }
 `;
 
+exports[`claude transcript regressions > a turn with a ride still scheduled is reminded of it 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "--session-id",
+        "minted-session-id",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<ride-scheduled>
+You have a ride scheduled for 3:00:00 PM or when sibling-1 lands, whichever comes first. It stays scheduled unless you clear it with \`lander ride --clear\`; scheduling another with \`lander ride\` replaces it.
+</ride-scheduled>
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "minted-session-id",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "groupId": "group:ride-1:0",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "all done",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "ok",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "inferenceId": "group:ride-1:0",
+          "kind": "text",
+          "text": "ok",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "all done",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
 exports[`claude transcript regressions > agent stderr is aggregated into the done 1`] = `
 {
   "done": {
@@ -2141,7 +2274,7 @@ GIT-SNAPSHOT-STUB
 }
 `;
 
-exports[`claude transcript regressions > revival notice names a cleared wakeup timer 1`] = `
+exports[`claude transcript regressions > revival notice names a cleared scheduled ride 1`] = `
 {
   "done": {
     "exitCode": 0,
@@ -2172,7 +2305,7 @@ exports[`claude transcript regressions > revival notice names a cleared wakeup t
         "do the thing
 
 <task-revived>
-You were waiting until 3:00:00 PM when this message arrived; the message changed your status to riding and cleared that wakeup. Re-arm it with \`lander ride\` if you still want it.
+You were waiting until 3:00:00 PM when this message arrived; the message changed your status to riding and cleared the ride you had scheduled for then. Schedule it again with \`lander ride\` if you still want it.
 </task-revived>
 
 <task-context>
@@ -3596,6 +3729,113 @@ GIT-SNAPSHOT-STUB
         "sessionCostUsd": 0.0421,
       },
       "usageChanged": true,
+    },
+  ],
+}
+`;
+
+exports[`codex transcript regressions > a turn with a ride still scheduled is reminded of it 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "exec",
+        "--json",
+        "--skip-git-repo-check",
+        "--config",
+        "default_permissions="lander-read-only"",
+        "--config",
+        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "--config",
+        "shell_environment_policy.inherit=all",
+        "--config",
+        "shell_environment_policy.ignore_default_excludes=true",
+        "--config",
+        "shell_environment_policy.include_only=["PATH","LANDER_*"]",
+        "--cd",
+        "/repo",
+        "--",
+        "Prompt: As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+
+do the thing
+
+<ride-scheduled>
+You have a ride scheduled for 3:00:00 PM. It stays scheduled unless you clear it with \`lander ride --clear\`; scheduling another with \`lander ride\` replaces it.
+</ride-scheduled>",
+      ],
+      "command": "codex",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "thread-1",
+      "taskPrompt": "sha256:0ea953f9109ca38d64f99a28a78e694b30a52f7ecf750037c2f704927134bdda",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "ok",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "drivingModel": undefined,
+      "finalText": "ok",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "kind": "text",
+          "text": "ok",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
     },
   ],
 }

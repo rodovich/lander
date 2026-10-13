@@ -8,7 +8,7 @@ import path from 'node:path'
 import type { AgentKind } from './agent'
 import type { Step, Usage } from './stream'
 import type { Attachment } from './attachments'
-import type { RevivedMarker } from './protocol'
+import type { RevivedMarker, ScheduledRide } from './protocol'
 // The one value we import (the rest of this module's imports are types):
 // recordStatusTransition settles open asks on the crossing. asks.ts imports only
 // types from here, so the runtime edge stays one-way — this module → asks.ts.
@@ -1643,11 +1643,54 @@ export function wakeupNotification(
 ): { text: string; from: LanderSender } {
   if (!landed?.length)
     return {
-      text: `Current date: ${new Date(at).toLocaleString()}`,
+      text: `Current date: ${displayTime(at)}`,
       from: { lander: 'time' },
     }
   const noun = landed.length > 1 ? 'Tasks' : 'Task'
   return { text: `${noun} landed: ${landed.join(', ')}`, from: { lander: 'await' } }
+}
+
+// How a scheduled time is shown to the agent: the date its "Current date: …"
+// notification carries, and every message that names that time.
+export function displayTime(iso: string): string {
+  return new Date(iso).toLocaleString()
+}
+
+// The ride a task still has scheduled, for the turn about to start to be reminded
+// of.
+export function scheduledRideOf(task: {
+  scheduledFor?: string
+  waitingFor?: string[]
+}): ScheduledRide | undefined {
+  if (!task.scheduledFor && !task.waitingFor?.length) return undefined
+  return {
+    ...(task.scheduledFor ? { at: displayTime(task.scheduledFor) } : {}),
+    ...(task.waitingFor?.length ? { awaiting: task.waitingFor } : {}),
+  }
+}
+
+// Whether what a task has scheduled would hold back work already queued for it —
+// a deferred launch that has not run yet, or a wedged task's deferred retry or
+// answer — rather than being a ride the task scheduled for itself. Inferred from
+// the task's state, since neither records which it is. A message that reaches
+// such a task does that work now, leaving the trigger nothing to do.
+export function scheduleHoldsQueuedWork(task: {
+  status: string
+  rides?: Ride[]
+  queued?: string[]
+}): boolean {
+  return !task.rides?.length || (task.status === 'wedged' && !!task.queued?.length)
+}
+
+// The revival marker carries the cleared time, so the next turn can schedule it
+// again in one step.
+export function clearScheduledTime(task: {
+  scheduledFor?: string
+  revived?: RevivedMarker
+}): void {
+  if (!task.scheduledFor) return
+  task.revived = { ...task.revived, waitingUntil: displayTime(task.scheduledFor) }
+  delete task.scheduledFor
 }
 
 // The notification a restart drives into a task whose turn it cut off after

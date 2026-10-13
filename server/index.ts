@@ -81,6 +81,9 @@ import {
   recordAssistantError,
   recordRideEnded,
   lastFlowItem,
+  scheduledRideOf,
+  scheduleHoldsQueuedWork,
+  clearScheduledTime,
   asList,
   type NotifyArming,
   type PendingNotifies,
@@ -335,9 +338,9 @@ type Task = {
   // task's opening message, or the resume prompt for a rested one, which reads
   // as the moment for this arm — see resumePrompt). May coexist with
   // `waitingFor`, in which case whichever fires first launches the task. Also
-  // dropped by an incoming message that wakes the task early (see the /messages
-  // handler) and by landing (recordStatusTransition) —
-  // both leave nothing for a timer to come back to. Absent on un-scheduled tasks.
+  // dropped by landing (recordStatusTransition), which leaves nothing for a
+  // timer to come back to, and by some of the messages that wake the task early
+  // (see the /messages handler). Absent on un-scheduled tasks.
   scheduledFor?: string
   // Task ids this task is waiting on (`lander launch/ride --await`). The scheduler
   // launches the task once every one has reached terminal "landed" — a missing
@@ -642,6 +645,7 @@ async function runTurn(
     return 'crashed'
   }
 
+  const scheduledRide = scheduledRideOf(task)
   // The token the in-task `lander` CLI sends back to authenticate as this task.
   // Backfilled for tasks created before tokens existed.
   const token = task.token ?? randomUUID()
@@ -768,8 +772,9 @@ async function runTurn(
     recordedCwd: task.cwd,
     // Present only on the turn an incoming message revived, so the daemon can
     // tell the resumed session which of its own last acts no longer holds — the
-    // wedge/land it called, or the wakeup timer the message cleared.
+    // wedge/land it called, or the ride the message cleared.
     ...(revived ? { revived } : {}),
+    ...(scheduledRide ? { scheduledRide } : {}),
     prompt,
     task: {
       allowEdits: task.allowEdits,
@@ -1249,10 +1254,12 @@ async function deliverScheduledMessages(
   let drive = false
   let claimed = false
   await mutateTask(file, (t) => {
-    // Hold delivery while the recipient hasn't launched yet — it's itself
-    // awaiting a future time or an await condition; the message waits for it.
-    if (t.scheduledFor && Date.parse(t.scheduledFor) > now) return
-    if (t.waitingFor?.length) return
+    // A message waits for a launch that has not happened yet, or a wedged task's
+    // deferred recovery — not for a ride the task scheduled for itself.
+    if (scheduleHoldsQueuedWork(t)) {
+      if (t.scheduledFor && Date.parse(t.scheduledFor) > now) return
+      if (t.waitingFor?.length) return
+    }
     const pending = t.scheduledMessages ?? []
     const due = pending.filter(isDue)
     if (!due.length) return
@@ -1354,6 +1361,9 @@ async function wakeNotified(
   await mutateTask(path.join(project.dataDir, `${to}.json`), (t) => {
     if (t.status === 'landed') return
     const at = new Date().toISOString()
+    // Treated as a message from another task (POST /messages carries the
+    // reasoning). A notified task has always run, so only its time can go.
+    if (scheduleHoldsQueuedWork(t)) delete t.scheduledFor
     // Revives a wedged target, same as any delivered message, and records the
     // crossing a hair ahead so the timeline orders right. `system`, because the
     // scheduler is what delivered it — the notifying task's turn was over.
@@ -1363,20 +1373,6 @@ async function wakeNotified(
       new Date(Date.parse(at) - 1).toISOString(),
       'system',
     )
-    // Supersedes a wakeup timer, exactly as a sent message does (POST /messages
-    // carries the reasoning): the fallback a launcher armed against its child
-    // never speaking would otherwise fire later, against a task that has now
-    // heard from it. This is the only delivery path that meets a live timer at
-    // all — deliverScheduledMessages holds its messages back from a task that
-    // has one, while waking the launcher is this one's whole purpose. An
-    // `await` stays armed: it is satisfied by landing, not by a finished turn.
-    if (t.scheduledFor) {
-      t.revived = {
-        ...t.revived,
-        waitingUntil: new Date(t.scheduledFor).toLocaleString(),
-      }
-      delete t.scheduledFor
-    }
     applyDueMessages(t, [{ text, from: { task: notifierId, via: 'notify' } }], at)
     t.status = 'riding'
     t.updatedAt = at
@@ -3765,6 +3761,7 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
     let targetTitle = task.title
     await mutateTask(file, (t) => {
       targetTitle = t.title
+      const holdsQueuedWork = scheduleHoldsQueuedWork(t)
       // Sending revives a wedged or landed (terminal) task — record the
       // "un-wedged"/"un-landed" transition a hair before the message's own
       // timestamp so the timeline shows it ahead of the message that caused it.
@@ -3775,27 +3772,25 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
         hookBy(principal, project.slug, id),
       )
       noteHumanContact(t, principal, now)
-      // An out-of-band wake supersedes a *timer*: the task is riding now, so the
-      // wakeup it armed would fire later against a task that has moved on (and,
-      // in every case we've observed, already landed) and burn a ride announcing
-      // it has nothing to do. Disarm it here and tell the woken turn, naming the
-      // time so re-arming is a single actionable step. An `await`, by contrast,
-      // stays armed — it's a real dependency on sibling tasks, and an unrelated
-      // message must not cancel it. Same rule the wake-delivery table states for
-      // the daemon path (docs/daemon-wakeups.md §Delivery).
+      // A time that holds back queued work goes whoever sent the message: the
+      // message does that work now, and the time would only ride it again (a
+      // deferred launch would launch twice). Nothing is lost, so the woken turn
+      // is not told. A launch the message starts has nothing left to await
+      // either; on a task that has run, an `await` is a real dependency on
+      // sibling tasks that an unrelated message must not cancel.
       //
-      // Stamped here rather than in recordStatusTransition because the paced
-      // case can't ride that funnel at all: riding↔paced isn't a crossing (both
-      // store as `riding`), so it returns early. Merged into whatever the
-      // crossing above stamped — a wedged task can hold a retry wakeup, so both
-      // halves can apply to one revival.
-      if (t.scheduledFor) {
-        t.revived = {
-          ...t.revived,
-          waitingUntil: new Date(t.scheduledFor).toLocaleString(),
-        }
+      // A ride the task scheduled for itself goes only for the human's message
+      // (or the task's own), which has moved the conversation past the moment
+      // it was scheduled for; the woken turn is told what it lost. A message
+      // from another task leaves it, and the woken turn is reminded of it
+      // (scheduledRideOf). The notice is stamped here rather than in
+      // recordStatusTransition because the paced case can't ride that funnel:
+      // riding↔paced isn't a crossing (both store as `riding`), so it returns
+      // early.
+      if (holdsQueuedWork) {
         delete t.scheduledFor
-      }
+        if (!t.rides?.length) delete t.waitingFor
+      } else if (!from) clearScheduledTime(t)
       pushUserItem(t, message, now, {
         ...(attachments ? { attachments } : {}),
         ...(from ? { from } : {}),
@@ -4201,25 +4196,31 @@ export async function recoverQueues(): Promise<void> {
         if (opening)
           naming = naming.then(() => ensureTitle(project, id, opening)).catch(() => {})
       }
-      // A deferred task waits for its trigger — launchScheduled owns both kinds,
-      // not the queue recovery (it carries a queued opening message too, which is
+      // A tracked run: hand it to driveTask, whose reattach asks the daemon to
+      // replay from the persisted cursor (or aborts it if the daemon is gone past
+      // the grace). The daemon, having outlived our restart, still holds the run
+      // and its buffer. Ahead of the trigger skip below: a live run is never
+      // waiting for a trigger, whatever the task has scheduled.
+      if (task.runId) {
+        void driveTask(project, id)
+        continue
+      }
+      // A task whose trigger holds back queued work waits for it — launchScheduled
+      // owns both kinds, not the queue recovery (a deferred launch carries a
+      // queued opening message, a wedged task its deferred retry, which is
       // exactly what would otherwise draw the sweep in). The await arm matters as
       // much as the time arm: a task awaiting a sibling sits with a full queue for
       // as long as that sibling runs, so any restart in that window would launch it
       // early — and, because this path never clears `waitingFor`, launchScheduled
       // would later fire again and push a spurious resume prompt into a task that
-      // had already run.
-      if (task.scheduledFor || task.waitingFor?.length) continue
-      const everRan = (task.rides?.length ?? 0) > 0
-
-      // A tracked run: hand it to driveTask, whose reattach asks the daemon to
-      // replay from the persisted cursor (or aborts it if the daemon is gone past
-      // the grace). The daemon, having outlived our restart, still holds the run
-      // and its buffer.
-      if (task.runId) {
-        void driveTask(project, id)
+      // had already run. A ride a task scheduled for itself holds nothing back, so
+      // a turn another task woke it for is recovered like any other.
+      if (
+        (task.scheduledFor || task.waitingFor?.length) &&
+        scheduleHoldsQueuedWork(task)
+      )
         continue
-      }
+      const everRan = (task.rides?.length ?? 0) > 0
 
       const hasQueue = !!(task.queued && task.queued.length)
       // A turn interrupted by the previous process dying, with nothing driving it

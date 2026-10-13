@@ -122,6 +122,7 @@ export function makeFlow({
       const promptParts = [ctx.turn.prompts.join('\n\n')]
       if (ctx.turn.manifestBlock) promptParts.push(ctx.turn.manifestBlock)
       if (ctx.turn.revivedBlock) promptParts.push(ctx.turn.revivedBlock)
+      if (ctx.turn.scheduledRideBlock) promptParts.push(ctx.turn.scheduledRideBlock)
       if (sendContext) promptParts.push(block)
 
       const args = [

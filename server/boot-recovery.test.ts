@@ -113,6 +113,36 @@ describe('boot recovery leaves a deferred task to the scheduler', () => {
       expect((await readRaw('boot-plain')).queued ?? []).not.toEqual(['opening'])
     })
   })
+
+  // A message from another task leaves a ride the task scheduled for itself, so a
+  // task can hold a queued message and a scheduled ride at once. The message is
+  // not waiting for the ride, and a restart must not make it.
+  it('drives a queued message on a task that scheduled its own ride', async () => {
+    const ran = [{ id: 'r0', startedAt: AT, endedAt: AT, outcome: 'done' }]
+    await seed('boot-ride-message', {
+      scheduledFor: '2099-01-01T00:00:00.000Z',
+      rides: ran,
+    })
+    await seed('boot-wedged-retry', {
+      status: 'wedged',
+      scheduledFor: '2099-01-01T00:00:00.000Z',
+      rides: ran,
+    })
+
+    await recoverQueues()
+
+    await vi.waitFor(async () => {
+      expect((await readRaw('boot-ride-message')).queued ?? []).not.toEqual([
+        'opening',
+      ])
+    })
+    // A wedged task's deferred retry is held for its time, exactly as a deferred
+    // launch is.
+    expect((await readRaw('boot-wedged-retry')).queued).toEqual(['opening'])
+    expect((await readRaw('boot-ride-message')).scheduledFor).toBe(
+      '2099-01-01T00:00:00.000Z',
+    )
+  })
 })
 
 // A turn the restart cut off, in a task that had already replied once: lander

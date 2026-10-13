@@ -29,7 +29,7 @@ import type { FlowMeta, StatePatchOp } from '../../server/protocol'
 import type { Step, Usage } from '../../server/stream'
 import type { HostEvent, HostInput, SpawnLike } from '../host-protocol'
 import { isAssistProvider, runAssist } from '../assist'
-import { buildRevivedBlock } from '../task-management'
+import { buildRevivedBlock, buildScheduledRideBlock } from '../task-management'
 import { taskApiHeaders } from '../task-api'
 
 // ── Handles ────────────────────────────────────────────────────────────────
@@ -116,6 +116,9 @@ export type CtxTurn = {
   // prompt, not what it says. A flow that skips it just leaves the resumed
   // session believing its own wedge/land call still holds.
   revivedBlock?: string
+  // The `<ride-scheduled>` reminder, present on every turn that starts with a
+  // ride still scheduled. Pre-built by the daemon, as revivedBlock is.
+  scheduledRideBlock?: string
   // The per-task attachment store. UNGATED on purpose: LANDER_FILES_DIR is set
   // from it with no existence check (the daemon always supplies it), so gating
   // here would leave tasks without a stable attachment destination.
@@ -938,6 +941,9 @@ export function createCtxRuntime(
         : {}),
       ...(start.revived
         ? { revivedBlock: buildRevivedBlock(start.revived) }
+        : {}),
+      ...(start.scheduledRide
+        ? { scheduledRideBlock: buildScheduledRideBlock(start.scheduledRide) }
         : {}),
       filesDir,
       filesDirExists: filesDir ? existsSync(filesDir) : false,

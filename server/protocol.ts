@@ -98,17 +98,26 @@ export type AttachmentRef = {
 // with neither is never stamped):
 //   `from`         — the notable status the message pulled the task out of, when
 //                    it was in one. Absent when the task was merely paced.
-//   `waitingUntil` — the display time of a wakeup timer the message cleared,
-//                    since an out-of-band revival supersedes a *timer*. Absent
-//                    when no timer was armed. Preformatted by the server, which
-//                    owns the "Current date: …" wording this echoes; the daemon
-//                    only interpolates it.
+//   `waitingUntil` — the display time of a scheduled ride the message cleared.
+//                    Absent when none was; a message from another task leaves a
+//                    ride the task scheduled for itself (see the /messages
+//                    handler). Preformatted by the server, which owns the
+//                    "Current date: …" wording this echoes; the daemon only
+//                    interpolates it.
 // An `await` is deliberately NOT represented: it survives an early revival (a
 // real dependency an unrelated message must not cancel), so there is nothing to
 // report.
 export type RevivedMarker = {
   from?: 'wedged' | 'landed'
   waitingUntil?: string
+}
+
+// The ride a task has scheduled at the start of a turn, which a turn woken by
+// anything else rides alongside: the display time of its time trigger
+// (preformatted, as `waitingUntil` is) and the ids its `--await` names.
+export type ScheduledRide = {
+  at?: string
+  awaiting?: string[]
 }
 
 // Launch a run: like today's RunJob minus the file paths and the absolute cwd.
@@ -142,6 +151,9 @@ export type StartRunMessage = {
   // server clears the task-side marker as it launches this run, so a later turn
   // never sees it.
   revived?: RevivedMarker
+  // Set on every turn that starts with a ride still scheduled. The daemon renders
+  // it as a `<ride-scheduled>` prompt block.
+  scheduledRide?: ScheduledRide
   prompt: string
   task: {
     allowEdits: boolean

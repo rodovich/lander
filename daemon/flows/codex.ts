@@ -129,6 +129,7 @@ export function makeFlow({
       // Codex has no turn-context block to hide this in, which is half of why the
       // revival notice is part of the user prompt.
       if (ctx.turn.revivedBlock) promptParts.push(ctx.turn.revivedBlock)
+      if (ctx.turn.scheduledRideBlock) promptParts.push(ctx.turn.scheduledRideBlock)
       // ── Project doc ──────────────────────────────────────────────────────
       // The project's optional LANDER.md, delivered through the same
       // deliver-once record as the task prompt but under its own key, because

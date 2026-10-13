@@ -384,12 +384,17 @@ export const CLAUDE_GOLDENS: Golden[] = [
     start: { revived: { from: 'wedged' } },
   },
   {
-    // The other half of the marker: a message that woke a paced task early
-    // disarmed its timer, and the notice has to say so or the woken turn silently
-    // loses a wakeup it may still want.
-    name: 'revival notice names a cleared wakeup timer',
+    // The other half of the marker: the human's message woke a paced task early
+    // and cleared its scheduled ride, and the notice has to say so or the woken
+    // turn silently loses a ride it may still want.
+    name: 'revival notice names a cleared scheduled ride',
     chunks: [[init(), assistantText('ok')], [result()]],
     start: { revived: { waitingUntil: '3:00:00 PM' } },
+  },
+  {
+    name: 'a turn with a ride still scheduled is reminded of it',
+    chunks: [[init(), assistantText('ok')], [result()]],
+    start: { scheduledRide: { at: '3:00:00 PM', awaiting: ['sibling-1'] } },
   },
   {
     name: 'agent stderr is aggregated into the done',

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { AgentTaskView } from './agent'
-import type { RevivedMarker } from '../server/protocol'
+import type { RevivedMarker, ScheduledRide } from '../server/protocol'
 
 // Deliver-once, for a provider whose only channel for lander's own prose is the
 // user message — i.e. codex, where a message put in front of one turn stays in
@@ -95,10 +95,12 @@ export function promptWithTaskManagement(
 // still wedged — or re-arms nothing and lets a cleared timer go unreplaced.
 //
 // Two facts, either or both (see RevivedMarker): the notable status it was pulled
-// out of, and a ride timer the message cleared. The timer clause names the time,
-// because "your wakeup is gone" is only actionable if the agent knows which
-// wakeup — and it points at `lander ride` because re-arming is the whole remedy.
-// An await is never reported: it survives the revival, so nothing changed.
+// out of, and the scheduled time the message cleared. The ride clause names the
+// time, because "your ride is cleared" is only actionable if the agent knows
+// which ride — and it points at `lander ride` because scheduling it again is the
+// remedy. An await is not mentioned here: it survives the revival, and the turn's
+// scheduled-ride reminder (buildScheduledRideBlock) reports it, warning that
+// scheduling a ride replaces it.
 //
 // Provider-neutral by construction, and shaped like buildManifestBlock — a small
 // self-framing block appended to the user prompt — for two reasons. It does NOT
@@ -109,15 +111,38 @@ export function promptWithTaskManagement(
 // it there would fix claude only.
 export function buildRevivedBlock(revived: RevivedMarker): string {
   // `waiting` when no notable status was crossed — which is the case a cleared
-  // timer arrives in almost every time.
+  // ride arrives in almost every time.
   const prior = revived.from ?? 'waiting'
   const sentence = revived.waitingUntil
     ? `You were ${prior} until ${revived.waitingUntil} when this message arrived; ` +
-      'the message changed your status to riding and cleared that wakeup. ' +
-      'Re-arm it with `lander ride` if you still want it.'
+      'the message changed your status to riding and cleared the ride you had ' +
+      'scheduled for then. Schedule it again with `lander ride` if you still ' +
+      'want it.'
     : `You were ${prior} when this message arrived; the message changed your ` +
       'status to riding.'
   return ['<task-revived>', sentence, '</task-revived>'].join('\n')
+}
+
+// The prompt block a turn carries while a ride is still scheduled behind it: the
+// turn was woken by something else — a notification, another task's message, or
+// the human's message with an await left standing — and the ride it scheduled
+// earlier is not in its own context unless it remembers it. Without this the
+// agent re-schedules a ride that is still there, or forgets one it no longer
+// needs. Shaped like buildRevivedBlock, and for the same two reasons.
+export function buildScheduledRideBlock(ride: ScheduledRide): string {
+  const awaiting = ride.awaiting ?? []
+  const landing = awaiting.length
+    ? `when ${awaiting.join(', ')} ${awaiting.length > 1 ? 'have all landed' : 'lands'}`
+    : ''
+  const when =
+    ride.at && landing
+      ? `for ${ride.at} or ${landing}, whichever comes first`
+      : `for ${ride.at ?? landing}`
+  const sentence =
+    `You have a ride scheduled ${when}. It stays scheduled unless you clear ` +
+    'it with `lander ride --clear`; scheduling another with `lander ride` ' +
+    'replaces it.'
+  return ['<ride-scheduled>', sentence, '</ride-scheduled>'].join('\n')
 }
 
 // What an agent working in a lander-managed checkout must know about it: where
