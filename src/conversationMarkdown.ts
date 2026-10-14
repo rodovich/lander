@@ -19,8 +19,8 @@
 import { formatTimestamp } from './format'
 import { EVENT_VERB } from './lifecycleNote'
 import { toolDetail } from './toolStep'
-import { groupInferences, planTurnCollapse, turnThreads } from './turnCollapse'
-import type { RideItem, TimelineEntry } from './timeline'
+import { foldSummary, planTurnCollapse, turnThreads } from './turnCollapse'
+import type { TimelineEntry } from './timeline'
 import type {
   AskItem,
   Attachment,
@@ -273,18 +273,6 @@ function rideBlocks(
     ...body,
     ...(files.length ? [attachmentLine(files)] : []),
   ]
-}
-
-// What a fold says in place of the stretch it hides, in the words the
-// disclosure uses: one step per inference group, plus the tool count.
-function foldSummary(items: RideItem[], idxs: number[]): string {
-  const steps = groupInferences(items, idxs).length
-  const tools = idxs.filter((j) => items[j].kind === 'tool').length
-  return (
-    `${steps} step${steps === 1 ? '' : 's'}` +
-    (tools > 0 ? `, ${tools} tool${tools === 1 ? '' : 's'}` : '') +
-    '…'
-  )
 }
 
 // The lines a diff side contributes, dropping the trailing empty one a string

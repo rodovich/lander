@@ -4,7 +4,12 @@ import { MessageText } from './messageText'
 import { TaskActionNote } from './taskActionNote'
 import { ToolStep, toolDetail } from './toolStep'
 import { planTurnActions } from './turnActions'
-import { groupInferences, planTurnCollapse, turnThreads } from './turnCollapse'
+import {
+  foldSummary,
+  groupInferences,
+  planTurnCollapse,
+  turnThreads,
+} from './turnCollapse'
 import type { RideItem } from './timeline'
 import type { TaskActionItem } from './types'
 import type { TimelineDisclosure } from './useTimelineDisclosure'
@@ -177,13 +182,6 @@ export function TurnTrace({
         // Each hidden segment folds independently, keyed by ride + segment index.
         const segKey = `${rideId}:${si}`
         const open = expandedTurns.has(segKey)
-        // Summarize as the model's actions: one "step" per inference group (the
-        // runs a turn-sep rules apart, so groups = turn-seps + 1), plus the tool
-        // count.
-        const stepCount = groupByGroup(seg.indices).length
-        const toolCount = seg.indices.filter(
-          (j) => items[j].kind === 'tool',
-        ).length
         return (
           <Fragment key={`seg-${si}`}>
             {sep}
@@ -192,11 +190,7 @@ export function TurnTrace({
               onToggle={() => toggleTurn(segKey)}
               label={
                 <span className="collapsible-label">
-                  {stepCount} step
-                  {stepCount === 1 ? '' : 's'}
-                  {toolCount > 0 &&
-                    `, ${toolCount} tool${toolCount === 1 ? '' : 's'}`}
-                  …
+                  {foldSummary(items, seg.indices)}
                 </span>
               }
             >

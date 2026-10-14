@@ -62,6 +62,21 @@ export function groupInferences(
   return groups
 }
 
+// The label a fold shows in place of the stretch it hides, on screen and in
+// every text rendering of the conversation.
+export function foldSummary(
+  items: readonly { kind: string; groupId?: string }[],
+  idxs: readonly number[],
+): string {
+  const steps = groupInferences(items, idxs).length
+  const tools = idxs.filter((j) => items[j].kind === 'tool').length
+  return (
+    `${steps} step${steps === 1 ? '' : 's'}` +
+    (tools > 0 ? `, ${tools} tool${tools === 1 ? '' : 's'}` : '') +
+    '…'
+  )
+}
+
 const textLength = (item: CollapsibleItem) =>
   item.kind === 'message' ? (item.text?.length ?? 0) : 0
 
