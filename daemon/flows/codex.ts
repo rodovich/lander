@@ -54,9 +54,9 @@ export const meta: FlowMeta = {
 
 const CODEX_SHELL_ENV_INCLUDE_ONLY = ['PATH', 'LANDER_*'] as const
 
-// `codex exec` prints this to stderr on every run whose stdin isn't a terminal,
-// and the daemon gives it /dev/null. Left in, it is the first stderr line of
-// every failed run, which the retry ask quotes as the failure's cause.
+// A fresh `codex exec` (not `exec resume`) prints this to stderr when its stdin
+// isn't a terminal, and the daemon gives it /dev/null. Left in, it is the first
+// stderr line of a failed first turn, which the retry ask quotes as the cause.
 const STDIN_BANNER = 'Reading additional input from stdin...'
 
 export type CodexFlowDeps = {
