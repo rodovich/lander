@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { ComponentProps } from 'react'
 import { RideTurn } from './rideTurn'
-import type { RideItem } from './timeline'
+import type { RideItem } from '../shared/timeline'
 import type {
   AskItem,
   MessageItem,

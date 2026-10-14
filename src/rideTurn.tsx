@@ -6,7 +6,7 @@ import { BlockedSummary } from './grants'
 import { blockedRequests } from './permissions'
 import { taskAgentModelName } from './taskMeta'
 import { TurnTrace } from './turnTrace'
-import type { RideItem } from './timeline'
+import type { RideItem } from '../shared/timeline'
 import type { AskItem, Ride, TaskActionItem, Task } from './types'
 import type { TimelineDisclosure } from './useTimelineDisclosure'
 

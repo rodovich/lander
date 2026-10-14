@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { conversationMarkdown } from './conversationMarkdown'
-import { buildTimeline } from './timeline'
+import { buildTimeline } from '../shared/timeline'
 import type {
   EventItem,
   Item,

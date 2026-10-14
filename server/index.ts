@@ -44,7 +44,7 @@ import {
   withMutationLock,
 } from './store'
 import { parseProjects, type Project } from './projects'
-import { conversationText } from '../src/conversationText'
+import { conversationText } from '../shared/conversationText'
 import {
   publicTask,
   taskSummary,

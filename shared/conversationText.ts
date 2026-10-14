@@ -1,6 +1,6 @@
 import { buildTimeline, type RideItem, type TimelineEntry } from './timeline'
 import { foldSummary, planTurnCollapse } from './turnCollapse'
-import type { Item, MessageItem, Ride } from './types'
+import type { Item, MessageItem, Ride } from '../src/types'
 
 // A task's conversation as plain text, the counterpart of the markdown copy for
 // readers without a screen — `lander view`, through the server. One block per

@@ -8,7 +8,7 @@ import type {
   Ride,
   TaskActionItem,
   ToolItem,
-} from './types'
+} from '../src/types'
 
 // Pick clearly-ordered ISO timestamps without hand-writing the date each time.
 const T = (clock: string) => `2026-06-26T${clock}.000Z`

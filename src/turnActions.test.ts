@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { planTurnActions } from './turnActions'
-import { planTurnCollapse } from './turnCollapse'
+import { planTurnCollapse } from '../shared/turnCollapse'
 import type { TaskActionItem } from './types'
 
 const T = (clock: string) => `2026-06-26T${clock}.000Z`

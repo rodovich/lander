@@ -14,7 +14,7 @@
 // below that stretch's summary rather than hiding behind it — with no second
 // render path, and no row that moves when the reader expands a segment.
 
-import type { TurnCollapsePlan } from './turnCollapse'
+import type { TurnCollapsePlan } from '../shared/turnCollapse'
 import type { TaskActionItem } from './types'
 
 // The subset of a ride item this reads: whether it carries assistant prose.

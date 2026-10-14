@@ -52,7 +52,7 @@ import {
 } from './tasks'
 import { askItems, createAsk } from './asks'
 import type { RevivedMarker } from './protocol'
-import { buildTimeline } from '../src/timeline'
+import { buildTimeline } from '../shared/timeline'
 
 const AT = '2026-01-01T00:00:00.000Z'
 const later = (n: number) => `2026-01-01T00:0${n}:00.000Z`

@@ -47,7 +47,7 @@ import type {
   AskItem,
   HookItem,
   Ride,
-} from './types'
+} from '../src/types'
 
 export type TimelineEntry =
   // A standalone message bubble (out of any ride) — the slot a prompt occupies,

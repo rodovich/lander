@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Item, Ride } from './types'
+import type { Item, Ride } from '../src/types'
 import { conversationText } from './conversationText'
 
 const AT = '2026-10-14T12:00:00.000Z'

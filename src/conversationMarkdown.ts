@@ -19,9 +19,9 @@
 import { formatTimestamp } from './format'
 import { EVENT_VERB } from './lifecycleNote'
 import { toolDetail } from './toolStep'
-import { oneLine } from './conversationText'
-import { foldSummary, planTurnCollapse, turnThreads } from './turnCollapse'
-import type { TimelineEntry } from './timeline'
+import { oneLine } from '../shared/conversationText'
+import { foldSummary, planTurnCollapse, turnThreads } from '../shared/turnCollapse'
+import type { TimelineEntry } from '../shared/timeline'
 import type {
   AskItem,
   Attachment,

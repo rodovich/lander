@@ -9,8 +9,8 @@ import {
   groupInferences,
   planTurnCollapse,
   turnThreads,
-} from './turnCollapse'
-import type { RideItem } from './timeline'
+} from '../shared/turnCollapse'
+import type { RideItem } from '../shared/timeline'
 import type { TaskActionItem } from './types'
 import type { TimelineDisclosure } from './useTimelineDisclosure'
 

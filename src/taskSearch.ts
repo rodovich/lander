@@ -1,5 +1,5 @@
-import { buildTimeline } from './timeline'
-import { planTurnCollapse } from './turnCollapse'
+import { buildTimeline } from '../shared/timeline'
+import { planTurnCollapse } from '../shared/turnCollapse'
 import { taskKeyOf } from './taskRef'
 import type { TaskWithProject } from './types'
 

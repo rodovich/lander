@@ -1,5 +1,5 @@
 import { openRide } from './taskMeta'
-import { buildTimeline, type TimelineEntry } from './timeline'
+import { buildTimeline, type TimelineEntry } from '../shared/timeline'
 import type { Task } from './types'
 
 // The read marker: how far into a task's conversation the viewer has read,

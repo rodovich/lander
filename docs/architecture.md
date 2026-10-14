@@ -10,6 +10,7 @@ running lander needs; this file is the level a person changing it needs.
 - `GET /api/projects` — list the configured projects (`{ path, slug }`); the first is the default.
 - `GET /api/task-links` — installation-wide `{ id, projectSlug, title, status, archived }` projection used to resolve task references across projects. The first request lazily scans every configured active/archive pool; normal task writes and archive moves then update the index synchronously in memory. Responses carry an ETag, so an unchanged client poll is a bodyless `304` and performs no task-file reads. A failed or ambiguous bootstrap fails closed rather than publishing a partial index.
 - `GET /api/:project/tasks` — list a project's tasks (sorted newest-first). `?archived=1` lists archived tasks instead, each tagged `archived: true`. `?view=summary` serves each task without its conversation — no `items`/`rides`, and `scheduledMessages` reduced to `deliverAt`/`relaunch`/`repeat` — which is ~99% of the bytes off a list response; everything else, including the ride-derived `status`, is unchanged. Opt-in on purpose: with no `view` param the response is exactly what it has always been, so an old client or a third-party caller never has to know the parameter exists. Callers that read only metadata should ask for it (`lander list` does); anything that reads message text must not.
+- `GET /api/:project/tasks/:id` — one task, from either pool. `?conversation=folded|expanded` adds `conversation`: the conversation as plain-text blocks, each agent turn folded as the UI folds it or fully expanded (`shared/conversationText.ts`), which `lander view` prints.
 - `POST /api/:project/tasks` — create a task, store its chosen agent, and queue the first turn on the daemon.
 - `POST /api/:project/tasks/:id/messages` — append a user message; the daemon resumes the task's stored provider session. Both this and `POST .../tasks` accept `attachments: id[]` to associate uploaded files with the message.
 - `POST /api/:project/attachments` — upload one or more files (multipart) to the project's durable blob store, returning their refs (`{id, name, mime, size}`). `GET /api/:project/attachments/:id` streams a stored file's bytes. Both require an identified caller (the browser's UI token or a task's `LANDER_TOKEN`).
@@ -40,6 +41,17 @@ Any id arriving from an untrusted source (URL segment, header, await list) is
 validated against `/^[A-Za-z0-9_-]{1,64}$/` before it is used to build a
 filesystem path. The closed character class excludes `/` and `.`, so the `:id`
 route can't traverse, and it admits both shapes.
+
+## Code shared by the client and the server
+
+The web client (`src/`) and the server (`server/`) otherwise share no code: the
+JSON they exchange is the contract, and the client's types in `src/types.ts`
+mirror the server's by hand. `shared/` holds the exception — logic both must run
+identically, today the conversation timeline, the turn fold, and the plain-text
+rendering of a conversation, so `lander view` folds a turn exactly as the UI
+does. Because the same modules load in the browser and under Node, they import
+nothing at runtime but each other; they may name the client's item types, which
+are erased. `shared/boundary.test.ts` enforces that.
 
 ## Provider layering
 
