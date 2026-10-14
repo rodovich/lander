@@ -4471,6 +4471,24 @@ describe('flow dispatch gate', () => {
   }, 20_000)
 })
 
+describe('GET /api/:project/tasks/:id', () => {
+  it('adds the rendered conversation only when asked for it', async () => {
+    const res = await post(`/api/${slug}/tasks`, { title: 'Viewed task', message: 'Hello.' })
+    const { id } = (await res.json()) as { id: string }
+    const get = (query: string) =>
+      app.request(`/api/${slug}/tasks/${id}${query}`, {
+        headers: { 'x-lander-ui-token': UI_TOKEN },
+      })
+
+    const plain = (await (await get('')).json()) as Record<string, unknown>
+    expect(plain).not.toHaveProperty('conversation')
+    const folded = (await (await get('?conversation=folded')).json()) as {
+      conversation: { role: string; text: string }[]
+    }
+    expect(folded.conversation[0]).toEqual({ role: 'user', text: 'Hello.' })
+  })
+})
+
 describe('POST /api/:project/tasks/:id/seen and /unread', () => {
   it('advances readThrough monotonically, and sets it back on unread', async () => {
     const { id } = await createTask('read marker')

@@ -19,6 +19,7 @@
 import { formatTimestamp } from './format'
 import { EVENT_VERB } from './lifecycleNote'
 import { toolDetail } from './toolStep'
+import { oneLine } from './conversationText'
 import { foldSummary, planTurnCollapse, turnThreads } from './turnCollapse'
 import type { TimelineEntry } from './timeline'
 import type {
@@ -54,10 +55,6 @@ const blockquote = (block: string) =>
     .split('\n')
     .map((line) => (line ? `> ${line}` : '>'))
     .join('\n')
-
-// A tool chip's input rides one line, so a multi-line input (a codex command)
-// collapses to spaces exactly as it does in the chip's span.
-const oneLine = (s: string) => s.replace(/\s*\n\s*/g, ' ').trim()
 
 const heading = (role: string, at: string) =>
   `## ${role} · ${formatTimestamp(at)}`

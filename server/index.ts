@@ -44,6 +44,7 @@ import {
   withMutationLock,
 } from './store'
 import { parseProjects, type Project } from './projects'
+import { conversationText } from '../src/conversationText'
 import {
   publicTask,
   taskSummary,
@@ -1734,19 +1735,34 @@ app.get('/api/:project/tasks', async (c) => {
   }
 })
 
-// A single task by id (for `lander view`). Same public shape as the list.
+// A single task by id (for `lander view`). Same public shape as the list, plus,
+// with `?conversation=folded|expanded`, the conversation as plain text
+// (conversationText) — rendered here so the dependency-free CLI folds turns with
+// the same code the UI does.
 app.get('/api/:project/tasks/:id', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
   const id = c.req.param('id')
   if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+  const conversation = c.req.query('conversation')
+  const respond = (task: Task) =>
+    c.json({
+      ...publicTask(task),
+      ...(conversation === 'folded' || conversation === 'expanded'
+        ? {
+            conversation: conversationText(task, {
+              expand: conversation === 'expanded',
+            }),
+          }
+        : {}),
+    })
   return withMutationLock(taskKey(project.slug, id), async () => {
     const task = await readTask(project.dataDir, id)
-    if (task) return c.json(publicTask(task))
+    if (task) return respond(task)
     // Fall back to the archive under the same lock as pool moves, so restore
     // cannot slip between the two probes and manufacture a false 404.
     const archived = await readTask(project.archiveDir, id)
-    if (archived) return c.json(publicTask({ ...archived, archived: true }))
+    if (archived) return respond({ ...archived, archived: true })
     return c.json({ error: 'task not found' }, 404)
   })
 })

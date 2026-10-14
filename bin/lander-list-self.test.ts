@@ -54,7 +54,9 @@ beforeAll(async () => {
     res.writeHead(200, { 'content-type': 'application/json' })
     if (m) {
       const t = TASKS.find((x) => x.id === m[1])
-      res.end(JSON.stringify(t ? { ...t, items: [], allowEdits: false } : {}))
+      res.end(
+        JSON.stringify(t ? { ...t, items: [], conversation: [], allowEdits: false } : {}),
+      )
     } else {
       res.end(JSON.stringify(TASKS))
     }
