@@ -10,16 +10,20 @@ import {
   codexOptionsFromEnv,
   type CodexFlowDeps,
 } from './codex'
-import { captureDriverTurn, type DriverTurnFixture } from './testCtx'
+import { captureDriverTurn, driveFlow, type DriverTurnFixture } from './testCtx'
 
 const TASK_PROMPT_TEMPLATE = 'Task prompt: {{forwardable}}.'
-function runCodex(input: DriverTurnFixture, overrides: Partial<CodexFlowDeps> = {}) {
-  return captureDriverTurn(makeFlow({
+function codexFlow(overrides: Partial<CodexFlowDeps> = {}) {
+  return makeFlow({
     taskPromptTemplate: TASK_PROMPT_TEMPLATE,
     readProjectDoc: () => undefined,
     resolveGitDirs: () => [],
     ...overrides,
-  }), input)
+  })
+}
+
+function runCodex(input: DriverTurnFixture, overrides: Partial<CodexFlowDeps> = {}) {
+  return captureDriverTurn(codexFlow(overrides), input)
 }
 
 function permissionArgs(
@@ -493,5 +497,20 @@ describe('Codex flow launch', () => {
   it('does not mint a session before Codex reports its thread', async () => {
     const launch = await runCodex({ task: { allowEdits: false }, root: '/repo', cwd: '/repo' })
     expect(launch.events.filter((e) => e.kind === 'state-patch')).toEqual([])
+  })
+
+  it('leaves the stdin banner out of a failed run’s stderr', async () => {
+    const { result } = await driveFlow(
+      {
+        name: 'out of credits',
+        chunks: [],
+        exitCode: 1,
+        stderrChunks: [
+          'Reading additional input from stdin...\nYour workspace is out of credits.\n',
+        ],
+      },
+      codexFlow(),
+    )
+    expect(result).toEqual({ exitCode: 1, stderr: 'Your workspace is out of credits.' })
   })
 })

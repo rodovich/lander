@@ -54,6 +54,11 @@ export const meta: FlowMeta = {
 
 const CODEX_SHELL_ENV_INCLUDE_ONLY = ['PATH', 'LANDER_*'] as const
 
+// `codex exec` prints this to stderr on every run whose stdin isn't a terminal,
+// and the daemon gives it /dev/null. Left in, it is the first stderr line of
+// every failed run, which the retry ask quotes as the failure's cause.
+const STDIN_BANNER = 'Reading additional input from stdin...'
+
 export type CodexFlowDeps = {
   taskPromptTemplate: string
   profile?: string
@@ -186,7 +191,8 @@ export function makeFlow({
       let producedOutput = false
 
       const collectStderr = (async () => {
-        for await (const l of child.stderr) stderrText += `${l}\n`
+        for await (const l of child.stderr)
+          if (l.trim() !== STDIN_BANNER) stderrText += `${l}\n`
       })()
 
       for await (const line of child.lines()) {
