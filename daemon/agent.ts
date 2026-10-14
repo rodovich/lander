@@ -1,12 +1,3 @@
-import type { AgentKind } from '../server/agent'
-
-export type AgentTaskView = {
-  agent?: AgentKind
-  sessionId?: string
-  allowEdits: boolean
-  allow?: string[]
-}
-
 // The launch directory a flow resolves for its next turn: where the child is
 // spawned — the config-load root and (for Claude) the permission boundary.
 export type AgentLaunchDir = {

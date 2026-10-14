@@ -8,8 +8,6 @@ import {
   buildRevivedBlock,
   buildScheduledRideBlock,
   fillTaskPrompt,
-  taskManagementPrompt,
-  promptWithTaskManagement,
 } from './task-management'
 
 const TEMPLATE = 'You are running inside a lander task. This task id is {{id}}. {{forwardable}}.'
@@ -21,21 +19,10 @@ describe('fillTaskPrompt', () => {
     expect(out).toContain('FWD.')
     expect(out).not.toContain('{{')
   })
-})
 
-describe('taskManagementPrompt / promptWithTaskManagement', () => {
-  it('threads the id through (not the task object, which has no id)', () => {
-    const task = { allowEdits: false }
-    const managed = taskManagementPrompt(task, TEMPLATE, 'task-xyz')
-    expect(managed).toContain('This task id is task-xyz.')
-    expect(managed).not.toContain('{{id}}')
-  })
-
-  it('appends the caller prompt after the filled template', () => {
-    const task = { allowEdits: true }
-    const full = promptWithTaskManagement(task, 'DO THE THING', TEMPLATE, 'task-xyz')
-    expect(full).toContain('This task id is task-xyz.')
-    expect(full.endsWith('DO THE THING')).toBe(true)
+  it('inserts the forwardable text literally, `$` patterns included', () => {
+    const out = fillTaskPrompt(TEMPLATE, "roots ($TMPDIR, $&, $')", 'abc123')
+    expect(out).toContain("roots ($TMPDIR, $&, $').")
   })
 })
 

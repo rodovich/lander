@@ -24,7 +24,7 @@ import {
   reduceCodexStreamLine,
   shouldDeliver,
   checkoutNote,
-  taskManagementPrompt,
+  fillTaskPrompt,
   type Usage,
 } from 'lander/flow'
 import type { Ctx, FlowMeta, ToolHandle, TurnResult } from './ctx'
@@ -101,14 +101,9 @@ export function makeFlow({
       // The commit is deferred to after the read loop, gated on the turn having
       // produced output. See deliveryDigest/shouldDeliver for why that ordering
       // is the whole safety argument.
-      const taskPrompt = taskManagementPrompt(
-        {
-          agent: 'codex',
-          allowEdits: ctx.task.allowEdits,
-          ...(ctx.task.allow !== undefined ? { allow: ctx.task.allow } : {}),
-          ...(sessionId !== undefined ? { sessionId } : {}),
-        },
+      const taskPrompt = fillTaskPrompt(
         taskPromptTemplate,
+        codexForwardableText(ctx.task.allowEdits),
         ctx.task.taskId,
       )
       // The checkout note rides with it, so a task adopted into a checkout gets
@@ -295,6 +290,28 @@ export function makeFlow({
       }
     },
   }
+}
+
+// The reach of an edit grant under the permission profiles built below.
+const EDIT_REACH =
+  'Edit access covers creating, editing, and deleting files — through any ' +
+  'tool or shell command, git included — within the project directory (or ' +
+  "the task's own checkout, when it has one) and the scratch roots (`/tmp` " +
+  'and `$TMPDIR`). Every shell command runs inside the same sandbox, so ' +
+  'without edit access commands can read files but not change them.'
+
+// The template's {{forwardable}} slot. "As of this message", not "this turn":
+// a superseded copy of the template stays in the thread's append-only history,
+// so the wording must not assert a fact about whichever turn happens to be
+// reading it.
+export function codexForwardableText(allowEdits: boolean): string {
+  return (
+    `${EDIT_REACH} ` +
+    `As of this message, this task runs with the workspace-scoped ${
+      allowEdits ? 'edit' : 'read-only'
+    } permission profile. ` +
+    'Task allow rules are stored by Lander but do not affect Codex runs yet'
+  )
 }
 
 function buildCodexArgs(

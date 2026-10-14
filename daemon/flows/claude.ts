@@ -54,12 +54,18 @@ const GIT_TIPS = [
   '- Commit or push only when the user asks. If on the default branch, branch first.',
 ].join('\n')
 
-// The static stand-in for the template's {{forwardable}} slot: the live grants
-// sentence moved to the task-context block so the appended system prompt stays
-// byte-stable across turns (see forwardableAccess / the context block below).
-const FORWARDABLE_POINTER =
-  'Your own current grants — which cap what you can forward — are stated in ' +
-  'the task-context block in the conversation'
+// The template's {{forwardable}} slot, static so the appended system prompt
+// stays byte-stable across turns. The reach it states follows from the flags
+// buildClaudeArgs passes; the live grants ride the task-context block (see
+// buildContextBlock).
+const FORWARDABLE_TEXT =
+  'Edit access covers editing, creating, and deleting files (including via ' +
+  '`rm`/`mv`/`cp` and `>` redirects) within the task\'s working directory and ' +
+  'the scratch roots (`/tmp` and `$TMPDIR`), but never `.git`, `.claude`, or ' +
+  'paths outside those roots. Git and every other shell command — `npm`, ' +
+  '`node`, `python3` and the rest — follow the project\'s normal permission ' +
+  'settings, not a Lander grant. Your own current grants — which cap what you ' +
+  'can forward — are stated in the task-context block in the conversation'
 
 export type ClaudeFlowDeps = {
   landerBin: string
@@ -338,7 +344,7 @@ function buildContextBlock(
   ctx: Ctx,
   gitContext: (cwd: string) => string | undefined,
 ): string {
-  const parts = [`${forwardableAccess({ agent: 'claude', ...ctx.task })}.`]
+  const parts = [`${forwardableAccess(ctx.task)}.`]
   // The rules granted to this task, which ride --allowedTools. Listed as state
   // rather than as a "newly granted" note, so a grant surfaces exactly once — by
   // changing the block, which the baseline compare then re-sends — and a
@@ -468,7 +474,7 @@ function buildClaudeArgs(
     // that changes it — busts this conversation's prompt cache, which is why
     // nothing else in this string is allowed to vary per turn.
     [
-      fillTaskPrompt(taskPromptTemplate, FORWARDABLE_POINTER, ctx.task.taskId),
+      fillTaskPrompt(taskPromptTemplate, FORWARDABLE_TEXT, ctx.task.taskId),
       GIT_TIPS,
       ...(ctx.task.checkout ? [checkoutNote(ctx.task.checkout, ctx.task.root)] : []),
       ...(projectDoc ? [projectDocBlock(projectDoc)] : []),

@@ -3,7 +3,13 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { makeFlow, resolveLaunchDir, codexOptionsFromEnv, type CodexFlowDeps } from './codex'
+import {
+  makeFlow,
+  resolveLaunchDir,
+  codexForwardableText,
+  codexOptionsFromEnv,
+  type CodexFlowDeps,
+} from './codex'
 import { captureDriverTurn, type DriverTurnFixture } from './testCtx'
 
 const TASK_PROMPT_TEMPLATE = 'Task prompt: {{forwardable}}.'
@@ -119,7 +125,7 @@ describe('Codex flow launch', () => {
       '--',
       managedPrompt(
         'hello codex',
-        'As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
+        codexForwardableText(false),
       ),
     ])
     expect(launch.args.join('\0')).not.toContain('secret-token')
@@ -155,7 +161,7 @@ describe('Codex flow launch', () => {
       '--',
       managedPrompt(
         'edit files',
-        'As of this message, this task runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
+        codexForwardableText(true),
       ),
     ])
     expect(launch.args.join('\0')).toContain('extends=":workspace"')
@@ -246,7 +252,7 @@ describe('Codex flow launch', () => {
       '--',
       managedPrompt(
         'edit worktree',
-        'As of this message, this task runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
+        codexForwardableText(true),
       ),
     ])
   })
@@ -281,7 +287,7 @@ describe('Codex flow launch', () => {
       '--',
       managedPrompt(
         'follow up',
-        'As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
+        codexForwardableText(false),
       ),
     ])
   })
@@ -316,7 +322,7 @@ describe('Codex flow launch', () => {
       '--',
       managedPrompt(
         'follow up with edits',
-        'As of this message, this task runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
+        codexForwardableText(true),
       ),
     ])
   })
@@ -362,7 +368,7 @@ describe('Codex flow launch', () => {
       '--',
       managedPrompt(
         'configured follow up',
-        'As of this message, this task runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
+        codexForwardableText(true),
       ),
     ])
   })
@@ -405,7 +411,7 @@ describe('Codex flow launch', () => {
       '--',
       managedPrompt(
         'use configured codex',
-        'As of this message, this task runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet',
+        codexForwardableText(true),
       ),
     ])
   })

@@ -90,10 +90,11 @@ describe('Claude flow', () => {
     )
 
     const systemPrompt = launch.args[launch.args.indexOf('--append-system-prompt') + 1]
-    // The appended prompt is static across turns: the live grants moved to the
-    // task-context block, leaving a fixed pointer in the {{forwardable}} slot.
     expect(systemPrompt).toContain(
-      'Prompt: Your own current grants — which cap what you can forward — are ' +
+      'Prompt: Edit access covers editing, creating, and deleting files',
+    )
+    expect(systemPrompt).toContain(
+      'Your own current grants — which cap what you can forward — are ' +
         'stated in the task-context block in the conversation.',
     )
     // The kept git tips, minus the sign-off conventions that

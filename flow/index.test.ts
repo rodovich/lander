@@ -36,10 +36,6 @@ describe('lander/flow stdlib façade', () => {
   it('re-exports the task-management prompt helpers by identity', () => {
     expect(flow.fillTaskPrompt).toBe(taskManagement.fillTaskPrompt)
     expect(flow.forwardableAccess).toBe(taskManagement.forwardableAccess)
-    expect(flow.taskManagementPrompt).toBe(taskManagement.taskManagementPrompt)
-    expect(flow.promptWithTaskManagement).toBe(
-      taskManagement.promptWithTaskManagement,
-    )
   })
 
   it('serves gitContext from its new stdlib home', () => {

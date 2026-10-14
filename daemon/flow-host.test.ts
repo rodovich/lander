@@ -5,9 +5,9 @@ import type { StartRunMessage } from '../server/protocol'
 import type { HostEvent, HostInput } from './host-protocol'
 import { runHost } from './flow-host'
 import { makeFlow as makeClaudeFlow } from './flows/claude'
-import { makeFlow as makeCodexFlow } from './flows/codex'
+import { codexForwardableText, makeFlow as makeCodexFlow } from './flows/codex'
 import { settle } from './flows/testCtx'
-import { deliveryDigest, taskManagementPrompt } from './task-management'
+import { deliveryDigest, fillTaskPrompt } from './task-management'
 import { projectDocBlock } from '../flow/project-doc'
 
 class FakeChild extends EventEmitter {
@@ -210,7 +210,7 @@ describe('flow host', () => {
         '--cd',
         '/repo',
         '--',
-        'Prompt: As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.\n\ncodex prompt',
+        `Prompt: ${codexForwardableText(false)}.\n\ncodex prompt`,
       ],
       options: { cwd: '/repo' },
     })
@@ -235,11 +235,9 @@ describe('flow host', () => {
         '--settings',
         expect.any(String),
         '--append-system-prompt',
-        'Prompt: Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.\n\n' +
-          '# Git\n' +
-          '- Interactive flags (`-i`, e.g. `git rebase -i`, `git add -i`) are not supported in this environment.\n' +
-          '- Use the `gh` CLI for GitHub operations (PRs, issues, API).\n' +
-          '- Commit or push only when the user asks. If on the default branch, branch first.',
+        expect.stringMatching(
+          /^Prompt: Edit access covers [^\n]*Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation\.\n\n# Git\n- Interactive flags \(`-i`, e\.g\. `git rebase -i`, `git add -i`\) are not supported in this environment\.\n- Use the `gh` CLI for GitHub operations \(PRs, issues, API\)\.\n- Commit or push only when the user asks\. If on the default branch, branch first\.$/,
+        ),
         '--output-format',
         'stream-json',
         '--verbose',
@@ -364,7 +362,7 @@ describe('flow host', () => {
     const TEMPLATE = 'Prompt: {{forwardable}}.'
     const digestFor = (allowEdits: boolean) =>
       deliveryDigest(
-        taskManagementPrompt({ agent: 'codex', allowEdits }, TEMPLATE, 'task-1'),
+        fillTaskPrompt(TEMPLATE, codexForwardableText(allowEdits), 'task-1'),
       )
     const promptOf = (h: ReturnType<typeof harness>) => {
       const args = h.spawns[0].args

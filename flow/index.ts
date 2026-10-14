@@ -50,10 +50,6 @@ export {
   fillTaskPrompt,
   forwardableAccess,
   checkoutNote,
-  taskManagementPrompt,
-  // Still exported though no bundled flow calls it: it is published stdlib, and
-  // a third-party flow whose provider has no deliver-once problem may want it.
-  promptWithTaskManagement,
   buildRevivedBlock,
   buildScheduledRideBlock,
   // Deliver-once, for a provider whose only prose channel is the user message.

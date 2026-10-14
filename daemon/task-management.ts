@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto'
-import type { AgentTaskView } from './agent'
 import type { RevivedMarker, ScheduledRide } from '../server/protocol'
 
 // Deliver-once, for a provider whose only channel for lander's own prose is the
@@ -47,45 +46,20 @@ export function shouldDeliver(
 
 // Fill the task prompt template's slots: {{id}} with the task's own id (constant
 // for the task's life, so it's safe in Claude's byte-stable --append-system-prompt)
-// and {{forwardable}} with a per-agent access sentence. The two providers diverge
-// on the latter, because their channels differ in scope:
-//
-// Claude's --append-system-prompt is request-scoped — regenerated every
-// invocation, never accumulated in the conversation — so it substitutes a static
-// pointer and delivers the live grants through the per-turn task-context block,
-// keeping the appended prompt byte-stable for prompt-cache reuse.
-//
-// Codex has no request-scoped channel, only the user message, so its template is
-// delivered once per thread (see deliveryDigest/shouldDeliver) and it interpolates
-// the live grants directly. Freshness comes from the digest being
-// content-addressed: a grant flip re-renders, re-digests, and re-delivers on the
-// next turn. That is also why the codex sentence must not claim to describe
-// "this turn" — a superseded copy stays in codex's append-only history.
+// and {{forwardable}} with the flow's account of what edit access covers under
+// its provider and what this task holds. The flow supplies that text because
+// both halves are provider facts: the reach of an edit grant follows the
+// provider's permission mechanism, and where the live grants can be stated
+// follows its prose channel.
 export function fillTaskPrompt(
   taskPromptTemplate: string,
   forwardable: string,
   id: string,
 ): string {
+  // Replacer functions, so a `$&` or `$'` in the inserted prose stays literal.
   return taskPromptTemplate
-    .replace('{{id}}', id)
-    .replace('{{forwardable}}', forwardable)
-}
-
-export function taskManagementPrompt(
-  task: AgentTaskView,
-  taskPromptTemplate: string,
-  id: string,
-): string {
-  return fillTaskPrompt(taskPromptTemplate, forwardableAccess(task), id)
-}
-
-export function promptWithTaskManagement(
-  task: AgentTaskView,
-  prompt: string,
-  taskPromptTemplate: string,
-  id: string,
-): string {
-  return `${taskManagementPrompt(task, taskPromptTemplate, id)}\n\n${prompt}`
+    .replace('{{id}}', () => id)
+    .replace('{{forwardable}}', () => forwardable)
 }
 
 // The prompt block a revived task's first turn carries: one sentence telling the
@@ -158,23 +132,7 @@ export function checkoutNote(checkout: string, root: string): string {
   )
 }
 
-export function forwardableAccess(task: AgentTaskView): string {
-  if (task.agent === 'codex') {
-    const permissions = task.allowEdits
-      ? 'workspace-scoped edit permission profile'
-      : 'workspace-scoped read-only permission profile'
-    // "As of this message", not "this turn": the sentence is interpolated into a
-    // template that codex now receives once per thread, so a copy of it sits in
-    // history being read on later turns. A grant change re-renders and
-    // re-delivers it (the digest is content-addressed), but the superseded copy
-    // stays — append-only history — so the wording must not assert a fact about
-    // whichever turn happens to be reading it.
-    return (
-      `As of this message, this task runs with the ${permissions}. ` +
-      'Task allow rules are stored by Lander but do not affect Codex runs yet'
-    )
-  }
-
+export function forwardableAccess(task: { allowEdits: boolean }): string {
   if (task.allowEdits) {
     return (
       'You currently have permission for editing files, and can forward that ' +
