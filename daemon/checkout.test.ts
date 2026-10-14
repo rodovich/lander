@@ -109,6 +109,46 @@ describe('task checkouts', () => {
     expect(await removeCheckout(root, 't1')).toBe(false)
   })
 
+  describe('diff comparison with the main checkout’s upstream', () => {
+    const commitFile = (cwd: string, file: string) => {
+      writeFileSync(path.join(cwd, file), 'one\n')
+      git(cwd, 'add', file)
+      git(cwd, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', file)
+    }
+
+    it.each(['behind', 'ahead', 'equal', 'diverged', 'detached', 'missing'])(
+      'uses the appropriate base when the local branch is %s relative to its upstream',
+      async (state) => {
+        const initial = git(root, 'rev-parse', 'HEAD')
+        const dir = await ensureCheckout(root, 't1')
+        git(root, 'remote', 'add', 'tracked', 'https://invalid.example/repo.git')
+        git(root, 'remote', 'add', 'origin', 'https://invalid.example/other.git')
+        git(root, 'config', 'branch.main.remote', 'tracked')
+        git(root, 'config', 'branch.main.merge', 'refs/heads/trunk')
+        git(dir, 'switch', '-q', '-c', 'feature')
+
+        if (state === 'behind' || state === 'diverged' || state === 'detached') {
+          commitFile(dir, 'upstream.txt')
+        }
+        git(root, 'update-ref', 'refs/remotes/tracked/trunk', git(dir, 'rev-parse', 'HEAD'))
+        git(root, 'update-ref', 'refs/remotes/origin/main', initial)
+        if (state === 'ahead' || state === 'diverged') {
+          commitFile(root, 'local.txt')
+          if (state === 'ahead') git(dir, 'merge', '-q', '--ff-only', 'main')
+        }
+        if (state === 'detached') git(root, 'switch', '-q', '--detach')
+        if (state === 'missing') git(root, 'update-ref', '-d', 'refs/remotes/tracked/trunk')
+        commitFile(dir, 'task.txt')
+
+        const files = [{ path: 'task.txt', added: 1, removed: 0 }]
+        if (state === 'diverged' || state === 'detached') {
+          files.push({ path: 'upstream.txt', added: 1, removed: 0 })
+        }
+        expect((await checkoutReport(root, dir)).files).toEqual(files)
+      },
+    )
+  })
+
   it('takes a worktree the agent nested inside it along, leaving that branch too', async () => {
     const dir = await ensureCheckout(root, 't1')
     const inner = path.join(dir, '.claude', 'worktrees', 'inner')

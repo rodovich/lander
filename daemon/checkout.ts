@@ -132,11 +132,25 @@ export async function checkoutReport(
   }
 }
 
-// Diffed from the merge base with the main checkout's HEAD rather than from
-// that HEAD itself, so commits landing on main afterward don't show up as
-// changes here.
+// A fetched upstream may include commits the task started from that the main
+// checkout hasn't incorporated yet. Keep local commits authoritative when the
+// main checkout and its upstream have diverged.
+async function checkoutComparisonHead(root: string, git: Git): Promise<string> {
+  let revisions: string[]
+  try {
+    revisions = (await git(root, ['rev-parse', 'HEAD', '@{upstream}'])).trim().split('\n')
+  } catch {
+    return (await git(root, ['rev-parse', 'HEAD'])).trim()
+  }
+  const [head, upstream] = revisions
+  const counts = (await git(root, ['rev-list', '--left-right', '--count', `${head}...${upstream}`]))
+    .trim()
+    .split(/\s+/)
+  return counts[0] === '0' ? upstream : head
+}
+
 async function checkoutChanges(root: string, dir: string, git: Git): Promise<ChangedFile[]> {
-  const main = (await git(root, ['rev-parse', 'HEAD'])).trim()
+  const main = await checkoutComparisonHead(root, git)
   const base = (await git(dir, ['merge-base', 'HEAD', main])).trim()
   // `--no-optional-locks` keeps the diff from rewriting the index, which an
   // agent's next turn may be using.
