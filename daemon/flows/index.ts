@@ -3,6 +3,7 @@ import path from 'node:path'
 import { readProjectDoc } from 'lander/flow'
 import type { FlowAnnouncement } from '../../server/protocol'
 import type { AgentLaunchDir, AgentLaunchDirInput } from '../agent'
+import * as agyFlowModule from './agy'
 import * as claudeFlowModule from './claude'
 import * as codexFlowModule from './codex'
 import * as openPrFlowModule from './open-pr'
@@ -49,6 +50,11 @@ export const FLOW_MODULES: Record<string, BundledFlowModule> = {
         readProjectDoc,
         ...codexFlowModule.codexOptionsFromEnv(env),
       }),
+  },
+  agy: {
+    ...agyFlowModule,
+    create: ({ taskPromptTemplate }) =>
+      agyFlowModule.makeFlow({ taskPromptTemplate, readProjectDoc }),
   },
   'open-pr': {
     ...openPrFlowModule,
