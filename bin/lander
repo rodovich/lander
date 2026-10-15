@@ -327,8 +327,8 @@ function resolveAwait(value, { self } = {}) {
 // and no whitespace. launch/send/relaunch reject it as their *whole* message,
 // where it is virtually always a flag the shell parsed as content (the exact way
 // `lander launch --help` used to spawn a task). Negatives, `-`, and any message
-// with a space are prose and pass. --message and `-` (stdin) stay the escape
-// hatch for anyone who genuinely means to send such a string.
+// with a space are prose and pass. `-` (stdin) stays the escape hatch for
+// anyone who genuinely means to send such a string.
 const isBareFlag = (s) => /^-{1,2}[A-Za-z][\w-]*$/.test(s)
 
 async function launchTask(rest) {
@@ -337,7 +337,6 @@ async function launchTask(rest) {
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i]
     if (a === '--project') o.project = rest[++i]
-    else if (a === '--message') o.message = rest[++i]
     else if (a === '--title') o.title = rest[++i]
     else if (a === '--date') o.date = rest[++i]
     else if (a === '--time') o.time = Number(rest[++i])
@@ -359,19 +358,18 @@ async function launchTask(rest) {
         o.files.push(rest[++i])
     else pos.push(a)
   }
-  const explicitMessage = o.message != null // via --message; trusted verbatim
-  o.message ??= pos.shift()
+  o.message = pos.shift()
   const fromStdin = o.message === '-'
   if (fromStdin) o.message = await readStdin()
   if (!o.message?.trim())
     die('usage: lander launch <message> [--flow <name>] [--key <k> <v> …]')
   // A positional message that is a lone flag token is a mistyped flag, not work
   // to hand a fresh agent — refuse rather than spawn a task on it.
-  if (!explicitMessage && !fromStdin && isBareFlag(o.message))
+  if (!fromStdin && isBareFlag(o.message))
     die(
       `refusing to launch: the message is just "${o.message}", which looks like a ` +
         'mistyped flag. Run `lander launch --help` for usage; to send it literally, ' +
-        'pass --message or `-` (stdin).',
+        'use `-` (stdin).',
     )
   validateSchedule(o)
   // --await defers the launch until the named tasks land (resolved to full ids

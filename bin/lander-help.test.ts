@@ -19,9 +19,12 @@ let server: Server
 let port: number
 let requests = 0
 
-function execLander(args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
+function execLander(
+  args: string[],
+  stdin?: string,
+): Promise<{ stdout: string; stderr: string; code: number }> {
   return new Promise((resolve) => {
-    execFile(
+    const child = execFile(
       process.execPath,
       [LANDER_BIN, ...args],
       {
@@ -43,6 +46,7 @@ function execLander(args: string[]): Promise<{ stdout: string; stderr: string; c
           code: error && typeof error.code === 'number' ? error.code : 0,
         }),
     )
+    child.stdin?.end(stdin ?? '')
   })
 }
 
@@ -122,10 +126,17 @@ describe('flag-shaped message guard', () => {
     expect(requests).toBe(0)
   })
 
-  it('--message is the escape hatch: a flag-shaped string still sends as content', async () => {
-    const { code } = await execLander(['launch', '--message', '--xyz'])
+  it('stdin is the escape hatch: a flag-shaped string still sends as content', async () => {
+    const { code } = await execLander(['launch', '-'], '--xyz')
     expect(code).toBe(0)
     expect(requests).toBe(1)
+  })
+
+  it('`launch --message <text>` is refused: --message is not a flag', async () => {
+    const { stderr, code } = await execLander(['launch', '--message', 'do the thing'])
+    expect(code).not.toBe(0)
+    expect(stderr).toContain('mistyped flag')
+    expect(requests).toBe(0)
   })
 
   it('prose that merely starts with a dash is not a flag', async () => {
