@@ -111,7 +111,7 @@ describe('lander help', () => {
 // Defense in depth for flag typos the help interception doesn't catch (only
 // --help/-h/help are intercepted): a lone flag-shaped token as the whole message
 // is refused rather than spawned/sent as content.
-describe('flag-shaped message guard', () => {
+describe('message argument guards', () => {
   it('`launch --titel foo` is refused, spawns nothing', async () => {
     const { stderr, code } = await execLander(['launch', '--titel', 'foo'])
     expect(code).not.toBe(0)
@@ -136,6 +136,20 @@ describe('flag-shaped message guard', () => {
     const { stderr, code } = await execLander(['launch', '--message', 'do the thing'])
     expect(code).not.toBe(0)
     expect(stderr).toContain('mistyped flag')
+    expect(requests).toBe(0)
+  })
+
+  it('an unquoted multi-word message is refused, not truncated to its first word', async () => {
+    const { stderr, code } = await execLander(['send', 'sometask', 'fix', 'the', 'bug'])
+    expect(code).not.toBe(0)
+    expect(stderr).toContain('unexpected argument "the"')
+    expect(requests).toBe(0)
+  })
+
+  it('an unknown flag after the message is refused, not dropped', async () => {
+    const { stderr, code } = await execLander(['launch', 'do the thing', '--titel', 'foo'])
+    expect(code).not.toBe(0)
+    expect(stderr).toContain('unexpected argument "--titel"')
     expect(requests).toBe(0)
   })
 

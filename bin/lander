@@ -331,16 +331,22 @@ function resolveAwait(value, { self } = {}) {
 // anyone who genuinely means to send such a string.
 const isBareFlag = (s) => /^-{1,2}[A-Za-z][\w-]*$/.test(s)
 
-async function readMessage(verb, arg) {
+async function readMessage(verb, [arg, ...extra]) {
   const fromStdin = arg === '-'
-  const message = fromStdin ? await readStdin() : arg
-  if (!message?.trim()) dieUsage(verb)
-  if (!fromStdin && isBareFlag(message))
+  if (!fromStdin && isBareFlag(arg))
     die(
-      `refusing to ${verb}: the message is just "${message}", which looks like a ` +
+      `refusing to ${verb}: the message is just "${arg}", which looks like a ` +
         `mistyped flag. Run \`lander ${verb} --help\` for usage; to send it ` +
         'literally, use `-` (stdin).',
     )
+  if (extra.length)
+    die(
+      `refusing to ${verb}: unexpected argument "${extra[0]}" after the message. ` +
+        `Quote a multi-word message as one argument; run \`lander ${verb} --help\` ` +
+        'for its flags.',
+    )
+  const message = fromStdin ? await readStdin() : arg
+  if (!message?.trim()) dieUsage(verb)
   return message
 }
 
@@ -371,7 +377,7 @@ async function launchTask(rest) {
         o.files.push(rest[++i])
     else pos.push(a)
   }
-  o.message = await readMessage('launch', pos.shift())
+  o.message = await readMessage('launch', pos)
   validateSchedule(o)
   // --await defers the launch until the named tasks land (resolved to full ids
   // here); combinable with --date/--time, in which case launch fires on
@@ -509,7 +515,7 @@ async function relaunchTask(args) {
     console.log(res.cleared ? 'scheduled relaunch cleared' : 'nothing to clear')
     return
   }
-  const message = await readMessage('relaunch', pos.shift())
+  const message = await readMessage('relaunch', pos)
   validateSchedule(o)
   validateRepeat(o)
   o.await = resolveAwait(o.await, { self: TASK })
@@ -792,7 +798,7 @@ async function sendTask(args) {
   }
   const target = pos.shift()
   if (!target) dieUsage('send')
-  const message = await readMessage('send', pos.shift())
+  const message = await readMessage('send', pos)
   validateSchedule(o)
   const awaitIds = resolveAwait(o.await)
   const attachments = o.files.length
