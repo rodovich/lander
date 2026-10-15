@@ -48,7 +48,6 @@ export {
 // ── Task-management prompt assembly ─────────────────────────────────────────
 export {
   fillTaskPrompt,
-  forwardableAccess,
   checkoutNote,
   buildRevivedBlock,
   buildScheduledRideBlock,

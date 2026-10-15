@@ -406,8 +406,7 @@ describe('the nudge', () => {
         status: 'riding',
         createdAt: AT,
         updatedAt: AT,
-        allowEdits: false,
-        token: `token-${ID}`,
+        token:`token-${ID}`,
         shape: 2,
         rides: [],
         // An action must find its own fire still pending and the target still
@@ -868,8 +867,7 @@ describe('the land', () => {
         status: 'riding',
         createdAt: AT,
         updatedAt: AT,
-        allowEdits: false,
-        token: `token-${ID}`,
+        token:`token-${ID}`,
         shape: 2,
         rides: [],
         // An action must find its own fire still pending and the target still
@@ -1039,8 +1037,7 @@ describe('the launch', () => {
         status: 'landed',
         createdAt: AT,
         updatedAt: AT,
-        allowEdits: false,
-        token: `token-${ID}`,
+        token:`token-${ID}`,
         shape: 2,
         rides: [],
         pendingHooks: [{ id: 'fire-1-abc', trigger: 'landed', by: 'agent', at: AT }],
@@ -1107,9 +1104,9 @@ describe('the launch', () => {
     return out
   }
 
-  it('creates a task carrying its origin, the backlink, and the grants asked for', async () => {
+  it('creates a task carrying its origin and the backlink', async () => {
     await seed()
-    const res = await launch(cred().token, { allowEdits: true })
+    const res = await launch(cred().token)
     expect(res.status).toBe(201)
     // `ok` and an id, NOT a task projection: the host gates success on this
     // field and advances its dedupe ordinal only when it sees it.
@@ -1127,7 +1124,6 @@ describe('the launch', () => {
     // No spawnedBy: there is no spawning task, which is also why no task can
     // land this one.
     expect(t.spawnedBy).toBeUndefined()
-    expect(t.allowEdits).toBe(true)
     // Composed from the credential, so a body cannot attribute its launch to a
     // hook that is not itself.
     expect(t.items[1].text).toBe(`Launched by hook review on ${ID}:\n\nreview this`)
@@ -1266,14 +1262,13 @@ describe('the launch', () => {
   })
 })
 
-// The privilege-granting paths, sorted by who is asking (resolvePrincipal).
-// Edit access is inherit-only for a task — it may pass on what it holds and
-// nothing more — while raising a grant from nothing is the human's call. Each
-// case is stated as the refusal rather than the permission, because the
-// refusals are what keep a task inside the sandbox it was given: a gate that
-// silently stopped denying would still pass every test written from the
-// allowed side.
-describe('permission grants by principal', () => {
+// The privileged paths, sorted by who is asking (resolvePrincipal). Widening a
+// task's tool sandbox is the human's call, and a task stays inside its own
+// project. Most cases are stated as the refusal rather than the permission,
+// because the refusals are what keep a task inside the sandbox it was given: a
+// gate that silently stopped denying would still pass every test written from
+// the allowed side.
+describe('privileged paths by principal', () => {
   const seedTask = (id: string, over: Record<string, unknown> = {}) =>
     writeFile(
       path.join(tasksDir, `${id}.json`),
@@ -1283,8 +1278,7 @@ describe('permission grants by principal', () => {
         status: 'riding',
         createdAt: AT,
         updatedAt: AT,
-        allowEdits: false,
-        token: `token-${id}`,
+        token:`token-${id}`,
         shape: 2,
         rides: [],
         items: [{ id: 'u0', at: AT, kind: 'message', role: 'user', text: 'go' }],
@@ -1320,10 +1314,9 @@ describe('permission grants by principal', () => {
     })
 
   it('never serves a task’s token over HTTP', async () => {
-    const res = await create({ 'x-lander-ui-token': UI_TOKEN }, { allowEdits: true })
+    const res = await create({ 'x-lander-ui-token': UI_TOKEN })
     expect(res.status).toBe(201)
     const body = (await res.json()) as Record<string, unknown>
-    expect(body.allowEdits).toBe(true)
     // publicTask strips it. Every task can reach this route, so a token served
     // here would let one task impersonate another for the whole check below.
     expect(body.token).toBeUndefined()
@@ -1332,40 +1325,20 @@ describe('permission grants by principal', () => {
     )
   })
 
-  it('refuses an anonymous caller the edit grant but not the task', async () => {
-    expect((await create({}, { allowEdits: true })).status).toBe(403)
-    expect((await create({}, {})).status).toBe(201)
-  })
-
-  it('lets a task pass on edit access it holds', async () => {
-    await seedTask('tsk-grantor', { allowEdits: true })
-    const res = await create(taskAuth('tsk-grantor'), { allowEdits: true })
+  // Identity is the (id, token) pair, so knowing a task's id buys no identity
+  // on its own — ids travel in plain sight, in prompts and in the CLI. A child
+  // launched under a borrowed id can't be landed as the real task's.
+  it('treats a real task id carrying the wrong token as anonymous', async () => {
+    await seedTask('tsk-impersonated')
+    const res = await create(taskAuth('tsk-impersonated', 'not-the-token'))
     expect(res.status).toBe(201)
     const { id } = (await res.json()) as { id: string }
-    expect(JSON.parse(await settled(id)).allowEdits).toBe(true)
-  })
+    expect(JSON.parse(await settled(id)).spawnedBy).toBeUndefined()
 
-  it('refuses a task the edit access it lacks', async () => {
-    await seedTask('tsk-readonly')
-    const res = await create(taskAuth('tsk-readonly'), { allowEdits: true })
-    expect(res.status).toBe(403)
-    expect(await res.json()).toMatchObject({
-      error: 'spawning task lacks edit permission to pass on',
-    })
-  })
-
-  // Identity is the (id, token) pair, so knowing a privileged task's id buys
-  // nothing on its own — ids travel in plain sight, in prompts and in the CLI.
-  // A wrong token demotes the caller to anon rather than matching.
-  it('treats a real task id carrying the wrong token as anonymous', async () => {
-    await seedTask('tsk-privileged', { allowEdits: true })
-    const res = await create(taskAuth('tsk-privileged', 'not-the-token'), {
-      allowEdits: true,
-    })
-    expect(res.status).toBe(403)
-    expect(await res.json()).toMatchObject({
-      error: 'not authorized to grant edit permission',
-    })
+    const real = await create(taskAuth('tsk-impersonated'))
+    expect(real.status).toBe(201)
+    const realId = ((await real.json()) as { id: string }).id
+    expect(JSON.parse(await settled(realId)).spawnedBy).toBe('tsk-impersonated')
   })
 
   // A task's sender and spawner are named by id alone, which holds only while
@@ -1397,28 +1370,9 @@ describe('permission grants by principal', () => {
     })
   })
 
-  it('lets only the UI change an existing task’s edit grant', async () => {
-    await seedTask('tsk-escalate')
-    const self = await patch('tsk-escalate', taskAuth('tsk-escalate'), {
-      allowEdits: true,
-    })
-    expect(self.status).toBe(403)
-    // The refusal is the write not happening, not just the status code.
-    expect(await readTaskField('tsk-escalate', 'allowEdits')).toBe(false)
-
-    const ui = await patch(
-      'tsk-escalate',
-      { 'x-lander-ui-token': UI_TOKEN },
-      { allowEdits: true },
-    )
-    expect(ui.status).toBe(200)
-    expect(await readTaskField('tsk-escalate', 'allowEdits')).toBe(true)
-  })
-
-  // Same route, and the reason to check it here: the escalation gate must turn
-  // away allowEdits without closing the status path, which is how `lander land`
-  // and `lander wedge` report in on every ride.
-  it('still lets a task set its own status', async () => {
+  // The status path stays open to the task itself: it is how a bare
+  // `lander land` or `lander wedge` reports in.
+  it('lets a task set its own status', async () => {
     await seedTask('tsk-selfland')
     const res = await patch('tsk-selfland', taskAuth('tsk-selfland'), {
       status: 'landed',
@@ -1654,7 +1608,6 @@ describe('server task provider behavior', () => {
         status: 'paced',
         createdAt: AT,
         updatedAt: AT,
-        allowEdits: false,
         shape: 2,
         items: [],
         rides: [],
@@ -1784,7 +1737,6 @@ describe('server task provider behavior', () => {
     // literal is how you say you meant to make it.
     expect(Object.keys(row).sort()).toEqual([
       'agent',
-      'allowEdits',
       'createdAt',
       'flow',
       'grants',
@@ -2011,7 +1963,6 @@ describe('server task provider behavior', () => {
           status: 'paced',
           createdAt: AT,
           updatedAt: AT,
-          allowEdits: false,
           messages: [],
         },
         null,
@@ -2409,8 +2360,7 @@ describe('acting task coordination history', () => {
         status: 'wedged',
         createdAt: AT,
         updatedAt: AT,
-        allowEdits: false,
-        token: 'remote-same-id-token',
+        token:'remote-same-id-token',
         shape: 2,
         items: [],
         rides: [],
@@ -2629,7 +2579,6 @@ describe('attachments', () => {
           status: 'paced',
           createdAt: AT,
           updatedAt: AT,
-          allowEdits: false,
           messages: [],
         },
         null,
@@ -2677,8 +2626,7 @@ describe('task attachments (a task attaching its own output)', () => {
           status: 'riding',
           createdAt: AT,
           updatedAt: AT,
-          allowEdits: false,
-          token: `token-${id}`,
+          token:`token-${id}`,
           runId: `run-${id}`,
           shape: 2,
           rides: [{ id: `run-${id}`, startedAt: AT }],
@@ -2900,8 +2848,7 @@ describe('asks', () => {
           status: 'riding',
           createdAt: AT,
           updatedAt: AT,
-          allowEdits: false,
-          token: `token-${id}`,
+          token:`token-${id}`,
           shape: 2,
           rides: [],
           ...rest,
@@ -3386,7 +3333,6 @@ describe('landing disarms the task’s wakeups', () => {
         waitingFor: ['sibling-x'],
         createdAt: AT,
         updatedAt: AT,
-        allowEdits: false,
         shape: 2,
         items: [],
         rides: [{ id: 'r0', startedAt: AT, endedAt: AT, outcome: 'done' }],
@@ -3511,8 +3457,7 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
         status: 'riding',
         createdAt: AT,
         updatedAt: AT,
-        allowEdits: false,
-        token: `token-${id}`,
+        token:`token-${id}`,
         shape: 2,
         items: [],
         rides: [],
@@ -3662,7 +3607,6 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
         status: 'idle',
         createdAt: AT,
         updatedAt: AT,
-        allowEdits: false,
         shape: 2,
         items: [],
         rides: [],
@@ -3715,7 +3659,6 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
         status: 'idle',
         createdAt: AT,
         updatedAt: AT,
-        allowEdits: false,
         shape: 2,
         items: [],
         rides: [],
@@ -3759,7 +3702,6 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
         status: 'wedged',
         createdAt: AT,
         updatedAt: AT,
-        allowEdits: false,
         shape: 2,
         items: [],
         rides: [],
@@ -3831,7 +3773,6 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
         waitingFor: ['sibling-x'],
         createdAt: AT,
         updatedAt: AT,
-        allowEdits: false,
         shape: 2,
         items: [],
         rides: [{ id: 'r0', startedAt: AT, endedAt: AT, outcome: 'done' }],
@@ -4247,7 +4188,6 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
         status: 'riding',
         createdAt: AT,
         updatedAt: AT,
-        allowEdits: false,
         shape: 2,
         items: [],
         rides: [{ id: 'r-restart', startedAt: AT }],
@@ -4322,7 +4262,6 @@ describe('flow dispatch gate', () => {
         status: 'paced',
         createdAt: AT,
         updatedAt: AT,
-        allowEdits: false,
         shape: 2,
         items: [],
         rides: [],

@@ -35,7 +35,7 @@ function makeStart(over: Partial<StartRunMessage> = {}): StartRunMessage {
     agent: 'claude',
     project: 'proj',
     prompt: 'hello',
-    task: { allowEdits: false },
+    task: {},
     env: { LANDER_TASK: 'task-1' },
     idleTimeoutMs: 60_000,
     ...over,
@@ -605,7 +605,7 @@ describe('ctx runtime — turn inputs', () => {
       makeInput(
         {
           recordedCwd: '/repo/sub',
-          task: { allowEdits: true, allow: ['Bash(npm test)'] },
+          task: { allow: ['Bash(npm test)'] },
         },
         { cwd: '/repo/.worktrees/task-1', checkout: '/repo/.worktrees/task-1' },
       ),
@@ -618,7 +618,6 @@ describe('ctx runtime — turn inputs', () => {
         cwd: '/repo/.worktrees/task-1',
         checkout: '/repo/.worktrees/task-1',
         recordedCwd: '/repo/sub',
-        allowEdits: true,
         allow: ['Bash(npm test)'],
       })
       expect(ctx.turn.prompts).toEqual(['hello'])
@@ -954,7 +953,6 @@ describe('ctx runtime — orchestration', () => {
         await ctx.launch('fix the build', {
           flow: 'claude',
           config: { pr: 12 },
-          edits: true,
         })
         return { exitCode: 0 }
       })
@@ -964,7 +962,6 @@ describe('ctx runtime — orchestration', () => {
         message: 'fix the build',
         flow: 'claude',
         flowConfig: { pr: 12 },
-        allowEdits: true,
       })
     } finally {
       vi.unstubAllGlobals()

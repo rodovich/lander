@@ -151,7 +151,6 @@ export type CtxTask = {
   checkout?: string
   // The cwd the previous turn's shell ended in, for the manual-cd hint.
   recordedCwd?: string
-  allowEdits: boolean
   allow?: string[]
   // The run env (LANDER_API/TOKEN/TASK…). The flow merges this into its child
   // env; ctx.spawn merges the result over process.env.
@@ -327,7 +326,6 @@ export type LaunchOpts = {
   title?: string
   flow?: string
   config?: Record<string, unknown>
-  edits?: boolean
 }
 
 export type RideOpts = {
@@ -973,7 +971,6 @@ export function createCtxRuntime(
       ...(start.recordedCwd !== undefined
         ? { recordedCwd: start.recordedCwd }
         : {}),
-      allowEdits: start.task.allowEdits,
       ...(start.task.allow !== undefined ? { allow: start.task.allow } : {}),
       env: start.env,
       // The task's opaque per-flow config, echoed by the server from the task
@@ -1008,7 +1005,6 @@ export function createCtxRuntime(
           ...(opts?.title ? { title: opts.title } : {}),
           ...(opts?.flow ? { flow: opts.flow } : {}),
           ...(opts?.config ? { flowConfig: opts.config } : {}),
-          allowEdits: !!opts?.edits,
         },
       }),
     send: notImplemented('send'),

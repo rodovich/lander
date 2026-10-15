@@ -25,7 +25,6 @@ class FakeChild extends EventEmitter {
 function makeInput(
   flowState: Record<string, unknown> = {},
   flowConfig: Record<string, unknown> = {},
-  allowEdits = true,
 ): HostInput {
   const start: StartRunMessage = {
     type: 'start-run',
@@ -34,7 +33,7 @@ function makeInput(
     flow: 'open-pr',
     project: 'proj',
     prompt: 'go',
-    task: { allowEdits },
+    task: {},
     env: {
       LANDER_API: 'http://api.test',
       LANDER_PROJECT: 'proj',
@@ -55,13 +54,11 @@ async function ride({
   flowConfig = { dryRun: true },
   outputs = [],
   view = { items: [] },
-  allowEdits = true,
 }: {
   flowState?: Record<string, unknown>
   flowConfig?: Record<string, unknown>
   outputs?: { out?: string; code?: number }[]
   view?: unknown
-  allowEdits?: boolean
 } = {}) {
   const events: HostEvent[] = []
   const spawned: { command: string; args: string[] }[] = []
@@ -113,7 +110,7 @@ async function ride({
   )
 
   try {
-    const runtime = createCtxRuntime(makeInput(flowState, flowConfig, allowEdits), {
+    const runtime = createCtxRuntime(makeInput(flowState, flowConfig), {
       emit: (e) => events.push(e),
       now: () => '2026-01-01T00:00:00.000Z',
       spawn,
@@ -372,36 +369,6 @@ describe('open-pr — watch', () => {
     expect(r.stateAfter.repairTask).toBe('sibling-1')
     const wedge = r.requests.filter((q) => q.url.endsWith('/asks'))
     expect(wedge[wedge.length - 1].body).toMatchObject({ blocking: 'task' })
-  })
-
-  it('forwards only the edit access it actually holds to the repair sibling', async () => {
-    // Found live, not by unit test: the server REJECTS a launch asking for more
-    // edit access than the spawner holds, so an unconditional `edits: true`
-    // failed the entire turn for a read-only open-pr task — the dry run died
-    // with "spawning task lacks edit permission to pass on" and surfaced a
-    // platform retry ask instead of the repair sibling.
-    const readOnly = await ride({
-      flowState: { phase: 'watch', prNumber: 9999, attempts: 2 },
-      flowConfig: { dryRun: true, dryRunOutcome: 'failed' },
-      allowEdits: false,
-    })
-    const launch = readOnly.requests.find(
-      (q) => q.method === 'POST' && q.url.endsWith('/api/proj/tasks'),
-    )
-    expect(launch?.body).toMatchObject({ allowEdits: false })
-    // And it still completes the branch rather than throwing.
-    expect(readOnly.stateAfter.repairTask).toBe('sibling-1')
-
-    const withEdits = await ride({
-      flowState: { phase: 'watch', prNumber: 9999, attempts: 2 },
-      flowConfig: { dryRun: true, dryRunOutcome: 'failed' },
-      allowEdits: true,
-    })
-    expect(
-      withEdits.requests.find(
-        (q) => q.method === 'POST' && q.url.endsWith('/api/proj/tasks'),
-      )?.body,
-    ).toMatchObject({ allowEdits: true })
   })
 
   it('walks the scripted success branch', async () => {

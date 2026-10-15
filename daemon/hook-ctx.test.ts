@@ -199,7 +199,7 @@ describe('ctx.launch', () => {
     expect(keys).toEqual(['launch#0', 'launch#0'])
   })
 
-  it('sends the grants and the flow the body asked for, and omits what it did not', async () => {
+  it('sends the title and the flow the body asked for, and omits what it did not', async () => {
     const bodies: Record<string, unknown>[] = []
     vi.stubGlobal('fetch', async (_url: string, init: { body: string }) => {
       bodies.push(JSON.parse(init.body) as Record<string, unknown>)
@@ -211,12 +211,11 @@ describe('ctx.launch', () => {
     })
     const ctx = buildCtx(input(), [])
     await ctx.launch('plain')
-    await ctx.launch('rich', { edits: true, title: 'Review', flow: 'codex' })
+    await ctx.launch('rich', { title: 'Review', flow: 'codex' })
     expect(bodies[0]).toEqual({ message: 'plain', key: 'launch#0' })
     expect(bodies[1]).toEqual({
       message: 'rich',
       key: 'launch#1',
-      allowEdits: true,
       title: 'Review',
       flow: 'codex',
     })

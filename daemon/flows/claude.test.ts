@@ -21,7 +21,7 @@ vi.mock('node:fs', async (original) => {
 function runClaude(input: DriverTurnFixture, overrides: Partial<ClaudeFlowDeps> = {}) {
   return captureDriverTurn(makeFlow({
     landerBin: '/repo/bin/lander',
-    taskPromptTemplate: 'Prompt: {{forwardable}}.',
+    taskPromptTemplate: 'Prompt: {{editAccess}}.',
     gitContext: (cwd) => `Git status as of this message:\n\ncwd ${cwd}`,
     mint: () => 'minted',
     readProjectDoc: () => undefined,
@@ -47,7 +47,6 @@ describe('Claude flow', () => {
   it('builds Claude launch arguments', async () => {
     const launch = await runClaude({
       task: {
-        allowEdits: true,
         allow: ['Bash(npm test)'],
       },
       prompt: '-starts-with-dash',
@@ -69,7 +68,6 @@ describe('Claude flow', () => {
       'Bash(npm test)',
       '--add-dir',
     ])
-    // The scratch roots ride along with edit access.
     expect(addDirsOf(launch.args)).toEqual(SCRATCH_ROOTS)
     expect(launch.args.slice(-6, -1)).toEqual([
       '--output-format',
@@ -94,9 +92,9 @@ describe('Claude flow', () => {
       'Prompt: Edit access covers editing, creating, and deleting files',
     )
     expect(systemPrompt).toContain(
-      'Your own current grants — which cap what you can forward — are ' +
-        'stated in the task-context block in the conversation.',
+      'follow the project\'s normal permission settings, not a Lander grant.',
     )
+    expect(systemPrompt).not.toContain('task-context block')
     // The kept git tips, minus the sign-off conventions that
     // includeGitInstructions:false removed along with the status snapshot.
     expect(systemPrompt).toContain('# Git')
@@ -108,7 +106,7 @@ describe('Claude flow', () => {
   it('tells an agent in a lander checkout where it is, in the stable system prompt', async () => {
     const wt = '/repo/.worktrees/t1'
     const launch = await runClaude({
-      task: { allowEdits: true },
+      task: {},
       root: '/repo',
       cwd: wt,
       checkout: wt,
@@ -121,7 +119,7 @@ describe('Claude flow', () => {
     // Spawned in the checkout, so acceptEdits covers it and nothing else.
     expect(launch.cwd).toBe(wt)
 
-    const outside = await runClaude({ task: { allowEdits: true }, root: '/repo', cwd: '/repo' })
+    const outside = await runClaude({ task: {}, root: '/repo', cwd: '/repo' })
     expect(
       outside.args[outside.args.indexOf('--append-system-prompt') + 1],
     ).not.toContain('git worktree lander created')
@@ -132,13 +130,13 @@ describe('Claude flow', () => {
     const docs: Record<string, string> = { '/repo': 'ROOT DOC' }
     const read = (dir: string) => docs[dir]
     const fromRoot = await runClaude(
-      { task: { allowEdits: false }, root: '/repo', cwd: wt, checkout: wt },
+      { task: {}, root: '/repo', cwd: wt, checkout: wt },
       { readProjectDoc: read },
     )
     expect(fromRoot.args.join('\n')).toContain('ROOT DOC')
     docs[wt] = 'BRANCH DOC'
     const fromCheckout = await runClaude(
-      { task: { allowEdits: false }, root: '/repo', cwd: wt, checkout: wt },
+      { task: {}, root: '/repo', cwd: wt, checkout: wt },
       { readProjectDoc: read },
     )
     expect(fromCheckout.args.join('\n')).toContain('BRANCH DOC')
@@ -147,7 +145,7 @@ describe('Claude flow', () => {
 
   it('adds the files dir as a Read workspace root when one exists', async () => {
     const launch = await runClaude({
-      task: { allowEdits: false },
+      task: {},
       prompt: 'look at this',
       root: '/repo',
       cwd: '/repo',
@@ -161,26 +159,9 @@ describe('Claude flow', () => {
     expect(launch.args[i + 1]).toBe('/files/proj/t')
   })
 
-  it('omits --add-dir when a read-only task has no attachment store', async () => {
+  it('grants both scratch roots even without attachments', async () => {
     const launch = await runClaude({
-      task: { allowEdits: false },
-      prompt: 'no files',
-      root: '/repo',
-      cwd: '/repo',
-      env: { LANDER_TASK: 't' },
-    })
-    expect(launch.args).not.toContain('--add-dir')
-    expect(launch.args).not.toContain('--permission-mode')
-  })
-
-  // The scratch grant is scoped to edit access: acceptEdits auto-approves writes
-  // to every --add-dir root, so handing a read-only task a writable scratch root
-  // would be the one way it could still mutate the filesystem. Both roots are
-  // granted because os.tmpdir() is not /tmp on macOS — it resolves $TMPDIR to a
-  // per-user /var/folders/<hash>/T — and agents write to the literal /tmp.
-  it('grants both scratch roots with edit access even without attachments', async () => {
-    const launch = await runClaude({
-      task: { allowEdits: true },
+      task: {},
       prompt: 'no files',
       root: '/repo',
       cwd: '/repo',
@@ -192,7 +173,7 @@ describe('Claude flow', () => {
 
   it('grants the scratch roots alongside the attachment store', async () => {
     const launch = await runClaude({
-      task: { allowEdits: true },
+      task: {},
       prompt: 'look at this',
       root: '/repo',
       cwd: '/repo',
@@ -203,33 +184,30 @@ describe('Claude flow', () => {
     expect(addDirsOf(launch.args)).toEqual(['/files/proj/t', ...SCRATCH_ROOTS])
   })
 
-  it('builds the per-turn context block from grants and the git snapshot', async () => {
+  it('builds the per-turn context block from the git snapshot', async () => {
     const { context } = await runClaude({
-      task: { allowEdits: true },
+      task: {},
       root: '/repo',
       cwd: '/repo/worktree',
     })
     expect(context).toContain('<task-context>')
-    expect(context).toContain(
-      'You currently have permission for editing files',
-    )
     expect(context).toContain('cwd /repo/worktree')
     expect(context).toContain('</task-context>')
   })
 
-  it('degrades the context block to just the grants outside a git repo', async () => {
-    const { context } = await runClaude({
-      task: { allowEdits: false },
+  it('sends no context block outside a git repo with nothing else to report', async () => {
+    const launch = await runClaude({
+      task: {},
       root: '/repo',
       cwd: '/repo',
     }, { gitContext: () => undefined })
-    expect(context).toContain('You currently have no edit permission')
-    expect(context).not.toContain('Git status')
+    expect(launch.context).toBeUndefined()
+    expect(launch.args.at(-1)).not.toContain('<task-context>')
   })
 
   it('lists task allow rules in the context block only when there are some', async () => {
     const { context } = await runClaude({
-      task: { allowEdits: false, allow: ['Bash(npm test)', 'WebFetch'] },
+      task: { allow: ['Bash(npm test)', 'WebFetch'] },
       root: '/repo',
       cwd: '/repo',
     })
@@ -238,7 +216,7 @@ describe('Claude flow', () => {
         '`Bash(npm test)`, `WebFetch`',
     )
     const { context: none } = await runClaude({
-      task: { allowEdits: false, allow: [] },
+      task: { allow: [] },
       root: '/repo',
       cwd: '/repo',
     })
@@ -266,7 +244,7 @@ describe('Claude flow', () => {
   describe('manual-cd hint in the context block', () => {
     it('notes where the previous turn ended when that differs from the launch dir', async () => {
       const { context } = await runClaude({
-        task: { allowEdits: false },
+        task: {},
         root: '/repo',
         cwd: '/repo',
         recordedCwd: '/repo/sub',
@@ -280,7 +258,7 @@ describe('Claude flow', () => {
 
     it('stays silent on a plain root-to-root turn', async () => {
       const { context } = await runClaude({
-        task: { allowEdits: false },
+        task: {},
         root: '/repo',
         cwd: '/repo',
         recordedCwd: '/repo',
@@ -293,7 +271,7 @@ describe('Claude flow', () => {
     it('stays silent in a lander checkout about a dir outside it', async () => {
       const wt = '/repo/.worktrees/t1'
       const { context } = await runClaude({
-        task: { allowEdits: false },
+        task: {},
         root: '/repo',
         cwd: wt,
         checkout: wt,
@@ -305,7 +283,7 @@ describe('Claude flow', () => {
     it('still notes a cd within a lander checkout', async () => {
       const wt = '/repo/.worktrees/t1'
       const { context } = await runClaude({
-        task: { allowEdits: false },
+        task: {},
         root: '/repo',
         cwd: wt,
         checkout: wt,
@@ -363,7 +341,7 @@ describe('Claude flow', () => {
     // The run launches in its checkout, and the block must describe the tree
     // the agent actually edits, not root.
     const { context } = await runClaude({
-      task: { allowEdits: true },
+      task: {},
       root,
       cwd: wtPath,
       checkout: wtPath,

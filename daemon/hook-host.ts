@@ -395,19 +395,12 @@ function buildCtx(input: HookHostInput, reports: string[]) {
     // apply — which depends on what changed — cannot enumerate its inputs in
     // advance and needs an agent with a real tool envelope and a transcript.
     //
-    // WHATEVER GRANTS THE BODY ASKS FOR, and there is no ceiling to declare: a
-    // body runs with daemon privileges and can spawn a provider CLI with no
-    // sandbox at all, so a limit here would constrain one path out of several to
-    // the same place while reading like a control. What this path buys is that
-    // the result is durable and visible — a recorded grant, a transcript, a
-    // human who can reply — which a body's own child has none of.
-    //
     // The new task inherits the TARGET's provider unless the body names one, and
     // carries the hook's origin, so neither its own landing nor its descendants'
     // wake the hook that started it.
     launch(
       message: string,
-      opts: { edits?: boolean; title?: string; flow?: string; key?: string } = {},
+      opts: { title?: string; flow?: string; key?: string } = {},
     ): Promise<HookActionResult> {
       return act('launch', opts.key, (key) =>
         callServer(run, '/tasks', {
@@ -415,7 +408,6 @@ function buildCtx(input: HookHostInput, reports: string[]) {
           body: {
             message: String(message),
             key,
-            ...(opts.edits ? { allowEdits: true } : {}),
             ...(opts.title ? { title: String(opts.title) } : {}),
             ...(opts.flow ? { flow: String(opts.flow) } : {}),
           },

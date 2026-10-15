@@ -215,12 +215,16 @@ describe('publicTask', () => {
       runId: 'r1',
       runCursor: 42,
       retry: { committed: true, prompts: ['x'] },
-      allowEdits: true,
     })
     expect('token' in out).toBe(false)
     expect('runId' in out).toBe(false)
     expect('runCursor' in out).toBe(false)
     expect('retry' in out).toBe(false)
+  })
+
+  it('strips the edit flag older task records still carry', () => {
+    const out = publicTask({ id: 's', status: 'landed', allowEdits: false })
+    expect('allowEdits' in out).toBe(false)
   })
 
   // The action record answers exactly one question — how much of the bound is
@@ -362,7 +366,6 @@ describe('taskSummary', () => {
       retry: { committed: true, prompts: ['x'] },
       flowState: { k: 1 },
       flowStateRev: 3,
-      allowEdits: true,
     })
     expect('items' in out).toBe(false)
     expect('rides' in out).toBe(false)
@@ -373,7 +376,12 @@ describe('taskSummary', () => {
     expect('flowState' in out).toBe(false)
     expect('flowStateRev' in out).toBe(false)
     // Everything else the list reads survives, capability flags included.
-    expect(out).toMatchObject({ id: 's', title: 't', allowEdits: true, flow: 'claude' })
+    expect(out).toMatchObject({
+      id: 's',
+      title: 't',
+      flow: 'claude',
+      grants: { task: true, project: true },
+    })
   })
 
   it('projects scheduledMessages to the schedule, keeping the index and dropping the text', () => {

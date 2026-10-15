@@ -271,7 +271,6 @@ type Task = {
   readThrough?: string
   // The replaced marker, present only until the boot migration drops it.
   seenAt?: string
-  allowEdits: boolean
   // The id of the task that spawned this one (`lander launch`), or absent
   // for tasks a human started from the UI. Records provenance — the same
   // relationship the opening message's `from` names — on the task, where the
@@ -784,7 +783,6 @@ async function runTurn(
     ...(scheduledRide ? { scheduledRide } : {}),
     prompt,
     task: {
-      allowEdits: task.allowEdits,
       allow: task.allow,
     },
     // The provider session to resume; absent on the first turn, so the daemon
@@ -2402,7 +2400,6 @@ app.post('/api/:project/tasks', async (c) => {
       agent?: unknown
       flow?: unknown
       flowConfig?: unknown
-      allowEdits?: unknown
       attachments?: unknown
       key?: unknown
     }>()
@@ -2483,7 +2480,6 @@ app.post('/api/:project/tasks', async (c) => {
 
     const flowConfig = validateFlowConfig(body.flowConfig)
     if ('error' in flowConfig) return c.json({ error: flowConfig.error }, 400)
-    const allowEdits = body.allowEdits === true
     if (!title && !rawMessage.trim())
       return c.json({ error: 'title or message is required' }, 400)
     if (title.length > TITLE_MAX_CHARS)
@@ -2517,8 +2513,8 @@ app.post('/api/:project/tasks', async (c) => {
       (scheduledFor !== undefined || waitingFor !== undefined) &&
       rawMessage.trim() !== ''
 
-    // Identify the caller once: it gates edit/commit grants below and, when a
-    // task spawned this one, supplies the backlink we prepend to the message.
+    // Identify the caller once: it gates cross-project launches below and, when
+    // a task spawned this one, is recorded as the spawner and message sender.
     const principal = await resolvePrincipal(c.req)
 
     // A task may only launch tasks in its own project, the same rule a send is
@@ -2530,33 +2526,6 @@ app.post('/api/:project/tasks', async (c) => {
         { error: 'a task may only launch tasks in its own project' },
         403,
       )
-
-    // Granting a spawned task edit access requires a caller that holds it. The
-    // human (UI token) may grant it freely; an authenticated task may only pass
-    // on edit access it has itself — so a task can't spawn a child more
-    // privileged than itself; an unidentified caller may grant nothing.
-    //
-    // A hook grants whatever it asks for, and there is no ceiling to declare: a
-    // body runs with daemon privileges and can spawn a provider CLI with no
-    // sandbox at all, so bounding this one route would constrain a path out of
-    // several to the same place while reading like a control. What routing
-    // through here buys is that the result is durable and visible — a recorded
-    // grant, a transcript, a human who can reply — which a body's own child has
-    // none of. That is the reason to prefer it, not a restriction.
-    if (allowEdits && !cred) {
-      if (principal.kind === 'task') {
-        if (!principal.task.allowEdits)
-          return c.json(
-            { error: 'spawning task lacks edit permission to pass on' },
-            403,
-          )
-      } else if (principal.kind !== 'ui') {
-        return c.json(
-          { error: 'not authorized to grant edit permission' },
-          403,
-        )
-      }
-    }
 
     // When a task spawns this one, the opening message records the spawner as its
     // sender, and the agent reads it named ahead of the words (attributedPrompt).
@@ -2611,7 +2580,6 @@ app.post('/api/:project/tasks', async (c) => {
       // afterwards — the assistant reply, lifecycle events — is newer than this and
       // shows as unread until viewed.
       readThrough: now,
-      allowEdits,
       // Provenance: when another task spawned this one, remember which, so it can
       // later land what it launched (see the PATCH land gate). A UI-started task
       // has no spawner.
@@ -2926,7 +2894,6 @@ app.patch('/api/:project/tasks/:id', async (c) => {
 
     const body = await c.req.json<{
       title?: unknown
-      allowEdits?: unknown
       status?: unknown
       key?: unknown
     }>()
@@ -2938,19 +2905,10 @@ app.patch('/api/:project/tasks/:id', async (c) => {
     if (hookToken !== undefined)
       return landFromHook(c, project, id, file, hookToken, body.status, body.key)
 
-    // Resolve the caller once: to gate the privileged allow* change, and to
-    // decide whether a wedge should interrupt a live run.
+    // Resolve the caller once: to gate a land by id, and to decide whether a
+    // wedge should interrupt a live run.
     const principal = await resolvePrincipal(c.req)
 
-    // Changing a task's own edit grant is a privilege escalation, so only the
-    // human (UI token) may do it — otherwise a task could PATCH itself to gain
-    // access it was never given. Title and status stay open: the CLI's
-    // `lander land`/`wedge` set status, and renames are harmless.
-    if (typeof body.allowEdits === 'boolean' && principal.kind !== 'ui')
-      return c.json(
-        { error: 'only the UI may change a task’s edit permission' },
-        403,
-      )
     if (typeof body.title === 'string' && body.title.trim().length > TITLE_MAX_CHARS)
       return c.json({ error: titleTooLong }, 400)
 
@@ -3012,7 +2970,6 @@ app.patch('/api/:project/tasks/:id', async (c) => {
         }
         t.title = next
       }
-      if (typeof body.allowEdits === 'boolean') t.allowEdits = body.allowEdits
       if (typeof body.status === 'string') {
         const at = new Date().toISOString()
         // Normalize to the collapsed stored vocabulary: the UI's Un-wedge and

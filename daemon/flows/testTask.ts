@@ -71,7 +71,6 @@ function freshTask(start: StartRunMessage): Record<string, unknown> {
     status: 'riding',
     createdAt: FIXED_NOW,
     updatedAt: FIXED_NOW,
-    allowEdits: start.task.allowEdits,
     shape: 2,
     items: [],
     rides: [],

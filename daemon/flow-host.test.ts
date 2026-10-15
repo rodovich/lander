@@ -1,14 +1,21 @@
 import { EventEmitter } from 'node:events'
+import { tmpdir } from 'node:os'
 import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import { describe, expect, it, vi } from 'vitest'
 import type { StartRunMessage } from '../server/protocol'
 import type { HostEvent, HostInput } from './host-protocol'
 import { runHost } from './flow-host'
 import { makeFlow as makeClaudeFlow } from './flows/claude'
-import { codexForwardableText, makeFlow as makeCodexFlow } from './flows/codex'
+import { CODEX_EDIT_ACCESS_TEXT, makeFlow as makeCodexFlow } from './flows/codex'
 import { settle } from './flows/testCtx'
 import { deliveryDigest, fillTaskPrompt } from './task-management'
 import { projectDocBlock } from '../flow/project-doc'
+
+// The scratch roots Claude always grants.
+const SCRATCH_DIR_ARGS = [...new Set(['/tmp', tmpdir()])].flatMap((dir) => [
+  '--add-dir',
+  dir,
+])
 
 class FakeChild extends EventEmitter {
   stdout = new EventEmitter()
@@ -35,9 +42,7 @@ function makeStart(over: Partial<StartRunMessage> = {}): StartRunMessage {
     agent: 'codex',
     project: 'proj',
     prompt: 'prompt',
-    task: {
-      allowEdits: false,
-    },
+    task: {},
     env: { LANDER_TASK: 'task-1' },
     idleTimeoutMs: 60_000,
     ...over,
@@ -55,14 +60,15 @@ function testFlows(readProjectDoc: (dir: string) => string | undefined = () => u
   return {
     claude: makeClaudeFlow({
       landerBin: '/repo/bin/lander',
-      taskPromptTemplate: 'Prompt: {{forwardable}}.',
+      taskPromptTemplate: 'Prompt: {{editAccess}}.',
       gitContext: () => 'Git status as of this message:\n\non branch test',
       mint: () => 'minted-session',
       readProjectDoc,
     }),
     codex: makeCodexFlow({
-      taskPromptTemplate: 'Prompt: {{forwardable}}.',
+      taskPromptTemplate: 'Prompt: {{editAccess}}.',
       readProjectDoc,
+      resolveGitDirs: () => [],
     }),
   }
 }
@@ -198,9 +204,9 @@ describe('flow host', () => {
         '--json',
         '--skip-git-repo-check',
         '--config',
-        'default_permissions="lander-read-only"',
+        'default_permissions="lander-edit"',
         '--config',
-        'permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}',
+        'permissions.lander-edit={description="Lander workspace edit access",extends=":workspace",workspace_roots={"/repo"=true},filesystem={":workspace_roots"={".git"="write"}},network={enabled=true,allow_local_binding=true}}',
         '--config',
         'shell_environment_policy.inherit=all',
         '--config',
@@ -210,15 +216,13 @@ describe('flow host', () => {
         '--cd',
         '/repo',
         '--',
-        `Prompt: ${codexForwardableText(false)}.\n\ncodex prompt`,
+        `Prompt: ${CODEX_EDIT_ACCESS_TEXT}.\n\ncodex prompt`,
       ],
       options: { cwd: '/repo' },
     })
     const claudeContext = [
       '<task-context>',
       "Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.",
-      '',
-      'You currently have no edit permission, so a spawned task cannot be granted it either.',
       '',
       'Git status as of this message:',
       '',
@@ -230,13 +234,16 @@ describe('flow host', () => {
       args: [
         '--session-id',
         'minted-session',
+        '--permission-mode',
+        'acceptEdits',
         '--allowedTools',
         'Bash(lander:*)',
+        ...SCRATCH_DIR_ARGS,
         '--settings',
         expect.any(String),
         '--append-system-prompt',
         expect.stringMatching(
-          /^Prompt: Edit access covers [^\n]*Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation\.\n\n# Git\n- Interactive flags \(`-i`, e\.g\. `git rebase -i`, `git add -i`\) are not supported in this environment\.\n- Use the `gh` CLI for GitHub operations \(PRs, issues, API\)\.\n- Commit or push only when the user asks\. If on the default branch, branch first\.$/,
+          /^Prompt: Edit access covers [^\n]*follow the project's normal permission settings, not a Lander grant\.\n\n# Git\n- Interactive flags \(`-i`, e\.g\. `git rebase -i`, `git add -i`\) are not supported in this environment\.\n- Use the `gh` CLI for GitHub operations \(PRs, issues, API\)\.\n- Commit or push only when the user asks\. If on the default branch, branch first\.$/,
         ),
         '--output-format',
         'stream-json',
@@ -295,11 +302,11 @@ describe('flow host', () => {
         prompt: 'follow-up',
         sessionId: 'sess-1',
         turnContext: context,
-        task: { allowEdits: true },
+        task: { allow: ['Bash(npm test)'] },
       }),
     )
     const changed = h.spawns[2].args.at(-1)!
-    expect(changed).toContain('You currently have permission for editing files')
+    expect(changed).toContain('Tool permissions granted to this task')
     expect(turnContextWrites(h.events)).toContainEqual(
       changed.slice('follow-up\n\n'.length),
     )
@@ -359,11 +366,9 @@ describe('flow host', () => {
   //
 
   describe('codex deliver-once', () => {
-    const TEMPLATE = 'Prompt: {{forwardable}}.'
-    const digestFor = (allowEdits: boolean) =>
-      deliveryDigest(
-        fillTaskPrompt(TEMPLATE, codexForwardableText(allowEdits), 'task-1'),
-      )
+    const TEMPLATE = 'Prompt: {{editAccess}}.'
+    const digestFor = (editAccess = CODEX_EDIT_ACCESS_TEXT) =>
+      deliveryDigest(fillTaskPrompt(TEMPLATE, editAccess, 'task-1'))
     const promptOf = (h: ReturnType<typeof harness>) => {
       const args = h.spawns[0].args
       return args[args.length - 1] as string
@@ -393,11 +398,11 @@ describe('flow host', () => {
       h.run(
         makeInput({
           sessionId: 'thread-1',
-          flowState: { sessionId: 'thread-1', taskPrompt: digestFor(false) },
+          flowState: { sessionId: 'thread-1', taskPrompt: digestFor() },
         }),
       )
       expect(promptOf(h)).toBe('prompt')
-      expect(promptOf(h)).not.toContain('Prompt: As of this message')
+      expect(promptOf(h)).not.toContain(CODEX_EDIT_ACCESS_TEXT)
     })
 
     // The regression for the one suppression path review found: sealForRelaunch
@@ -408,24 +413,25 @@ describe('flow host', () => {
     // Deleting that disjunct must turn this red.
     it('sends it when the digest matches but no thread is recorded', async () => {
       const h = harness()
-      h.run(makeInput({ flowState: { taskPrompt: digestFor(false) } }))
-      expect(promptOf(h)).toContain('As of this message')
+      h.run(makeInput({ flowState: { taskPrompt: digestFor() } }))
+      expect(promptOf(h)).toContain(CODEX_EDIT_ACCESS_TEXT)
     })
 
-    // The same content-addressing that handles a template edit handles a
-    // mid-task grant flip, with no separate staleness machinery: allowEdits is
-    // interpolated into the render, so flipping it changes the digest and the
-    // corrected sentence is re-delivered on the next turn.
+    // Content-addressing handles a template edit with no separate staleness
+    // machinery: a digest recorded for an older render no longer matches, so the
+    // corrected text is re-delivered on the next turn.
     it('re-sends when the rendered text changes under it', async () => {
       const h = harness()
       h.run(
         makeInput({
           sessionId: 'thread-1',
-          task: { allowEdits: true },
-          flowState: { sessionId: 'thread-1', taskPrompt: digestFor(false) },
+          flowState: {
+            sessionId: 'thread-1',
+            taskPrompt: digestFor('an older edit-access text'),
+          },
         }),
       )
-      expect(promptOf(h)).toContain('workspace-scoped edit permission profile')
+      expect(promptOf(h)).toContain(CODEX_EDIT_ACCESS_TEXT)
     })
 
     it('records the delivery when the turn produced output', async () => {

@@ -1116,6 +1116,9 @@ export function publicTask<T extends object>(
     hookFireSeq: _hfs,
     hookActionsResetAt: _hra,
     hookActions: _ha,
+    // Tasks saved while read-only tasks existed still carry the edit flag. No
+    // code reads it, and served as `false` it would misreport the task's access.
+    allowEdits: _ae,
     queued,
     ...rest
   } = task as T & {
@@ -1128,6 +1131,7 @@ export function publicTask<T extends object>(
     hookFireSeq?: unknown
     hookActionsResetAt?: unknown
     hookActions?: unknown
+    allowEdits?: unknown
     queued?: string[]
     items?: Item[]
     rides?: Ride[]

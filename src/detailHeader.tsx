@@ -2,12 +2,7 @@ import { memo, useEffect, useRef, useState } from 'react'
 import { CheckoutChip } from './checkoutChip'
 import { formatTimestamp } from './format'
 import { GrantControl } from './grants'
-import {
-  AllowEditsMenu,
-  CopyConversationButton,
-  CopyIdButton,
-  TaskActionsMenu,
-} from './menus'
+import { CopyConversationButton, CopyIdButton, TaskActionsMenu } from './menus'
 import { availableTaskActions } from './taskActions'
 import type { TaskAction } from './taskActions'
 import { taskKeyOf } from './taskRef'
@@ -44,7 +39,6 @@ export const DetailHeader = memo(function DetailHeader({
   saveTitle,
   generateTitle,
   allowTool,
-  setAllowEdits,
   onRetry,
 }: {
   task: TaskWithProject
@@ -56,7 +50,6 @@ export const DetailHeader = memo(function DetailHeader({
   saveTitle: (draft: string) => Promise<void>
   generateTitle: () => Promise<void>
   allowTool: (rule: string, scope: 'task' | 'project') => Promise<boolean>
-  setAllowEdits: (checked: boolean) => Promise<void>
   onRetry: () => Promise<boolean>
 }) {
   const [editingTitle, setEditingTitle] = useState(false)
@@ -130,9 +123,6 @@ export const DetailHeader = memo(function DetailHeader({
               onAllow={allowTool}
               onRetry={task.status === 'wedged' || task.status === 'paced' ? onRetry : undefined}
             />
-          )}
-          {!task.allowEdits && !task.archived && (
-            <AllowEditsMenu onAllowEdits={() => void setAllowEdits(true)} />
           )}
           <TaskActionsMenu
             actions={availableTaskActions(task)}

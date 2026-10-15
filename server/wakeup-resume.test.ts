@@ -31,7 +31,6 @@ function seed(id: string, extra: Record<string, unknown>): Promise<void> {
       status: 'riding',
       createdAt: AT,
       updatedAt: AT,
-      allowEdits: false,
       shape: 2,
       items: [
         { id: `${id}-0`, at: AT, kind: 'message', role: 'user', text: 'go' },

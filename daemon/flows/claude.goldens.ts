@@ -294,7 +294,7 @@ export const CLAUDE_GOLDENS: Golden[] = [
   {
     name: 'unchanged turn context is not re-sent',
     chunks: [[init(), assistantText('same context')], [result()]],
-    // Matches what the stub gitContext + no-edit grants produce, so the block
+    // Matches what the stub gitContext produces with no grants, so the block
     // compares equal and is neither appended nor re-recorded. Both the top-level
     // fields and flowState are set, mirroring what runTurn sends for a task whose
     // thread identity lives in flowState (the accessors' union read fills both).
@@ -304,8 +304,6 @@ export const CLAUDE_GOLDENS: Golden[] = [
         '<task-context>',
         "Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.",
         '',
-        'You currently have no edit permission, so a spawned task cannot be granted it either.',
-        '',
         'GIT-SNAPSHOT-STUB',
         '</task-context>',
       ].join('\n'),
@@ -314,8 +312,6 @@ export const CLAUDE_GOLDENS: Golden[] = [
         turnContext: [
           '<task-context>',
           "Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.",
-          '',
-          'You currently have no edit permission, so a spawned task cannot be granted it either.',
           '',
           'GIT-SNAPSHOT-STUB',
           '</task-context>',
@@ -327,23 +323,13 @@ export const CLAUDE_GOLDENS: Golden[] = [
     name: 'task allow rules extend allowedTools',
     chunks: [[init(), assistantText('ok')], [result()]],
     start: {
-      task: { allowEdits: false, allow: ['Bash(npm test)', 'Bash(npm run build)'] },
+      task: { allow: ['Bash(npm test)', 'Bash(npm run build)'] },
     },
-  },
-  {
-    name: 'edit access adds acceptEdits and scratch roots',
-    chunks: [[init(), assistantText('ok')], [result()]],
-    start: { task: { allowEdits: true } },
-  },
-  {
-    name: 'no edit access omits acceptEdits and scratch roots',
-    chunks: [[init(), assistantText('ok')], [result()]],
-    start: { task: { allowEdits: false } },
   },
   {
     // The §3.1 gate split: LANDER_FILES_DIR is set regardless, --add-dir only
     // when the dir exists.
-    name: 'nonexistent filesDir still sets the env var but adds no --add-dir',
+    name: 'nonexistent filesDir still sets the env var but adds no files --add-dir',
     chunks: [[init(), assistantText('ok')], [result()]],
     input: { filesDir: '/definitely/not/here/xyz' },
   },

@@ -84,19 +84,17 @@ uses it for follow-up turns.
 
 The Codex flow supports first turns and resumed turns, including explicit
 `--cd` handling so resumed Codex turns launch from the daemon-resolved cwd. It
-maps Lander's edit flag to named Codex permission profiles:
+runs every turn under a named Codex permission profile that extends Codex's
+built-in `:workspace` profile and changes the workspace's `.git` rule from read
+to write. The flow also resolves and grants the Git common directory and, in a
+linked worktree, the worktree's own git directory, so it can update its HEAD,
+index, objects, and refs.
 
-- `allowEdits=false` extends Codex's built-in `:read-only` profile.
-- `allowEdits=true` extends Codex's built-in `:workspace` profile and changes
-  the workspace's `.git` rule from read to write. The flow also resolves and
-  grants the Git common directory and, in a linked worktree, the worktree's own
-  git directory, so it can update its HEAD, index, objects, and refs.
-
-The editable profile otherwise preserves Codex's workspace-write semantics:
-filesystem reads are unrestricted, writes are limited to the workspace, its
-resolved Git directories, `/tmp`, and `$TMPDIR`, and the usual `.agents`
-and `.codex` metadata protections remain in place. Both profiles allow network
-access, including the local Lander API used by in-task self-management commands.
+The profile otherwise preserves Codex's workspace-write semantics: filesystem
+reads are unrestricted, writes are limited to the workspace, its resolved Git
+directories, `/tmp`, and `$TMPDIR`, and the usual `.agents` and `.codex`
+metadata protections remain in place. It allows network access, including the
+local Lander API used by in-task self-management commands.
 
 The Codex JSONL reducer currently handles text replies, command executions, file
 change events, failed commands or failed turns, resumed sessions, and token
@@ -125,8 +123,8 @@ Codex is not at Claude feature parity. Some differences are due to limitations o
 the harness, while others are unfinished work that a different design could
 remove.
 
-Permission grants are coarse. Lander selects a read-only or editable Codex
-permission profile, but Codex runs do not honor task allow rules or Claude-style
+Permission grants are coarse. Lander runs every Codex task under one editable
+permission profile, and Codex runs do not honor task allow rules or Claude-style
 per-tool `--allowedTools`. The UI stores Codex task rules for future parity and
 returns a warning, but those rules do not change Codex argv or runtime behavior.
 There is also no separate git gate on Codex: edit access includes writes to the

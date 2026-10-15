@@ -75,7 +75,6 @@ async function writeTask(id: string, over: Record<string, unknown> = {}) {
       status: 'riding',
       createdAt: AT,
       updatedAt: AT,
-      allowEdits: false,
       items: [],
       pendingHooks: [fire()],
       ...over,

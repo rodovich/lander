@@ -55,7 +55,7 @@ beforeAll(async () => {
     if (m) {
       const t = TASKS.find((x) => x.id === m[1])
       res.end(
-        JSON.stringify(t ? { ...t, items: [], conversation: [], allowEdits: false } : {}),
+        JSON.stringify(t ? { ...t, items: [], conversation: [] } : {}),
       )
     } else {
       res.end(JSON.stringify(TASKS))

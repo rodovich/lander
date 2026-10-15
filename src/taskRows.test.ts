@@ -17,7 +17,6 @@ const task = (over: Partial<TaskWithProject> = {}): TaskWithProject => ({
   title: `Task ${seq}`,
   status: 'paced',
   createdAt: at(0),
-  allowEdits: true,
   projectSlug: 'proj',
   ...over,
 })

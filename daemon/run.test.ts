@@ -40,9 +40,7 @@ function makeStart(over: Partial<StartRunMessage> = {}): StartRunMessage {
     agent: 'codex',
     project: 'proj',
     prompt: 'prompt',
-    task: {
-      allowEdits: false,
-    },
+    task: {},
     env: { LANDER_TASK: 'task-1' },
     idleTimeoutMs: 60_000,
     ...over,

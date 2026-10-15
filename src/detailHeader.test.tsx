@@ -12,7 +12,6 @@ const baseTask = (over: Partial<TaskWithProject> = {}): TaskWithProject => ({
   title: 'Fix the parser',
   status: 'paced',
   createdAt: AT,
-  allowEdits: true,
   projectSlug: 'proj',
   items: [],
   rides: [],
@@ -32,7 +31,6 @@ const render = (
       saveTitle={async () => {}}
       generateTitle={async () => {}}
       allowTool={async () => true}
-      setAllowEdits={async () => {}}
       onRetry={async () => true}
       {...over}
     />,
@@ -74,13 +72,6 @@ describe('DetailHeader', () => {
     expect(html).toContain('Copy task ID')
     expect(html).toContain('Copy conversation as markdown')
     expect(html).toContain('copy-conversation')
-  })
-
-  it('hides the grant and read-only controls on an archived task', () => {
-    const active = render(baseTask({ allowEdits: false }))
-    expect(active).toContain('Read-only')
-    const archived = render(baseTask({ allowEdits: false, archived: true }))
-    expect(archived).not.toContain('Read-only')
   })
 
   // The sparkle holds still while haiku is naming *this* task; another task's

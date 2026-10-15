@@ -6,13 +6,13 @@ import path from 'node:path'
 import {
   makeFlow,
   resolveLaunchDir,
-  codexForwardableText,
+  CODEX_EDIT_ACCESS_TEXT,
   codexOptionsFromEnv,
   type CodexFlowDeps,
 } from './codex'
 import { captureDriverTurn, driveFlow, type DriverTurnFixture } from './testCtx'
 
-const TASK_PROMPT_TEMPLATE = 'Task prompt: {{forwardable}}.'
+const TASK_PROMPT_TEMPLATE = 'Task prompt: {{editAccess}}.'
 function codexFlow(overrides: Partial<CodexFlowDeps> = {}) {
   return makeFlow({
     taskPromptTemplate: TASK_PROMPT_TEMPLATE,
@@ -27,30 +27,21 @@ function runCodex(input: DriverTurnFixture, overrides: Partial<CodexFlowDeps> = 
 }
 
 function permissionArgs(
-  allowEdits: boolean,
   projectRoot = '/repo',
   gitDirs: string[] = [],
 ): string[] {
-  const profileId = allowEdits ? 'lander-edit' : 'lander-read-only'
-  const description = allowEdits
-    ? 'Lander workspace edit access'
-    : 'Lander workspace read-only access'
-  const commonDirRule = allowEdits
-    ? gitDirs.map((dir) => `,"${dir}"="write"`).join('')
-    : ''
-  const profile = allowEdits
-    ? `description="${description}",extends=":workspace",workspace_roots={"${projectRoot}"=true},filesystem={":workspace_roots"={".git"="write"}${commonDirRule}},network={enabled=true,allow_local_binding=true}`
-    : `description="${description}",extends=":read-only",network={enabled=true,allow_local_binding=true}`
+  const commonDirRule = gitDirs.map((dir) => `,"${dir}"="write"`).join('')
+  const profile = `description="Lander workspace edit access",extends=":workspace",workspace_roots={"${projectRoot}"=true},filesystem={":workspace_roots"={".git"="write"}${commonDirRule}},network={enabled=true,allow_local_binding=true}`
   return [
     '--config',
-    `default_permissions="${profileId}"`,
+    'default_permissions="lander-edit"',
     '--config',
-    `permissions.${profileId}={${profile}}`,
+    `permissions.lander-edit={${profile}}`,
   ]
 }
 
-function managedPrompt(prompt: string, forwardable: string): string {
-  return `Task prompt: ${forwardable}.\n\n${prompt}`
+function managedPrompt(prompt: string): string {
+  return `Task prompt: ${CODEX_EDIT_ACCESS_TEXT}.\n\n${prompt}`
 }
 
 describe('Codex flow launch', () => {
@@ -89,11 +80,9 @@ describe('Codex flow launch', () => {
     })
   })
 
-  it('builds first-turn Codex exec args with workspace-scoped read access', async () => {
+  it('builds first-turn Codex exec args with the workspace edit profile', async () => {
     const launch = await runCodex({
-      task: {
-        allowEdits: false,
-      },
+      task: {},
       prompt: 'hello codex',
       root: '/repo',
       cwd: '/repo/subdir',
@@ -117,7 +106,7 @@ describe('Codex flow launch', () => {
       'exec',
       '--json',
       '--skip-git-repo-check',
-      ...permissionArgs(false),
+      ...permissionArgs(),
       '--config',
       'shell_environment_policy.inherit=all',
       '--config',
@@ -127,47 +116,11 @@ describe('Codex flow launch', () => {
       '--cd',
       '/repo/subdir',
       '--',
-      managedPrompt(
-        'hello codex',
-        codexForwardableText(false),
-      ),
+      managedPrompt('hello codex'),
     ])
     expect(launch.args.join('\0')).not.toContain('secret-token')
     expect(launch.args).not.toContain('--sandbox')
     expect(launch.args.join('\0')).not.toContain('sandbox_mode')
-    expect(launch.args.join('\0')).toContain('extends=":read-only"')
-  })
-
-  it('maps editable first-turn Codex tasks to a workspace edit profile', async () => {
-    const launch = await runCodex({
-      task: {
-        allowEdits: true,
-      },
-      prompt: 'edit files',
-      root: '/repo',
-      cwd: '/repo',
-      env: {},
-    })
-
-    expect(launch.args).toEqual([
-      'exec',
-      '--json',
-      '--skip-git-repo-check',
-      ...permissionArgs(true),
-      '--config',
-      'shell_environment_policy.inherit=all',
-      '--config',
-      'shell_environment_policy.ignore_default_excludes=true',
-      '--config',
-      'shell_environment_policy.include_only=["PATH","LANDER_*"]',
-      '--cd',
-      '/repo',
-      '--',
-      managedPrompt(
-        'edit files',
-        codexForwardableText(true),
-      ),
-    ])
     expect(launch.args.join('\0')).toContain('extends=":workspace"')
     expect(launch.args.join('\0')).toContain('":workspace_roots"={".git"="write"}')
   })
@@ -175,7 +128,7 @@ describe('Codex flow launch', () => {
   it('makes a lander checkout the whole workspace and tells the agent about it', async () => {
     const wt = '/repo/.worktrees/t1'
     const launch = await runCodex(
-      { task: { allowEdits: true }, prompt: 'work', root: '/repo', cwd: wt, checkout: wt },
+      { task: {}, prompt: 'work', root: '/repo', cwd: wt, checkout: wt },
       {
         resolveGitDirs: (cwd) => {
           expect(cwd).toBe(wt)
@@ -185,7 +138,7 @@ describe('Codex flow launch', () => {
     )
     const joined = launch.args.join('\0')
     expect(joined).toContain(
-      permissionArgs(true, wt, ['/repo/.git', '/repo/.git/worktrees/t1'])[3],
+      permissionArgs(wt, ['/repo/.git', '/repo/.git/worktrees/t1'])[3],
     )
     expect(joined).not.toContain('workspace_roots={"/repo"=true}')
     expect(launch.args.slice(-4, -2)).toEqual(['--cd', wt])
@@ -194,7 +147,7 @@ describe('Codex flow launch', () => {
     )
 
     const outside = await runCodex({
-      task: { allowEdits: true },
+      task: {},
       prompt: 'work',
       root: '/repo',
       cwd: '/repo',
@@ -212,7 +165,7 @@ describe('Codex flow launch', () => {
       const wt = path.join(root, '.worktrees', 't1')
       git(root, 'worktree', 'add', '-q', '--detach', wt)
       const launch = await runCodex(
-        { task: { allowEdits: true }, prompt: 'work', root, cwd: wt, checkout: wt },
+        { task: {}, prompt: 'work', root, cwd: wt, checkout: wt },
         { resolveGitDirs: undefined },
       )
       const joined = launch.args.join('\0')
@@ -223,7 +176,7 @@ describe('Codex flow launch', () => {
     }
   })
 
-  it('grants editable worktrees access to the resolved Git dirs', async () => {
+  it('grants worktrees access to the resolved Git dirs', async () => {
     const options: Partial<CodexFlowDeps> = {
       taskPromptTemplate: TASK_PROMPT_TEMPLATE,
       resolveGitDirs: (cwd) => {
@@ -233,7 +186,7 @@ describe('Codex flow launch', () => {
     }
 
     const launch = await runCodex({
-      task: { allowEdits: true },
+      task: {},
       prompt: 'edit worktree',
       root: '/worktrees/feature',
       cwd: '/worktrees/feature',
@@ -244,7 +197,7 @@ describe('Codex flow launch', () => {
       'exec',
       '--json',
       '--skip-git-repo-check',
-      ...permissionArgs(true, '/worktrees/feature', ['/repo/.git']),
+      ...permissionArgs('/worktrees/feature', ['/repo/.git']),
       '--config',
       'shell_environment_policy.inherit=all',
       '--config',
@@ -254,10 +207,7 @@ describe('Codex flow launch', () => {
       '--cd',
       '/worktrees/feature',
       '--',
-      managedPrompt(
-        'edit worktree',
-        codexForwardableText(true),
-      ),
+      managedPrompt('edit worktree'),
     ])
   })
 
@@ -265,7 +215,6 @@ describe('Codex flow launch', () => {
     const launch = await runCodex({
       task: {
         sessionId: '019f0000-0000-7000-8000-000000000001',
-        allowEdits: false,
       },
       prompt: 'follow up',
       root: '/repo',
@@ -277,7 +226,7 @@ describe('Codex flow launch', () => {
       'exec',
       '--json',
       '--skip-git-repo-check',
-      ...permissionArgs(false),
+      ...permissionArgs(),
       '--config',
       'shell_environment_policy.inherit=all',
       '--config',
@@ -289,45 +238,7 @@ describe('Codex flow launch', () => {
       'resume',
       '019f0000-0000-7000-8000-000000000001',
       '--',
-      managedPrompt(
-        'follow up',
-        codexForwardableText(false),
-      ),
-    ])
-  })
-
-  it('maps editable Codex resume tasks to the same workspace edit profile', async () => {
-    const launch = await runCodex({
-      task: {
-        sessionId: '019f0000-0000-7000-8000-000000000001',
-        allowEdits: true,
-      },
-      prompt: 'follow up with edits',
-      root: '/repo',
-      cwd: '/repo',
-      env: {},
-    })
-
-    expect(launch.args).toEqual([
-      'exec',
-      '--json',
-      '--skip-git-repo-check',
-      ...permissionArgs(true),
-      '--config',
-      'shell_environment_policy.inherit=all',
-      '--config',
-      'shell_environment_policy.ignore_default_excludes=true',
-      '--config',
-      'shell_environment_policy.include_only=["PATH","LANDER_*"]',
-      '--cd',
-      '/repo',
-      'resume',
-      '019f0000-0000-7000-8000-000000000001',
-      '--',
-      managedPrompt(
-        'follow up with edits',
-        codexForwardableText(true),
-      ),
+      managedPrompt('follow up'),
     ])
   })
 
@@ -340,7 +251,6 @@ describe('Codex flow launch', () => {
     const launch = await runCodex({
       task: {
         sessionId: '019f0000-0000-7000-8000-000000000001',
-        allowEdits: true,
       },
       prompt: 'configured follow up',
       root: '/repo',
@@ -358,7 +268,7 @@ describe('Codex flow launch', () => {
       'model="gpt-5-codex"',
       '--config',
       'approval_policy="never"',
-      ...permissionArgs(true),
+      ...permissionArgs(),
       '--config',
       'shell_environment_policy.inherit=all',
       '--config',
@@ -370,10 +280,7 @@ describe('Codex flow launch', () => {
       'resume',
       '019f0000-0000-7000-8000-000000000001',
       '--',
-      managedPrompt(
-        'configured follow up',
-        codexForwardableText(true),
-      ),
+      managedPrompt('configured follow up'),
     ])
   })
 
@@ -384,9 +291,7 @@ describe('Codex flow launch', () => {
       configOverrides: ['model="gpt-5-codex"', 'approval_policy="never"'],
     }
     const launch = await runCodex({
-      task: {
-        allowEdits: true,
-      },
+      task: {},
       prompt: 'use configured codex',
       root: '/repo',
       cwd: '/repo',
@@ -403,7 +308,7 @@ describe('Codex flow launch', () => {
       'model="gpt-5-codex"',
       '--config',
       'approval_policy="never"',
-      ...permissionArgs(true),
+      ...permissionArgs(),
       '--config',
       'shell_environment_policy.inherit=all',
       '--config',
@@ -413,10 +318,7 @@ describe('Codex flow launch', () => {
       '--cd',
       '/repo',
       '--',
-      managedPrompt(
-        'use configured codex',
-        codexForwardableText(true),
-      ),
+      managedPrompt('use configured codex'),
     ])
   })
 
@@ -428,7 +330,7 @@ describe('Codex flow launch', () => {
   // rather than an accident of what the template happens to start with.
   it('terminates flag parsing before the prompt on a fresh exec', async () => {
     const launch = await runCodex({
-      task: { allowEdits: false },
+      task: {},
       prompt: '- bullet one\n- bullet two',
       root: '/repo',
       cwd: '/repo',
@@ -443,7 +345,6 @@ describe('Codex flow launch', () => {
     const launch = await runCodex({
       task: {
         sessionId: '019f0000-0000-7000-8000-000000000001',
-        allowEdits: false,
       },
       prompt: '--help me',
       root: '/repo',
@@ -461,7 +362,7 @@ describe('Codex flow launch', () => {
   // variadic form would otherwise swallow it.
   it('places image flags before the terminator on a fresh exec', async () => {
     const launch = await runCodex({
-      task: { allowEdits: false },
+      task: {},
       prompt: 'look at this',
       root: '/repo',
       cwd: '/repo',
@@ -495,7 +396,7 @@ describe('Codex flow launch', () => {
   })
 
   it('does not mint a session before Codex reports its thread', async () => {
-    const launch = await runCodex({ task: { allowEdits: false }, root: '/repo', cwd: '/repo' })
+    const launch = await runCodex({ task: {}, root: '/repo', cwd: '/repo' })
     expect(launch.events.filter((e) => e.kind === 'state-patch')).toEqual([])
   })
 

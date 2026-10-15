@@ -76,7 +76,7 @@ export function goldenInput(g: Golden): HostInput {
       agent: 'claude',
       project: 'proj',
       prompt: 'do the thing',
-      task: { allowEdits: false },
+      task: {},
       env: { LANDER_TASK: 'task-1', LANDER_PROJECT: 'proj' },
       idleTimeoutMs: 600_000,
       ...g.start,

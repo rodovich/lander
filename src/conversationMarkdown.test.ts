@@ -51,7 +51,6 @@ const task = (items: Item[], rides: Ride[]): TaskWithProject => ({
   title: 'Fix the parser',
   status: 'paced',
   createdAt: AT,
-  allowEdits: true,
   projectSlug: 'proj',
   items,
   rides,

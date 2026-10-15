@@ -46,20 +46,18 @@ export function shouldDeliver(
 
 // Fill the task prompt template's slots: {{id}} with the task's own id (constant
 // for the task's life, so it's safe in Claude's byte-stable --append-system-prompt)
-// and {{forwardable}} with the flow's account of what edit access covers under
-// its provider and what this task holds. The flow supplies that text because
-// both halves are provider facts: the reach of an edit grant follows the
-// provider's permission mechanism, and where the live grants can be stated
-// follows its prose channel.
+// and {{editAccess}} with the flow's account of what edit access covers under
+// its provider. The flow supplies that text because the reach of edit access
+// follows the provider's permission mechanism.
 export function fillTaskPrompt(
   taskPromptTemplate: string,
-  forwardable: string,
+  editAccess: string,
   id: string,
 ): string {
   // Replacer functions, so a `$&` or `$'` in the inserted prose stays literal.
   return taskPromptTemplate
     .replace('{{id}}', () => id)
-    .replace('{{forwardable}}', () => forwardable)
+    .replace('{{editAccess}}', () => editAccess)
 }
 
 // The prompt block a revived task's first turn carries: one sentence telling the
@@ -129,18 +127,5 @@ export function checkoutNote(checkout: string, root: string): string {
     `starting detached at whatever the project's main checkout (\`${root}\`) had ` +
     'checked out. Commit on a branch you create: lander removes this worktree ' +
     'when the task is landed or archived, and leaves branches alone.'
-  )
-}
-
-export function forwardableAccess(task: { allowEdits: boolean }): string {
-  if (task.allowEdits) {
-    return (
-      'You currently have permission for editing files, and can forward that ' +
-      'to a spawned task'
-    )
-  }
-  return (
-    'You currently have no edit permission, so a spawned task cannot be ' +
-    'granted it either'
   )
 }

@@ -97,13 +97,10 @@ describe.skipIf(!VERSION)(`codex contract (${VERSION})`, () => {
   // Codex ignores an unknown -c key unless --strict-config is passed, so a
   // renamed permission or env key would silently drop lander's sandbox scoping.
   // Rerun the argv lander builds, strictly.
-  it.each([
-    ['read-only', false],
-    ['edit', true],
-  ])("accepts lander's %s config overrides under --strict-config", async (_label, allowEdits) => {
+  it("accepts lander's config overrides under --strict-config", async () => {
     const root = scratchDir({ git: true })
     const { args } = await captureDriverTurn(flow, {
-      task: { allowEdits },
+      task: {},
       root,
       cwd: root,
       prompt: 'Reply with exactly: ok. Run no commands.',
@@ -125,20 +122,14 @@ describe.skipIf(!VERSION)(`codex contract (${VERSION})`, () => {
     expect(r.stderr).toMatch(/unknown configuration field/)
   })
 
-  // The sandbox profile the flow selects: read-only keeps the workspace
-  // unwritable; edit access opens it.
-  it.each([
-    ['read-only', false, false],
-    ['edit', true, true],
-  ])('a %s task %s write the workspace', async (_label, allowEdits, writes) => {
+  it('a task can write the workspace', async () => {
     const root = scratchDir({ git: true })
     await driveLive(flow, {
       root,
-      allowEdits,
       prompt:
         'Run exactly this shell command once and nothing else: touch contract-probe.txt ' +
         '— then reply with the command output or error.',
     })
-    expect(existsSync(path.join(root, 'contract-probe.txt'))).toBe(writes)
+    expect(existsSync(path.join(root, 'contract-probe.txt'))).toBe(true)
   })
 })

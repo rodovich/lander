@@ -492,13 +492,6 @@ async function watch(
       ].join('\n'),
       {
         title: `Repair CI for PR #${prNumber}`,
-        // Only forward edit access we actually hold. The server caps a spawned
-        // task's grants to the spawner's, and REJECTS the launch outright when
-        // it asks for more — so an unconditional `true` fails the whole turn
-        // for a read-only open-pr task rather than degrading. Found live: the
-        // dry-run walk died here with "spawning task lacks edit permission to
-        // pass on", which then surfaced as a platform retry ask.
-        edits: ctx.task.allowEdits,
       },
     )) as { id?: string }
     if (sibling?.id) ctx.state.set(['repairTask'], sibling.id)

@@ -16,7 +16,6 @@ const render = (rides: Ride[], over: Partial<Task> = {}) =>
           title: 'T',
           status: 'paced',
           createdAt: '2026-09-09T00:00:00.000Z',
-          allowEdits: false,
           items: [],
           rides,
           ...over,

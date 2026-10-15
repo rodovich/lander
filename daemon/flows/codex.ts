@@ -99,16 +99,16 @@ export function makeFlow({
       // --append-system-prompt), so this rides the user message — which means a
       // copy sent on one turn stays in that turn's message and replays on every
       // later one. Deliver it once per thread, and again only when the rendered
-      // text changes: the digest is content-addressed, so a template edit or a
-      // mid-task grant flip re-delivers the corrected text on the next turn
-      // without any separate staleness machinery.
+      // text changes: the digest is content-addressed, so a template edit
+      // re-delivers the corrected text on the next turn without any separate
+      // staleness machinery.
       //
       // The commit is deferred to after the read loop, gated on the turn having
       // produced output. See deliveryDigest/shouldDeliver for why that ordering
       // is the whole safety argument.
       const taskPrompt = fillTaskPrompt(
         taskPromptTemplate,
-        codexForwardableText(ctx.task.allowEdits),
+        CODEX_EDIT_ACCESS_TEXT,
         ctx.task.taskId,
       )
       // The checkout note rides with it, so a task adopted into a checkout gets
@@ -156,7 +156,7 @@ export function makeFlow({
       const args = buildCodexArgs(ctx, promptParts.join('\n\n'), sessionId, {
         profile,
         configOverrides,
-        gitDirs: ctx.task.allowEdits ? resolveGitDirs(ctx.task.cwd) : [],
+        gitDirs: resolveGitDirs(ctx.task.cwd),
       })
 
       const child = ctx.spawn('codex', args, {
@@ -304,27 +304,14 @@ export function makeFlow({
   }
 }
 
-// The reach of an edit grant under the permission profiles built below.
-const EDIT_REACH =
+// The template's {{editAccess}} slot: the reach of edit access under the
+// permission profile built below, and the allow rules that don't change it.
+export const CODEX_EDIT_ACCESS_TEXT =
   'Edit access covers creating, editing, and deleting files — through any ' +
   'tool or shell command, git included — within the project directory (or ' +
   "the task's own checkout, when it has one) and the scratch roots (`/tmp` " +
-  'and `$TMPDIR`). Every shell command runs inside the same sandbox, so ' +
-  'without edit access commands can read files but not change them.'
-
-// The template's {{forwardable}} slot. "As of this message", not "this turn":
-// a superseded copy of the template stays in the thread's append-only history,
-// so the wording must not assert a fact about whichever turn happens to be
-// reading it.
-export function codexForwardableText(allowEdits: boolean): string {
-  return (
-    `${EDIT_REACH} ` +
-    `As of this message, this task runs with the workspace-scoped ${
-      allowEdits ? 'edit' : 'read-only'
-    } permission profile. ` +
-    'Task allow rules are stored by Lander but do not affect Codex runs yet'
-  )
-}
+  'and `$TMPDIR`). Task allow rules are stored by Lander but do not affect ' +
+  'Codex runs yet'
 
 function buildCodexArgs(
   ctx: Ctx,
@@ -345,7 +332,6 @@ function buildCodexArgs(
     // The task's checkout is its whole workspace when it has one, matching
     // Claude, whose edit boundary is the dir it is spawned in.
     ...codexPermissionConfigOverrides(
-      ctx.task.allowEdits,
       ctx.task.checkout ?? ctx.task.root,
       gitDirs,
     ),
@@ -390,35 +376,23 @@ function buildCodexArgs(
   ]
 }
 
-// Edit access is a scoped permission profile, not a --sandbox mode: a synthesized
-// `lander-edit` / `lander-read-only` profile pins the writable workspace to the
-// resolved project root and spells out the .git rules.
+// Edit access is a synthesized permission profile rather than a --sandbox mode,
+// so the writable workspace can be pinned to the resolved project root and the
+// .git rules spelled out.
 function codexPermissionConfigOverrides(
-  allowEdits: boolean,
   projectRoot: string,
   gitDirs: string[],
 ): string[] {
-  const profileId = allowEdits ? 'lander-edit' : 'lander-read-only'
-  const baseProfile = allowEdits ? ':workspace' : ':read-only'
-  const filesystemRules = allowEdits
-    ? [
-        `${tomlString(':workspace_roots')}={${tomlEntry('.git', 'write')}}`,
-        ...gitDirs.map((dir) => tomlEntry(path.resolve(dir), 'write')),
-      ].join(',')
-    : undefined
+  const profileId = 'lander-edit'
+  const filesystemRules = [
+    `${tomlString(':workspace_roots')}={${tomlEntry('.git', 'write')}}`,
+    ...gitDirs.map((dir) => tomlEntry(path.resolve(dir), 'write')),
+  ].join(',')
   const profileValue = [
-    `description=${tomlString(
-      allowEdits
-        ? 'Lander workspace edit access'
-        : 'Lander workspace read-only access',
-    )}`,
-    `extends=${tomlString(baseProfile)}`,
-    ...(allowEdits
-      ? [
-          `workspace_roots={${tomlString(path.resolve(projectRoot))}=true}`,
-          `filesystem={${filesystemRules}}`,
-        ]
-      : []),
+    `description=${tomlString('Lander workspace edit access')}`,
+    `extends=${tomlString(':workspace')}`,
+    `workspace_roots={${tomlString(path.resolve(projectRoot))}=true}`,
+    `filesystem={${filesystemRules}}`,
     'network={enabled=true,allow_local_binding=true}',
   ].join(',')
 

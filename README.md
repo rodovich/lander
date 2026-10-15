@@ -55,7 +55,7 @@ Flat JSON files, one per task, no database. Tasks live under `./data/<normalized
 
 ### Configuring what tasks may run
 
-An edit-capable task can edit, create, and delete files within its project directory and the scratch roots (`/tmp` and `$TMPDIR`), but never `.git`, `.claude`, or paths outside those roots. Edit access is the only thing Lander itself grants.
+Every task can edit, create, and delete files within its project directory and the scratch roots (`/tmp` and `$TMPDIR`), but never `.git`, `.claude`, or paths outside those roots.
 
 Everything else — git, package managers, anything you'd run in a shell — follows the target project's own `.claude` settings plus any rules granted to the individual task; anything unlisted is denied. So to let tasks run git in a project, add a rule like `Bash(git:*)` to that project's `.claude/settings.json`. Granting a denied rule in **project** scope from the UI writes it to `.claude/settings.local.json`, which the Claude CLI reads on its own; **task** scope keeps it to the one task. Codex tasks are governed by a sandbox profile rather than rules, so a Codex task's stored rules don't affect its runs yet.
 
@@ -95,7 +95,7 @@ A task's agent can call back into lander to manage itself. When the daemon launc
 
 With no trigger flag, `send` delivers immediately, queued behind any in-flight turn. With `--date`/`--time`/`--await` (same semantics as `launch`/`ride`) it stashes the message on the recipient as a scheduled message that fires when its time arrives or every awaited task has landed, whichever comes first. `--notify` wakes the sending task once, with the recipient's closing message, when the turn that reads the message ends cleanly — the same courtesy `launch --notify` arms for a launcher. A task may only message tasks in its own project.
 
-`lander launch` reads the message from the argument, or from stdin if it's `-`, and accepts `--project <slug>`, `--title <title>`, `--date <when>` / `--time <minutes>` / `--await <ids>`, and `--edits`. `--title` names the task directly instead of using the auto-titler. Deferred launches are created paced and the scheduler wakes them when their trigger fires; a paced scheduled task also gets a **Launch** item in its row's kebab menu (see [Frontend](#frontend-src)) to run it early. A spawned task is read-only unless `--edits` is passed, and `--edits` is inherit-only: a child may be granted edit access only if the spawning task already has it. (Git isn't a Lander grant — it's governed by the project's `.claude` settings.) A human can later grant edits to a read-only task from the crossed-out-pencil menu in the task header. As a guard against a mistyped flag becoming work, `launch` (and `send`/`relaunch`) refuse a message that is a lone flag-shaped token like `--help` or `--titel`; pass such a string as content via `--message` or `-` (stdin).
+`lander launch` reads the message from the argument, or from stdin if it's `-`, and accepts `--project <slug>`, `--title <title>`, `--date <when>` / `--time <minutes>` / `--await <ids>`. `--title` names the task directly instead of using the auto-titler. Deferred launches are created paced and the scheduler wakes them when their trigger fires; a paced scheduled task also gets a **Launch** item in its row's kebab menu (see [Frontend](#frontend-src)) to run it early. As a guard against a mistyped flag becoming work, `launch` (and `send`/`relaunch`) refuse a message that is a lone flag-shaped token like `--help` or `--titel`; pass such a string as content via `--message` or `-` (stdin).
 
 `lander ride` takes the same `--date`/`--time`/`--await` flags (at least one required) to re-sleep a running task: it records a scheduled or awaiting event and, once its turn ends and the scheduler wakes it, notifies it with a generated message naming the trigger that fired: `Current date: <time>` for a time (matching the time `lander ride` printed when it scheduled the ride), `Tasks landed: <ids>` for an await. Only a time trigger carries a timestamp — for the others the moment is not the condition that was met. The UI shows the notification folded under a "received a notification" note rather than as the user's message. A task launched by hand from the UI, ahead of any trigger, resumes with the user's own "go ahead" instead; nothing may claim a condition that never fired. A message from the user clears a scheduled time and tells the woken turn so; a message from another task or a `--notify` leaves the ride scheduled, and every turn that starts with a ride scheduled is reminded of it in a `<ride-scheduled>` block. `lander ride --clear` drops the scheduled ride without touching status or rewriting history. The CLI is a zero-dependency Node script that talks to the local HTTP API, so the server stays the single source of truth; actual agent subprocesses are launched by the daemon, not by the CLI.
 
@@ -120,14 +120,9 @@ Attaching the same name twice yields two chips, not one: every blob is immutable
 Every request to the local API is unauthenticated by default, so the server distinguishes two **principals** before honoring any permission change, identifying the caller from request headers:
 
 - **The human** — the browser sends a shared UI secret (`X-Lander-UI-Token`). `dev.mjs` mints it once, persists it under `data/.ui-token` (gitignored, mode 0600), inlines it into the client as `VITE_LANDER_UI_TOKEN`, and passes it to the API as `LANDER_UI_TOKEN`. Each goes to the one process that needs it, never onto the shared environment the three processes inherit, and the daemon drops its own copy once it has read it — otherwise the value reaches every task's shell, where presenting it would resolve as the human (`server/secrets.ts`). This narrows the default blast radius rather than making the secret unobtainable: it is still a file a same-user task can read, still served to the browser by the Vite dev server, and still visible in a process's exec-time environment. The human may grant anything.
-- **A task** — the `lander` CLI sends its `LANDER_TOKEN` plus its task id/project (`X-Lander-Token`/`X-Lander-Task`/`X-Lander-Project`); the server matches the token against the task's stored secret. A task may only pass on permissions it already holds, and **cannot** change its own grants or add tool rules. Tokens are never returned over HTTP, so one task can't read another's to impersonate it.
+- **A task** — the `lander` CLI sends its `LANDER_TOKEN` plus its task id/project (`X-Lander-Token`/`X-Lander-Task`/`X-Lander-Project`); the server matches the token against the task's stored secret. A task **cannot** add tool rules, to itself or anyone else. Tokens are never returned over HTTP, so one task can't read another's to impersonate it.
 
-Concretely, the server enforces:
-
-- `POST /tasks` with `allowEdits` — the human may grant it; a task may grant it only if it holds edits itself (else `403`); an unidentified caller may not. The UI always launches human-started tasks with `allowEdits: true`.
-- `POST /tasks` with `allowEdits` **from an approved hook** (`ctx.launch`, authenticated by a per-fire credential rather than by a principal) — granted freely. There is no ceiling to place: a hook body runs with daemon privileges and can spawn a provider CLI with no sandbox at all, so restricting this route would constrain one path out of several to the same destination while reading like a control. Approval of the hook is the gate; nothing downstream of it is. What the route buys is that the result is durable and visible — a recorded grant, a transcript, a human who can reply — where a body's own child leaves none of that.
-- `PATCH /tasks/:id` of `allowEdits` — human only (a task `403`s, so it can't self-escalate). Status/title stay open so the CLI's `land`/`status` keep working.
-- `POST /tasks/:id/allow` — human only.
+Concretely, the server enforces that `POST /tasks/:id/allow` is human only.
 
 This is best-effort for a single-user local tool: a fully adversarial task running as the same user could still read `data/.ui-token` off disk. It blocks the realistic failure mode — an agent escalating itself or a child via the documented API — not a determined local attacker.
 
@@ -147,7 +142,7 @@ The server only **resolves** the script's path (`GET /api/:project/flows/:name`,
 | Method | Backed by |
 |--------|-----------|
 | `lander.inputs` | the `--key value` flags, as an object |
-| `await lander.launch(message, { project, title, date, time, await, edits })` | `POST /tasks`; returns the new task's id |
+| `await lander.launch(message, { project, title, date, time, await })` | `POST /tasks`; returns the new task's id |
 | `await lander.send(target, message, { date, time, await })` | message another task, by id |
 | `await lander.view(target)` | returns the **parsed task object** (`.status`, `.title`, `.messages`, …) — not text to re-parse |
 | `await lander.list({ status })` | the project's tasks as an array |
@@ -182,7 +177,7 @@ Each streamed turn renders its activity trace as steps. A `tool_use` step is a c
 
 When a finished turn had any confirmed denials, a muted **"N permissions blocked this turn"** line appears at the foot of the assistant message; clicking it opens a popup that lists each denied call as an editable `settings.json`-style rule (e.g. `Bash(npm run build)`) — click a rule to edit it, then grant the result in **task** or **project** scope from the row's kebab (for Codex, task scope saves the rule for parity and project scope is unsupported). A granted row shows a checkmark and the popup stays open for the turn's other denials; clicking outside or pressing Escape dismisses it.
 
-The task header carries a **rubber-stamp button** (beside the copy-id / read-only controls) — the always-available grant control. It opens the same rule-row UI with a single empty editable row, so a rule can be authored and granted proactively (task or project scope) without hunting through denied chips, over the same `/allow` endpoint.
+The task header carries a **rubber-stamp button** (beside the copy-id control) — the always-available grant control. It opens the same rule-row UI with a single empty editable row, so a rule can be authored and granted proactively (task or project scope) without hunting through denied chips, over the same `/allow` endpoint.
 
 ## Notable details
 

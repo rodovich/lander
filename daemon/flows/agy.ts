@@ -5,7 +5,6 @@ import {
   deliveryDigest,
   diffEdits,
   fillTaskPrompt,
-  forwardableAccess,
   fullToolInput,
   projectDocBlock,
   readThreadUsage,
@@ -195,19 +194,13 @@ export function makeFlow({
   return {
     meta,
     async onTurn(ctx: Ctx): Promise<TurnResult> {
-      if (!ctx.task.allowEdits) return {
-        exitCode: 1,
-        stderr: 'agy tasks require edit permission (--edits); Antigravity CLI has no headless mode that permits running the lander CLI while enforcing read-only access.',
-      }
-
       const known = ctx.state.get(['sessionId'])
       const sessionId = typeof known === 'string' && known ? known : undefined
       const taskPrompt = fillTaskPrompt(
         taskPromptTemplate,
         'Antigravity runs with --dangerously-skip-permissions. Edit access covers ' +
           'unrestricted file creation, editing, and deletion, including `.git` and ' +
-          'paths outside the workspace, and all shell commands. ' +
-          forwardableAccess(ctx.task),
+          'paths outside the workspace, and all shell commands',
         ctx.task.taskId,
       )
       const rendered = ctx.task.checkout

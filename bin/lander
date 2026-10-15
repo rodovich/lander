@@ -332,7 +332,7 @@ function resolveAwait(value, { self } = {}) {
 const isBareFlag = (s) => /^-{1,2}[A-Za-z][\w-]*$/.test(s)
 
 async function launchTask(rest) {
-  const o = { project: PROJECT, allowEdits: false, files: [] }
+  const o = { project: PROJECT, files: [] }
   const pos = []
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i]
@@ -345,7 +345,6 @@ async function launchTask(rest) {
     // --notify takes no target: the server arms it against the calling task, so
     // there is no id to mistype and no way to point a notification at a stranger.
     else if (a === '--notify') o.notify = true
-    else if (a === '--edits') o.allowEdits = true
     else if (a === '--flow') o.flow = rest[++i]
     // --key <name> <value> pairs accumulate into the flow's config. Values are
     // coerced at this boundary so a flow receives real booleans/numbers.
@@ -360,11 +359,6 @@ async function launchTask(rest) {
         o.files.push(rest[++i])
     else pos.push(a)
   }
-  // The server caps the requested --edits to what this (spawning) task holds,
-  // authenticating us by the caller headers `call` attaches; a task can't grant
-  // a child edit access it lacks. --edits covers file edits plus the filesystem
-  // Bash commands (rm/mv/cp/…) within the task's roots; git and every other Bash
-  // follow the project's normal .claude permissions, not a Lander grant.
   const explicitMessage = o.message != null // via --message; trusted verbatim
   o.message ??= pos.shift()
   const fromStdin = o.message === '-'
@@ -737,7 +731,6 @@ async function viewTask(args) {
   console.log(`${task.title}  [${task.status}]${task.archived ? ' (archived)' : ''}`)
   console.log(`id: ${task.id}${task.id === TASK ? '  ← this task' : ''}`)
   if (task.scheduledFor) console.log(`scheduled: ${task.scheduledFor}`)
-  console.log(`edits: ${task.allowEdits}`)
   const clip = (s) => (s.length > clipLen ? `${s.slice(0, clipLen)}…` : s)
   const items = task.items ?? []
   // Open asks first: what a wedged task is waiting on, so a sibling can answer
@@ -1066,7 +1059,6 @@ function makeLander(inputs) {
         title: opts.title,
         date: opts.date,
         time: opts.time,
-        allowEdits: !!opts.edits,
         // The driver flow for the new task, and its opaque config. Already
         // typed here (a flow author writes real values), so no coercion — that
         // is only needed at the argv boundary.
@@ -1310,7 +1302,7 @@ async function recordCwd() {
 const USAGE = {
   land: 'land [id…]',
   launch:
-    'launch <message|-> [--title <t>] [--project <slug>] [--date <when>|--time <min>] [--await <ids>] [--notify] [--edits] [--flow <name>] [--key <k> <v>]… [--attach <paths…>]',
+    'launch <message|-> [--title <t>] [--project <slug>] [--date <when>|--time <min>] [--await <ids>] [--notify] [--flow <name>] [--key <k> <v>]… [--attach <paths…>]',
   list: 'list [--status <s>] [--since <when>] [--until <when>] [--text <terms>] [--archived] [--json]',
   view: 'view <id> [--expand] [--messages <N|all>] [--clip <N|all>] [--json]',
   send: 'send <id> <message|-> [--date <when>|--time <min>] [--await <ids>] [--notify] [--attach <paths…>]',

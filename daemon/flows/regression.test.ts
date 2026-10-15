@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('node:os', async (original) => ({
   ...await original<typeof import('node:os')>(),
-  tmpdir: () => '/tmp/lander-test-scratch',
+  tmpdir: () => '/tmp',
 }))
 import { makeFlow as makeClaudeFlow } from './claude'
 import { makeFlow as makeCodexFlow } from './codex'
@@ -12,7 +12,7 @@ import type { HostEvent } from '../host-protocol'
 import { applyEvents } from './testTask'
 import { driveFlow, goldenInput, type Golden } from './testCtx'
 
-const TASK_PROMPT = 'Prompt: {{forwardable}}.'
+const TASK_PROMPT = 'Prompt: {{editAccess}}.'
 const LANDER_BIN = '/repo/bin/lander'
 // A stub snapshot, so the compare depends on neither the host's git tree nor the
 // clock. Both paths get the same one.

@@ -10,17 +10,17 @@ import {
   fillTaskPrompt,
 } from './task-management'
 
-const TEMPLATE = 'You are running inside a lander task. This task id is {{id}}. {{forwardable}}.'
+const TEMPLATE = 'You are running inside a lander task. This task id is {{id}}. {{editAccess}}.'
 
 describe('fillTaskPrompt', () => {
-  it('substitutes both {{id}} and {{forwardable}} and leaves no placeholder', () => {
-    const out = fillTaskPrompt(TEMPLATE, 'FWD', 'abc123')
+  it('substitutes both {{id}} and {{editAccess}} and leaves no placeholder', () => {
+    const out = fillTaskPrompt(TEMPLATE, 'EDIT', 'abc123')
     expect(out).toContain('This task id is abc123.')
-    expect(out).toContain('FWD.')
+    expect(out).toContain('EDIT.')
     expect(out).not.toContain('{{')
   })
 
-  it('inserts the forwardable text literally, `$` patterns included', () => {
+  it('inserts the edit-access text literally, `$` patterns included', () => {
     const out = fillTaskPrompt(TEMPLATE, "roots ($TMPDIR, $&, $')", 'abc123')
     expect(out).toContain("roots ($TMPDIR, $&, $').")
   })

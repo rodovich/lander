@@ -75,10 +75,10 @@ are declared rather than incidental (`grants` in the capability list above).
 
 Claude turns build `--allowedTools` from `Bash(lander:*)` (always) and the task's
 `allow` list (rules granted in **task** scope from the per-turn blocked-permissions
-summary). Edit access rides `--permission-mode acceptEdits` instead of the
-allowlist, plus `--add-dir` for the scratch roots (`/tmp` and `os.tmpdir()` — the
-same path on Linux, but distinct on macOS, where `os.tmpdir()` resolves `$TMPDIR`
-to a per-user `/var/folders/<hash>/T`).
+summary). Edit access, which every task has, rides `--permission-mode
+acceptEdits` instead of the allowlist, plus `--add-dir` for the scratch roots
+(`/tmp` and `os.tmpdir()` — the same path on Linux, but distinct on macOS, where
+`os.tmpdir()` resolves `$TMPDIR` to a per-user `/var/folders/<hash>/T`).
 
 Naming `Edit`/`Write` in `--allowedTools` is "explicit permission", which escapes
 the working-directory boundary — a granted `Write` can create `/tmp/anything`.
@@ -86,21 +86,18 @@ the working-directory boundary — a granted `Write` can create `/tmp/anything`.
 (`mkdir`/`touch`/`rm`/`rmdir`/`mv`/`cp`/`sed`) and `>` redirects only for paths
 under the cwd, the scratch roots, or the attachment `--add-dir` root, and never
 for protected paths (`.git`, `.claude`, shell rc files). So it both bounds edits
-and gives edit-capable tasks the delete access a bare `Edit`/`Write` grant can't
-express.
+and gives tasks the delete access a bare `Edit`/`Write` grant can't express.
 
 It widens nothing else: git and every other Bash command follow the project's
 normal `.claude` settings (`settings.json` / `settings.local.json`) plus per-task
 allow rules — anything unlisted is denied in headless mode. Project-scoped Claude
 grants land in `.claude/settings.local.json`, which the CLI reads on its own.
 
-Codex turns use named permission profiles: read-only tasks extend Codex's built-in
-read-only profile, while editable tasks extend its workspace profile and add write
-access to the workspace's `.git` path and resolved Git common directory. The
-editable profile otherwise preserves workspace-write behavior, including general
+Codex turns use a named permission profile that extends Codex's workspace profile
+and adds write access to the workspace's `.git` path and resolved Git common
+directory. It otherwise preserves workspace-write behavior, including general
 filesystem reads and writes to `/tmp` and `$TMPDIR`. Task allow rules are stored
-by Lander but do not affect Codex runs yet, and Codex has no separate git gate
-inside an editable task.
+by Lander but do not affect Codex runs yet, and Codex has no separate git gate.
 
 ## Durable data migrations
 

@@ -22,7 +22,6 @@ const withRides = (rides: Ride[]): Task =>
     title: 'T',
     status: 'paced',
     createdAt: '2026-09-09T00:00:00.000Z',
-    allowEdits: false,
     items: [],
     rides,
   }) as Task

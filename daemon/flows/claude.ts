@@ -9,7 +9,6 @@ import {
   addUsage,
   checkoutNote,
   fillTaskPrompt,
-  forwardableAccess,
   gitContext as realGitContext,
   projectDocBlock,
   reduceStreamLine,
@@ -54,18 +53,15 @@ const GIT_TIPS = [
   '- Commit or push only when the user asks. If on the default branch, branch first.',
 ].join('\n')
 
-// The template's {{forwardable}} slot, static so the appended system prompt
-// stays byte-stable across turns. The reach it states follows from the flags
-// buildClaudeArgs passes; the live grants ride the task-context block (see
-// buildContextBlock).
-const FORWARDABLE_TEXT =
+// The template's {{editAccess}} slot. The reach it states follows from the flags
+// buildClaudeArgs passes.
+const EDIT_ACCESS_TEXT =
   'Edit access covers editing, creating, and deleting files (including via ' +
   '`rm`/`mv`/`cp` and `>` redirects) within the task\'s working directory and ' +
   'the scratch roots (`/tmp` and `$TMPDIR`), but never `.git`, `.claude`, or ' +
   'paths outside those roots. Git and every other shell command — `npm`, ' +
   '`node`, `python3` and the rest — follow the project\'s normal permission ' +
-  'settings, not a Lander grant. Your own current grants — which cap what you ' +
-  'can forward — are stated in the task-context block in the conversation'
+  'settings, not a Lander grant'
 
 export type ClaudeFlowDeps = {
   landerBin: string
@@ -117,7 +113,7 @@ export function makeFlow({
       // the baseline when there is no session to resume, but flowState rides in
       // ungated and a replayed patch can outlive a seal — so a stale baseline
       // must never be able to suppress a new session's context.
-      const sendContext = !resuming || block !== baseline
+      const sendContext = block !== '' && (!resuming || block !== baseline)
       if (sendContext) ctx.state.set(['turnContext'], block)
 
       // ── Prompt ───────────────────────────────────────────────────────────
@@ -343,12 +339,12 @@ export function anchorFileRule(rule: string): string {
 
 // The dynamic per-turn context block. Dynamic facts belong at the cache-friendly
 // end of the conversation, not in the system prompt where any change invalidates
-// the whole cached prefix.
+// the whole cached prefix. Empty when there is no state to report.
 function buildContextBlock(
   ctx: Ctx,
   gitContext: (cwd: string) => string | undefined,
 ): string {
-  const parts = [`${forwardableAccess(ctx.task)}.`]
+  const parts: string[] = []
   // The rules granted to this task, which ride --allowedTools. Listed as state
   // rather than as a "newly granted" note, so a grant surfaces exactly once — by
   // changing the block, which the baseline compare then re-sends — and a
@@ -375,6 +371,7 @@ function buildContextBlock(
     (!ctx.task.checkout || isInside(ctx.task.checkout, ctx.task.recordedCwd))
   )
     parts.push(manualCdHint(ctx.task.root, ctx.task.recordedCwd))
+  if (!parts.length) return ''
   return [
     '<task-context>',
     'Task state as of this message — background context from lander, not ' +
@@ -423,25 +420,15 @@ function buildClaudeArgs(
     ctx.turn.filesDir && ctx.turn.filesDirExists
       ? ['--add-dir', ctx.turn.filesDir]
       : []
-  // Edit access rides on --permission-mode acceptEdits rather than an
-  // --allowedTools grant. An Edit/Write allow rule is "explicit permission", so
-  // it escapes the working-directory boundary entirely (a granted Write can
-  // create /tmp/anything); acceptEdits instead auto-approves file edits and the
-  // filesystem Bash commands (mkdir/touch/rm/rmdir/mv/cp/sed) only for paths in
-  // the cwd or an --add-dir root, and never for protected paths (.git, .claude).
-  const editModeArgs = ctx.task.allowEdits
-    ? ['--permission-mode', 'acceptEdits']
-    : []
   // Shared scratch roots. Agents reach for /tmp constantly for probe scripts and
   // diff dumps; without it they burn turns getting blocked and then route around
   // the block anyway. Grant BOTH the literal /tmp and os.tmpdir() — on macOS
   // those differ, so granting only one leaves the other blocked. Deduped for
   // Linux, where they're the same path, and existence-filtered because --add-dir
-  // rejects a non-directory. In acceptEdits every --add-dir root is writable, so
-  // gate on edit access.
-  const scratchRoots = ctx.task.allowEdits
-    ? [...new Set(['/tmp', tmpdir()])].filter((dir) => existsSync(dir))
-    : []
+  // rejects a non-directory.
+  const scratchRoots = [...new Set(['/tmp', tmpdir()])].filter((dir) =>
+    existsSync(dir),
+  )
   const tmpDirArgs = scratchRoots.flatMap((dir) => ['--add-dir', dir])
   const allowed: string[] = ['Bash(lander:*)']
   if (ctx.task.allow?.length) allowed.push(...ctx.task.allow)
@@ -462,7 +449,14 @@ function buildClaudeArgs(
   })
 
   return [
-    ...editModeArgs,
+    // Edit access rides on --permission-mode acceptEdits rather than an
+    // --allowedTools grant. An Edit/Write allow rule is "explicit permission", so
+    // it escapes the working-directory boundary entirely (a granted Write can
+    // create /tmp/anything); acceptEdits instead auto-approves file edits and the
+    // filesystem Bash commands (mkdir/touch/rm/rmdir/mv/cp/sed) only for paths in
+    // the cwd or an --add-dir root, and never for protected paths (.git, .claude).
+    '--permission-mode',
+    'acceptEdits',
     '--allowedTools',
     ...allowed,
     ...filesDirArgs,
@@ -478,7 +472,7 @@ function buildClaudeArgs(
     // that changes it — busts this conversation's prompt cache, which is why
     // nothing else in this string is allowed to vary per turn.
     [
-      fillTaskPrompt(taskPromptTemplate, FORWARDABLE_TEXT, ctx.task.taskId),
+      fillTaskPrompt(taskPromptTemplate, EDIT_ACCESS_TEXT, ctx.task.taskId),
       GIT_TIPS,
       ...(ctx.task.checkout ? [checkoutNote(ctx.task.checkout, ctx.task.root)] : []),
       ...(projectDoc ? [projectDocBlock(projectDoc)] : []),

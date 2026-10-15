@@ -185,16 +185,6 @@ export const CODEX_GOLDENS: Golden[] = [
     },
   },
   {
-    name: 'edit access synthesizes the scoped workspace profile',
-    chunks: [[threadStarted(), turnStarted(), agentMessage('ok')]],
-    start: { ...codexStart, task: { allowEdits: true } },
-  },
-  {
-    name: 'read-only access synthesizes the read-only profile',
-    chunks: [[threadStarted(), turnStarted(), agentMessage('ok')]],
-    start: { ...codexStart, task: { allowEdits: false } },
-  },
-  {
     name: 'recorded cwd becomes the launch dir',
     chunks: [[threadStarted(), turnStarted(), agentMessage('ok')]],
     start: { ...codexStart, recordedCwd: '/repo/sub' },

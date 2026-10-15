@@ -44,7 +44,6 @@ const task = (
   title: 'Untitled',
   status: 'paced',
   createdAt: AT,
-  allowEdits: true,
   projectSlug: 'proj',
   items,
   rides,

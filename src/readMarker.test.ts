@@ -15,7 +15,6 @@ const task = (over: Partial<Task> = {}): Task => ({
   title: 'X',
   status: 'paced',
   createdAt: t(0),
-  allowEdits: false,
   items: [],
   rides: [],
   ...over,

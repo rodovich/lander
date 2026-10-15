@@ -55,7 +55,6 @@ beforeAll(async () => {
           id: 'child-1',
           title: 'Child',
           status: 'paced',
-          allowEdits: false,
           items: [],
           conversation,
         }),

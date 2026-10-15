@@ -12,12 +12,16 @@ exports[`claude transcript regressions > a task checkout is the launch dir, snap
       "args": [
         "--session-id",
         "minted-session-id",
+        "--permission-mode",
+        "acceptEdits",
         "--allowedTools",
         "Bash(lander:*)",
+        "--add-dir",
+        "/tmp",
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -35,8 +39,6 @@ This task works in a git worktree lander created for it at \`/repo/.worktrees/ta
 <task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
 
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
 GIT-SNAPSHOT-STUB
 </task-context>",
       ],
@@ -50,14 +52,11 @@ GIT-SNAPSHOT-STUB
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
       "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -145,12 +144,16 @@ exports[`claude transcript regressions > a turn with a ride still scheduled is r
       "args": [
         "--session-id",
         "minted-session-id",
+        "--permission-mode",
+        "acceptEdits",
         "--allowedTools",
         "Bash(lander:*)",
+        "--add-dir",
+        "/tmp",
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -170,8 +173,6 @@ You have a ride scheduled for 3:00:00 PM or when sibling-1 lands, whichever come
 <task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
 
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
 GIT-SNAPSHOT-STUB
 </task-context>",
       ],
@@ -185,14 +186,11 @@ GIT-SNAPSHOT-STUB
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
       "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -280,12 +278,16 @@ exports[`claude transcript regressions > agent stderr is aggregated into the don
       "args": [
         "--session-id",
         "minted-session-id",
+        "--permission-mode",
+        "acceptEdits",
         "--allowedTools",
         "Bash(lander:*)",
+        "--add-dir",
+        "/tmp",
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -301,8 +303,6 @@ exports[`claude transcript regressions > agent stderr is aggregated into the don
 <task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
 
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
 GIT-SNAPSHOT-STUB
 </task-context>",
       ],
@@ -316,14 +316,11 @@ GIT-SNAPSHOT-STUB
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
       "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -412,12 +409,16 @@ exports[`claude transcript regressions > an API failure leads the done stderr wi
       "args": [
         "--session-id",
         "minted-session-id",
+        "--permission-mode",
+        "acceptEdits",
         "--allowedTools",
         "Bash(lander:*)",
+        "--add-dir",
+        "/tmp",
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -433,8 +434,6 @@ exports[`claude transcript regressions > an API failure leads the done stderr wi
 <task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
 
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
 GIT-SNAPSHOT-STUB
 </task-context>",
       ],
@@ -448,14 +447,11 @@ GIT-SNAPSHOT-STUB
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
       "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -592,14 +588,18 @@ exports[`claude transcript regressions > attachment manifest rides the prompt wi
       "args": [
         "--session-id",
         "minted-session-id",
+        "--permission-mode",
+        "acceptEdits",
         "--allowedTools",
         "Bash(lander:*)",
+        "--add-dir",
+        "/tmp",
         "--add-dir",
         "/tmp",
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -619,8 +619,6 @@ shot.png, notes.txt
 <task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
 
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
 GIT-SNAPSHOT-STUB
 </task-context>",
       ],
@@ -635,14 +633,11 @@ GIT-SNAPSHOT-STUB
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
       "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -730,12 +725,16 @@ exports[`claude transcript regressions > blocked call via permission_denials 1`]
       "args": [
         "--session-id",
         "minted-session-id",
+        "--permission-mode",
+        "acceptEdits",
         "--allowedTools",
         "Bash(lander:*)",
+        "--add-dir",
+        "/tmp",
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -751,8 +750,6 @@ exports[`claude transcript regressions > blocked call via permission_denials 1`]
 <task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
 
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
 GIT-SNAPSHOT-STUB
 </task-context>",
       ],
@@ -766,14 +763,11 @@ GIT-SNAPSHOT-STUB
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
       "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -884,7 +878,7 @@ GIT-SNAPSHOT-STUB
 }
 `;
 
-exports[`claude transcript regressions > edit access adds acceptEdits and scratch roots 1`] = `
+exports[`claude transcript regressions > edit and write produce diff hunks 1`] = `
 {
   "done": {
     "exitCode": 0,
@@ -905,7 +899,7 @@ exports[`claude transcript regressions > edit access adds acceptEdits and scratc
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -921,8 +915,6 @@ exports[`claude transcript regressions > edit access adds acceptEdits and scratc
 <task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
 
-You currently have permission for editing files, and can forward that to a spawned task.
-
 GIT-SNAPSHOT-STUB
 </task-context>",
       ],
@@ -936,145 +928,11 @@ GIT-SNAPSHOT-STUB
     },
   ],
   "task": {
-    "allowEdits": true,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
       "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have permission for editing files, and can forward that to a spawned task.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
-    },
-    "flowStateRev": 2,
-    "hookFireSeq": 1,
-    "id": "task-1",
-    "items": [
-      {
-        "at": "2026-01-01T00:00:00.000Z",
-        "groupId": "group:ride-1:0",
-        "id": "itm-mjuohs00-0",
-        "kind": "message",
-        "rideId": "ride-1",
-        "role": "flow",
-        "text": "all done",
-      },
-    ],
-    "pendingHooks": [
-      {
-        "at": "2026-01-01T00:00:00.000Z",
-        "by": "agent",
-        "id": "fire-1-mjuohs00",
-        "outcome": "done",
-        "rideId": "ride-1",
-        "trigger": "ride-ended",
-      },
-    ],
-    "rides": [
-      {
-        "endedAt": "2026-01-01T00:00:00.000Z",
-        "id": "ride-1",
-        "outcome": "done",
-        "startedAt": "2026-01-01T00:00:00.000Z",
-      },
-    ],
-    "shape": 2,
-    "status": "riding",
-    "title": "Parity task",
-    "updatedAt": "2026-01-01T00:00:00.000Z",
-  },
-  "updates": [
-    {
-      "blockedIds": [],
-      "committed": true,
-      "drivingModel": "claude-opus-4-8",
-      "finalText": "ok",
-      "kind": "update",
-      "rateLimitResetsAt": undefined,
-      "steps": [
-        {
-          "createdAt": "2026-01-01T00:00:00.000Z",
-          "inferenceId": "group:ride-1:0",
-          "kind": "text",
-          "text": "ok",
-        },
-      ],
-      "usage": undefined,
-      "usageChanged": false,
-    },
-    {
-      "blockedIds": [],
-      "committed": true,
-      "drivingModel": "claude-opus-4-8",
-      "finalText": "all done",
-      "kind": "update",
-      "rateLimitResetsAt": undefined,
-      "steps": [],
-      "usage": undefined,
-      "usageChanged": false,
-    },
-  ],
-}
-`;
-
-exports[`claude transcript regressions > edit and write produce diff hunks 1`] = `
-{
-  "done": {
-    "exitCode": 0,
-    "kind": "done",
-    "stderr": "",
-  },
-  "launch": [
-    {
-      "args": [
-        "--session-id",
-        "minted-session-id",
-        "--allowedTools",
-        "Bash(lander:*)",
-        "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
-        "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
-
-# Git
-- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
-- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "-p",
-        "--",
-        "do the thing
-
-<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
-      ],
-      "command": "claude",
-      "cwd": "/repo",
-      "envDelta": {
-        "LANDER_PROJECT": "proj",
-        "LANDER_RUN": "ride-1",
-        "LANDER_TASK": "task-1",
-      },
-    },
-  ],
-  "task": {
-    "allowEdits": false,
-    "createdAt": "2026-01-01T00:00:00.000Z",
-    "flowState": {
-      "sessionId": "minted-session-id",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -1238,12 +1096,16 @@ exports[`claude transcript regressions > errored result event carries no in-stre
       "args": [
         "--session-id",
         "minted-session-id",
+        "--permission-mode",
+        "acceptEdits",
         "--allowedTools",
         "Bash(lander:*)",
+        "--add-dir",
+        "/tmp",
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -1259,8 +1121,6 @@ exports[`claude transcript regressions > errored result event carries no in-stre
 <task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
 
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
 GIT-SNAPSHOT-STUB
 </task-context>",
       ],
@@ -1274,14 +1134,11 @@ GIT-SNAPSHOT-STUB
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
       "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -1358,12 +1215,16 @@ exports[`claude transcript regressions > legacy top-level session resumes withou
       "args": [
         "--resume",
         "sess-legacy-only",
+        "--permission-mode",
+        "acceptEdits",
         "--allowedTools",
         "Bash(lander:*)",
+        "--add-dir",
+        "/tmp",
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -1379,8 +1240,6 @@ exports[`claude transcript regressions > legacy top-level session resumes withou
 <task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
 
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
 GIT-SNAPSHOT-STUB
 </task-context>",
       ],
@@ -1394,13 +1253,10 @@ GIT-SNAPSHOT-STUB
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -1489,12 +1345,16 @@ exports[`claude transcript regressions > manual cd hint when the recorded cwd di
       "args": [
         "--session-id",
         "minted-session-id",
+        "--permission-mode",
+        "acceptEdits",
         "--allowedTools",
         "Bash(lander:*)",
+        "--add-dir",
+        "/tmp",
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -1509,8 +1369,6 @@ exports[`claude transcript regressions > manual cd hint when the recorded cwd di
 
 <task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 
@@ -1527,14 +1385,11 @@ Note: your previous turn ended in sub/dir. Depending how you moved there, that l
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
       "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 
@@ -1612,7 +1467,7 @@ Note: your previous turn ended in sub/dir. Depending how you moved there, that l
 }
 `;
 
-exports[`claude transcript regressions > no edit access omits acceptEdits and scratch roots 1`] = `
+exports[`claude transcript regressions > nonexistent filesDir still sets the env var but adds no files --add-dir 1`] = `
 {
   "done": {
     "exitCode": 0,
@@ -1624,12 +1479,16 @@ exports[`claude transcript regressions > no edit access omits acceptEdits and sc
       "args": [
         "--session-id",
         "minted-session-id",
+        "--permission-mode",
+        "acceptEdits",
         "--allowedTools",
         "Bash(lander:*)",
+        "--add-dir",
+        "/tmp",
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -1644,139 +1503,6 @@ exports[`claude transcript regressions > no edit access omits acceptEdits and sc
 
 <task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
-      ],
-      "command": "claude",
-      "cwd": "/repo",
-      "envDelta": {
-        "LANDER_PROJECT": "proj",
-        "LANDER_RUN": "ride-1",
-        "LANDER_TASK": "task-1",
-      },
-    },
-  ],
-  "task": {
-    "allowEdits": false,
-    "createdAt": "2026-01-01T00:00:00.000Z",
-    "flowState": {
-      "sessionId": "minted-session-id",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
-    },
-    "flowStateRev": 2,
-    "hookFireSeq": 1,
-    "id": "task-1",
-    "items": [
-      {
-        "at": "2026-01-01T00:00:00.000Z",
-        "groupId": "group:ride-1:0",
-        "id": "itm-mjuohs00-0",
-        "kind": "message",
-        "rideId": "ride-1",
-        "role": "flow",
-        "text": "all done",
-      },
-    ],
-    "pendingHooks": [
-      {
-        "at": "2026-01-01T00:00:00.000Z",
-        "by": "agent",
-        "id": "fire-1-mjuohs00",
-        "outcome": "done",
-        "rideId": "ride-1",
-        "trigger": "ride-ended",
-      },
-    ],
-    "rides": [
-      {
-        "endedAt": "2026-01-01T00:00:00.000Z",
-        "id": "ride-1",
-        "outcome": "done",
-        "startedAt": "2026-01-01T00:00:00.000Z",
-      },
-    ],
-    "shape": 2,
-    "status": "riding",
-    "title": "Parity task",
-    "updatedAt": "2026-01-01T00:00:00.000Z",
-  },
-  "updates": [
-    {
-      "blockedIds": [],
-      "committed": true,
-      "drivingModel": "claude-opus-4-8",
-      "finalText": "ok",
-      "kind": "update",
-      "rateLimitResetsAt": undefined,
-      "steps": [
-        {
-          "createdAt": "2026-01-01T00:00:00.000Z",
-          "inferenceId": "group:ride-1:0",
-          "kind": "text",
-          "text": "ok",
-        },
-      ],
-      "usage": undefined,
-      "usageChanged": false,
-    },
-    {
-      "blockedIds": [],
-      "committed": true,
-      "drivingModel": "claude-opus-4-8",
-      "finalText": "all done",
-      "kind": "update",
-      "rateLimitResetsAt": undefined,
-      "steps": [],
-      "usage": undefined,
-      "usageChanged": false,
-    },
-  ],
-}
-`;
-
-exports[`claude transcript regressions > nonexistent filesDir still sets the env var but adds no --add-dir 1`] = `
-{
-  "done": {
-    "exitCode": 0,
-    "kind": "done",
-    "stderr": "",
-  },
-  "launch": [
-    {
-      "args": [
-        "--session-id",
-        "minted-session-id",
-        "--allowedTools",
-        "Bash(lander:*)",
-        "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
-        "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
-
-# Git
-- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
-- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "-p",
-        "--",
-        "do the thing
-
-<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -1792,14 +1518,11 @@ GIT-SNAPSHOT-STUB
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
       "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -1887,12 +1610,16 @@ exports[`claude transcript regressions > parallel batch in one inference 1`] = `
       "args": [
         "--session-id",
         "minted-session-id",
+        "--permission-mode",
+        "acceptEdits",
         "--allowedTools",
         "Bash(lander:*)",
+        "--add-dir",
+        "/tmp",
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -1908,8 +1635,6 @@ exports[`claude transcript regressions > parallel batch in one inference 1`] = `
 <task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
 
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
 GIT-SNAPSHOT-STUB
 </task-context>",
       ],
@@ -1923,14 +1648,11 @@ GIT-SNAPSHOT-STUB
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
       "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -2079,12 +1801,16 @@ exports[`claude transcript regressions > plain text reply 1`] = `
       "args": [
         "--session-id",
         "minted-session-id",
+        "--permission-mode",
+        "acceptEdits",
         "--allowedTools",
         "Bash(lander:*)",
+        "--add-dir",
+        "/tmp",
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -2100,8 +1826,6 @@ exports[`claude transcript regressions > plain text reply 1`] = `
 <task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
 
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
 GIT-SNAPSHOT-STUB
 </task-context>",
       ],
@@ -2115,14 +1839,11 @@ GIT-SNAPSHOT-STUB
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
       "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -2210,12 +1931,16 @@ exports[`claude transcript regressions > rejecting rate limit event 1`] = `
       "args": [
         "--session-id",
         "minted-session-id",
+        "--permission-mode",
+        "acceptEdits",
         "--allowedTools",
         "Bash(lander:*)",
+        "--add-dir",
+        "/tmp",
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -2231,8 +1956,6 @@ exports[`claude transcript regressions > rejecting rate limit event 1`] = `
 <task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
 
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
 GIT-SNAPSHOT-STUB
 </task-context>",
       ],
@@ -2246,14 +1969,11 @@ GIT-SNAPSHOT-STUB
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
       "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -2378,12 +2098,16 @@ exports[`claude transcript regressions > resume of an existing session 1`] = `
       "args": [
         "--resume",
         "sess-existing",
+        "--permission-mode",
+        "acceptEdits",
         "--allowedTools",
         "Bash(lander:*)",
+        "--add-dir",
+        "/tmp",
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -2399,8 +2123,6 @@ exports[`claude transcript regressions > resume of an existing session 1`] = `
 <task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
 
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
 GIT-SNAPSHOT-STUB
 </task-context>",
       ],
@@ -2414,14 +2136,11 @@ GIT-SNAPSHOT-STUB
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "sess-existing",
       "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -2510,12 +2229,16 @@ exports[`claude transcript regressions > revival notice names a cleared schedule
       "args": [
         "--session-id",
         "minted-session-id",
+        "--permission-mode",
+        "acceptEdits",
         "--allowedTools",
         "Bash(lander:*)",
+        "--add-dir",
+        "/tmp",
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -2535,8 +2258,6 @@ You were waiting until 3:00:00 PM when this message arrived; the message changed
 <task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
 
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
 GIT-SNAPSHOT-STUB
 </task-context>",
       ],
@@ -2550,14 +2271,11 @@ GIT-SNAPSHOT-STUB
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
       "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -2645,12 +2363,16 @@ exports[`claude transcript regressions > revival notice rides the prompt of the 
       "args": [
         "--session-id",
         "minted-session-id",
+        "--permission-mode",
+        "acceptEdits",
         "--allowedTools",
         "Bash(lander:*)",
+        "--add-dir",
+        "/tmp",
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -2670,8 +2392,6 @@ You were wedged when this message arrived; the message changed your status to ri
 <task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
 
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
 GIT-SNAPSHOT-STUB
 </task-context>",
       ],
@@ -2685,14 +2405,11 @@ GIT-SNAPSHOT-STUB
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
       "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -2780,12 +2497,16 @@ exports[`claude transcript regressions > second ride seeded with a nonzero flowS
       "args": [
         "--session-id",
         "minted-session-id",
+        "--permission-mode",
+        "acceptEdits",
         "--allowedTools",
         "Bash(lander:*)",
+        "--add-dir",
+        "/tmp",
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -2801,8 +2522,6 @@ exports[`claude transcript regressions > second ride seeded with a nonzero flowS
 <task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
 
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
 GIT-SNAPSHOT-STUB
 </task-context>",
       ],
@@ -2816,15 +2535,12 @@ GIT-SNAPSHOT-STUB
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "phase": "reviewing",
       "sessionId": "minted-session-id",
       "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -2912,12 +2628,16 @@ exports[`claude transcript regressions > single tool call and result in one chun
       "args": [
         "--session-id",
         "minted-session-id",
+        "--permission-mode",
+        "acceptEdits",
         "--allowedTools",
         "Bash(lander:*)",
+        "--add-dir",
+        "/tmp",
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -2933,8 +2653,6 @@ exports[`claude transcript regressions > single tool call and result in one chun
 <task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
 
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
 GIT-SNAPSHOT-STUB
 </task-context>",
       ],
@@ -2948,14 +2666,11 @@ GIT-SNAPSHOT-STUB
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
       "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -3074,12 +2789,16 @@ exports[`claude transcript regressions > subagent report closes its trace 1`] = 
       "args": [
         "--session-id",
         "minted-session-id",
+        "--permission-mode",
+        "acceptEdits",
         "--allowedTools",
         "Bash(lander:*)",
+        "--add-dir",
+        "/tmp",
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -3095,8 +2814,6 @@ exports[`claude transcript regressions > subagent report closes its trace 1`] = 
 <task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
 
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
 GIT-SNAPSHOT-STUB
 </task-context>",
       ],
@@ -3110,14 +2827,11 @@ GIT-SNAPSHOT-STUB
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
       "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -3299,12 +3013,16 @@ exports[`claude transcript regressions > subagent trace with sub-subagent nestin
       "args": [
         "--session-id",
         "minted-session-id",
+        "--permission-mode",
+        "acceptEdits",
         "--allowedTools",
         "Bash(lander:*)",
+        "--add-dir",
+        "/tmp",
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -3320,8 +3038,6 @@ exports[`claude transcript regressions > subagent trace with sub-subagent nestin
 <task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
 
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
 GIT-SNAPSHOT-STUB
 </task-context>",
       ],
@@ -3335,14 +3051,11 @@ GIT-SNAPSHOT-STUB
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
       "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -3511,14 +3224,18 @@ exports[`claude transcript regressions > task allow rules extend allowedTools 1`
       "args": [
         "--session-id",
         "minted-session-id",
+        "--permission-mode",
+        "acceptEdits",
         "--allowedTools",
         "Bash(lander:*)",
         "Bash(npm test)",
         "Bash(npm run build)",
+        "--add-dir",
+        "/tmp",
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -3533,8 +3250,6 @@ exports[`claude transcript regressions > task allow rules extend allowedTools 1`
 
 <task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 Tool permissions granted to this task (beyond the defaults): \`Bash(npm test)\`, \`Bash(npm run build)\`
 
@@ -3551,14 +3266,11 @@ GIT-SNAPSHOT-STUB
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
       "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 Tool permissions granted to this task (beyond the defaults): \`Bash(npm test)\`, \`Bash(npm run build)\`
 
@@ -3648,12 +3360,16 @@ exports[`claude transcript regressions > unchanged turn context is not re-sent 1
       "args": [
         "--resume",
         "sess-existing",
+        "--permission-mode",
+        "acceptEdits",
         "--allowedTools",
         "Bash(lander:*)",
+        "--add-dir",
+        "/tmp",
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -3676,14 +3392,11 @@ exports[`claude transcript regressions > unchanged turn context is not re-sent 1
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "sess-existing",
       "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -3725,8 +3438,6 @@ GIT-SNAPSHOT-STUB
     "title": "Parity task",
     "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -3778,12 +3489,16 @@ exports[`claude transcript regressions > usage across inferences with cache miss
       "args": [
         "--session-id",
         "minted-session-id",
+        "--permission-mode",
+        "acceptEdits",
         "--allowedTools",
         "Bash(lander:*)",
+        "--add-dir",
+        "/tmp",
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -3799,8 +3514,6 @@ exports[`claude transcript regressions > usage across inferences with cache miss
 <task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
 
-You currently have no edit permission, so a spawned task cannot be granted it either.
-
 GIT-SNAPSHOT-STUB
 </task-context>",
       ],
@@ -3814,7 +3527,6 @@ GIT-SNAPSHOT-STUB
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
@@ -3824,8 +3536,6 @@ GIT-SNAPSHOT-STUB
       },
       "turnContext": "<task-context>
 Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-You currently have no edit permission, so a spawned task cannot be granted it either.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -3993,9 +3703,9 @@ exports[`codex transcript regressions > a turn with a ride still scheduled is re
         "--json",
         "--skip-git-repo-check",
         "--config",
-        "default_permissions="lander-read-only"",
+        "default_permissions="lander-edit"",
         "--config",
-        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "permissions.lander-edit={description="Lander workspace edit access",extends=":workspace",workspace_roots={"/repo"=true},filesystem={":workspace_roots"={".git"="write"},"/repo/.git"="write"},network={enabled=true,allow_local_binding=true}}",
         "--config",
         "shell_environment_policy.inherit=all",
         "--config",
@@ -4005,7 +3715,7 @@ exports[`codex transcript regressions > a turn with a ride still scheduled is re
         "--cd",
         "/repo",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Every shell command runs inside the same sandbox, so without edit access commands can read files but not change them. As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
 
 do the thing
 
@@ -4023,11 +3733,10 @@ You have a ride scheduled for 3:00:00 PM. It stays scheduled unless you clear it
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-1",
-      "taskPrompt": "sha256:5a01add26e4f75f2c952a8dadc814e897904dedd0de5bbc887dd980d9b78f2bf",
+      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -4101,9 +3810,9 @@ exports[`codex transcript regressions > agent message reply 1`] = `
         "--json",
         "--skip-git-repo-check",
         "--config",
-        "default_permissions="lander-read-only"",
+        "default_permissions="lander-edit"",
         "--config",
-        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "permissions.lander-edit={description="Lander workspace edit access",extends=":workspace",workspace_roots={"/repo"=true},filesystem={":workspace_roots"={".git"="write"},"/repo/.git"="write"},network={enabled=true,allow_local_binding=true}}",
         "--config",
         "shell_environment_policy.inherit=all",
         "--config",
@@ -4113,7 +3822,7 @@ exports[`codex transcript regressions > agent message reply 1`] = `
         "--cd",
         "/repo",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Every shell command runs inside the same sandbox, so without edit access commands can read files but not change them. As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
 
 do the thing",
       ],
@@ -4127,11 +3836,10 @@ do the thing",
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-1",
-      "taskPrompt": "sha256:5a01add26e4f75f2c952a8dadc814e897904dedd0de5bbc887dd980d9b78f2bf",
+      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -4205,9 +3913,9 @@ exports[`codex transcript regressions > command execution started and completed 
         "--json",
         "--skip-git-repo-check",
         "--config",
-        "default_permissions="lander-read-only"",
+        "default_permissions="lander-edit"",
         "--config",
-        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "permissions.lander-edit={description="Lander workspace edit access",extends=":workspace",workspace_roots={"/repo"=true},filesystem={":workspace_roots"={".git"="write"},"/repo/.git"="write"},network={enabled=true,allow_local_binding=true}}",
         "--config",
         "shell_environment_policy.inherit=all",
         "--config",
@@ -4217,7 +3925,7 @@ exports[`codex transcript regressions > command execution started and completed 
         "--cd",
         "/repo",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Every shell command runs inside the same sandbox, so without edit access commands can read files but not change them. As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
 
 do the thing",
       ],
@@ -4231,11 +3939,10 @@ do the thing",
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-1",
-      "taskPrompt": "sha256:5a01add26e4f75f2c952a8dadc814e897904dedd0de5bbc887dd980d9b78f2bf",
+      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -4335,12 +4042,12 @@ b.ts",
 }
 `;
 
-exports[`codex transcript regressions > edit access synthesizes the scoped workspace profile 1`] = `
+exports[`codex transcript regressions > error event folds into a failed done on a clean exit 1`] = `
 {
   "done": {
-    "exitCode": 0,
+    "exitCode": 1,
     "kind": "done",
-    "stderr": "",
+    "stderr": "upstream blew up",
   },
   "launch": [
     {
@@ -4361,7 +4068,7 @@ exports[`codex transcript regressions > edit access synthesizes the scoped works
         "--cd",
         "/repo",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Every shell command runs inside the same sandbox, so without edit access commands can read files but not change them. As of this message, this task runs with the workspace-scoped edit permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
 
 do the thing",
       ],
@@ -4375,111 +4082,6 @@ do the thing",
     },
   ],
   "task": {
-    "allowEdits": true,
-    "createdAt": "2026-01-01T00:00:00.000Z",
-    "flowState": {
-      "sessionId": "thread-1",
-      "taskPrompt": "sha256:a0db0839986fc81121e482af76e4a1ecb5d742a3b320ebafeab194cbc37491cc",
-    },
-    "flowStateRev": 2,
-    "hookFireSeq": 1,
-    "id": "task-1",
-    "items": [
-      {
-        "at": "2026-01-01T00:00:00.000Z",
-        "id": "itm-mjuohs00-0",
-        "kind": "message",
-        "rideId": "ride-1",
-        "role": "flow",
-        "text": "ok",
-      },
-    ],
-    "pendingHooks": [
-      {
-        "at": "2026-01-01T00:00:00.000Z",
-        "by": "agent",
-        "id": "fire-1-mjuohs00",
-        "outcome": "done",
-        "rideId": "ride-1",
-        "trigger": "ride-ended",
-      },
-    ],
-    "rides": [
-      {
-        "endedAt": "2026-01-01T00:00:00.000Z",
-        "id": "ride-1",
-        "outcome": "done",
-        "startedAt": "2026-01-01T00:00:00.000Z",
-      },
-    ],
-    "shape": 2,
-    "status": "riding",
-    "title": "Parity task",
-    "updatedAt": "2026-01-01T00:00:00.000Z",
-  },
-  "updates": [
-    {
-      "blockedIds": [],
-      "committed": true,
-      "drivingModel": undefined,
-      "finalText": "ok",
-      "kind": "update",
-      "rateLimitResetsAt": undefined,
-      "steps": [
-        {
-          "createdAt": "2026-01-01T00:00:00.000Z",
-          "kind": "text",
-          "text": "ok",
-        },
-      ],
-      "usage": undefined,
-      "usageChanged": false,
-    },
-  ],
-}
-`;
-
-exports[`codex transcript regressions > error event folds into a failed done on a clean exit 1`] = `
-{
-  "done": {
-    "exitCode": 1,
-    "kind": "done",
-    "stderr": "upstream blew up",
-  },
-  "launch": [
-    {
-      "args": [
-        "exec",
-        "--json",
-        "--skip-git-repo-check",
-        "--config",
-        "default_permissions="lander-read-only"",
-        "--config",
-        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
-        "--config",
-        "shell_environment_policy.inherit=all",
-        "--config",
-        "shell_environment_policy.ignore_default_excludes=true",
-        "--config",
-        "shell_environment_policy.include_only=["PATH","LANDER_*"]",
-        "--cd",
-        "/repo",
-        "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Every shell command runs inside the same sandbox, so without edit access commands can read files but not change them. As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
-
-do the thing",
-      ],
-      "command": "codex",
-      "cwd": "/repo",
-      "envDelta": {
-        "LANDER_PROJECT": "proj",
-        "LANDER_RUN": "ride-1",
-        "LANDER_TASK": "task-1",
-      },
-    },
-  ],
-  "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-1",
@@ -4590,9 +4192,9 @@ exports[`codex transcript regressions > failed command execution 1`] = `
         "--json",
         "--skip-git-repo-check",
         "--config",
-        "default_permissions="lander-read-only"",
+        "default_permissions="lander-edit"",
         "--config",
-        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "permissions.lander-edit={description="Lander workspace edit access",extends=":workspace",workspace_roots={"/repo"=true},filesystem={":workspace_roots"={".git"="write"},"/repo/.git"="write"},network={enabled=true,allow_local_binding=true}}",
         "--config",
         "shell_environment_policy.inherit=all",
         "--config",
@@ -4602,7 +4204,7 @@ exports[`codex transcript regressions > failed command execution 1`] = `
         "--cd",
         "/repo",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Every shell command runs inside the same sandbox, so without edit access commands can read files but not change them. As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
 
 do the thing",
       ],
@@ -4616,11 +4218,10 @@ do the thing",
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-1",
-      "taskPrompt": "sha256:5a01add26e4f75f2c952a8dadc814e897904dedd0de5bbc887dd980d9b78f2bf",
+      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -4719,9 +4320,9 @@ exports[`codex transcript regressions > file change item 1`] = `
         "--json",
         "--skip-git-repo-check",
         "--config",
-        "default_permissions="lander-read-only"",
+        "default_permissions="lander-edit"",
         "--config",
-        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "permissions.lander-edit={description="Lander workspace edit access",extends=":workspace",workspace_roots={"/repo"=true},filesystem={":workspace_roots"={".git"="write"},"/repo/.git"="write"},network={enabled=true,allow_local_binding=true}}",
         "--config",
         "shell_environment_policy.inherit=all",
         "--config",
@@ -4731,7 +4332,7 @@ exports[`codex transcript regressions > file change item 1`] = `
         "--cd",
         "/repo",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Every shell command runs inside the same sandbox, so without edit access commands can read files but not change them. As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
 
 do the thing",
       ],
@@ -4745,11 +4346,10 @@ do the thing",
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-1",
-      "taskPrompt": "sha256:5a01add26e4f75f2c952a8dadc814e897904dedd0de5bbc887dd980d9b78f2bf",
+      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -4853,9 +4453,9 @@ exports[`codex transcript regressions > image turn places -i after the prompt on
         "--json",
         "--skip-git-repo-check",
         "--config",
-        "default_permissions="lander-read-only"",
+        "default_permissions="lander-edit"",
         "--config",
-        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "permissions.lander-edit={description="Lander workspace edit access",extends=":workspace",workspace_roots={"/repo"=true},filesystem={":workspace_roots"={".git"="write"},"/repo/.git"="write"},network={enabled=true,allow_local_binding=true}}",
         "--config",
         "shell_environment_policy.inherit=all",
         "--config",
@@ -4867,7 +4467,7 @@ exports[`codex transcript regressions > image turn places -i after the prompt on
         "-i",
         "/tmp/img1",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Every shell command runs inside the same sandbox, so without edit access commands can read files but not change them. As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
 
 look at this
 
@@ -4888,11 +4488,10 @@ The image(s) above are already attached to your vision.
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-1",
-      "taskPrompt": "sha256:5a01add26e4f75f2c952a8dadc814e897904dedd0de5bbc887dd980d9b78f2bf",
+      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -4966,9 +4565,9 @@ exports[`codex transcript regressions > image turn places -i before the prompt o
         "--json",
         "--skip-git-repo-check",
         "--config",
-        "default_permissions="lander-read-only"",
+        "default_permissions="lander-edit"",
         "--config",
-        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "permissions.lander-edit={description="Lander workspace edit access",extends=":workspace",workspace_roots={"/repo"=true},filesystem={":workspace_roots"={".git"="write"},"/repo/.git"="write"},network={enabled=true,allow_local_binding=true}}",
         "--config",
         "shell_environment_policy.inherit=all",
         "--config",
@@ -4982,7 +4581,7 @@ exports[`codex transcript regressions > image turn places -i before the prompt o
         "-i",
         "/tmp/img1",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Every shell command runs inside the same sandbox, so without edit access commands can read files but not change them. As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
 
 look at this
 
@@ -5003,11 +4602,10 @@ The image(s) above are already attached to your vision.
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-1",
-      "taskPrompt": "sha256:5a01add26e4f75f2c952a8dadc814e897904dedd0de5bbc887dd980d9b78f2bf",
+      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
     },
     "flowStateRev": 1,
     "hookFireSeq": 1,
@@ -5082,9 +4680,9 @@ exports[`codex transcript regressions > later ride reusing the same local item i
         "--json",
         "--skip-git-repo-check",
         "--config",
-        "default_permissions="lander-read-only"",
+        "default_permissions="lander-edit"",
         "--config",
-        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "permissions.lander-edit={description="Lander workspace edit access",extends=":workspace",workspace_roots={"/repo"=true},filesystem={":workspace_roots"={".git"="write"},"/repo/.git"="write"},network={enabled=true,allow_local_binding=true}}",
         "--config",
         "shell_environment_policy.inherit=all",
         "--config",
@@ -5094,7 +4692,7 @@ exports[`codex transcript regressions > later ride reusing the same local item i
         "--cd",
         "/repo",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Every shell command runs inside the same sandbox, so without edit access commands can read files but not change them. As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
 
 do the thing",
       ],
@@ -5108,11 +4706,10 @@ do the thing",
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-3",
-      "taskPrompt": "sha256:5a01add26e4f75f2c952a8dadc814e897904dedd0de5bbc887dd980d9b78f2bf",
+      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -5199,9 +4796,9 @@ exports[`codex transcript regressions > notice item before a failed turn 1`] = `
         "--json",
         "--skip-git-repo-check",
         "--config",
-        "default_permissions="lander-read-only"",
+        "default_permissions="lander-edit"",
         "--config",
-        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "permissions.lander-edit={description="Lander workspace edit access",extends=":workspace",workspace_roots={"/repo"=true},filesystem={":workspace_roots"={".git"="write"},"/repo/.git"="write"},network={enabled=true,allow_local_binding=true}}",
         "--config",
         "shell_environment_policy.inherit=all",
         "--config",
@@ -5211,7 +4808,7 @@ exports[`codex transcript regressions > notice item before a failed turn 1`] = `
         "--cd",
         "/repo",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Every shell command runs inside the same sandbox, so without edit access commands can read files but not change them. As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
 
 do the thing",
       ],
@@ -5225,7 +4822,6 @@ do the thing",
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-1",
@@ -5347,110 +4943,6 @@ model refused",
 }
 `;
 
-exports[`codex transcript regressions > read-only access synthesizes the read-only profile 1`] = `
-{
-  "done": {
-    "exitCode": 0,
-    "kind": "done",
-    "stderr": "",
-  },
-  "launch": [
-    {
-      "args": [
-        "exec",
-        "--json",
-        "--skip-git-repo-check",
-        "--config",
-        "default_permissions="lander-read-only"",
-        "--config",
-        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
-        "--config",
-        "shell_environment_policy.inherit=all",
-        "--config",
-        "shell_environment_policy.ignore_default_excludes=true",
-        "--config",
-        "shell_environment_policy.include_only=["PATH","LANDER_*"]",
-        "--cd",
-        "/repo",
-        "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Every shell command runs inside the same sandbox, so without edit access commands can read files but not change them. As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
-
-do the thing",
-      ],
-      "command": "codex",
-      "cwd": "/repo",
-      "envDelta": {
-        "LANDER_PROJECT": "proj",
-        "LANDER_RUN": "ride-1",
-        "LANDER_TASK": "task-1",
-      },
-    },
-  ],
-  "task": {
-    "allowEdits": false,
-    "createdAt": "2026-01-01T00:00:00.000Z",
-    "flowState": {
-      "sessionId": "thread-1",
-      "taskPrompt": "sha256:5a01add26e4f75f2c952a8dadc814e897904dedd0de5bbc887dd980d9b78f2bf",
-    },
-    "flowStateRev": 2,
-    "hookFireSeq": 1,
-    "id": "task-1",
-    "items": [
-      {
-        "at": "2026-01-01T00:00:00.000Z",
-        "id": "itm-mjuohs00-0",
-        "kind": "message",
-        "rideId": "ride-1",
-        "role": "flow",
-        "text": "ok",
-      },
-    ],
-    "pendingHooks": [
-      {
-        "at": "2026-01-01T00:00:00.000Z",
-        "by": "agent",
-        "id": "fire-1-mjuohs00",
-        "outcome": "done",
-        "rideId": "ride-1",
-        "trigger": "ride-ended",
-      },
-    ],
-    "rides": [
-      {
-        "endedAt": "2026-01-01T00:00:00.000Z",
-        "id": "ride-1",
-        "outcome": "done",
-        "startedAt": "2026-01-01T00:00:00.000Z",
-      },
-    ],
-    "shape": 2,
-    "status": "riding",
-    "title": "Parity task",
-    "updatedAt": "2026-01-01T00:00:00.000Z",
-  },
-  "updates": [
-    {
-      "blockedIds": [],
-      "committed": true,
-      "drivingModel": undefined,
-      "finalText": "ok",
-      "kind": "update",
-      "rateLimitResetsAt": undefined,
-      "steps": [
-        {
-          "createdAt": "2026-01-01T00:00:00.000Z",
-          "kind": "text",
-          "text": "ok",
-        },
-      ],
-      "usage": undefined,
-      "usageChanged": false,
-    },
-  ],
-}
-`;
-
 exports[`codex transcript regressions > recorded cwd becomes the launch dir 1`] = `
 {
   "done": {
@@ -5465,9 +4957,9 @@ exports[`codex transcript regressions > recorded cwd becomes the launch dir 1`] 
         "--json",
         "--skip-git-repo-check",
         "--config",
-        "default_permissions="lander-read-only"",
+        "default_permissions="lander-edit"",
         "--config",
-        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "permissions.lander-edit={description="Lander workspace edit access",extends=":workspace",workspace_roots={"/repo"=true},filesystem={":workspace_roots"={".git"="write"},"/repo/.git"="write"},network={enabled=true,allow_local_binding=true}}",
         "--config",
         "shell_environment_policy.inherit=all",
         "--config",
@@ -5477,7 +4969,7 @@ exports[`codex transcript regressions > recorded cwd becomes the launch dir 1`] 
         "--cd",
         "/repo/sub",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Every shell command runs inside the same sandbox, so without edit access commands can read files but not change them. As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
 
 do the thing",
       ],
@@ -5491,11 +4983,10 @@ do the thing",
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-1",
-      "taskPrompt": "sha256:5a01add26e4f75f2c952a8dadc814e897904dedd0de5bbc887dd980d9b78f2bf",
+      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -5569,9 +5060,9 @@ exports[`codex transcript regressions > resumed turn re-emitting thread.started 
         "--json",
         "--skip-git-repo-check",
         "--config",
-        "default_permissions="lander-read-only"",
+        "default_permissions="lander-edit"",
         "--config",
-        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "permissions.lander-edit={description="Lander workspace edit access",extends=":workspace",workspace_roots={"/repo"=true},filesystem={":workspace_roots"={".git"="write"},"/repo/.git"="write"},network={enabled=true,allow_local_binding=true}}",
         "--config",
         "shell_environment_policy.inherit=all",
         "--config",
@@ -5583,7 +5074,7 @@ exports[`codex transcript regressions > resumed turn re-emitting thread.started 
         "resume",
         "thread-1",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Every shell command runs inside the same sandbox, so without edit access commands can read files but not change them. As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
 
 do the thing",
       ],
@@ -5597,11 +5088,10 @@ do the thing",
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-1",
-      "taskPrompt": "sha256:5a01add26e4f75f2c952a8dadc814e897904dedd0de5bbc887dd980d9b78f2bf",
+      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
     },
     "flowStateRev": 1,
     "hookFireSeq": 1,
@@ -5676,9 +5166,9 @@ exports[`codex transcript regressions > revival notice rides the prompt of the r
         "--json",
         "--skip-git-repo-check",
         "--config",
-        "default_permissions="lander-read-only"",
+        "default_permissions="lander-edit"",
         "--config",
-        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "permissions.lander-edit={description="Lander workspace edit access",extends=":workspace",workspace_roots={"/repo"=true},filesystem={":workspace_roots"={".git"="write"},"/repo/.git"="write"},network={enabled=true,allow_local_binding=true}}",
         "--config",
         "shell_environment_policy.inherit=all",
         "--config",
@@ -5688,7 +5178,7 @@ exports[`codex transcript regressions > revival notice rides the prompt of the r
         "--cd",
         "/repo",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Every shell command runs inside the same sandbox, so without edit access commands can read files but not change them. As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
 
 do the thing
 
@@ -5706,11 +5196,10 @@ You were landed when this message arrived; the message changed your status to ri
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-1",
-      "taskPrompt": "sha256:5a01add26e4f75f2c952a8dadc814e897904dedd0de5bbc887dd980d9b78f2bf",
+      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -5784,9 +5273,9 @@ exports[`codex transcript regressions > second ride seeded with a nonzero flowSt
         "--json",
         "--skip-git-repo-check",
         "--config",
-        "default_permissions="lander-read-only"",
+        "default_permissions="lander-edit"",
         "--config",
-        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "permissions.lander-edit={description="Lander workspace edit access",extends=":workspace",workspace_roots={"/repo"=true},filesystem={":workspace_roots"={".git"="write"},"/repo/.git"="write"},network={enabled=true,allow_local_binding=true}}",
         "--config",
         "shell_environment_policy.inherit=all",
         "--config",
@@ -5796,7 +5285,7 @@ exports[`codex transcript regressions > second ride seeded with a nonzero flowSt
         "--cd",
         "/repo",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Every shell command runs inside the same sandbox, so without edit access commands can read files but not change them. As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
 
 do the thing",
       ],
@@ -5810,12 +5299,11 @@ do the thing",
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "phase": "reviewing",
       "sessionId": "thread-2",
-      "taskPrompt": "sha256:5a01add26e4f75f2c952a8dadc814e897904dedd0de5bbc887dd980d9b78f2bf",
+      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
     },
     "flowStateRev": 8,
     "hookFireSeq": 1,
@@ -5889,9 +5377,9 @@ exports[`codex transcript regressions > turn.failed folds into a failed done 1`]
         "--json",
         "--skip-git-repo-check",
         "--config",
-        "default_permissions="lander-read-only"",
+        "default_permissions="lander-edit"",
         "--config",
-        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "permissions.lander-edit={description="Lander workspace edit access",extends=":workspace",workspace_roots={"/repo"=true},filesystem={":workspace_roots"={".git"="write"},"/repo/.git"="write"},network={enabled=true,allow_local_binding=true}}",
         "--config",
         "shell_environment_policy.inherit=all",
         "--config",
@@ -5901,7 +5389,7 @@ exports[`codex transcript regressions > turn.failed folds into a failed done 1`]
         "--cd",
         "/repo",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Every shell command runs inside the same sandbox, so without edit access commands can read files but not change them. As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
 
 do the thing",
       ],
@@ -5915,7 +5403,6 @@ do the thing",
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-1",
@@ -6026,9 +5513,9 @@ exports[`codex transcript regressions > usage on turn.completed 1`] = `
         "--json",
         "--skip-git-repo-check",
         "--config",
-        "default_permissions="lander-read-only"",
+        "default_permissions="lander-edit"",
         "--config",
-        "permissions.lander-read-only={description="Lander workspace read-only access",extends=":read-only",network={enabled=true,allow_local_binding=true}}",
+        "permissions.lander-edit={description="Lander workspace edit access",extends=":workspace",workspace_roots={"/repo"=true},filesystem={":workspace_roots"={".git"="write"},"/repo/.git"="write"},network={enabled=true,allow_local_binding=true}}",
         "--config",
         "shell_environment_policy.inherit=all",
         "--config",
@@ -6038,7 +5525,7 @@ exports[`codex transcript regressions > usage on turn.completed 1`] = `
         "--cd",
         "/repo",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Every shell command runs inside the same sandbox, so without edit access commands can read files but not change them. As of this message, this task runs with the workspace-scoped read-only permission profile. Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
 
 do the thing",
       ],
@@ -6052,11 +5539,10 @@ do the thing",
     },
   ],
   "task": {
-    "allowEdits": false,
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-1",
-      "taskPrompt": "sha256:5a01add26e4f75f2c952a8dadc814e897904dedd0de5bbc887dd980d9b78f2bf",
+      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
       "threadUsage": {
         "cacheCreation": 0,
         "cacheRead": 120,

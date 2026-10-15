@@ -254,15 +254,6 @@ export function useTaskActions(opts: {
     [currentRef, setError, refresh],
   )
 
-  const setAllowEdits = useCallback(
-    async (checked: boolean) => {
-      const current = currentRef.current
-      if (!current) return
-      await writeTask(current, { allowEdits: checked })
-    },
-    [currentRef, writeTask],
-  )
-
   const tryAgain = useCallback(async () => {
     const current = currentRef.current
     if (
@@ -363,7 +354,6 @@ export function useTaskActions(opts: {
     archiveSection,
     allowTool,
     tryAgain,
-    setAllowEdits,
     saveTitle,
     generateTitle,
     retitling,

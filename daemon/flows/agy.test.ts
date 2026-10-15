@@ -7,12 +7,12 @@ import { applyEvents } from './testTask'
 import { deliveryDigest, projectDocBlock } from 'lander/flow'
 
 const flow = (doc: string | undefined = 'Project instructions') => makeFlow({
-  taskPromptTemplate: 'Task {{id}}. {{forwardable}}',
+  taskPromptTemplate: 'Task {{id}}. {{editAccess}}',
   readProjectDoc: () => doc,
 })
 const fixture = (chunks: string[][] = []): Golden => ({
   name: 'agy', chunks,
-  start: { flow: 'agy', task: { allowEdits: true } },
+  start: { flow: 'agy', task: {} },
 })
 const event = (name: string, data: object) => JSON.stringify({ event: name, [name]: data })
 const init = (conversation_id: string, data: object = {}) =>
@@ -29,15 +29,6 @@ it('registers an executable driver and its capabilities', () => {
   expect(buildFlows({ root: process.cwd(), env: {} }).agy.meta).toEqual(meta)
   expect(resolveLaunchDir({ root: '/repo', recordedCwd: '/repo/sub', isDir: () => true })).toEqual({ cwd: '/repo/sub' })
   expect(resolveLaunchDir({ root: '/repo', recordedCwd: '/gone', isDir: () => false })).toEqual({ cwd: '/repo' })
-})
-
-it('rejects read-only turns before spawning or changing state', async () => {
-  const g = fixture()
-  g.start!.task = { allowEdits: false }
-  const driven = await driveFlow(g, flow())
-  expect(driven.spawns).toEqual([])
-  expect(patches(driven.events)).toEqual([])
-  expect(driven.result).toMatchObject({ exitCode: 1, stderr: expect.stringContaining('--edits') })
 })
 
 it('reduces the recorded Antigravity stream into a session, tool lifecycle, usage, and reply', async () => {

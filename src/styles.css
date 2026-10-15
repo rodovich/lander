@@ -1453,8 +1453,8 @@ body {
 }
 
 /* The icon buttons in the detail header's title row: the naming sparkle, the
-   two copies, the permission stamp, the read-only pencil. Muted until hovered,
-   so the row reads as the title with its controls behind it. */
+   two copies, the permission stamp. Muted until hovered, so the row reads as
+   the title with its controls behind it. */
 .title-action {
   display: inline-flex;
   align-items: center;

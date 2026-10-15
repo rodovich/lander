@@ -156,7 +156,6 @@ export type StartRunMessage = {
   scheduledRide?: ScheduledRide
   prompt: string
   task: {
-    allowEdits: boolean
     allow?: string[]
   }
   // The provider session to resume, when the task already has one (a prior turn

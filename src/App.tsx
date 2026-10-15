@@ -85,7 +85,6 @@ export function App() {
     archiveSection,
     allowTool,
     tryAgain,
-    setAllowEdits,
     saveTitle,
     generateTitle,
     retitling,
@@ -333,7 +332,6 @@ export function App() {
                 saveTitle={saveTitle}
                 generateTitle={generateTitle}
                 allowTool={allowTool}
-                setAllowEdits={setAllowEdits}
                 onRetry={tryAgain}
               />
               <Conversation

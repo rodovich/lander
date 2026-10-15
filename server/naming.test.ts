@@ -71,7 +71,6 @@ describe('a task is named once at a time', () => {
         status: 'riding',
         createdAt: AT,
         updatedAt: AT,
-        allowEdits: false,
         shape: 2,
         items: [
           { id: 'named-once-0', at: AT, kind: 'message', role: 'user', text: 'opening' },

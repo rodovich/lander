@@ -80,7 +80,6 @@ export async function driveLive(
     root: string
     prompt: string
     prior?: LiveTurn['task']
-    allowEdits?: boolean
     // Task-scope grants, as the server sends them from the task's allow list.
     allow?: string[]
   },
@@ -93,7 +92,6 @@ export async function driveLive(
     project: 'contract',
     prompt: opts.prompt,
     task: {
-      allowEdits: opts.allowEdits ?? false,
       ...(opts.allow ? { allow: opts.allow } : {}),
     },
     env: INERT_ENV,
