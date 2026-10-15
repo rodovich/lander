@@ -7,6 +7,8 @@ const j = (o: unknown) => JSON.stringify(o)
 const threadStarted = (id = 'thread-1') =>
   j({ type: 'thread.started', thread_id: id })
 
+const turnStarted = () => j({ type: 'turn.started' })
+
 const agentMessage = (text: string, id = 'item-msg') =>
   j({ type: 'item.completed', item: { id, type: 'agent_message', text } })
 
@@ -35,7 +37,7 @@ const codexStart = { agent: 'codex' as const }
 export const CODEX_GOLDENS: Golden[] = [
   {
     name: 'agent message reply',
-    chunks: [[threadStarted(), agentMessage('codex says hi')]],
+    chunks: [[threadStarted(), turnStarted(), agentMessage('codex says hi')]],
     start: codexStart,
   },
   {
@@ -44,7 +46,7 @@ export const CODEX_GOLDENS: Golden[] = [
     name: 'command execution started and completed in one chunk',
     chunks: [
       [
-        threadStarted(),
+        threadStarted(), turnStarted(),
         commandStarted('item-1', 'ls -la'),
         commandDone('item-1', 'ls -la', { aggregated_output: 'a.ts\nb.ts' }),
       ],
@@ -55,7 +57,7 @@ export const CODEX_GOLDENS: Golden[] = [
   {
     name: 'failed command execution',
     chunks: [
-      [threadStarted(), commandStarted('item-1', 'false')],
+      [threadStarted(), turnStarted(), commandStarted('item-1', 'false')],
       [
         commandDone('item-1', 'false', {
           exit_code: 1,
@@ -69,7 +71,7 @@ export const CODEX_GOLDENS: Golden[] = [
     name: 'file change item',
     chunks: [
       [
-        threadStarted(),
+        threadStarted(), turnStarted(),
         j({
           type: 'item.started',
           item: {
@@ -94,6 +96,7 @@ export const CODEX_GOLDENS: Golden[] = [
           type: 'item.completed',
           item: { id: 'item_0', type: 'error', message: 'a setting is deprecated' },
         }),
+        turnStarted(),
       ],
       [j({ type: 'turn.failed', error: { message: 'model refused' } })],
     ],
@@ -103,7 +106,7 @@ export const CODEX_GOLDENS: Golden[] = [
   {
     name: 'usage on turn.completed',
     chunks: [
-      [threadStarted(), agentMessage('done')],
+      [threadStarted(), turnStarted(), agentMessage('done')],
       [
         j({
           type: 'turn.completed',
@@ -119,14 +122,14 @@ export const CODEX_GOLDENS: Golden[] = [
   },
   {
     name: 'error event folds into a failed done on a clean exit',
-    chunks: [[threadStarted()], [j({ type: 'error', message: 'upstream blew up' })]],
+    chunks: [[threadStarted(), turnStarted()], [j({ type: 'error', message: 'upstream blew up' })]],
     start: codexStart,
     exitCode: 0,
   },
   {
     name: 'turn.failed folds into a failed done',
     chunks: [
-      [threadStarted()],
+      [threadStarted(), turnStarted()],
       [j({ type: 'turn.failed', error: { message: 'model refused' } })],
     ],
     start: codexStart,
@@ -136,7 +139,7 @@ export const CODEX_GOLDENS: Golden[] = [
     // The §5.2 guard: a resumed turn re-emits thread.started, and persisting it
     // again would produce a redundant state-patch.
     name: 'resumed turn re-emitting thread.started writes no duplicate session',
-    chunks: [[threadStarted('thread-1'), agentMessage('resumed')]],
+    chunks: [[threadStarted('thread-1'), turnStarted(), agentMessage('resumed')]],
     start: {
       ...codexStart,
       sessionId: 'thread-1',
@@ -145,7 +148,7 @@ export const CODEX_GOLDENS: Golden[] = [
   },
   {
     name: 'image turn places -i before the prompt on resume',
-    chunks: [[threadStarted('thread-1'), agentMessage('looked')]],
+    chunks: [[threadStarted('thread-1'), turnStarted(), agentMessage('looked')]],
     start: {
       ...codexStart,
       prompt: 'look at this',
@@ -165,7 +168,7 @@ export const CODEX_GOLDENS: Golden[] = [
   },
   {
     name: 'image turn places -i after the prompt on a fresh exec',
-    chunks: [[threadStarted(), agentMessage('looked')]],
+    chunks: [[threadStarted(), turnStarted(), agentMessage('looked')]],
     start: {
       ...codexStart,
       prompt: 'look at this',
@@ -183,23 +186,23 @@ export const CODEX_GOLDENS: Golden[] = [
   },
   {
     name: 'edit access synthesizes the scoped workspace profile',
-    chunks: [[threadStarted(), agentMessage('ok')]],
+    chunks: [[threadStarted(), turnStarted(), agentMessage('ok')]],
     start: { ...codexStart, task: { allowEdits: true } },
   },
   {
     name: 'read-only access synthesizes the read-only profile',
-    chunks: [[threadStarted(), agentMessage('ok')]],
+    chunks: [[threadStarted(), turnStarted(), agentMessage('ok')]],
     start: { ...codexStart, task: { allowEdits: false } },
   },
   {
     name: 'recorded cwd becomes the launch dir',
-    chunks: [[threadStarted(), agentMessage('ok')]],
+    chunks: [[threadStarted(), turnStarted(), agentMessage('ok')]],
     start: { ...codexStart, recordedCwd: '/repo/sub' },
     input: { cwd: '/repo/sub' },
   },
   {
     name: 'second ride seeded with a nonzero flowStateRev',
-    chunks: [[threadStarted('thread-2'), agentMessage('second ride')]],
+    chunks: [[threadStarted('thread-2'), turnStarted(), agentMessage('second ride')]],
     start: {
       ...codexStart,
       runId: 'ride-2',
@@ -211,12 +214,12 @@ export const CODEX_GOLDENS: Golden[] = [
     // Codex has no turn-context block, so the revival notice reaching it at all
     // is the point of making it a prompt part.
     name: 'revival notice rides the prompt of the reviving turn',
-    chunks: [[threadStarted(), agentMessage('ok')]],
+    chunks: [[threadStarted(), turnStarted(), agentMessage('ok')]],
     start: { ...codexStart, revived: { from: 'landed' } },
   },
   {
     name: 'a turn with a ride still scheduled is reminded of it',
-    chunks: [[threadStarted(), agentMessage('ok')]],
+    chunks: [[threadStarted(), turnStarted(), agentMessage('ok')]],
     start: { ...codexStart, scheduledRide: { at: '3:00:00 PM' } },
   },
   {
@@ -226,6 +229,7 @@ export const CODEX_GOLDENS: Golden[] = [
     chunks: [
       [
         threadStarted('thread-3'),
+        turnStarted(),
         commandStarted('item-1', 'echo again'),
         commandDone('item-1', 'echo again'),
       ],

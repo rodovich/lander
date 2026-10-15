@@ -196,6 +196,7 @@ export function makeFlow({
         if (!trimmed) continue
         const r = reduceStreamLine(trimmed, ctx.now())
 
+        if (r.turnStarted) ctx.emit.committed()
         if (r.drivingModel) ctx.emit.meter({ drivingModel: r.drivingModel })
         // Claude reports a reliable reset time, so the scheduled-retry option is
         // safe to arm from it (meta.capabilities.rateLimitRetry). The retry ask

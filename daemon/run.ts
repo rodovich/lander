@@ -427,6 +427,7 @@ export function createRunManager({
             usageChanged: event.usageChanged,
             drivingModel: event.drivingModel,
             rateLimitResetsAt: event.rateLimitResetsAt,
+            committed: event.committed,
           }
           buffer.push(update)
           send(update)

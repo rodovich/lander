@@ -19,6 +19,10 @@ export type CodexLineUpdate = {
   // codexTurnUsage.
   threadUsage?: Usage
   terminalError?: string
+  // Set on `turn.started`. A turn observed failing after it (an invalid model,
+  // then a normal exit) still left its user message in the thread for the
+  // next resume.
+  turnStarted?: true
   // Set when the line is a Codex notice (an `error` item) rather than anything
   // the model did.
   notice?: true
@@ -41,6 +45,7 @@ export function reduceCodexStreamLine(
   let finalText: string | undefined
   let threadUsage: Usage | undefined
   let terminalError: string | undefined
+  let turnStarted: true | undefined
   let notice: true | undefined
 
   if (ev.type === 'item.started' || ev.type === 'item.completed') {
@@ -220,6 +225,8 @@ export function reduceCodexStreamLine(
         notice = true
       }
     }
+  } else if (ev.type === 'turn.started') {
+    turnStarted = true
   } else if (ev.type === 'turn.completed') {
     if (ev.usage && typeof ev.usage === 'object')
       threadUsage = parseCodexUsage(ev.usage as Record<string, unknown>)
@@ -229,7 +236,14 @@ export function reduceCodexStreamLine(
     terminalError = errorMessage(ev.error) ?? errorMessage(ev)
   }
 
-  return { steps, finalText, threadUsage, terminalError, ...(notice ? { notice } : {}) }
+  return {
+    steps,
+    finalText,
+    threadUsage,
+    terminalError,
+    ...(turnStarted ? { turnStarted } : {}),
+    ...(notice ? { notice } : {}),
+  }
 }
 
 const USAGE_COUNTS = ['input', 'output', 'cacheRead', 'cacheCreation'] as const

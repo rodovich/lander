@@ -874,6 +874,22 @@ describe('reduceStreamLine', () => {
     )
     expect(r.drivingModel).toBe('claude-opus-4-8')
     expect(r.steps).toEqual([])
+    expect(r.turnStarted).toBe(true)
+  })
+
+  it('does not mark a run that failed before init as started', () => {
+    // A --resume of a session with no transcript prints only this.
+    const r = reduceStreamLine(
+      JSON.stringify({
+        type: 'result',
+        subtype: 'error_during_execution',
+        is_error: true,
+        num_turns: 0,
+        errors: ['No conversation found with session ID: x'],
+      }),
+      AT,
+    )
+    expect(r.turnStarted).toBeUndefined()
   })
 
   it('omits drivingModel for a non-init system event or a missing model', () => {

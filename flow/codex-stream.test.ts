@@ -435,6 +435,17 @@ describe('Codex stream reducer', () => {
     ])
   })
 
+  it('marks only turn.started as the turn starting, ahead of a failure', () => {
+    const r = reduceFixture('turn-failed.jsonl')
+    expect(r.updates.map((u) => u.turnStarted === true)).toEqual([
+      false,
+      false,
+      true,
+      false,
+      false,
+    ])
+  })
+
   it('extracts the same session id from resumed sessions', () => {
     const r = reduceFixture('resumed-session.jsonl')
     expect(extractCodexSession(r.lines[0])).toBe(

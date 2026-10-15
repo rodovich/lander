@@ -205,6 +205,13 @@ export type CtxEmit = {
   // skips already-applied updates and a one-shot value on a skipped seq would be
   // unrecoverable after a restart (losing, say, the scheduled-retry timestamp).
   meter(opts: MeterOpts): void
+  // The provider has recorded this turn's user message in its session, so a
+  // retry after a failure should nudge the session rather than send the message
+  // again. Call it at the earliest stream event that implies the record exists.
+  // Latches like `drivingModel`, and goes out on the next flush even when
+  // nothing else changed: a run killed while it waits on the model streams
+  // nothing after this point.
+  committed(): void
 }
 
 export type CtxState = {
@@ -400,6 +407,8 @@ export function createCtxRuntime(
   // Latched for the lifetime of the run — see CtxEmit.meter.
   let drivingModel: string | undefined
   let rateLimitResetsAt: string | undefined
+  let committed = false
+  let committedChanged = false
 
   function flush(): void {
     // The empty-batch rule: a chunk that reduced to nothing puts nothing on the
@@ -408,7 +417,8 @@ export function createCtxRuntime(
       !steps.length &&
       finalText === undefined &&
       !blockedIds.length &&
-      !usageChanged
+      !usageChanged &&
+      !committedChanged
     )
       return
     emitEvent({
@@ -420,11 +430,13 @@ export function createCtxRuntime(
       usageChanged,
       drivingModel,
       rateLimitResetsAt,
+      ...(committed ? { committed: true as const } : {}),
     })
     steps = []
     finalText = undefined
     blockedIds = []
     usageChanged = false
+    committedChanged = false
   }
 
   // ── Durable state ────────────────────────────────────────────────────────
@@ -702,6 +714,9 @@ export function createCtxRuntime(
       }
       if (model) drivingModel = model
       if (resets) rateLimitResetsAt = resets
+    },
+    committed() {
+      if (!committed) committed = committedChanged = true
     },
   }
 

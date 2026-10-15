@@ -489,6 +489,9 @@ export type UpdateMessage = {
   usageChanged: boolean
   drivingModel?: string
   rateLimitResetsAt?: string
+  // The provider has recorded the turn's user message in its session (see
+  // CtxEmit.committed). Latched: once set, every later update carries it.
+  committed?: true
 }
 
 // Why the daemon synthesized a done itself instead of relaying the host's own:

@@ -299,6 +299,17 @@ describe('applyDone', () => {
     expect(t.retry?.committed).toBe(true)
   })
 
+  it('marks committed true when the flow reported it, though nothing streamed', () => {
+    const t = task()
+    applyUpdate(t, update({ steps: [], committed: true, cursor: 1 }))
+    applyDone(t, done({ exitCode: 1 }), { at: AT, askId: 'ask-x-0' })
+    expect(t.retry?.committed).toBe(true)
+    const ask = t.items!.find((i) => i.kind === 'ask')!
+    expect(ask.kind === 'ask' && ask.form.options.map((o) => o.label)).toEqual([
+      'Try again',
+    ])
+  })
+
   it('keeps an interrupted run unwedged, recording the stop, and closes it interrupted', () => {
     const t = task()
     applyDone(t, done({ exitCode: 137, interrupted: true }), { at: AT, askId: 'ask-x-0' })

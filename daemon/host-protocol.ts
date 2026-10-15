@@ -32,6 +32,7 @@ export type HostEvent =
       usageChanged: boolean
       drivingModel?: string
       rateLimitResetsAt?: string
+      committed?: true
     }
   // A NATURAL done — the agent completed, errored, or its stream folded a
   // terminalError. Interrupt and idle-kill dones are synthesized by the supervisor,

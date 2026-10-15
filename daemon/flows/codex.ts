@@ -211,6 +211,12 @@ export function makeFlow({
         }
 
         const r = reduceCodexStreamLine(trimmed, ctx.now())
+        // turn.started only suggests the thread holds the message; whether it is
+        // on disk if codex is killed right after is untested. That is good
+        // enough for the retry choice, where a wrong guess costs one nudge the
+        // user must follow with a resend, but not for the delivery commit below,
+        // where a wrong guess loses the task prompt for good.
+        if (r.turnStarted) ctx.emit.committed()
 
         // A notice doesn't count: Codex reports config warnings before the turn
         // starts, so one proves nothing about the model reading the prompt.

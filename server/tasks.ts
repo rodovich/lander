@@ -105,6 +105,9 @@ export type Ride = {
   // whole span the server was down. Absent on any ride whose run never reported
   // a done, which is the best-effort silence `usage.costUsd` already has.
   durationMs?: number
+  // Set once the flow reports that the provider recorded this turn's user
+  // message in its session (UpdateMessage.committed).
+  committed?: true
   // Present only on an 'error' outcome: the exit code, the daemon's cause when
   // it synthesized the done itself (idle-timeout / daemon-shutdown / host-crash,
   // plus the expired window for an idle kill), and the tail of the run's stderr.

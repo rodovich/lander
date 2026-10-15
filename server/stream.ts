@@ -334,6 +334,11 @@ export function reduceStreamLine(
   // session — not a tool-heavy subagent on a cheaper model that happened to emit
   // more output.
   drivingModel?: string
+  // Set on the `system`/`init` event. The one failure observed to precede the
+  // session recording the user message (a missing --resume session) ends
+  // before init, and an API failure records it — so a run that got this far
+  // has the message in its transcript.
+  turnStarted?: true
   // When a `rate_limit_event` reports the session limit was *rejected* (the turn
   // was refused outright, not just warned), the ISO time the limit resets —
   // claude sends it as `rate_limit_info.resetsAt`, a Unix epoch in seconds. The
@@ -361,9 +366,11 @@ export function reduceStreamLine(
   let usageInferenceId: string | undefined
   let usageFinal: boolean | undefined
   let drivingModel: string | undefined
+  let turnStarted: true | undefined
   let rateLimitResetsAt: string | undefined
   let sessionTotals: SessionTotals | undefined
   if (ev.type === 'system' && ev.subtype === 'init') {
+    turnStarted = true
     if (typeof ev.model === 'string') drivingModel = ev.model
   } else if (ev.type === 'assistant' && Array.isArray(ev.message?.content)) {
     const inferenceId =
@@ -502,6 +509,7 @@ export function reduceStreamLine(
     usageInferenceId,
     usageFinal,
     drivingModel,
+    ...(turnStarted ? { turnStarted } : {}),
     rateLimitResetsAt,
     sessionTotals,
   }

@@ -102,6 +102,7 @@ GIT-SNAPSHOT-STUB
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "ok",
       "kind": "update",
@@ -119,6 +120,7 @@ GIT-SNAPSHOT-STUB
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "all done",
       "kind": "update",
@@ -235,6 +237,7 @@ GIT-SNAPSHOT-STUB
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "ok",
       "kind": "update",
@@ -252,6 +255,7 @@ GIT-SNAPSHOT-STUB
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "all done",
       "kind": "update",
@@ -364,6 +368,7 @@ GIT-SNAPSHOT-STUB
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "ok",
       "kind": "update",
@@ -381,6 +386,7 @@ GIT-SNAPSHOT-STUB
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "all done",
       "kind": "update",
@@ -500,6 +506,7 @@ GIT-SNAPSHOT-STUB
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "ok",
       "kind": "update",
@@ -517,6 +524,7 @@ GIT-SNAPSHOT-STUB
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "all done",
       "kind": "update",
@@ -640,6 +648,7 @@ GIT-SNAPSHOT-STUB
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": undefined,
       "kind": "update",
@@ -660,6 +669,7 @@ GIT-SNAPSHOT-STUB
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": undefined,
       "kind": "update",
@@ -680,6 +690,7 @@ GIT-SNAPSHOT-STUB
       "blockedIds": [
         "tool:ride-1:0",
       ],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "I was blocked",
       "kind": "update",
@@ -796,6 +807,7 @@ GIT-SNAPSHOT-STUB
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "ok",
       "kind": "update",
@@ -813,6 +825,7 @@ GIT-SNAPSHOT-STUB
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "all done",
       "kind": "update",
@@ -961,6 +974,7 @@ GIT-SNAPSHOT-STUB
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": undefined,
       "kind": "update",
@@ -1003,6 +1017,7 @@ GIT-SNAPSHOT-STUB
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "all done",
       "kind": "update",
@@ -1130,6 +1145,7 @@ GIT-SNAPSHOT-STUB
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "starting",
       "kind": "update",
@@ -1249,6 +1265,7 @@ GIT-SNAPSHOT-STUB
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "legacy resumed",
       "kind": "update",
@@ -1266,6 +1283,7 @@ GIT-SNAPSHOT-STUB
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "all done",
       "kind": "update",
@@ -1382,6 +1400,7 @@ Note: your previous turn ended in sub/dir. Depending how you moved there, that l
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "ok",
       "kind": "update",
@@ -1399,6 +1418,7 @@ Note: your previous turn ended in sub/dir. Depending how you moved there, that l
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "all done",
       "kind": "update",
@@ -1511,6 +1531,7 @@ GIT-SNAPSHOT-STUB
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "ok",
       "kind": "update",
@@ -1528,6 +1549,7 @@ GIT-SNAPSHOT-STUB
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "all done",
       "kind": "update",
@@ -1641,6 +1663,7 @@ GIT-SNAPSHOT-STUB
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "ok",
       "kind": "update",
@@ -1658,6 +1681,7 @@ GIT-SNAPSHOT-STUB
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "all done",
       "kind": "update",
@@ -1793,6 +1817,7 @@ GIT-SNAPSHOT-STUB
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": undefined,
       "kind": "update",
@@ -1822,6 +1847,7 @@ GIT-SNAPSHOT-STUB
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": undefined,
       "kind": "update",
@@ -1847,6 +1873,7 @@ GIT-SNAPSHOT-STUB
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "all done",
       "kind": "update",
@@ -1959,6 +1986,7 @@ GIT-SNAPSHOT-STUB
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "hello there",
       "kind": "update",
@@ -1976,6 +2004,7 @@ GIT-SNAPSHOT-STUB
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "hello there",
       "kind": "update",
@@ -2132,6 +2161,18 @@ GIT-SNAPSHOT-STUB
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
+      "drivingModel": "claude-opus-4-8",
+      "finalText": undefined,
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "rate limited",
       "kind": "update",
@@ -2245,6 +2286,7 @@ GIT-SNAPSHOT-STUB
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "resumed",
       "kind": "update",
@@ -2262,6 +2304,7 @@ GIT-SNAPSHOT-STUB
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "resumed",
       "kind": "update",
@@ -2378,6 +2421,7 @@ GIT-SNAPSHOT-STUB
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "ok",
       "kind": "update",
@@ -2395,6 +2439,7 @@ GIT-SNAPSHOT-STUB
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "all done",
       "kind": "update",
@@ -2511,6 +2556,7 @@ GIT-SNAPSHOT-STUB
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "ok",
       "kind": "update",
@@ -2528,6 +2574,7 @@ GIT-SNAPSHOT-STUB
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "all done",
       "kind": "update",
@@ -2641,6 +2688,7 @@ GIT-SNAPSHOT-STUB
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "second ride",
       "kind": "update",
@@ -2658,6 +2706,7 @@ GIT-SNAPSHOT-STUB
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "all done",
       "kind": "update",
@@ -2783,6 +2832,7 @@ b.ts",
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": undefined,
       "kind": "update",
@@ -2811,6 +2861,7 @@ b.ts",
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "all done",
       "kind": "update",
@@ -2968,6 +3019,7 @@ b.md",
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": undefined,
       "kind": "update",
@@ -2991,6 +3043,7 @@ Count the markdown files under docs/.",
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": undefined,
       "kind": "update",
@@ -3020,6 +3073,7 @@ b.md",
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "there are 2",
       "kind": "update",
@@ -3186,6 +3240,7 @@ GIT-SNAPSHOT-STUB
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": undefined,
       "kind": "update",
@@ -3206,6 +3261,7 @@ GIT-SNAPSHOT-STUB
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": undefined,
       "kind": "update",
@@ -3241,6 +3297,7 @@ GIT-SNAPSHOT-STUB
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "all done",
       "kind": "update",
@@ -3367,6 +3424,7 @@ GIT-SNAPSHOT-STUB
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "ok",
       "kind": "update",
@@ -3384,6 +3442,7 @@ GIT-SNAPSHOT-STUB
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "all done",
       "kind": "update",
@@ -3495,6 +3554,7 @@ GIT-SNAPSHOT-STUB
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "same context",
       "kind": "update",
@@ -3512,6 +3572,7 @@ GIT-SNAPSHOT-STUB
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "all done",
       "kind": "update",
@@ -3659,6 +3720,7 @@ GIT-SNAPSHOT-STUB
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "first",
       "kind": "update",
@@ -3676,6 +3738,7 @@ GIT-SNAPSHOT-STUB
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "second",
       "kind": "update",
@@ -3710,6 +3773,7 @@ GIT-SNAPSHOT-STUB
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": "claude-opus-4-8",
       "finalText": "all done",
       "kind": "update",
@@ -3823,6 +3887,7 @@ You have a ride scheduled for 3:00:00 PM. It stays scheduled unless you clear it
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": undefined,
       "finalText": "ok",
       "kind": "update",
@@ -3926,6 +3991,7 @@ do the thing",
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": undefined,
       "finalText": "codex says hi",
       "kind": "update",
@@ -4041,6 +4107,7 @@ b.ts",
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": undefined,
       "finalText": undefined,
       "kind": "update",
@@ -4068,6 +4135,7 @@ b.ts",
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": undefined,
       "finalText": "listed the files",
       "kind": "update",
@@ -4171,6 +4239,7 @@ do the thing",
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": undefined,
       "finalText": "ok",
       "kind": "update",
@@ -4310,7 +4379,19 @@ upstream blew up",
     "title": "Parity task",
     "updatedAt": "2026-01-01T00:00:00.000Z",
   },
-  "updates": [],
+  "updates": [
+    {
+      "blockedIds": [],
+      "committed": true,
+      "drivingModel": undefined,
+      "finalText": undefined,
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
 }
 `;
 
@@ -4402,6 +4483,7 @@ do the thing",
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": undefined,
       "finalText": undefined,
       "kind": "update",
@@ -4421,6 +4503,7 @@ do the thing",
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": undefined,
       "finalText": undefined,
       "kind": "update",
@@ -4536,6 +4619,7 @@ do the thing",
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": undefined,
       "finalText": undefined,
       "kind": "update",
@@ -4555,6 +4639,7 @@ do the thing",
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": undefined,
       "finalText": "edited it",
       "kind": "update",
@@ -4667,6 +4752,7 @@ The image(s) above are already attached to your vision.
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": undefined,
       "finalText": "looked",
       "kind": "update",
@@ -4782,6 +4868,7 @@ The image(s) above are already attached to your vision.
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": undefined,
       "finalText": "looked",
       "kind": "update",
@@ -4888,6 +4975,7 @@ do the thing",
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": undefined,
       "finalText": undefined,
       "kind": "update",
@@ -5050,6 +5138,7 @@ model refused",
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": undefined,
       "finalText": undefined,
       "kind": "update",
@@ -5162,6 +5251,7 @@ do the thing",
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": undefined,
       "finalText": "ok",
       "kind": "update",
@@ -5265,6 +5355,7 @@ do the thing",
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": undefined,
       "finalText": "ok",
       "kind": "update",
@@ -5371,6 +5462,7 @@ do the thing",
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": undefined,
       "finalText": "resumed",
       "kind": "update",
@@ -5478,6 +5570,7 @@ You were landed when this message arrived; the message changed your status to ri
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": undefined,
       "finalText": "ok",
       "kind": "update",
@@ -5582,6 +5675,7 @@ do the thing",
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": undefined,
       "finalText": "second ride",
       "kind": "update",
@@ -5721,7 +5815,19 @@ model refused",
     "title": "Parity task",
     "updatedAt": "2026-01-01T00:00:00.000Z",
   },
-  "updates": [],
+  "updates": [
+    {
+      "blockedIds": [],
+      "committed": true,
+      "drivingModel": undefined,
+      "finalText": undefined,
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
 }
 `;
 
@@ -5822,6 +5928,7 @@ do the thing",
   "updates": [
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": undefined,
       "finalText": "done",
       "kind": "update",
@@ -5838,6 +5945,7 @@ do the thing",
     },
     {
       "blockedIds": [],
+      "committed": true,
       "drivingModel": undefined,
       "finalText": undefined,
       "kind": "update",

@@ -12,7 +12,13 @@ import {
 } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { applyUpdate, applyDone, wedgeForRetry } from './apply'
+import {
+  applyUpdate,
+  applyDone,
+  hasStreamedText,
+  turnCommitted,
+  wedgeForRetry,
+} from './apply'
 import { applyStatePatch } from './flowstate'
 import { isAgentKind } from './agent'
 import {
@@ -878,13 +884,7 @@ async function reduceRunWs(
           const ride = openRide(t)
           if (ride) {
             const rideItems = (t.items ?? []).filter((it) => it.rideId === ride.id)
-            const streamedText = rideItems.some(
-              (it) => it.kind === 'message' && it.text.trim().length > 0,
-            )
-            // Whether the turn had begun committing before the daemon vanished —
-            // the same proxy applyDone uses to pick "try again" vs. re-send.
-            const hadOutput =
-              rideItems.some((it) => it.kind === 'tool') || streamedText
+            const streamedText = hasStreamedText(rideItems)
             // Only fill an otherwise-empty turn: the ask's prompt is the kill's
             // durable record (it outlives the form), so a turn that streamed
             // needs no synthetic line saying the same thing twice.
@@ -896,7 +896,7 @@ async function reduceRunWs(
             // stands, exactly as applyDone guards.
             if (t.status === 'riding')
               wedgeForRetry(t, {
-                committed: hadOutput,
+                committed: turnCommitted(ride, rideItems),
                 askId: nextAskId(t, Date.parse(at)),
                 at,
                 prompt: resume
@@ -968,6 +968,7 @@ async function reduceRunWs(
             usage: u.usage,
             usageChanged: u.usageChanged,
             drivingModel: u.drivingModel,
+            committed: u.committed,
             cursor: u.seq,
           })
         }).catch(() => {})

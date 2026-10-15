@@ -65,7 +65,7 @@ export type ApplyTask = {
 // distinction stays the caller's, this just stores whatever it's given.
 export type ApplyUpdate = Pick<
   UpdateMessage,
-  'steps' | 'finalText' | 'blockedIds' | 'drivingModel'
+  'steps' | 'finalText' | 'blockedIds' | 'drivingModel' | 'committed'
 > & {
   // The resolved running usage to set on the ride (the caller's accumulated
   // `liveUsage`), applied only when `usageChanged`.
@@ -143,17 +143,47 @@ export function wedgeForRetry(
   })
 }
 
+// Whether the ride's user message reached the provider's session, which decides
+// whether a retry nudges the session or sends the message again. The flow's own
+// report is authoritative; streamed output also proves it, for a flow that
+// doesn't report.
+export function turnCommitted(
+  ride: Ride | undefined,
+  rideItems: readonly Item[],
+): boolean {
+  return (
+    ride?.committed === true ||
+    rideItems.some((it) => it.kind === 'tool') ||
+    hasStreamedText(rideItems)
+  )
+}
+
+export function hasStreamedText(rideItems: readonly Item[]): boolean {
+  return rideItems.some(
+    (it) => it.kind === 'message' && it.text.trim().length > 0,
+  )
+}
+
 // Apply one reduced batch onto the task: fold its steps into the open ride's item
 // log, reconcile blocked tool calls, carry the running reply text and usage,
 // advance the run cursor. Mutates the task in place.
 export function applyUpdate(task: ApplyTask, update: ApplyUpdate): void {
-  const { steps, finalText, blockedIds, usage, usageChanged, drivingModel, cursor } =
-    update
+  const {
+    steps,
+    finalText,
+    blockedIds,
+    usage,
+    usageChanged,
+    drivingModel,
+    committed,
+    cursor,
+  } = update
   if (
     steps.length ||
     finalText !== undefined ||
     (blockedIds?.length ?? 0) ||
-    usageChanged
+    usageChanged ||
+    committed
   ) {
     const ride = openRide(task)
     // A run always opens a ride before it streams (runTurn), and a run that began
@@ -161,6 +191,7 @@ export function applyUpdate(task: ApplyTask, update: ApplyUpdate): void {
     // always find one. Guard defensively rather than throw.
     if (ride) {
       const rideId = ride.id
+      if (committed) ride.committed = true
       const items = (task.items ??= [])
       // Bump updatedAt only on the batch that begins the ride's activity (adds its
       // first item), not on every streamed batch — streaming churn shouldn't keep
@@ -270,13 +301,7 @@ export function applyDone(
   const rideItems = rideId
     ? (task.items ?? []).filter((it) => it.rideId === rideId)
     : []
-  const streamedText = rideItems.some(
-    (it) => it.kind === 'message' && it.text.trim().length > 0,
-  )
-  // Whether the assistant had begun replying before the run ended (streamed a tool
-  // or non-empty reply). On an assistant error this is our proxy for "the user's
-  // turn reached the session and was committed".
-  const hadOutput = rideItems.some((it) => it.kind === 'tool') || streamedText
+  const streamedText = hasStreamedText(rideItems)
   // A non-zero exit with no reply is an error to surface; a deliberate interrupt
   // (the task was wedged mid-run) is not — note the stop only if nothing streamed.
   if (rideId && !streamedText) {
@@ -299,7 +324,7 @@ export function applyDone(
   if (done.exitCode !== 0 && !done.interrupted && task.status === 'riding') {
     const prompt = rateLimitResetsAt ? undefined : failurePrompt(done)
     wedgeForRetry(task, {
-      committed: hadOutput,
+      committed: turnCommitted(ride, rideItems),
       askId,
       at,
       ...(rateLimitResetsAt ? { resetsAt: rateLimitResetsAt } : {}),
