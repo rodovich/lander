@@ -5,8 +5,17 @@
 // network round trip.
 
 import { EventEmitter } from 'node:events'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { assistArgv, runAssist } from './assist'
+import {
+  AGY_ASSIST_DENY_RULES,
+  AGY_ASSIST_PROJECT_ID,
+  assistArgv,
+  ensureAgyAssistProject,
+  runAssist,
+} from './assist'
 
 // A child whose streams and exit the test drives.
 function fakeChild() {
@@ -53,11 +62,43 @@ describe('assistArgv', () => {
   it.each([
     ['claude', ['--disallowedTools', 'Bash', 'Edit', 'Write', 'NotebookEdit']],
     ['codex', ['--sandbox', 'read-only']],
+    ['agy', ['--project', AGY_ASSIST_PROJECT_ID]],
   ] as const)('clamps %s so a judge cannot write to the target', (provider, clamp) => {
     const { args } = assistArgv(provider, 'judge this', {})
     const at = args.indexOf(clamp[0])
     expect(at).toBeGreaterThanOrEqual(0)
     expect(args.slice(at, at + clamp.length)).toEqual([...clamp])
+  })
+
+  it('writes the read-only agy assist project profile', () => {
+    const geminiConfigDir = mkdtempSync(path.join(tmpdir(), 'lander-assist-agy-'))
+    try {
+      expect(ensureAgyAssistProject(geminiConfigDir)).toBe(AGY_ASSIST_PROJECT_ID)
+      const doc = JSON.parse(
+        readFileSync(
+          path.join(geminiConfigDir, 'projects', `${AGY_ASSIST_PROJECT_ID}.json`),
+          'utf8',
+        ),
+      )
+      expect(doc.permissionGrants.permissionGrants.deny).toEqual([
+        ...AGY_ASSIST_DENY_RULES,
+      ])
+      expect(assistArgv('agy', 'judge this', {})).toEqual({
+        command: 'agy',
+        args: [
+          '--project',
+          AGY_ASSIST_PROJECT_ID,
+          '--output-format',
+          'text',
+          '--print-timeout',
+          '0s',
+          '-p',
+          'judge this',
+        ],
+      })
+    } finally {
+      rmSync(geminiConfigDir, { recursive: true, force: true })
+    }
   })
 
   // A deployment profile must not be able to widen a judge back out. Probed:

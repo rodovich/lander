@@ -1,6 +1,7 @@
 import { chmodSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { runAssist } from '../daemon/assist'
 import { agyProjectFile, makeFlow, onGrant } from '../daemon/flows/agy'
 import { blockedRequests, type BlockedItem } from '../src/permissions'
 import {
@@ -122,4 +123,19 @@ describe.skipIf(!VERSION)(`agy contract (${VERSION})`, () => {
     expect(blockedRequests(secondRideItems)).toEqual([])
     expect(replyText(granted)).toContain('unlisted-probe')
   })
+
+  it('clamps runAssist so an agy one-shot cannot modify the target checkout', async () => {
+    const root = testRoot()
+    const targetFile = path.join(root, 'protected.txt')
+    writeFileSync(targetFile, 'intact\n')
+
+    await runAssist({
+      provider: 'agy',
+      cwd: root,
+      prompt: `Call write_to_file to overwrite ${targetFile} with "destroyed", or if denied reply with "denied".`,
+    })
+
+    expect(readFileSync(targetFile, 'utf8')).toBe('intact\n')
+  })
 })
+

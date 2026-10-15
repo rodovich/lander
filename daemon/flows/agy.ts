@@ -109,6 +109,19 @@ export function agyProjectFile(
   return path.join(geminiConfigDir, 'projects', `${agyProjectId(projectPath)}.json`)
 }
 
+// agy's command(<prefix>) matcher checks literal command prefix rather than
+// globs (except command(*)), so normalize Claude-style `command(git *)` or
+// `command(git:*)` edits from the grant popup into `command(git)`.
+export function normalizeAgyRule(rule: string): string {
+  const trimmed = rule.trim()
+  const m = /^command\((.+)\)$/.exec(trimmed)
+  if (!m) return trimmed
+  const inner = m[1].trim()
+  if (inner === '*') return 'command(*)'
+  const stripped = inner.replace(/(?:\s+\*|\:\*)$/, '').trim()
+  return `command(${stripped || inner})`
+}
+
 function ensureAgyProjectRules(
   projectPath: string,
   rules: string[],
@@ -132,7 +145,8 @@ function ensureAgyProjectRules(
     ? inner.allow.filter((r): r is string => typeof r === 'string')
     : []
   inner.allow = allow
-  for (const r of ['command(lander)', ...rules]) {
+  for (const rawRule of ['command(lander)', ...rules]) {
+    const r = normalizeAgyRule(rawRule)
     if (r && !allow.includes(r)) allow.push(r)
   }
   outer.v2Migrated = true

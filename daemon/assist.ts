@@ -22,13 +22,47 @@
 // arriving by a longer route.
 
 import { spawn } from 'node:child_process'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import path from 'node:path'
 import { codexConfigArgs, codexOptionsFromEnv } from './codex-config'
 import { endStdin } from './processes'
 
-export type AssistProvider = 'claude' | 'codex'
+export type AssistProvider = 'claude' | 'codex' | 'agy'
 
 export function isAssistProvider(value: unknown): value is AssistProvider {
-  return value === 'claude' || value === 'codex'
+  return value === 'claude' || value === 'codex' || value === 'agy'
+}
+
+export const AGY_ASSIST_PROJECT_ID = 'lander-assist-readonly'
+export const AGY_ASSIST_DENY_RULES = [
+  'write_file(*)',
+  'command(*)',
+  'mcp(*)',
+] as const
+
+export function ensureAgyAssistProject(
+  geminiConfigDir = path.join(homedir(), '.gemini', 'config'),
+): string {
+  const file = path.join(
+    geminiConfigDir,
+    'projects',
+    `${AGY_ASSIST_PROJECT_ID}.json`,
+  )
+  const doc = {
+    id: AGY_ASSIST_PROJECT_ID,
+    name: 'Lander Assist Read-Only',
+    projectResources: {},
+    permissionGrants: {
+      permissionGrants: {
+        deny: [...AGY_ASSIST_DENY_RULES],
+      },
+      v2Migrated: true,
+    },
+  }
+  mkdirSync(path.dirname(file), { recursive: true })
+  writeFileSync(file, JSON.stringify(doc, null, 2) + '\n')
+  return AGY_ASSIST_PROJECT_ID
 }
 
 export type AssistResult =
@@ -47,6 +81,7 @@ export type AssistInput = {
   cwd: string
   timeoutMs?: number
   env?: NodeJS.ProcessEnv
+  geminiConfigDir?: string
   // Test seam. Production passes nothing and gets a real child.
   spawnChild?: typeof spawn
 }
@@ -82,6 +117,20 @@ export function assistArgv(
       ],
     }
   }
+  if (provider === 'agy') {
+    return {
+      command: 'agy',
+      args: [
+        ...WRITE_CLAMP.agy,
+        '--output-format',
+        'text',
+        '--print-timeout',
+        '0s',
+        '-p',
+        prompt,
+      ],
+    }
+  }
   // `--` so a prompt beginning with a hyphen is taken as the prompt rather than
   // parsed as an option.
   return { command: 'claude', args: [...WRITE_CLAMP.claude, '-p', '--', prompt] }
@@ -106,13 +155,12 @@ export function assistArgv(
 // removes a way to damage the target, not the judge's ability to answer.
 //
 // The two are asymmetric in KIND and that is inherent: Codex takes a sandbox
-// mode, Claude an enumeration. Denying `Bash` is what carries most of it, since
-// it reaches everything else; the file-writing tools are named because they do
-// not go through a shell. A new write-capable Claude tool would have to be added
-// here — the maintenance edge a mode would not have.
+// mode, Claude an enumeration, and Antigravity a read-only `--project` profile
+// whose permissionGrants.deny blocks write_file(*), command(*), and mcp(*).
 const WRITE_CLAMP = {
   claude: ['--disallowedTools', 'Bash', 'Edit', 'Write', 'NotebookEdit'],
   codex: ['--sandbox', 'read-only'],
+  agy: ['--project', AGY_ASSIST_PROJECT_ID],
 } as const
 
 // Run the one-shot. Never throws and never exits: a body must be able to report
@@ -125,6 +173,7 @@ export function runAssist(input: AssistInput): Promise<AssistResult> {
   return new Promise<AssistResult>((resolve) => {
     let child
     try {
+      if (provider === 'agy') ensureAgyAssistProject(input.geminiConfigDir)
       child = spawnChild(command, args, {
         cwd,
         env: { ...(input.env ?? process.env) },

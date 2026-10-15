@@ -2,7 +2,15 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, expect, it } from 'vitest'
-import { agyProjectFile, agyProjectId, makeFlow, meta, onGrant, resolveLaunchDir } from './agy'
+import {
+  agyProjectFile,
+  agyProjectId,
+  makeFlow,
+  meta,
+  normalizeAgyRule,
+  onGrant,
+  resolveLaunchDir,
+} from './agy'
 import { announcedFlows, buildFlows, FLOW_MODULES, providerCaps } from './index'
 import { driveFlow, goldenInput, type Golden } from './testCtx'
 import { applyEvents } from './testTask'
@@ -486,3 +494,32 @@ it('emits intermediate text, terminal tool errors, and a final response fallback
   expect(steps(driven.events)).toContainEqual(expect.objectContaining({ kind: 'tool_result', isError: true, text: 'Command failed' }))
   expect(driven.events).toContainEqual(expect.objectContaining({ kind: 'update', finalText: 'Finished' }))
 })
+
+it('normalizes glob-style command rules in normalizeAgyRule and onGrant', async () => {
+  expect(normalizeAgyRule('command(git *)')).toBe('command(git)')
+  expect(normalizeAgyRule('command(git:*)')).toBe('command(git)')
+  expect(normalizeAgyRule('command(npm test *)')).toBe('command(npm test)')
+  expect(normalizeAgyRule('command(*)')).toBe('command(*)')
+  expect(normalizeAgyRule('write_file(/tmp/*)')).toBe('write_file(/tmp/*)')
+
+  const rootDir = path.join(geminiConfigDir, 'workspace-glob')
+  mkdirSync(rootDir, { recursive: true })
+  await onGrant(undefined, {
+    projectPath: rootDir,
+    rule: 'command(git *)',
+    geminiConfigDir,
+  })
+  await onGrant(undefined, {
+    projectPath: rootDir,
+    rule: 'command(git:*)',
+    geminiConfigDir,
+  })
+  const projectConfig = JSON.parse(
+    readFileSync(agyProjectFile(rootDir, geminiConfigDir), 'utf8'),
+  )
+  expect(projectConfig.permissionGrants.permissionGrants.allow).toEqual([
+    'command(lander)',
+    'command(git)',
+  ])
+})
+

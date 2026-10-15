@@ -663,6 +663,8 @@ async function runTurn(
   // other flow is what stops such a daemon from silently running an unknown
   // flow as claude — it will report `unsupported flow` instead.
   const agent = isAgentKind(flow) ? flow : undefined
+  const assistProvider =
+    agent ?? (flow === 'agy' ? ('agy' as const) : undefined)
   const landerEnv = {
     PATH: `${LANDER_BIN_DIR}:${process.env.PATH ?? ''}`,
     // The base URL the daemon's agent (and the in-task CLI) use to reach this
@@ -685,7 +687,7 @@ async function runTurn(
     //
     // Omitted for an announced flow, which declares no one-shot provider — the
     // same `agent` the start-run carries for exactly that reason.
-    ...(agent ? { LANDER_ASSIST_PROVIDER: agent } : {}),
+    ...(assistProvider ? { LANDER_ASSIST_PROVIDER: assistProvider } : {}),
   }
 
   // Wait briefly for a daemon serving this project to be connected (dev launches

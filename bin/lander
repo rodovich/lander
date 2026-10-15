@@ -8,7 +8,8 @@
 // callbacks).
 import { spawnSync } from 'node:child_process'
 import { createReadStream, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { basename, extname, join } from 'node:path'
+import { homedir } from 'node:os'
+import { basename, dirname, extname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { inDateRange, matchesText, taskMetadata } from './task-metadata.js'
 
@@ -945,7 +946,30 @@ function assistAgentFromEnv(env) {
   const value = (env.LANDER_ASSIST_PROVIDER ?? env.LANDER_AGENT)
     ?.trim()
     .toLowerCase()
-  return value === 'codex' ? 'codex' : 'claude'
+  if (value === 'codex') return 'codex'
+  if (value === 'agy') return 'agy'
+  return 'claude'
+}
+
+const AGY_ASSIST_PROJECT_ID = 'lander-assist-readonly'
+
+function ensureAgyAssistProject(env = process.env) {
+  const configDir =
+    env.LANDER_GEMINI_CONFIG_DIR?.trim() || join(homedir(), '.gemini', 'config')
+  const file = join(configDir, 'projects', `${AGY_ASSIST_PROJECT_ID}.json`)
+  const doc = {
+    id: AGY_ASSIST_PROJECT_ID,
+    name: 'Lander Assist Read-Only',
+    projectResources: {},
+    permissionGrants: {
+      permissionGrants: {
+        deny: ['write_file(*)', 'command(*)', 'mcp(*)'],
+      },
+      v2Migrated: true,
+    },
+  }
+  mkdirSync(dirname(file), { recursive: true })
+  writeFileSync(file, JSON.stringify(doc, null, 2) + '\n')
 }
 
 // The argv, kept in step with daemon/assist.ts's `assistArgv` — which is the
@@ -984,6 +1008,21 @@ function assistLaunch(agent, text, env) {
       ],
     }
   }
+  if (agent === 'agy') {
+    return {
+      command: 'agy',
+      args: [
+        '--project',
+        AGY_ASSIST_PROJECT_ID,
+        '--output-format',
+        'text',
+        '--print-timeout',
+        '0s',
+        '-p',
+        text,
+      ],
+    }
+  }
   return {
     command: 'claude',
     args: ['--disallowedTools', 'Bash', 'Edit', 'Write', 'NotebookEdit', '-p', '--', text],
@@ -992,8 +1031,10 @@ function assistLaunch(agent, text, env) {
 
 function runAssist(prompt, args) {
   const text = args.length ? `${prompt}\n${args.join('')}` : prompt
+  const agent = assistAgentFromEnv(process.env)
+  if (agent === 'agy') ensureAgyAssistProject()
   const launch = assistLaunch(
-    assistAgentFromEnv(process.env),
+    agent,
     text,
     process.env,
   )

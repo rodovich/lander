@@ -21,12 +21,17 @@ async function makeHarness(): Promise<Harness> {
   const log = path.join(dir, 'calls.jsonl')
   await writeFakeAgent(dir, 'claude')
   await writeFakeAgent(dir, 'codex')
+  await writeFakeAgent(dir, 'agy')
   // Every variable this suite is about is REMOVED from the inherited
   // environment, so each test states what it is testing rather than inheriting
   // it. These tests run inside a lander task, whose turn now carries
   // LANDER_ASSIST_PROVIDER — so a base of `process.env` made the fallback case
   // pass or fail depending on which provider happened to be running it.
-  const { LANDER_ASSIST_PROVIDER: _p, LANDER_AGENT: _a, ...rest } = process.env
+  const {
+    LANDER_ASSIST_PROVIDER: _p,
+    LANDER_AGENT: _a,
+    ...rest
+  } = process.env
   return {
     dir,
     log,
@@ -34,12 +39,16 @@ async function makeHarness(): Promise<Harness> {
       ...rest,
       PATH: `${dir}${path.delimiter}${process.env.PATH ?? ''}`,
       CALL_LOG: log,
+      LANDER_GEMINI_CONFIG_DIR: path.join(dir, 'gemini-config'),
     },
     cleanup: () => rm(dir, { recursive: true, force: true }),
   }
 }
 
-async function writeFakeAgent(dir: string, command: 'claude' | 'codex') {
+async function writeFakeAgent(
+  dir: string,
+  command: 'claude' | 'codex' | 'agy',
+) {
   const file = path.join(dir, command)
   await writeFile(
     file,
@@ -186,6 +195,23 @@ describe('lander assist', () => {
       expect(stdout).toBe('codex reply\n')
       expect(await readCalls(h.log)).toEqual([
         { command: 'codex', args: assistArgv('codex', PROMPT, {}).args },
+      ])
+    } finally {
+      await h.cleanup()
+    }
+  })
+
+  it('runs a clamped agy one-shot with the argv daemon/assist.ts builds', async () => {
+    const h = await makeHarness()
+    try {
+      const { stdout } = await execLander(['assist', 'summarize:', 'notes'], {
+        ...h.env,
+        LANDER_ASSIST_PROVIDER: 'agy',
+      })
+
+      expect(stdout).toBe('agy reply\n')
+      expect(await readCalls(h.log)).toEqual([
+        { command: 'agy', args: assistArgv('agy', PROMPT, {}).args },
       ])
     } finally {
       await h.cleanup()
