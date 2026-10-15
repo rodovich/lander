@@ -33,8 +33,8 @@ export type FlowCaps = {
 }
 
 // A flow the server has never heard of degrades to the conservative floor —
-// "Save rule" instead of a grant menu, cost "n/a" — rather than falsely
-// advertising a capability the flow may not honor.
+// no grant controls, cost "n/a" — rather than falsely advertising a capability
+// the flow may not honor.
 const UNKNOWN_FLOW_CAPS: FlowCaps = {
   grants: { task: false, project: false },
   reportsCost: false,

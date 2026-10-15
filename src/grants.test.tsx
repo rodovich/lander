@@ -57,14 +57,23 @@ describe('RuleRow', () => {
     expect(html).toContain('Allow in project')
   })
 
-  it('relabels task scope and disables project scope when neither is honored (codex)', () => {
+  it('shows only project scope when task scope is unsupported (agy)', () => {
     const html = render({
       menuOpen: true,
-      grants: { task: false, project: false },
+      grants: { task: false, project: true },
     })
-    expect(html).toContain('Save rule')
-    expect(html).toContain('Project unsupported')
-    expect(html).toContain('disabled')
+    expect(html).toContain('Allow in project')
+    expect(html).not.toContain('Allow in task')
+    expect(html).not.toContain('Save rule')
+  })
+
+  it('shows only task scope when project scope is unsupported', () => {
+    const html = render({
+      menuOpen: true,
+      grants: { task: true, project: false },
+    })
+    expect(html).toContain('Allow in task')
+    expect(html).not.toContain('Allow in project')
   })
 
   const grantedAs = { scope: 'task', rule: 'Bash(git push)' }
@@ -105,7 +114,7 @@ describe('RuleRow', () => {
 })
 
 describe('GrantControl', () => {
-  it('renders a labeled stamp trigger (popup opens on click, not in SSR)', () => {
+  it('renders a labeled stamp trigger when task or project grants are supported', () => {
     const html = renderToStaticMarkup(
       <GrantControl
         grants={{ task: true, project: true }}
@@ -117,13 +126,33 @@ describe('GrantControl', () => {
     // Closed by default: no popup, rule row, or granted rule in the markup.
     expect(html).not.toContain('rule-row')
     expect(html).not.toContain('Bash(git:*)')
+
+    const projectOnly = renderToStaticMarkup(
+      <GrantControl
+        grants={{ task: false, project: true }}
+        allow={undefined}
+        onAllow={noop}
+      />,
+    )
+    expect(projectOnly).toContain('aria-label="Permissions"')
+  })
+
+  it('renders nothing when neither task nor project grants are supported (codex)', () => {
+    const html = renderToStaticMarkup(
+      <GrantControl
+        grants={{ task: false, project: false }}
+        allow={undefined}
+        onAllow={noop}
+      />,
+    )
+    expect(html).toBe('')
   })
 })
 
 describe('GrantedRules', () => {
   it('lists the task’s granted rules read-only', () => {
     const html = renderToStaticMarkup(
-      <GrantedRules rules={['Bash(git:*)', 'WebFetch(https://x)']} honored />,
+      <GrantedRules rules={['Bash(git:*)', 'WebFetch(https://x)']} />,
     )
     expect(html).toContain('Allowed in this task')
     expect(html).toContain('Bash(git:*)')
@@ -133,15 +162,7 @@ describe('GrantedRules', () => {
     expect(html).not.toContain('rule-row-kebab')
   })
 
-  it('says so when the flow does not honor task rules (codex)', () => {
-    const html = renderToStaticMarkup(
-      <GrantedRules rules={['Bash(git:*)']} honored={false} />,
-    )
-    expect(html).toContain('not honored')
-    expect(html).not.toContain('Allowed in this task')
-  })
-
   it('renders nothing when the task has no rules', () => {
-    expect(renderToStaticMarkup(<GrantedRules rules={[]} honored />)).toBe('')
+    expect(renderToStaticMarkup(<GrantedRules rules={[]} />)).toBe('')
   })
 })

@@ -34,10 +34,9 @@ export type Granted = { scope: GrantScope; rule: string }
 // committed draft is exactly what the kebab actions grant, so the user can shape
 // the rule (`git log` → `git:*`) before allowing it. Which row's kebab is open,
 // and what has been granted, belong to the popup. Rule strings stay opaque
-// agent-owned data: which scopes a grant is honored in comes from the task's
-// server-derived `grants` capability flags — when task-scope isn't honored (codex
-// today) "allow in task" reads "save rule" and carries a parity note, and when
-// project scope isn't supported that action is disabled.
+// agent-owned data: which scopes a grant is offered in comes from the task's
+// server-derived `grants` capability flags (`Allow in task` when `grants.task`
+// is true, `Allow in project` when `grants.project` is true).
 export function RuleRow({
   rule: initialRule,
   grants,
@@ -132,14 +131,7 @@ export function RuleRow({
         </button>
       )}
       {granted ? (
-        <span
-          className="rule-row-granted"
-          title={
-            (granted.scope === 'project' ? canGrantProject : canGrantTask)
-              ? `Allowed in ${granted.scope}`
-              : 'Rule saved'
-          }
-        >
+        <span className="rule-row-granted" title={`Allowed in ${granted.scope}`}>
           ✓
         </span>
       ) : (
@@ -151,7 +143,7 @@ export function RuleRow({
             aria-haspopup="menu"
             aria-expanded={menuOpen}
             aria-label="Grant scope"
-            disabled={!committed}
+            disabled={!committed || (!canGrantTask && !canGrantProject)}
             onClick={onToggleMenu}
           >
             ⋮
@@ -163,33 +155,26 @@ export function RuleRow({
               role="menu"
               style={menuStyle}
             >
-              <button
-                type="button"
-                role="menuitem"
-                className="rule-row-menu-item"
-                title={
-                  canGrantTask
-                    ? undefined
-                    : "Saved for parity; this task's agent does not honor task allow rules yet"
-                }
-                onClick={() => onGrant(committed, 'task')}
-              >
-                {canGrantTask ? 'Allow in task' : 'Save rule'}
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="rule-row-menu-item"
-                disabled={!canGrantProject}
-                title={
-                  canGrantProject
-                    ? undefined
-                    : "Project grants are not supported for this task's agent yet"
-                }
-                onClick={() => onGrant(committed, 'project')}
-              >
-                {canGrantProject ? 'Allow in project' : 'Project unsupported'}
-              </button>
+              {canGrantTask && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="rule-row-menu-item"
+                  onClick={() => onGrant(committed, 'task')}
+                >
+                  Allow in task
+                </button>
+              )}
+              {canGrantProject && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="rule-row-menu-item"
+                  onClick={() => onGrant(committed, 'project')}
+                >
+                  Allow in project
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -390,21 +375,12 @@ function StampIcon() {
 // it. Read-only: a rule's text is the grant, so editing it here would misrepresent
 // what the agent actually runs under — revoking isn't a surface yet. Project-scope
 // grants live in the project's settings file, outside any one task, so they aren't
-// listed. When the flow doesn't honor task rules (codex) these were saved for
-// parity only, and the label says so rather than claiming they are in force.
-export function GrantedRules({
-  rules,
-  honored,
-}: {
-  rules: string[]
-  honored: boolean
-}) {
+// listed.
+export function GrantedRules({ rules }: { rules: string[] }) {
   if (rules.length === 0) return null
   return (
     <>
-      <div className="rule-popup-head">
-        {honored ? 'Allowed in this task' : 'Saved on this task (not honored)'}
-      </div>
+      <div className="rule-popup-head">Allowed in this task</div>
       {rules.map((rule) => (
         <div className="rule-row" key={rule}>
           <span className="rule-row-rule readonly">{rule}</span>
@@ -414,13 +390,12 @@ export function GrantedRules({
   )
 }
 
-// The always-available grant control in the task header: a rubber-stamp button
-// that opens the task's permission popup — the rules already granted on the task,
-// above one empty rule-authoring row with the same task/project kebab the blocked
-// summary's rows carry — so a rule can be granted proactively, no archaeology
-// through denied chips. The doc's primary permission surface; permission asks
-// will later deep-link into it with a prefill. Each open starts fresh: an empty
-// row, no checkmark.
+// The grant control in the task header: a rubber-stamp button that opens the
+// task's permission popup — the rules already granted on the task, above one
+// empty rule-authoring row with the same scope kebab the blocked summary's rows
+// carry — so a rule can be granted proactively, no archaeology through denied
+// chips. Omitted when the task's flow supports neither task nor project grants
+// (e.g. codex). Each open starts fresh: an empty row, no checkmark.
 export function GrantControl({
   grants,
   allow,
@@ -434,14 +409,22 @@ export function GrantControl({
   onAllow: (rule: string, scope: GrantScope) => Promise<boolean>
   onRetry?: () => Promise<boolean>
 }) {
+  const canGrantTask = grants?.task ?? true
+  const canGrantProject = grants?.project ?? true
+  if (!canGrantTask && !canGrantProject) return null
+
   return (
     <RulePopup
       className="grant-control"
       trigger={{ className: 'title-action', label: 'Permissions', content: <StampIcon /> }}
       head={
         <>
-          <GrantedRules rules={allow ?? []} honored={grants?.task ?? true} />
-          <div className={'rule-popup-head' + (allow?.length ? ' divided' : '')}>
+          {canGrantTask && <GrantedRules rules={allow ?? []} />}
+          <div
+            className={
+              'rule-popup-head' + (canGrantTask && allow?.length ? ' divided' : '')
+            }
+          >
             Grant a permission rule
           </div>
         </>

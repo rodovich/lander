@@ -1906,26 +1906,21 @@ describe('server task provider behavior', () => {
     })
   })
 
-  it('stores Codex task allow rules with an unsupported warning', async () => {
+  it('rejects task allow rules when the flow does not support task grants', async () => {
     const task = await createTask('Codex task allow rule')
 
     const res = await post(`/api/${slug}/tasks/${task.id}/allow`, {
       scope: 'task',
       rule: 'Bash(npm test)',
     })
-    expect(res.status).toBe(200)
+    expect(res.status).toBe(400)
     expect(await res.json()).toEqual({
-      ok: true,
-      rule: 'Bash(npm test)',
-      scope: 'task',
-      // Worded from the capability, not the provider: an open-pr task declares
-      // the same `grants.task: false` and would otherwise be told it was Codex.
-      warning: 'Saved for parity; this flow does not honor task allow rules yet',
+      error: 'Task permission grants are not supported for codex tasks.',
     })
     const raw = JSON.parse(
       await readFile(path.join(tasksDir, `${task.id}.json`), 'utf8'),
     )
-    expect(raw.allow).toEqual(['Bash(npm test)'])
+    expect(raw.allow).toBeUndefined()
   })
 
   it('bounds the recorded cwd to the project root', async () => {

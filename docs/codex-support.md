@@ -124,16 +124,13 @@ the harness, while others are unfinished work that a different design could
 remove.
 
 Permission grants are coarse. Lander runs every Codex task under one editable
-permission profile, and Codex runs do not honor task allow rules or Claude-style
-per-tool `--allowedTools`. The UI stores Codex task rules for future parity and
-returns a warning, but those rules do not change Codex argv or runtime behavior.
-There is also no separate git gate on Codex: edit access includes writes to the
-repository's Git metadata so Git runs as an ordinary shell command. It cannot be
-narrowed the way a Claude project's `.claude` settings narrow git.
-
-Project permission grants are unsupported for Codex. A project-scope grant for a
-Codex task is routed to the daemon, and the Codex flow reports that project
-permission grants are not supported yet.
+permission profile, and Codex runs do not emit blocked permission prompts or
+honor task- or project-scope allow rules (`grants: { task: false, project: false }`).
+The UI therefore hides the permission grant control on Codex tasks, and the API
+rejects both task- and project-scope grants for Codex. There is also no separate
+git gate on Codex: edit access includes writes to the repository's Git metadata
+so Git runs as an ordinary shell command. It cannot be narrowed the way a Claude
+project's `.claude` settings narrow git.
 
 Worktrees are the daemon's, not a provider's: in a project whose lander config
 enables them, each task launches in its own `<project>/.worktrees/<task id>`,

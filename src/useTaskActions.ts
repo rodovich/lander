@@ -241,9 +241,6 @@ export function useTaskActions(opts: {
         })
         const body = await r.json()
         if (!r.ok) throw new Error(body.error ?? r.statusText)
-        // A codex task-scope grant succeeds but comes back with a parity warning;
-        // surface it without treating the grant as failed.
-        if (typeof body.warning === 'string') setError(body.warning)
         if (scope === 'task') await refresh()
         return true
       } catch (err) {

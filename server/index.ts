@@ -184,11 +184,6 @@ const DEFAULT_NEW_TASK_FLOW = (
 )
   .trim()
   .toLowerCase()
-// Fires on the flow's declared task-grant capability, not on a provider name —
-// an open-pr task declares the same `false` and would otherwise be told it was
-// Codex.
-const TASK_ALLOW_UNSUPPORTED_WARNING =
-  'Saved for parity; this flow does not honor task allow rules yet'
 
 // Daemon split: runs are driven by the host
 // daemon over a WebSocket — the server holds task state, drives the queue, and
@@ -685,8 +680,7 @@ async function runTurn(
     // arrive in the environment: `lander.assist()` is synchronous and documented
     // without `await` (README), so the CLI cannot go and ask.
     //
-    // Omitted for an announced flow, which declares no one-shot provider — the
-    // same `agent` the start-run carries for exactly that reason.
+    // Omitted for a flow that declares no one-shot provider (e.g. open-pr).
     ...(assistProvider ? { LANDER_ASSIST_PROVIDER: assistProvider } : {}),
   }
 
@@ -4007,7 +4001,6 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
     const grantFlow = taskFlow(task)
     const grantAgent = isAgentKind(grantFlow) ? grantFlow : undefined
 
-    let warning: string | undefined
     if (scope === 'project') {
       const result = await requestProjectGrant({
         project: project.slug,
@@ -4028,6 +4021,14 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
         noteHumanContact(t, { kind: 'ui' }, new Date().toISOString())
       }).catch(() => {})
     } else {
+      if (!flowCaps(grantFlow).grants.task) {
+        return c.json(
+          {
+            error: `Task permission grants are not supported for ${grantFlow} tasks.`,
+          },
+          400,
+        )
+      }
       try {
         await mutateTask(file, (t) => {
           const allow = (t.allow ??= [])
@@ -4040,16 +4041,8 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
       } catch {
         return c.json({ error: 'task not found' }, 404)
       }
-      // Key off the flow's announced capability, not the agent name: a flow
-      // that saves task rules for parity but doesn't honor them (task cap
-      // false) gets the "saved for parity" warning. Byte-identical today —
-      // claude's task cap is true and codex's false, announced and bootstrap
-      // alike — and it is what lets a non-legacy flow, which has no AgentKind
-      // to pass here at all, be answered correctly.
-      if (!flowCaps(grantFlow).grants.task)
-        warning = TASK_ALLOW_UNSUPPORTED_WARNING
     }
-    return c.json({ ok: true, rule, scope, ...(warning ? { warning } : {}) })
+    return c.json({ ok: true, rule, scope })
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
