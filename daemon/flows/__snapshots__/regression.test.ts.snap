@@ -21,7 +21,7 @@ exports[`claude transcript regressions > a task checkout is the launch dir, snap
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
+        "Task prompt.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -153,7 +153,7 @@ exports[`claude transcript regressions > a turn with a ride still scheduled is r
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
+        "Task prompt.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -287,7 +287,7 @@ exports[`claude transcript regressions > agent stderr is aggregated into the don
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
+        "Task prompt.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -418,7 +418,7 @@ exports[`claude transcript regressions > an API failure leads the done stderr wi
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
+        "Task prompt.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -599,7 +599,7 @@ exports[`claude transcript regressions > attachment manifest rides the prompt wi
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
+        "Task prompt.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -734,7 +734,7 @@ exports[`claude transcript regressions > blocked call via permission_denials 1`]
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
+        "Task prompt.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -899,7 +899,7 @@ exports[`claude transcript regressions > edit and write produce diff hunks 1`] =
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
+        "Task prompt.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -1105,7 +1105,7 @@ exports[`claude transcript regressions > errored result event carries no in-stre
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
+        "Task prompt.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -1224,7 +1224,7 @@ exports[`claude transcript regressions > legacy top-level session resumes withou
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
+        "Task prompt.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -1354,7 +1354,7 @@ exports[`claude transcript regressions > manual cd hint when the recorded cwd di
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
+        "Task prompt.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -1488,7 +1488,7 @@ exports[`claude transcript regressions > nonexistent filesDir still sets the env
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
+        "Task prompt.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -1619,7 +1619,7 @@ exports[`claude transcript regressions > parallel batch in one inference 1`] = `
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
+        "Task prompt.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -1810,7 +1810,7 @@ exports[`claude transcript regressions > plain text reply 1`] = `
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
+        "Task prompt.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -1940,7 +1940,7 @@ exports[`claude transcript regressions > rejecting rate limit event 1`] = `
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
+        "Task prompt.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -2107,7 +2107,7 @@ exports[`claude transcript regressions > resume of an existing session 1`] = `
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
+        "Task prompt.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -2238,7 +2238,7 @@ exports[`claude transcript regressions > revival notice names a cleared schedule
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
+        "Task prompt.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -2372,7 +2372,7 @@ exports[`claude transcript regressions > revival notice rides the prompt of the 
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
+        "Task prompt.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -2506,7 +2506,7 @@ exports[`claude transcript regressions > second ride seeded with a nonzero flowS
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
+        "Task prompt.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -2637,7 +2637,7 @@ exports[`claude transcript regressions > single tool call and result in one chun
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
+        "Task prompt.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -2798,7 +2798,7 @@ exports[`claude transcript regressions > subagent report closes its trace 1`] = 
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
+        "Task prompt.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -3022,7 +3022,7 @@ exports[`claude transcript regressions > subagent trace with sub-subagent nestin
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
+        "Task prompt.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -3235,7 +3235,7 @@ exports[`claude transcript regressions > task allow rules extend allowedTools 1`
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
+        "Task prompt.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -3369,7 +3369,7 @@ exports[`claude transcript regressions > unchanged turn context is not re-sent 1
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
+        "Task prompt.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -3498,7 +3498,7 @@ exports[`claude transcript regressions > usage across inferences with cache miss
         "--settings",
         "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
-        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant.
+        "Task prompt.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -3715,7 +3715,7 @@ exports[`codex transcript regressions > a turn with a ride still scheduled is re
         "--cd",
         "/repo",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Task prompt.
 
 do the thing
 
@@ -3736,7 +3736,7 @@ You have a ride scheduled for 3:00:00 PM. It stays scheduled unless you clear it
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-1",
-      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
+      "taskPrompt": "sha256:3af023016e80fe609115753a5d742c4e508418b09c65442ba966bf2041aa808f",
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -3822,7 +3822,7 @@ exports[`codex transcript regressions > agent message reply 1`] = `
         "--cd",
         "/repo",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Task prompt.
 
 do the thing",
       ],
@@ -3839,7 +3839,7 @@ do the thing",
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-1",
-      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
+      "taskPrompt": "sha256:3af023016e80fe609115753a5d742c4e508418b09c65442ba966bf2041aa808f",
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -3925,7 +3925,7 @@ exports[`codex transcript regressions > command execution started and completed 
         "--cd",
         "/repo",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Task prompt.
 
 do the thing",
       ],
@@ -3942,7 +3942,7 @@ do the thing",
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-1",
-      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
+      "taskPrompt": "sha256:3af023016e80fe609115753a5d742c4e508418b09c65442ba966bf2041aa808f",
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -4068,7 +4068,7 @@ exports[`codex transcript regressions > error event folds into a failed done on 
         "--cd",
         "/repo",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Task prompt.
 
 do the thing",
       ],
@@ -4204,7 +4204,7 @@ exports[`codex transcript regressions > failed command execution 1`] = `
         "--cd",
         "/repo",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Task prompt.
 
 do the thing",
       ],
@@ -4221,7 +4221,7 @@ do the thing",
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-1",
-      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
+      "taskPrompt": "sha256:3af023016e80fe609115753a5d742c4e508418b09c65442ba966bf2041aa808f",
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -4332,7 +4332,7 @@ exports[`codex transcript regressions > file change item 1`] = `
         "--cd",
         "/repo",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Task prompt.
 
 do the thing",
       ],
@@ -4349,7 +4349,7 @@ do the thing",
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-1",
-      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
+      "taskPrompt": "sha256:3af023016e80fe609115753a5d742c4e508418b09c65442ba966bf2041aa808f",
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -4467,7 +4467,7 @@ exports[`codex transcript regressions > image turn places -i after the prompt on
         "-i",
         "/tmp/img1",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Task prompt.
 
 look at this
 
@@ -4491,7 +4491,7 @@ The image(s) above are already attached to your vision.
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-1",
-      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
+      "taskPrompt": "sha256:3af023016e80fe609115753a5d742c4e508418b09c65442ba966bf2041aa808f",
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -4581,7 +4581,7 @@ exports[`codex transcript regressions > image turn places -i before the prompt o
         "-i",
         "/tmp/img1",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Task prompt.
 
 look at this
 
@@ -4605,7 +4605,7 @@ The image(s) above are already attached to your vision.
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-1",
-      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
+      "taskPrompt": "sha256:3af023016e80fe609115753a5d742c4e508418b09c65442ba966bf2041aa808f",
     },
     "flowStateRev": 1,
     "hookFireSeq": 1,
@@ -4692,7 +4692,7 @@ exports[`codex transcript regressions > later ride reusing the same local item i
         "--cd",
         "/repo",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Task prompt.
 
 do the thing",
       ],
@@ -4709,7 +4709,7 @@ do the thing",
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-3",
-      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
+      "taskPrompt": "sha256:3af023016e80fe609115753a5d742c4e508418b09c65442ba966bf2041aa808f",
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -4808,7 +4808,7 @@ exports[`codex transcript regressions > notice item before a failed turn 1`] = `
         "--cd",
         "/repo",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Task prompt.
 
 do the thing",
       ],
@@ -4969,7 +4969,7 @@ exports[`codex transcript regressions > recorded cwd becomes the launch dir 1`] 
         "--cd",
         "/repo/sub",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Task prompt.
 
 do the thing",
       ],
@@ -4986,7 +4986,7 @@ do the thing",
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-1",
-      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
+      "taskPrompt": "sha256:3af023016e80fe609115753a5d742c4e508418b09c65442ba966bf2041aa808f",
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -5074,7 +5074,7 @@ exports[`codex transcript regressions > resumed turn re-emitting thread.started 
         "resume",
         "thread-1",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Task prompt.
 
 do the thing",
       ],
@@ -5091,7 +5091,7 @@ do the thing",
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-1",
-      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
+      "taskPrompt": "sha256:3af023016e80fe609115753a5d742c4e508418b09c65442ba966bf2041aa808f",
     },
     "flowStateRev": 1,
     "hookFireSeq": 1,
@@ -5178,7 +5178,7 @@ exports[`codex transcript regressions > revival notice rides the prompt of the r
         "--cd",
         "/repo",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Task prompt.
 
 do the thing
 
@@ -5199,7 +5199,7 @@ You were landed when this message arrived; the message changed your status to ri
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-1",
-      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
+      "taskPrompt": "sha256:3af023016e80fe609115753a5d742c4e508418b09c65442ba966bf2041aa808f",
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -5285,7 +5285,7 @@ exports[`codex transcript regressions > second ride seeded with a nonzero flowSt
         "--cd",
         "/repo",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Task prompt.
 
 do the thing",
       ],
@@ -5303,7 +5303,7 @@ do the thing",
     "flowState": {
       "phase": "reviewing",
       "sessionId": "thread-2",
-      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
+      "taskPrompt": "sha256:3af023016e80fe609115753a5d742c4e508418b09c65442ba966bf2041aa808f",
     },
     "flowStateRev": 8,
     "hookFireSeq": 1,
@@ -5389,7 +5389,7 @@ exports[`codex transcript regressions > turn.failed folds into a failed done 1`]
         "--cd",
         "/repo",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Task prompt.
 
 do the thing",
       ],
@@ -5525,7 +5525,7 @@ exports[`codex transcript regressions > usage on turn.completed 1`] = `
         "--cd",
         "/repo",
         "--",
-        "Prompt: Edit access covers creating, editing, and deleting files — through any tool or shell command, git included — within the project directory (or the task's own checkout, when it has one) and the scratch roots (\`/tmp\` and \`$TMPDIR\`). Task allow rules are stored by Lander but do not affect Codex runs yet.
+        "Task prompt.
 
 do the thing",
       ],
@@ -5542,7 +5542,7 @@ do the thing",
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "thread-1",
-      "taskPrompt": "sha256:a609b1ae7c2385e4d5e8c4cc62d1482ca4d94f1f1f3f24618887f399543dd85e",
+      "taskPrompt": "sha256:3af023016e80fe609115753a5d742c4e508418b09c65442ba966bf2041aa808f",
       "threadUsage": {
         "cacheCreation": 0,
         "cacheRead": 120,

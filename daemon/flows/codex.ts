@@ -106,11 +106,7 @@ export function makeFlow({
       // The commit is deferred to after the read loop, gated on the turn having
       // produced output. See deliveryDigest/shouldDeliver for why that ordering
       // is the whole safety argument.
-      const taskPrompt = fillTaskPrompt(
-        taskPromptTemplate,
-        CODEX_EDIT_ACCESS_TEXT,
-        ctx.task.taskId,
-      )
+      const taskPrompt = fillTaskPrompt(taskPromptTemplate, ctx.task.taskId)
       // The checkout note rides with it, so a task adopted into a checkout gets
       // it on its next turn through the digest change.
       const rendered = ctx.task.checkout
@@ -303,15 +299,6 @@ export function makeFlow({
     },
   }
 }
-
-// The template's {{editAccess}} slot: the reach of edit access under the
-// permission profile built below, and the allow rules that don't change it.
-export const CODEX_EDIT_ACCESS_TEXT =
-  'Edit access covers creating, editing, and deleting files — through any ' +
-  'tool or shell command, git included — within the project directory (or ' +
-  "the task's own checkout, when it has one) and the scratch roots (`/tmp` " +
-  'and `$TMPDIR`). Task allow rules are stored by Lander but do not affect ' +
-  'Codex runs yet'
 
 function buildCodexArgs(
   ctx: Ctx,

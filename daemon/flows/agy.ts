@@ -196,13 +196,7 @@ export function makeFlow({
     async onTurn(ctx: Ctx): Promise<TurnResult> {
       const known = ctx.state.get(['sessionId'])
       const sessionId = typeof known === 'string' && known ? known : undefined
-      const taskPrompt = fillTaskPrompt(
-        taskPromptTemplate,
-        'Antigravity runs with --dangerously-skip-permissions. Edit access covers ' +
-          'unrestricted file creation, editing, and deletion, including `.git` and ' +
-          'paths outside the workspace, and all shell commands',
-        ctx.task.taskId,
-      )
+      const taskPrompt = fillTaskPrompt(taskPromptTemplate, ctx.task.taskId)
       const rendered = ctx.task.checkout
         ? `${taskPrompt}\n\n${checkoutNote(ctx.task.checkout, ctx.task.root)}`
         : taskPrompt

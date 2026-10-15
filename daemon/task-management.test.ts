@@ -10,19 +10,13 @@ import {
   fillTaskPrompt,
 } from './task-management'
 
-const TEMPLATE = 'You are running inside a lander task. This task id is {{id}}. {{editAccess}}.'
+const TEMPLATE = 'You are running inside a lander task. This task id is {{id}}.'
 
 describe('fillTaskPrompt', () => {
-  it('substitutes both {{id}} and {{editAccess}} and leaves no placeholder', () => {
-    const out = fillTaskPrompt(TEMPLATE, 'EDIT', 'abc123')
+  it('substitutes {{id}} and leaves no placeholder', () => {
+    const out = fillTaskPrompt(TEMPLATE, 'abc123')
     expect(out).toContain('This task id is abc123.')
-    expect(out).toContain('EDIT.')
     expect(out).not.toContain('{{')
-  })
-
-  it('inserts the edit-access text literally, `$` patterns included', () => {
-    const out = fillTaskPrompt(TEMPLATE, "roots ($TMPDIR, $&, $')", 'abc123')
-    expect(out).toContain("roots ($TMPDIR, $&, $').")
   })
 })
 

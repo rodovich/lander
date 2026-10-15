@@ -53,16 +53,6 @@ const GIT_TIPS = [
   '- Commit or push only when the user asks. If on the default branch, branch first.',
 ].join('\n')
 
-// The template's {{editAccess}} slot. The reach it states follows from the flags
-// buildClaudeArgs passes.
-const EDIT_ACCESS_TEXT =
-  'Edit access covers editing, creating, and deleting files (including via ' +
-  '`rm`/`mv`/`cp` and `>` redirects) within the task\'s working directory and ' +
-  'the scratch roots (`/tmp` and `$TMPDIR`), but never `.git`, `.claude`, or ' +
-  'paths outside those roots. Git and every other shell command — `npm`, ' +
-  '`node`, `python3` and the rest — follow the project\'s normal permission ' +
-  'settings, not a Lander grant'
-
 export type ClaudeFlowDeps = {
   landerBin: string
   taskPromptTemplate: string
@@ -472,7 +462,7 @@ function buildClaudeArgs(
     // that changes it — busts this conversation's prompt cache, which is why
     // nothing else in this string is allowed to vary per turn.
     [
-      fillTaskPrompt(taskPromptTemplate, EDIT_ACCESS_TEXT, ctx.task.taskId),
+      fillTaskPrompt(taskPromptTemplate, ctx.task.taskId),
       GIT_TIPS,
       ...(ctx.task.checkout ? [checkoutNote(ctx.task.checkout, ctx.task.root)] : []),
       ...(projectDoc ? [projectDocBlock(projectDoc)] : []),

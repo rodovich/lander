@@ -6,13 +6,12 @@ import path from 'node:path'
 import {
   makeFlow,
   resolveLaunchDir,
-  CODEX_EDIT_ACCESS_TEXT,
   codexOptionsFromEnv,
   type CodexFlowDeps,
 } from './codex'
 import { captureDriverTurn, driveFlow, type DriverTurnFixture } from './testCtx'
 
-const TASK_PROMPT_TEMPLATE = 'Task prompt: {{editAccess}}.'
+const TASK_PROMPT_TEMPLATE = 'Task prompt.'
 function codexFlow(overrides: Partial<CodexFlowDeps> = {}) {
   return makeFlow({
     taskPromptTemplate: TASK_PROMPT_TEMPLATE,
@@ -41,7 +40,7 @@ function permissionArgs(
 }
 
 function managedPrompt(prompt: string): string {
-  return `Task prompt: ${CODEX_EDIT_ACCESS_TEXT}.\n\n${prompt}`
+  return `${TASK_PROMPT_TEMPLATE}\n\n${prompt}`
 }
 
 describe('Codex flow launch', () => {

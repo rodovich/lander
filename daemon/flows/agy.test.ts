@@ -7,7 +7,7 @@ import { applyEvents } from './testTask'
 import { deliveryDigest, projectDocBlock } from 'lander/flow'
 
 const flow = (doc: string | undefined = 'Project instructions') => makeFlow({
-  taskPromptTemplate: 'Task {{id}}. {{editAccess}}',
+  taskPromptTemplate: 'Task {{id}}.',
   readProjectDoc: () => doc,
 })
 const fixture = (chunks: string[][] = []): Golden => ({
@@ -225,7 +225,7 @@ it('passes prompts, cwd, scratch directories, and the Lander environment', async
   const spawn = driven.spawns[0]
   expect(spawn).toMatchObject({ command: 'agy', cwd: '/repo/sub', env: { LANDER_API: 'http://localhost', LANDER_TOKEN: 'secret', LANDER_FILES_DIR: '/tmp', LANDER_RUN: 'ride-1' } })
   expect(spawn.args).toEqual(expect.arrayContaining(['--output-format', 'stream-json', '--print-timeout', '0s', '--dangerously-skip-permissions', '--add-dir', '/tmp']))
-  expect(spawn.args[1]).toContain('paths outside the workspace')
+  expect(spawn.args[1]).toContain('Task task-1.')
   expect(spawn.args[1]).toContain(projectDocBlock('Project instructions'))
   expect(spawn.args[1]).toContain('Attachment manifest')
   expect(spawn.args.filter((arg) => arg === '/tmp')).toHaveLength(1)

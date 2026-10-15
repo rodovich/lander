@@ -12,7 +12,7 @@ import type { HostEvent } from '../host-protocol'
 import { applyEvents } from './testTask'
 import { driveFlow, goldenInput, type Golden } from './testCtx'
 
-const TASK_PROMPT = 'Prompt: {{editAccess}}.'
+const TASK_PROMPT = 'Task prompt.'
 const LANDER_BIN = '/repo/bin/lander'
 // A stub snapshot, so the compare depends on neither the host's git tree nor the
 // clock. Both paths get the same one.

@@ -44,20 +44,11 @@ export function shouldDeliver(
   return !sessionId || delivered !== digest
 }
 
-// Fill the task prompt template's slots: {{id}} with the task's own id (constant
-// for the task's life, so it's safe in Claude's byte-stable --append-system-prompt)
-// and {{editAccess}} with the flow's account of what edit access covers under
-// its provider. The flow supplies that text because the reach of edit access
-// follows the provider's permission mechanism.
-export function fillTaskPrompt(
-  taskPromptTemplate: string,
-  editAccess: string,
-  id: string,
-): string {
-  // Replacer functions, so a `$&` or `$'` in the inserted prose stays literal.
-  return taskPromptTemplate
-    .replace('{{id}}', () => id)
-    .replace('{{editAccess}}', () => editAccess)
+// Fill the task prompt template's {{id}} slot with the task's own id, which is
+// constant for the task's life and so safe in Claude's byte-stable
+// --append-system-prompt.
+export function fillTaskPrompt(taskPromptTemplate: string, id: string): string {
+  return taskPromptTemplate.replace('{{id}}', id)
 }
 
 // The prompt block a revived task's first turn carries: one sentence telling the

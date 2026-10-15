@@ -21,7 +21,7 @@ vi.mock('node:fs', async (original) => {
 function runClaude(input: DriverTurnFixture, overrides: Partial<ClaudeFlowDeps> = {}) {
   return captureDriverTurn(makeFlow({
     landerBin: '/repo/bin/lander',
-    taskPromptTemplate: 'Prompt: {{editAccess}}.',
+    taskPromptTemplate: 'Task prompt.',
     gitContext: (cwd) => `Git status as of this message:\n\ncwd ${cwd}`,
     mint: () => 'minted',
     readProjectDoc: () => undefined,
@@ -88,12 +88,7 @@ describe('Claude flow', () => {
     )
 
     const systemPrompt = launch.args[launch.args.indexOf('--append-system-prompt') + 1]
-    expect(systemPrompt).toContain(
-      'Prompt: Edit access covers editing, creating, and deleting files',
-    )
-    expect(systemPrompt).toContain(
-      'follow the project\'s normal permission settings, not a Lander grant.',
-    )
+    expect(systemPrompt).toContain('Task prompt.')
     expect(systemPrompt).not.toContain('task-context block')
     // The kept git tips, minus the sign-off conventions that
     // includeGitInstructions:false removed along with the status snapshot.

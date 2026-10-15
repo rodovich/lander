@@ -6,7 +6,7 @@ import type { StartRunMessage } from '../server/protocol'
 import type { HostEvent, HostInput } from './host-protocol'
 import { runHost } from './flow-host'
 import { makeFlow as makeClaudeFlow } from './flows/claude'
-import { CODEX_EDIT_ACCESS_TEXT, makeFlow as makeCodexFlow } from './flows/codex'
+import { makeFlow as makeCodexFlow } from './flows/codex'
 import { settle } from './flows/testCtx'
 import { deliveryDigest, fillTaskPrompt } from './task-management'
 import { projectDocBlock } from '../flow/project-doc'
@@ -56,17 +56,19 @@ function makeInput(
   return { start: makeStart(over), root: '/repo', cwd: '/repo', ...input }
 }
 
+const TASK_PROMPT = 'Lander instructions.'
+
 function testFlows(readProjectDoc: (dir: string) => string | undefined = () => undefined) {
   return {
     claude: makeClaudeFlow({
       landerBin: '/repo/bin/lander',
-      taskPromptTemplate: 'Prompt: {{editAccess}}.',
+      taskPromptTemplate: TASK_PROMPT,
       gitContext: () => 'Git status as of this message:\n\non branch test',
       mint: () => 'minted-session',
       readProjectDoc,
     }),
     codex: makeCodexFlow({
-      taskPromptTemplate: 'Prompt: {{editAccess}}.',
+      taskPromptTemplate: TASK_PROMPT,
       readProjectDoc,
       resolveGitDirs: () => [],
     }),
@@ -216,7 +218,7 @@ describe('flow host', () => {
         '--cd',
         '/repo',
         '--',
-        `Prompt: ${CODEX_EDIT_ACCESS_TEXT}.\n\ncodex prompt`,
+        `${TASK_PROMPT}\n\ncodex prompt`,
       ],
       options: { cwd: '/repo' },
     })
@@ -243,7 +245,7 @@ describe('flow host', () => {
         expect.any(String),
         '--append-system-prompt',
         expect.stringMatching(
-          /^Prompt: Edit access covers [^\n]*follow the project's normal permission settings, not a Lander grant\.\n\n# Git\n- Interactive flags \(`-i`, e\.g\. `git rebase -i`, `git add -i`\) are not supported in this environment\.\n- Use the `gh` CLI for GitHub operations \(PRs, issues, API\)\.\n- Commit or push only when the user asks\. If on the default branch, branch first\.$/,
+          /^Lander instructions\.\n\n# Git\n- Interactive flags \(`-i`, e\.g\. `git rebase -i`, `git add -i`\) are not supported in this environment\.\n- Use the `gh` CLI for GitHub operations \(PRs, issues, API\)\.\n- Commit or push only when the user asks\. If on the default branch, branch first\.$/,
         ),
         '--output-format',
         'stream-json',
@@ -366,9 +368,8 @@ describe('flow host', () => {
   //
 
   describe('codex deliver-once', () => {
-    const TEMPLATE = 'Prompt: {{editAccess}}.'
-    const digestFor = (editAccess = CODEX_EDIT_ACCESS_TEXT) =>
-      deliveryDigest(fillTaskPrompt(TEMPLATE, editAccess, 'task-1'))
+    const digestFor = (template = TASK_PROMPT) =>
+      deliveryDigest(fillTaskPrompt(template, 'task-1'))
     const promptOf = (h: ReturnType<typeof harness>) => {
       const args = h.spawns[0].args
       return args[args.length - 1] as string
@@ -402,7 +403,6 @@ describe('flow host', () => {
         }),
       )
       expect(promptOf(h)).toBe('prompt')
-      expect(promptOf(h)).not.toContain(CODEX_EDIT_ACCESS_TEXT)
     })
 
     // The regression for the one suppression path review found: sealForRelaunch
@@ -414,7 +414,7 @@ describe('flow host', () => {
     it('sends it when the digest matches but no thread is recorded', async () => {
       const h = harness()
       h.run(makeInput({ flowState: { taskPrompt: digestFor() } }))
-      expect(promptOf(h)).toContain(CODEX_EDIT_ACCESS_TEXT)
+      expect(promptOf(h)).toContain(TASK_PROMPT)
     })
 
     // Content-addressing handles a template edit with no separate staleness
@@ -427,11 +427,11 @@ describe('flow host', () => {
           sessionId: 'thread-1',
           flowState: {
             sessionId: 'thread-1',
-            taskPrompt: digestFor('an older edit-access text'),
+            taskPrompt: digestFor('Older lander instructions.'),
           },
         }),
       )
-      expect(promptOf(h)).toContain(CODEX_EDIT_ACCESS_TEXT)
+      expect(promptOf(h)).toContain(TASK_PROMPT)
     })
 
     it('records the delivery when the turn produced output', async () => {
@@ -487,7 +487,8 @@ describe('flow host', () => {
         const appended = appendedSystemPrompt(h)
         expect(appended).toContain(DOC)
         // Lander's instructions precede the repo's.
-        expect(appended.indexOf('Prompt:')).toBeLessThan(
+        expect(appended.indexOf(TASK_PROMPT)).toBeGreaterThanOrEqual(0)
+        expect(appended.indexOf(TASK_PROMPT)).toBeLessThan(
           appended.indexOf('<project-instructions>'),
         )
       })
@@ -548,7 +549,8 @@ describe('flow host', () => {
         const h = harness(hasDoc)
         h.run(makeInput())
         const prompt = spawnArgs(h).at(-1) as string
-        expect(prompt.indexOf('Prompt:')).toBeLessThan(
+        expect(prompt.indexOf(TASK_PROMPT)).toBeGreaterThanOrEqual(0)
+        expect(prompt.indexOf(TASK_PROMPT)).toBeLessThan(
           prompt.indexOf('<project-instructions>'),
         )
         expect(prompt.indexOf('<project-instructions>')).toBeLessThan(
@@ -630,7 +632,7 @@ describe('flow host', () => {
           }),
         )
         const prompt = spawnArgs(h).at(-1) as string
-        expect(prompt).toContain('Prompt:')
+        expect(prompt).toContain(TASK_PROMPT)
         expect(prompt).not.toContain('<project-instructions>')
       })
 

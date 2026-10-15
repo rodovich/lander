@@ -60,8 +60,8 @@ thread id from the stream.
 The record of that delivery is a content digest in `flowState.taskPrompt`, written
 only after a turn produces output — proof the model consumed the turn, and
 therefore that the thread holds it. Two consequences worth knowing: a template
-edit or a mid-task grant flip re-renders, re-digests, and re-delivers on the next
-turn, so live threads do not go stale; and every failure direction is a duplicate
+edit re-renders, re-digests, and re-delivers on the next turn, so live threads do
+not go stale; and every failure direction is a duplicate
 copy rather than a suppressed one, which is why the gate also fires whenever no
 thread id is recorded.
 

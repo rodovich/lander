@@ -55,7 +55,7 @@ Flat JSON files, one per task, no database. Tasks live under `./data/<normalized
 
 ### Configuring what tasks may run
 
-Every task can edit, create, and delete files within its project directory and the scratch roots (`/tmp` and `$TMPDIR`), but never `.git`, `.claude`, or paths outside those roots.
+Every task can edit, create, and delete files within its project directory and the scratch roots (`/tmp` and `$TMPDIR`). A Claude task can't write `.git`, `.claude`, or paths outside those roots; a Codex task can write the repository's git metadata; an Antigravity task runs with `--dangerously-skip-permissions` and can write anywhere.
 
 Everything else — git, package managers, anything you'd run in a shell — follows the target project's own `.claude` settings plus any rules granted to the individual task; anything unlisted is denied. So to let tasks run git in a project, add a rule like `Bash(git:*)` to that project's `.claude/settings.json`. Granting a denied rule in **project** scope from the UI writes it to `.claude/settings.local.json`, which the Claude CLI reads on its own; **task** scope keeps it to the one task. Codex tasks are governed by a sandbox profile rather than rules, so a Codex task's stored rules don't affect its runs yet.
 
@@ -120,9 +120,7 @@ Attaching the same name twice yields two chips, not one: every blob is immutable
 Every request to the local API is unauthenticated by default, so the server distinguishes two **principals** before honoring any permission change, identifying the caller from request headers:
 
 - **The human** — the browser sends a shared UI secret (`X-Lander-UI-Token`). `dev.mjs` mints it once, persists it under `data/.ui-token` (gitignored, mode 0600), inlines it into the client as `VITE_LANDER_UI_TOKEN`, and passes it to the API as `LANDER_UI_TOKEN`. Each goes to the one process that needs it, never onto the shared environment the three processes inherit, and the daemon drops its own copy once it has read it — otherwise the value reaches every task's shell, where presenting it would resolve as the human (`server/secrets.ts`). This narrows the default blast radius rather than making the secret unobtainable: it is still a file a same-user task can read, still served to the browser by the Vite dev server, and still visible in a process's exec-time environment. The human may grant anything.
-- **A task** — the `lander` CLI sends its `LANDER_TOKEN` plus its task id/project (`X-Lander-Token`/`X-Lander-Task`/`X-Lander-Project`); the server matches the token against the task's stored secret. A task **cannot** add tool rules, to itself or anyone else. Tokens are never returned over HTTP, so one task can't read another's to impersonate it.
-
-Concretely, the server enforces that `POST /tasks/:id/allow` is human only.
+- **A task** — the `lander` CLI sends its `LANDER_TOKEN` plus its task id/project (`X-Lander-Token`/`X-Lander-Task`/`X-Lander-Project`); the server matches the token against the task's stored secret. A task **cannot** add tool rules to itself or anyone else: `POST /tasks/:id/allow` is human only. Tokens are never returned over HTTP, so one task can't read another's to impersonate it.
 
 This is best-effort for a single-user local tool: a fully adversarial task running as the same user could still read `data/.ui-token` off disk. It blocks the realistic failure mode — an agent escalating itself or a child via the documented API — not a determined local attacker.
 
