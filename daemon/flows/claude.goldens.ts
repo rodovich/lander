@@ -402,4 +402,35 @@ export const CLAUDE_GOLDENS: Golden[] = [
     stderrChunks: ['warning: something\n'],
     exitCode: 0,
   },
+  {
+    name: 'an API failure leads the done stderr with its synthetic message',
+    chunks: [
+      [init()],
+      [
+        j({
+          type: 'assistant',
+          message: {
+            model: '<synthetic>',
+            content: [
+              {
+                type: 'text',
+                text: 'Failed to authenticate: OAuth session expired and could not be refreshed',
+              },
+            ],
+          },
+          error: 'authentication_failed',
+          is_api_error_message: true,
+        }),
+      ],
+      [
+        result({
+          result: 'Failed to authenticate: OAuth session expired and could not be refreshed',
+          is_error: true,
+          terminal_reason: 'api_error',
+        }),
+      ],
+    ],
+    stderrChunks: ['[claude-code:unrecognized_model] {}\n'],
+    exitCode: 1,
+  },
 ]

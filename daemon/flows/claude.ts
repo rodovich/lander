@@ -186,6 +186,7 @@ export function makeFlow({
         ? readSessionTotals(ctx.state.get(['sessionTotals']))
         : { costUsd: 0, tokens: 0 }
       let stderrText = ''
+      let apiError: string | undefined
 
       const collectStderr = (async () => {
         for await (const l of child.stderr) stderrText += `${l}\n`
@@ -197,16 +198,13 @@ export function makeFlow({
         const r = reduceStreamLine(trimmed, ctx.now())
 
         if (r.turnStarted) ctx.emit.committed()
+        if (r.apiError) apiError = r.apiError
         if (r.drivingModel) ctx.emit.meter({ drivingModel: r.drivingModel })
         // Claude reports a reliable reset time, so the scheduled-retry option is
         // safe to arm from it (meta.capabilities.rateLimitRetry). The retry ask
         // itself stays a platform ask, raised server-side.
         if (r.rateLimitResetsAt)
           ctx.emit.meter({ rateLimitResetsAt: r.rateLimitResetsAt })
-        // No terminal-error branch: claude's reducer has no such channel (unlike
-        // codex's), so a failed turn reaches us as an exit code plus stderr. The
-        // generic executor carries one for providers that do report errors
-        // in-stream; here it would be unreachable code.
 
         for (const step of r.steps) {
           if (step.kind === 'tool_use') {
@@ -303,7 +301,12 @@ export function makeFlow({
 
       const exitCode = await child.exit
       await collectStderr
-      return { exitCode, stderr: stderrText.trim() }
+      return {
+        exitCode,
+        // The API error leads: the retry ask quotes the first line, and the
+        // CLI's own stderr can open with a terse machine-formatted diagnostic.
+        stderr: [apiError, stderrText.trim()].filter(Boolean).join('\n'),
+      }
     },
   }
 }

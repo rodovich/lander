@@ -399,6 +399,187 @@ GIT-SNAPSHOT-STUB
 }
 `;
 
+exports[`claude transcript regressions > an API failure leads the done stderr with its synthetic message 1`] = `
+{
+  "done": {
+    "exitCode": 1,
+    "kind": "done",
+    "stderr": "Failed to authenticate: OAuth session expired and could not be refreshed
+[claude-code:unrecognized_model] {}",
+  },
+  "launch": [
+    {
+      "args": [
+        "--session-id",
+        "minted-session-id",
+        "--allowedTools",
+        "Bash(lander:*)",
+        "--settings",
+        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "--append-system-prompt",
+        "Prompt: Edit access covers editing, creating, and deleting files (including via \`rm\`/\`mv\`/\`cp\` and \`>\` redirects) within the task's working directory and the scratch roots (\`/tmp\` and \`$TMPDIR\`), but never \`.git\`, \`.claude\`, or paths outside those roots. Git and every other shell command — \`npm\`, \`node\`, \`python3\` and the rest — follow the project's normal permission settings, not a Lander grant. Your own current grants — which cap what you can forward — are stated in the task-context block in the conversation.
+
+# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        "--",
+        "do the thing
+
+<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+      ],
+      "command": "claude",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "allowEdits": false,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "minted-session-id",
+      "turnContext": "<task-context>
+Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+
+You currently have no edit permission, so a spawned task cannot be granted it either.
+
+GIT-SNAPSHOT-STUB
+</task-context>",
+    },
+    "flowStateRev": 2,
+    "hookFireSeq": 2,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "Failed to authenticate: OAuth session expired and could not be refreshed",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "eventKind": "wedged",
+        "id": "itm-mjuohs00-1",
+        "kind": "event",
+        "title": "Parity task",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "blocking": "task",
+        "form": {
+          "options": [
+            {
+              "id": "retry-now",
+              "label": "Try again",
+            },
+          ],
+          "type": "choice",
+        },
+        "id": "ask-1",
+        "kind": "ask",
+        "origin": "retry",
+        "prompt": "The assistant run failed: Failed to authenticate: OAuth session expired and could not be refreshed",
+        "state": "open",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "system",
+        "id": "fire-1-mjuohs00",
+        "trigger": "wedged",
+      },
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "system",
+        "id": "fire-2-mjuohs00",
+        "outcome": "error",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "retry": {
+      "committed": true,
+      "prompts": [],
+    },
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "error": {
+          "exitCode": 1,
+          "stderr": "Failed to authenticate: OAuth session expired and could not be refreshed
+[claude-code:unrecognized_model] {}",
+        },
+        "id": "ride-1",
+        "outcome": "error",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "shape": 2,
+    "status": "wedged",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "committed": true,
+      "drivingModel": "claude-opus-4-8",
+      "finalText": undefined,
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "committed": true,
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "Failed to authenticate: OAuth session expired and could not be refreshed",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "kind": "text",
+          "text": "Failed to authenticate: OAuth session expired and could not be refreshed",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+    {
+      "blockedIds": [],
+      "committed": true,
+      "drivingModel": "claude-opus-4-8",
+      "finalText": "Failed to authenticate: OAuth session expired and could not be refreshed",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
 exports[`claude transcript regressions > attachment manifest rides the prompt with an --add-dir 1`] = `
 {
   "done": {

@@ -339,6 +339,11 @@ export function reduceStreamLine(
   // before init, and an API failure records it — so a run that got this far
   // has the message in its transcript.
   turnStarted?: true
+  // The text of the assistant message the main agent's CLI writes in place of a
+  // reply when the API call fails (`is_api_error_message`) — e.g. "Failed to
+  // authenticate: OAuth session expired…". The CLI prints it on stdout; stderr
+  // carries at most a terse diagnostic, and for an expired login nothing.
+  apiError?: string
   // When a `rate_limit_event` reports the session limit was *rejected* (the turn
   // was refused outright, not just warned), the ISO time the limit resets —
   // claude sends it as `rate_limit_info.resetsAt`, a Unix epoch in seconds. The
@@ -367,6 +372,7 @@ export function reduceStreamLine(
   let usageFinal: boolean | undefined
   let drivingModel: string | undefined
   let turnStarted: true | undefined
+  let apiError: string | undefined
   let rateLimitResetsAt: string | undefined
   let sessionTotals: SessionTotals | undefined
   if (ev.type === 'system' && ev.subtype === 'init') {
@@ -389,6 +395,8 @@ export function reduceStreamLine(
         // Only the main agent's text is the turn's reply; a subagent's prose stays
         // inside its own trace and must not overwrite the message's reply text.
         if (!parentToolUseId) finalText = block.text
+        if (!parentToolUseId && ev.is_api_error_message === true)
+          apiError = block.text
       } else if (block.type === 'tool_use') {
         const input = summarizeToolInput(block.input)
         const inputFull =
@@ -510,6 +518,7 @@ export function reduceStreamLine(
     usageFinal,
     drivingModel,
     ...(turnStarted ? { turnStarted } : {}),
+    ...(apiError ? { apiError } : {}),
     rateLimitResetsAt,
     sessionTotals,
   }

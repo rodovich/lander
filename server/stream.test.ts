@@ -892,6 +892,54 @@ describe('reduceStreamLine', () => {
     expect(r.turnStarted).toBeUndefined()
   })
 
+  it('reports the text of a synthetic API-error message, still as a text step', () => {
+    const r = reduceStreamLine(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          model: '<synthetic>',
+          content: [
+            {
+              type: 'text',
+              text: 'Failed to authenticate: OAuth session expired and could not be refreshed',
+            },
+          ],
+        },
+        error: 'authentication_failed',
+        is_api_error_message: true,
+      }),
+      AT,
+    )
+    expect(r.apiError).toBe(
+      'Failed to authenticate: OAuth session expired and could not be refreshed',
+    )
+    expect(r.steps.map((s) => s.kind)).toEqual(['text'])
+  })
+
+  it('reports no API error for a subagent’s failed call', () => {
+    const r = reduceStreamLine(
+      JSON.stringify({
+        type: 'assistant',
+        parent_tool_use_id: 'toolu_1',
+        message: { content: [{ type: 'text', text: 'API Error: 500' }] },
+        is_api_error_message: true,
+      }),
+      AT,
+    )
+    expect(r.apiError).toBeUndefined()
+  })
+
+  it('reports no API error for an ordinary reply', () => {
+    const r = reduceStreamLine(
+      JSON.stringify({
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'hi' }] },
+      }),
+      AT,
+    )
+    expect(r.apiError).toBeUndefined()
+  })
+
   it('omits drivingModel for a non-init system event or a missing model', () => {
     expect(
       reduceStreamLine(JSON.stringify({ type: 'system', subtype: 'task_progress' }), AT)
