@@ -4,6 +4,8 @@ export function agentDisplayName(agent: string | undefined): string {
       return 'Claude'
     case 'codex':
       return 'Codex'
+    case 'agy':
+      return 'Antigravity'
     default: {
       const name = agent?.trim()
       return name || 'Assistant'

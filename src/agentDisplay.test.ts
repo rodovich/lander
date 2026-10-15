@@ -5,6 +5,7 @@ describe('agentDisplayName', () => {
   it('maps known agent ids to user-facing names', () => {
     expect(agentDisplayName('claude')).toBe('Claude')
     expect(agentDisplayName('codex')).toBe('Codex')
+    expect(agentDisplayName('agy')).toBe('Antigravity')
   })
 
   it('falls back to a trimmed custom name or Assistant', () => {
