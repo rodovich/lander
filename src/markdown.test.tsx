@@ -257,6 +257,20 @@ describe('Markdown rendering', () => {
     )
   })
 
+  it('renders inline formatting in a link label, with or without an anchor', () => {
+    const label = '<code>c</code> <strong>b</strong> <em>i</em>'
+    expect(render('[`c` **b** _i_](https://x.com)')).toBe(
+      `<p><a href="https://x.com" target="_blank" rel="noopener noreferrer">${label}</a></p>`,
+    )
+    expect(render('[`c` **b** _i_](file:///x)')).toBe(`<p>${label}</p>`)
+  })
+
+  it('does not autolink a URL inside a link label', () => {
+    expect(render('[**see https://a.com**](https://b.com)')).toBe(
+      '<p><a href="https://b.com" target="_blank" rel="noopener noreferrer"><strong>see https://a.com</strong></a></p>',
+    )
+  })
+
   it('autolinks a bare URL and excludes trailing punctuation', () => {
     const html = render('see https://ex.com.')
     expect(html).toContain('href="https://ex.com"')
@@ -360,6 +374,12 @@ describe('task-mention linking', () => {
     const html = render('abcd1234 is wedged')
     expect(html).toContain(`href="/proj/${FULL}"`)
     expect(html).toContain('>Fix the parser</a>')
+  })
+
+  it('does not link a task id inside a markdown link label', () => {
+    expect(render('[abcd1234](https://x.com)')).toBe(
+      '<p><a href="https://x.com" target="_blank" rel="noopener noreferrer">abcd1234</a></p>',
+    )
   })
 
   it('leaves an id that matches no task as literal text', () => {

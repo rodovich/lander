@@ -90,10 +90,13 @@ function maskEscapes(masked: string): { masked: string; escapeAt: Set<number> } 
 
 // Parse inline spans (bold, italic, strikethrough, code, links) into React
 // nodes. Operates on plain text, so anything it doesn't recognize stays literal.
+// `inLink` is set while rendering a link's label, where CommonMark allows every
+// inline span except another link.
 function renderInline(
   text: string,
   keyPrefix: string,
   linkTask?: TaskLinkResolver,
+  inLink = false,
 ): ReactNode[] {
   const nodes: ReactNode[] = []
   let key = 0
@@ -123,7 +126,7 @@ function renderInline(
   //
   // Matches always come from `.exec` below, so `index` is always present —
   // RegExpMatchArray would leave it optional and `src`/`group` need it.
-  const patterns: {
+  let patterns: {
     re: RegExp
     render: (m: RegExpExecArray, k: string) => ReactNode
     // Optional gate: a match the predicate rejects is skipped during scanning as
@@ -133,6 +136,7 @@ function renderInline(
     // one contiguous text node instead of becoming tens of thousands of
     // Fragments — the dominant render/DOM cost on a long pasted log.
     accept?: (m: RegExpExecArray) => boolean
+    link?: true
   }[] = [
     {
       // One blanked run is exactly one code span: two spans can never be
@@ -151,12 +155,14 @@ function renderInline(
     },
     {
       re: /\[([^\]]+)\]\(([^)\s]+)\)/gd,
+      link: true,
       render: (m, k) => {
+        const label = renderInline(group(m, 1) ?? '', k, linkTask, true)
         const href = safeHref(group(m, 2) ?? '')
-        if (!href) return <Fragment key={k}>{group(m, 1)}</Fragment>
+        if (!href) return <Fragment key={k}>{label}</Fragment>
         return (
           <a key={k} href={href} target="_blank" rel="noopener noreferrer">
-            {group(m, 1)}
+            {label}
           </a>
         )
       },
@@ -176,7 +182,7 @@ function renderInline(
       re: /\*\*([\s\S]+?)\*\*|(?<![\p{L}\p{N}_])__([^_]+)__(?![\p{L}\p{N}_])/gud,
       render: (m, k) => (
         <strong key={k}>
-          {renderInline(group(m, 1) ?? group(m, 2) ?? '', k, linkTask)}
+          {renderInline(group(m, 1) ?? group(m, 2) ?? '', k, linkTask, inLink)}
         </strong>
       ),
     },
@@ -184,7 +190,7 @@ function renderInline(
       re: /\*([^*]+)\*|(?<![\p{L}\p{N}_])_([^_]+)_(?![\p{L}\p{N}_])/gud,
       render: (m, k) => (
         <em key={k}>
-          {renderInline(group(m, 1) ?? group(m, 2) ?? '', k, linkTask)}
+          {renderInline(group(m, 1) ?? group(m, 2) ?? '', k, linkTask, inLink)}
         </em>
       ),
     },
@@ -196,7 +202,7 @@ function renderInline(
       // lazy and recursed, like bold's, so inner emphasis stays inside.
       re: /~~([\s\S]+?)~~/gd,
       render: (m, k) => (
-        <del key={k}>{renderInline(group(m, 1) ?? '', k, linkTask)}</del>
+        <del key={k}>{renderInline(group(m, 1) ?? '', k, linkTask, inLink)}</del>
       ),
     },
     {
@@ -204,6 +210,7 @@ function renderInline(
       // trailing punctuation (".", ")", etc.) out of the link. Markdown links
       // win over this since their "[" sits at an earlier index.
       re: /(?:https?:\/\/|www\.)[^\s]*[^\s.,;:!?)\]}'"]/gi,
+      link: true,
       render: (m, k) => {
         const raw = src(m)
         const href = safeHref(raw.startsWith('www.') ? `https://${raw}` : raw)
@@ -238,6 +245,7 @@ function renderInline(
   // lifecycle-event task links, so it navigates within the app.
   if (linkTask) {
     patterns.push({
+      link: true,
       re: /(?<![0-9A-Za-z_-])(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9A-Za-z_-]{8,10})(?![0-9A-Za-z_-])/gi,
       // Only a candidate that resolves to a real task is treated as a match; the
       // rest fall through to literal text without splitting the run (see accept).
@@ -258,6 +266,7 @@ function renderInline(
       },
     })
   }
+  if (inLink) patterns = patterns.filter((p) => !p.link)
 
   // Forward scan with a per-pattern cache. `cursor` is where the next span
   // starts; each pattern's soonest match at/after `cursor` is cached and only
