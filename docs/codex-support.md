@@ -1,17 +1,21 @@
 # Codex support
 
-Lander hosts multiple local coding-agent CLIs through bundled driver flows.
+Lander bundles driver flows for Claude (`claude`), Codex (`codex`), and
+Antigravity (`agy`), plus the `open-pr` workflow. The complete bundled list lives
+in [the flow registry](../daemon/flows/index.ts). This document covers Codex and
+its differences from Claude; it is not a complete account of agent support.
 Codex is intended as a first-class target; tasks run through Codex when Codex
 is selected in the UI, when it is launched with `lander launch --flow codex`,
 or when `LANDER_FLOW=codex` sets the instance default.
 
 ## Multi-agent architecture
 
-Lander stores the chosen provider on each task as `agent: "claude" | "codex"`.
-Existing tasks without an `agent` are treated as Claude tasks. A task keeps using
-the provider it was created with; switching providers requires creating a new
-task. Relaunching a task resets its provider session while keeping the same
-stored provider.
+Lander resolves a task's driver from `flow`, falling back to the legacy
+`agent: "claude" | "codex"` field, then to `claude` when neither is present.
+The legacy field does not enumerate all supported drivers: Antigravity tasks
+use `flow: "agy"`. A task keeps using the flow it was created with; switching
+flows requires creating a new task. Relaunching a task resets its provider
+session while keeping the same flow.
 
 The API server owns task JSON, scheduling, queues, status changes, permission
 metadata, and UI-facing state. It does not spawn the agent CLI directly. For each
