@@ -1,14 +1,28 @@
-import { readFileSync } from 'node:fs'
-import { expect, it } from 'vitest'
-import { makeFlow, meta, resolveLaunchDir } from './agy'
-import { announcedFlows, buildFlows, providerCaps } from './index'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { afterEach, beforeEach, expect, it } from 'vitest'
+import { agyProjectFile, agyProjectId, makeFlow, meta, onGrant, resolveLaunchDir } from './agy'
+import { announcedFlows, buildFlows, FLOW_MODULES, providerCaps } from './index'
 import { driveFlow, goldenInput, type Golden } from './testCtx'
 import { applyEvents } from './testTask'
+import { blockedRequests, type BlockedItem } from '../../src/permissions'
 import { deliveryDigest, projectDocBlock } from 'lander/flow'
+
+let geminiConfigDir: string
+
+beforeEach(() => {
+  geminiConfigDir = mkdtempSync(path.join(tmpdir(), 'lander-agy-test-'))
+})
+
+afterEach(() => {
+  rmSync(geminiConfigDir, { recursive: true, force: true })
+})
 
 const flow = (doc: string | undefined = 'Project instructions') => makeFlow({
   taskPromptTemplate: 'Task {{id}}.',
   readProjectDoc: () => doc,
+  geminiConfigDir,
 })
 const fixture = (chunks: string[][] = []): Golden => ({
   name: 'agy', chunks,
@@ -25,7 +39,8 @@ const steps = (events: Awaited<ReturnType<typeof driveFlow>>['events']) =>
 
 it('registers an executable driver and its capabilities', () => {
   expect(announcedFlows()).toContainEqual({ scope: 'bundled', meta })
-  expect(providerCaps().agy).toMatchObject({ visionNative: false, projectGrants: false, usageSnapshot: false })
+  expect(providerCaps().agy).toMatchObject({ visionNative: false, projectGrants: true, usageSnapshot: false })
+  expect(FLOW_MODULES.agy.onGrant).toBe(onGrant)
   expect(buildFlows({ root: process.cwd(), env: {} }).agy.meta).toEqual(meta)
   expect(resolveLaunchDir({ root: '/repo', recordedCwd: '/repo/sub', isDir: () => true })).toEqual({ cwd: '/repo/sub' })
   expect(resolveLaunchDir({ root: '/repo', recordedCwd: '/gone', isDir: () => false })).toEqual({ cwd: '/repo' })
@@ -48,7 +63,12 @@ it('reduces the recorded Antigravity stream into a session, tool lifecycle, usag
     ],
   })
   expect(steps(driven.events)).toEqual(expect.arrayContaining([
-    expect.objectContaining({ kind: 'tool_use', tool: 'run_command', input: 'printf agy-golden' }),
+    expect.objectContaining({
+      kind: 'tool_use',
+      tool: 'run_command',
+      input: 'printf agy-golden',
+      rule: 'command(printf agy-golden)',
+    }),
     expect.objectContaining({ kind: 'tool_result', text: 'agy-golden' }),
     expect.objectContaining({ kind: 'text', text: 'Golden complete.\n' }),
   ]))
@@ -56,7 +76,7 @@ it('reduces the recorded Antigravity stream into a session, tool lifecycle, usag
   expect(driven.result.exitCode).toBe(0)
 })
 
-it('formats tool inputs, file-edit diffs, subagent summaries, and truncated outputs', async () => {
+it('formats tool inputs, permission rules, file-edit diffs, subagent summaries, and truncated outputs', async () => {
   const toolStep = (
     step_index: number,
     tool_name: string,
@@ -106,6 +126,9 @@ it('formats tool inputs, file-edit diffs, subagent summaries, and truncated outp
         },
       },
     ),
+    toolStep(11, 'read_url_content', { Url: 'https://antigravity.google/docs/cli' }),
+    toolStep(12, 'call_mcp_tool', { ServerName: 'playwright', ToolName: 'browser_snapshot' }),
+    toolStep(13, 'notebook_edit', { NotebookPath: '/repo/demo.ipynb' }),
     result(),
   ]])
   const driven = await driveFlow(g, flow())
@@ -115,37 +138,82 @@ it('formats tool inputs, file-edit diffs, subagent summaries, and truncated outp
       tool: 'run_command',
       input: 'npm test npm run typecheck',
       inputFull: 'npm test\nnpm run typecheck',
+      rule: 'command(npm test\nnpm run typecheck)',
     }),
     expect.objectContaining({
       kind: 'tool_result',
       text: 'line 1\nline 2\nline 3\n…',
     }),
-    expect.objectContaining({ kind: 'tool_use', tool: 'view_file', input: '/repo/src/app.ts' }),
-    expect.objectContaining({ kind: 'tool_use', tool: 'list_dir', input: '/repo/src' }),
-    expect.objectContaining({ kind: 'tool_use', tool: 'grep_search', input: 'makeFlow' }),
+    expect.objectContaining({
+      kind: 'tool_use',
+      tool: 'view_file',
+      input: '/repo/src/app.ts',
+      rule: 'read_file(/repo/src/app.ts)',
+    }),
+    expect.objectContaining({
+      kind: 'tool_use',
+      tool: 'list_dir',
+      input: '/repo/src',
+      rule: 'read_file(/repo/src)',
+    }),
+    expect.objectContaining({
+      kind: 'tool_use',
+      tool: 'grep_search',
+      input: 'makeFlow',
+      rule: 'read_file(/repo/daemon)',
+    }),
     expect.objectContaining({ kind: 'tool_use', tool: 'code_search', input: 'resolveLaunchDir' }),
-    expect.objectContaining({ kind: 'tool_use', tool: 'find_by_name', input: '*.test.ts' }),
+    expect.objectContaining({
+      kind: 'tool_use',
+      tool: 'find_by_name',
+      input: '*.test.ts',
+      rule: 'read_file(/repo)',
+    }),
     expect.objectContaining({
       kind: 'tool_use',
       tool: 'replace_file_content',
       input: '/repo/src/app.ts',
+      rule: 'write_file(/repo/src/app.ts)',
       edits: [{ old: 'const x = 1', new: 'const x = 2' }],
     }),
     expect.objectContaining({
       kind: 'tool_use',
       tool: 'multi_replace_file_content',
       input: '/repo/src/multi.ts',
+      rule: 'write_file(/repo/src/multi.ts)',
       edits: [
         { old: 'a', new: 'b' },
         { old: 'c', new: 'd' },
       ],
     }),
-    expect.objectContaining({ kind: 'tool_use', tool: 'write_to_file', input: '/repo/src/new.ts' }),
+    expect.objectContaining({
+      kind: 'tool_use',
+      tool: 'write_to_file',
+      input: '/repo/src/new.ts',
+      rule: 'write_file(/repo/src/new.ts)',
+    }),
     expect.objectContaining({
       kind: 'tool_use',
       tool: 'invoke_subagent',
       input: 'research: Codebase Researcher',
       inputFull: 'research: Codebase Researcher\n\nInspect the flow reducer.',
+    }),
+    expect.objectContaining({
+      kind: 'tool_use',
+      tool: 'read_url_content',
+      input: 'https://antigravity.google/docs/cli',
+      rule: 'read_url(antigravity.google)',
+    }),
+    expect.objectContaining({
+      kind: 'tool_use',
+      tool: 'call_mcp_tool',
+      rule: 'mcp(playwright:browser_snapshot)',
+    }),
+    expect.objectContaining({
+      kind: 'tool_use',
+      tool: 'notebook_edit',
+      input: '/repo/demo.ipynb',
+      rule: 'write_file(/repo/demo.ipynb)',
     }),
   ]))
 })
@@ -217,18 +285,172 @@ it('accounts for per-turn token usage deltas and drivingModel across conversatio
   })
 })
 
-it('passes prompts, cwd, scratch directories, and the Lander environment', async () => {
+it('passes --mode accept-edits, --project lander-<hash>, canonicalized --add-dir paths, and seeds command(lander)', async () => {
+  const realFilesDir = path.join(geminiConfigDir, 'real-files')
+  const symlinkFilesDir = path.join(geminiConfigDir, 'symlink-files')
+  mkdirSync(realFilesDir, { recursive: true })
+  symlinkSync(realFilesDir, symlinkFilesDir)
+
   const g = fixture([[result()]])
   g.start = { ...g.start, env: { LANDER_API: 'http://localhost', LANDER_TOKEN: 'secret', PATH: '/bin' } }
-  g.input = { cwd: '/repo/sub', filesDir: '/tmp', materialized: { filesDir: '/tmp', images: [], manifestBlock: 'Attachment manifest' } }
+  g.input = {
+    root: '/repo',
+    cwd: '/repo/sub',
+    filesDir: symlinkFilesDir,
+    materialized: { filesDir: symlinkFilesDir, images: [], manifestBlock: 'Attachment manifest' },
+  }
   const driven = await driveFlow(g, flow())
   const spawn = driven.spawns[0]
-  expect(spawn).toMatchObject({ command: 'agy', cwd: '/repo/sub', env: { LANDER_API: 'http://localhost', LANDER_TOKEN: 'secret', LANDER_FILES_DIR: '/tmp', LANDER_RUN: 'ride-1' } })
-  expect(spawn.args).toEqual(expect.arrayContaining(['--output-format', 'stream-json', '--print-timeout', '0s', '--dangerously-skip-permissions', '--add-dir', '/tmp']))
+  const expectedProjectId = agyProjectId('/repo')
+  expect(spawn).toMatchObject({
+    command: 'agy',
+    cwd: '/repo/sub',
+    env: {
+      LANDER_API: 'http://localhost',
+      LANDER_TOKEN: 'secret',
+      LANDER_FILES_DIR: symlinkFilesDir,
+      LANDER_RUN: 'ride-1',
+    },
+  })
+  expect(spawn.args).not.toContain('--dangerously-skip-permissions')
+  expect(spawn.args).toEqual(expect.arrayContaining([
+    '--output-format', 'stream-json',
+    '--print-timeout', '0s',
+    '--mode', 'accept-edits',
+    '--project', expectedProjectId,
+    '--add-dir', '/tmp',
+    '--add-dir', symlinkFilesDir,
+    '--add-dir', realpathSync(symlinkFilesDir),
+  ]))
   expect(spawn.args[1]).toContain('Task task-1.')
   expect(spawn.args[1]).toContain(projectDocBlock('Project instructions'))
   expect(spawn.args[1]).toContain('Attachment manifest')
   expect(spawn.args.filter((arg) => arg === '/tmp')).toHaveLength(1)
+
+  const projectConfig = JSON.parse(
+    readFileSync(agyProjectFile('/repo', geminiConfigDir), 'utf8'),
+  )
+  expect(projectConfig).toEqual({
+    id: expectedProjectId,
+    name: 'repo',
+    projectResources: {},
+    permissionGrants: {
+      permissionGrants: {
+        allow: ['command(lander)'],
+      },
+      v2Migrated: true,
+    },
+  })
+})
+
+it('marks denied tool calls blocked from result.denied_actions, preserves earlier prose, and omits blank messages', async () => {
+  const withProse = fixture([[
+    event('step_update', {
+      step_index: 1,
+      step_type: 'agent_response',
+      state: 'DONE',
+      text_delta: 'Running the check now.',
+    }),
+    event('step_update', {
+      step_index: 2,
+      step_type: 'tool',
+      state: 'ACTIVE',
+      tool_name: 'run_command',
+      tool_info: { name: 'run_command', parameters: { CommandLine: 'echo unlisted-probe' } },
+    }),
+    event('step_update', {
+      step_index: 2,
+      step_type: 'tool',
+      state: 'ERROR',
+      tool_name: 'run_command',
+      tool_info: {
+        name: 'run_command',
+        error: { message: 'Action denied by user.' },
+      },
+    }),
+    result({
+      response: '',
+      denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
+    }),
+  ]])
+  const drivenWithProse = await driveFlow(withProse, flow())
+  const taskWithProse = applyEvents(goldenInput(withProse).start, drivenWithProse.events)
+  const itemsWithProse = (taskWithProse.items ?? []) as (BlockedItem & { text?: string })[]
+  expect(itemsWithProse.filter((it) => it.kind === 'message').map((it) => it.text)).toEqual([
+    'Running the check now.',
+  ])
+  expect(blockedRequests(itemsWithProse)).toEqual([
+    {
+      key: 'command(echo unlisted-probe)',
+      rule: 'command(echo unlisted-probe)',
+      tool: 'run_command',
+    },
+  ])
+
+  const withoutProse = fixture([[
+    event('step_update', {
+      step_index: 1,
+      step_type: 'tool',
+      state: 'DONE',
+      tool_name: 'run_command',
+      tool_info: { name: 'run_command', parameters: { CommandLine: 'git push' } },
+    }),
+    result({
+      response: '',
+      denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
+    }),
+  ]])
+  const drivenWithoutProse = await driveFlow(withoutProse, flow())
+  const taskWithoutProse = applyEvents(goldenInput(withoutProse).start, drivenWithoutProse.events)
+  const itemsWithoutProse = (taskWithoutProse.items ?? []) as (BlockedItem & { text?: string })[]
+  expect(itemsWithoutProse.filter((it) => it.kind === 'message')).toEqual([])
+  expect(blockedRequests(itemsWithoutProse)).toEqual([
+    {
+      key: 'command(git push)',
+      rule: 'command(git push)',
+      tool: 'run_command',
+    },
+  ])
+})
+
+it('persists project grants via onGrant into the same lander-<hash>.json used by onTurn across worktrees', async () => {
+  const rootDir = path.join(geminiConfigDir, 'workspace')
+  const worktreeDir = path.join(rootDir, '.worktrees', 'task-1')
+  mkdirSync(worktreeDir, { recursive: true })
+
+  await onGrant(undefined, {
+    projectPath: rootDir,
+    rule: 'command(echo unlisted-probe)',
+    geminiConfigDir,
+  })
+  await onGrant(undefined, {
+    projectPath: rootDir,
+    rule: 'command(echo unlisted-probe)',
+    geminiConfigDir,
+  })
+
+  const g = fixture([[result()]])
+  g.input = { root: rootDir, cwd: worktreeDir, checkout: worktreeDir }
+  const driven = await driveFlow(g, flow())
+  const expectedProjectId = agyProjectId(rootDir)
+  expect(driven.spawns[0].args).toEqual(
+    expect.arrayContaining(['--project', expectedProjectId]),
+  )
+
+  const projectConfig = JSON.parse(
+    readFileSync(agyProjectFile(rootDir, geminiConfigDir), 'utf8'),
+  )
+  expect(projectConfig).toEqual({
+    id: expectedProjectId,
+    name: 'workspace',
+    projectResources: {},
+    permissionGrants: {
+      permissionGrants: {
+        allow: ['command(lander)', 'command(echo unlisted-probe)'],
+      },
+      v2Migrated: true,
+    },
+  })
 })
 
 it('resumes without redelivering unchanged instructions and redelivers changed documents', async () => {

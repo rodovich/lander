@@ -1,3 +1,7 @@
+import { createHash } from 'node:crypto'
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import path from 'node:path'
 import {
   addUsage,
   checkoutNote,
@@ -23,7 +27,7 @@ export const meta: FlowMeta = {
   driver: true,
   capabilities: {
     vision: 'read',
-    grants: { task: false, project: false },
+    grants: { task: false, project: true },
     usageSnapshot: false,
     rateLimitRetry: false,
     reportsCost: false,
@@ -51,6 +55,10 @@ type AgyEvent = {
   subagent_info?: {
     subagents?: AgySubagent[]
   }
+  denied_actions?: {
+    action?: string
+    display_name?: string
+  }[]
   usage?: unknown
   model?: string
   response?: string
@@ -62,6 +70,130 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined
+}
+
+function paramStr(
+  params: Record<string, unknown> | undefined,
+  ...keys: string[]
+): string {
+  if (!params) return ''
+  for (const k of keys) {
+    const v = params[k]
+    if (typeof v === 'string' && v.trim()) return v.trim()
+  }
+  return ''
+}
+
+function canonicalPath(p: string): string {
+  try {
+    return realpathSync(p)
+  } catch {
+    return path.resolve(p)
+  }
+}
+
+export function agyProjectId(projectPath: string): string {
+  const hash = createHash('sha256')
+    .update(canonicalPath(projectPath))
+    .digest('hex')
+    .slice(0, 16)
+  return `lander-${hash}`
+}
+
+const DEFAULT_GEMINI_CONFIG_DIR = path.join(homedir(), '.gemini', 'config')
+
+export function agyProjectFile(
+  projectPath: string,
+  geminiConfigDir = DEFAULT_GEMINI_CONFIG_DIR,
+): string {
+  return path.join(geminiConfigDir, 'projects', `${agyProjectId(projectPath)}.json`)
+}
+
+function ensureAgyProjectRules(
+  projectPath: string,
+  rules: string[],
+  geminiConfigDir = DEFAULT_GEMINI_CONFIG_DIR,
+): string {
+  const canonical = canonicalPath(projectPath)
+  const projectId = agyProjectId(canonical)
+  const file = agyProjectFile(canonical, geminiConfigDir)
+  let doc: Record<string, unknown> = {}
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8'))
+    if (asRecord(parsed)) doc = parsed
+  } catch {}
+  doc.id = projectId
+  doc.name ??= path.basename(canonical) || projectId
+  doc.projectResources ??= {}
+  const outer = (doc.permissionGrants = asRecord(doc.permissionGrants) ?? {})
+  const inner = (outer.permissionGrants =
+    asRecord(outer.permissionGrants) ?? {})
+  const allow = Array.isArray(inner.allow)
+    ? inner.allow.filter((r): r is string => typeof r === 'string')
+    : []
+  inner.allow = allow
+  for (const r of ['command(lander)', ...rules]) {
+    if (r && !allow.includes(r)) allow.push(r)
+  }
+  outer.v2Migrated = true
+  mkdirSync(path.dirname(file), { recursive: true })
+  writeFileSync(file, JSON.stringify(doc, null, 2) + '\n')
+  return projectId
+}
+
+const WRITE_FILE_TOOLS = new Set([
+  'write_to_file',
+  'replace_file_content',
+  'multi_replace_file_content',
+  'sed_file',
+  'notebook_edit',
+])
+
+const READ_FILE_TOOLS = new Set([
+  'view_file',
+  'list_dir',
+  'grep_search',
+  'find_by_name',
+])
+
+function agyToolRule(
+  event: AgyEvent,
+): { action: string; rule: string } | undefined {
+  const name = event.tool_name ?? event.tool_info?.name ?? ''
+  const params = asRecord(event.tool_info?.parameters)
+  const rule = (action: string, target: string) =>
+    target ? { action, rule: `${action}(${target})` } : undefined
+  if (name === 'run_command') {
+    return rule('command', paramStr(params, 'CommandLine'))
+  }
+  if (WRITE_FILE_TOOLS.has(name)) {
+    return rule(
+      'write_file',
+      paramStr(params, 'TargetFile', 'AbsolutePath', 'NotebookPath'),
+    )
+  }
+  if (READ_FILE_TOOLS.has(name)) {
+    return rule(
+      'read_file',
+      paramStr(
+        params,
+        'AbsolutePath',
+        'DirectoryPath',
+        'SearchPath',
+        'SearchDirectory',
+      ),
+    )
+  }
+  if (name === 'read_url_content') {
+    const rawUrl = paramStr(params, 'Url')
+    return rule('read_url', URL.parse(rawUrl)?.hostname || rawUrl)
+  }
+  if (name === 'call_mcp_tool') {
+    const server = paramStr(params, 'ServerName')
+    const tool = paramStr(params, 'ToolName')
+    return rule('mcp', server && tool ? `${server}:${tool}` : server)
+  }
+  return undefined
 }
 
 function summarizeAndFull(
@@ -144,20 +276,20 @@ function formatToolCall(event: AgyEvent): {
   const params = asRecord(event.tool_info?.parameters)
   const sub = formatSubagents(event, params)
   if (sub) return sub
-  const str = (k: string) =>
-    params && typeof params[k] === 'string' ? (params[k] as string) : ''
-  const primary =
-    str('AbsolutePath') ||
-    str('TargetFile') ||
-    str('DirectoryPath') ||
-    str('NotebookPath') ||
-    str('CommandLine') ||
-    str('Pattern') ||
-    str('Query') ||
-    str('query') ||
-    str('Url') ||
-    str('SearchPath') ||
-    str('SearchDirectory')
+  const primary = paramStr(
+    params,
+    'AbsolutePath',
+    'TargetFile',
+    'DirectoryPath',
+    'NotebookPath',
+    'CommandLine',
+    'Pattern',
+    'Query',
+    'query',
+    'Url',
+    'SearchPath',
+    'SearchDirectory',
+  )
   const normalized = primary ? { description: primary } : params
   const edits = extractEdits(params)
   return {
@@ -187,9 +319,11 @@ function parseAgyUsage(raw: unknown): Usage | undefined {
 export function makeFlow({
   taskPromptTemplate,
   readProjectDoc,
+  geminiConfigDir,
 }: {
   taskPromptTemplate: string
   readProjectDoc: (dir: string) => string | undefined
+  geminiConfigDir?: string
 }) {
   return {
     meta,
@@ -221,12 +355,19 @@ export function makeFlow({
         ctx.turn.revivedBlock,
         ctx.turn.scheduledRideBlock,
       ].filter((part) => part !== undefined).join('\n\n')
-      const dirs = new Set(['/tmp'])
-      if (process.env.TMPDIR) dirs.add(process.env.TMPDIR)
-      if (ctx.turn.filesDir && ctx.turn.filesDirExists) dirs.add(ctx.turn.filesDir)
+      const projectId = ensureAgyProjectRules(ctx.task.root, [], geminiConfigDir)
+      const dirs = new Set<string>()
+      const addDir = (dir: string | undefined) => {
+        if (!dir) return
+        dirs.add(dir)
+        dirs.add(canonicalPath(dir))
+      }
+      addDir('/tmp')
+      addDir(process.env.TMPDIR)
+      if (ctx.turn.filesDir && ctx.turn.filesDirExists) addDir(ctx.turn.filesDir)
       const child = ctx.spawn('agy', [
         '-p', prompt, '--output-format', 'stream-json', '--print-timeout', '0s',
-        '--dangerously-skip-permissions',
+        '--mode', 'accept-edits', '--project', projectId,
         ...(sessionId ? ['--conversation', sessionId] : []),
         ...[...dirs].flatMap((dir) => ['--add-dir', dir]),
       ], {
@@ -237,7 +378,10 @@ export function makeFlow({
           ...(ctx.turn.run ? { LANDER_RUN: ctx.turn.run } : {}),
         },
       })
-      const tools = new Map<number, ToolHandle>()
+      const tools = new Map<
+        number,
+        { handle: ToolHandle; action?: string; blocked?: boolean }
+      >()
       const texts = new Map<number, string>()
       const seenUsageSteps = new Set<number>()
       const priorTotal: Usage | undefined = sessionId
@@ -311,17 +455,20 @@ export function makeFlow({
             flushText()
             producedOutput = true
             const info = event.tool_info
-            let handle = tools.get(event.step_index)
-            if (!handle) {
-              handle = ctx.emit.tool({
+            let entry = tools.get(event.step_index)
+            if (!entry) {
+              const ruleInfo = agyToolRule(event)
+              const handle = ctx.emit.tool({
                 name: event.tool_name ?? info?.name ?? 'tool',
                 ...formatToolCall(event),
+                ...(ruleInfo ? { rule: ruleInfo.rule } : {}),
               })
-              tools.set(event.step_index, handle)
+              entry = { handle, action: ruleInfo?.action }
+              tools.set(event.step_index, entry)
             }
             if (event.state !== 'ACTIVE') {
               const rawOutput = info?.output ?? info?.error?.message
-              handle.result({
+              entry.handle.result({
                 ...(rawOutput !== undefined
                   ? { output: summarizeToolResult(rawOutput) }
                   : {}),
@@ -330,16 +477,29 @@ export function makeFlow({
             }
           }
         } else if (envelope.event === 'result') {
-          const streamedFinal = pendingText !== undefined
-            ? texts.get(pendingText) : undefined
-          const response = event.response ?? streamedFinal ?? lastText
-          if (pendingText !== undefined && streamedFinal === response) flushText()
-          else {
-            pendingText = undefined
-            if (response) ctx.emit.message(response)
+          if (Array.isArray(event.denied_actions)) {
+            const recorded = [...tools.values()].reverse()
+            for (const denied of event.denied_actions) {
+              const action =
+                typeof denied?.action === 'string' ? denied.action : undefined
+              const target = action
+                ? recorded.find((t) => !t.blocked && t.action === action)
+                : undefined
+              if (target) {
+                target.blocked = true
+                target.handle.result({ blocked: true })
+              }
+            }
           }
-          ctx.emit.reply(response)
-          if (response) producedOutput = true
+          flushText()
+          if (event.response && event.response !== lastText) {
+            lastText = event.response
+            ctx.emit.message(event.response)
+          }
+          if (lastText) {
+            ctx.emit.reply(lastText)
+            producedOutput = true
+          }
           const totalUsage = parseAgyUsage(event.usage)
           if (totalUsage) {
             const usage = codexTurnUsage(totalUsage, priorTotal)
@@ -365,6 +525,17 @@ export function makeFlow({
       }
     },
   }
+}
+
+export async function onGrant(
+  _ctx: unknown,
+  {
+    projectPath,
+    rule,
+    geminiConfigDir,
+  }: { projectPath: string; rule: string; geminiConfigDir?: string },
+): Promise<void> {
+  ensureAgyProjectRules(projectPath, [rule], geminiConfigDir)
 }
 
 export function resolveLaunchDir({
