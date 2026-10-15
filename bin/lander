@@ -331,6 +331,19 @@ function resolveAwait(value, { self } = {}) {
 // anyone who genuinely means to send such a string.
 const isBareFlag = (s) => /^-{1,2}[A-Za-z][\w-]*$/.test(s)
 
+async function readMessage(verb, arg) {
+  const fromStdin = arg === '-'
+  const message = fromStdin ? await readStdin() : arg
+  if (!message?.trim()) die(`usage: lander ${USAGE[verb]}`)
+  if (!fromStdin && isBareFlag(message))
+    die(
+      `refusing to ${verb}: the message is just "${message}", which looks like a ` +
+        `mistyped flag. Run \`lander ${verb} --help\` for usage; to send it ` +
+        'literally, use `-` (stdin).',
+    )
+  return message
+}
+
 async function launchTask(rest) {
   const o = { project: PROJECT, files: [] }
   const pos = []
@@ -358,19 +371,7 @@ async function launchTask(rest) {
         o.files.push(rest[++i])
     else pos.push(a)
   }
-  o.message = pos.shift()
-  const fromStdin = o.message === '-'
-  if (fromStdin) o.message = await readStdin()
-  if (!o.message?.trim())
-    die('usage: lander launch <message> [--flow <name>] [--key <k> <v> …]')
-  // A positional message that is a lone flag token is a mistyped flag, not work
-  // to hand a fresh agent — refuse rather than spawn a task on it.
-  if (!fromStdin && isBareFlag(o.message))
-    die(
-      `refusing to launch: the message is just "${o.message}", which looks like a ` +
-        'mistyped flag. Run `lander launch --help` for usage; to send it literally, ' +
-        'use `-` (stdin).',
-    )
+  o.message = await readMessage('launch', pos.shift())
   validateSchedule(o)
   // --await defers the launch until the named tasks land (resolved to full ids
   // here); combinable with --date/--time, in which case launch fires on
@@ -508,16 +509,7 @@ async function relaunchTask(args) {
     console.log(res.cleared ? 'scheduled relaunch cleared' : 'nothing to clear')
     return
   }
-  let message = pos.shift()
-  const fromStdin = message === '-'
-  if (fromStdin) message = await readStdin()
-  if (!message?.trim()) die('usage: lander relaunch <message>')
-  if (!fromStdin && isBareFlag(message))
-    die(
-      `refusing to relaunch: the message is just "${message}", which looks like a ` +
-        'mistyped flag. Run `lander relaunch --help` for usage; to send it ' +
-        'literally, use `-` (stdin).',
-    )
+  const message = await readMessage('relaunch', pos.shift())
   validateSchedule(o)
   validateRepeat(o)
   o.await = resolveAwait(o.await, { self: TASK })
@@ -799,17 +791,8 @@ async function sendTask(args) {
     else pos.push(a)
   }
   const target = pos.shift()
-  if (!target) die('usage: lander send <id> <message>')
-  let message = pos.shift()
-  const fromStdin = message === '-'
-  if (fromStdin) message = await readStdin()
-  if (!message?.trim()) die('usage: lander send <id> <message|->')
-  if (!fromStdin && isBareFlag(message))
-    die(
-      `refusing to send: the message is just "${message}", which looks like a ` +
-        'mistyped flag. Run `lander send --help` for usage; to send it literally, ' +
-        'use `-` (stdin).',
-    )
+  if (!target) die(`usage: lander ${USAGE.send}`)
+  const message = await readMessage('send', pos.shift())
   validateSchedule(o)
   const awaitIds = resolveAwait(o.await)
   const attachments = o.files.length
