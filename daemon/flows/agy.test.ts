@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import {
   agyProjectFile,
   agyProjectId,
@@ -351,74 +351,122 @@ it('passes --mode accept-edits, --project lander-<hash>, canonicalized --add-dir
   })
 })
 
-it('marks denied tool calls blocked from result.denied_actions, preserves earlier prose, and omits blank messages', async () => {
-  const withProse = fixture([[
-    event('step_update', {
-      step_index: 1,
-      step_type: 'agent_response',
-      state: 'DONE',
-      text_delta: 'Running the check now.',
+it('marks denied tool calls blocked from result.denied_actions, wedges the task, preserves earlier prose, and omits blank messages', async () => {
+  const calls: { url: string; method: string; body: unknown }[] = []
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({
+        url,
+        method: init?.method ?? 'GET',
+        body: typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body,
+      })
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ status: 'wedged' }),
+        text: async () => '{"status":"wedged"}',
+      } as Response
     }),
-    event('step_update', {
-      step_index: 2,
-      step_type: 'tool',
-      state: 'ACTIVE',
-      tool_name: 'run_command',
-      tool_info: { name: 'run_command', parameters: { CommandLine: 'echo unlisted-probe' } },
-    }),
-    event('step_update', {
-      step_index: 2,
-      step_type: 'tool',
-      state: 'ERROR',
-      tool_name: 'run_command',
-      tool_info: {
-        name: 'run_command',
-        error: { message: 'Action denied by user.' },
+  )
+  try {
+    const withProse = fixture([[
+      event('step_update', {
+        step_index: 1,
+        step_type: 'agent_response',
+        state: 'DONE',
+        text_delta: 'Running the check now.',
+      }),
+      event('step_update', {
+        step_index: 2,
+        step_type: 'tool',
+        state: 'ACTIVE',
+        tool_name: 'run_command',
+        tool_info: { name: 'run_command', parameters: { CommandLine: 'echo unlisted-probe' } },
+      }),
+      event('step_update', {
+        step_index: 2,
+        step_type: 'tool',
+        state: 'ERROR',
+        tool_name: 'run_command',
+        tool_info: {
+          name: 'run_command',
+          error: { message: 'Action denied by user.' },
+        },
+      }),
+      result({
+        response: '',
+        denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
+      }),
+    ]])
+    withProse.start = {
+      ...withProse.start,
+      env: {
+        LANDER_API: 'http://api.test',
+        LANDER_PROJECT: 'proj',
+        LANDER_TASK: 'task-1',
+        LANDER_TOKEN: 'tok',
       },
-    }),
-    result({
-      response: '',
-      denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
-    }),
-  ]])
-  const drivenWithProse = await driveFlow(withProse, flow())
-  const taskWithProse = applyEvents(goldenInput(withProse).start, drivenWithProse.events)
-  const itemsWithProse = (taskWithProse.items ?? []) as (BlockedItem & { text?: string })[]
-  expect(itemsWithProse.filter((it) => it.kind === 'message').map((it) => it.text)).toEqual([
-    'Running the check now.',
-  ])
-  expect(blockedRequests(itemsWithProse)).toEqual([
-    {
-      key: 'command(echo unlisted-probe)',
-      rule: 'command(echo unlisted-probe)',
-      tool: 'run_command',
-    },
-  ])
+    }
+    const drivenWithProse = await driveFlow(withProse, flow())
+    const taskWithProse = applyEvents(goldenInput(withProse).start, drivenWithProse.events)
+    const itemsWithProse = (taskWithProse.items ?? []) as (BlockedItem & { text?: string })[]
+    expect(itemsWithProse.filter((it) => it.kind === 'message').map((it) => it.text)).toEqual([
+      'Running the check now.',
+    ])
+    expect(blockedRequests(itemsWithProse)).toEqual([
+      {
+        key: 'command(echo unlisted-probe)',
+        rule: 'command(echo unlisted-probe)',
+        tool: 'run_command',
+      },
+    ])
+    expect(calls).toEqual([
+      {
+        url: 'http://api.test/api/proj/tasks/task-1',
+        method: 'PATCH',
+        body: { status: 'wedged' },
+      },
+    ])
 
-  const withoutProse = fixture([[
-    event('step_update', {
-      step_index: 1,
-      step_type: 'tool',
-      state: 'DONE',
-      tool_name: 'run_command',
-      tool_info: { name: 'run_command', parameters: { CommandLine: 'git push' } },
-    }),
-    result({
-      response: '',
-      denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
-    }),
-  ]])
-  const drivenWithoutProse = await driveFlow(withoutProse, flow())
-  const taskWithoutProse = applyEvents(goldenInput(withoutProse).start, drivenWithoutProse.events)
-  const itemsWithoutProse = (taskWithoutProse.items ?? []) as (BlockedItem & { text?: string })[]
-  expect(itemsWithoutProse.filter((it) => it.kind === 'message')).toEqual([])
-  expect(blockedRequests(itemsWithoutProse)).toEqual([
-    {
-      key: 'command(git push)',
-      rule: 'command(git push)',
-      tool: 'run_command',
-    },
-  ])
+    const withoutProse = fixture([[
+      event('step_update', {
+        step_index: 1,
+        step_type: 'tool',
+        state: 'DONE',
+        tool_name: 'run_command',
+        tool_info: { name: 'run_command', parameters: { CommandLine: 'git push' } },
+      }),
+      result({
+        response: '',
+        denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
+      }),
+    ]])
+    withoutProse.start = {
+      ...withoutProse.start,
+      env: {
+        LANDER_API: 'http://api.test',
+        LANDER_PROJECT: 'proj',
+        LANDER_TASK: 'task-1',
+        LANDER_TOKEN: 'tok',
+      },
+    }
+    const drivenWithoutProse = await driveFlow(withoutProse, flow())
+    const taskWithoutProse = applyEvents(goldenInput(withoutProse).start, drivenWithoutProse.events)
+    const itemsWithoutProse = (taskWithoutProse.items ?? []) as (BlockedItem & { text?: string })[]
+    expect(itemsWithoutProse.filter((it) => it.kind === 'message')).toEqual([])
+    expect(blockedRequests(itemsWithoutProse)).toEqual([
+      {
+        key: 'command(git push)',
+        rule: 'command(git push)',
+        tool: 'run_command',
+      },
+    ])
+    expect(calls).toHaveLength(2)
+  } finally {
+    vi.unstubAllGlobals()
+  }
 })
 
 it('persists project grants via onGrant into the same lander-<hash>.json used by onTurn across worktrees', async () => {

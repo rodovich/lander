@@ -406,6 +406,7 @@ export function makeFlow({
       let lastText = ''
       let announced = sessionId !== undefined
       let producedOutput = false
+      let permissionAborted = false
       let terminalError: string | undefined
       let stderr = ''
       const collectStderr = (async () => {
@@ -491,7 +492,8 @@ export function makeFlow({
             }
           }
         } else if (envelope.event === 'result') {
-          if (Array.isArray(event.denied_actions)) {
+          if (Array.isArray(event.denied_actions) && event.denied_actions.length > 0) {
+            permissionAborted = true
             const recorded = [...tools.values()].reverse()
             for (const denied of event.denied_actions) {
               const action =
@@ -533,6 +535,9 @@ export function makeFlow({
       }
       const exitCode = await child.exit
       await collectStderr
+      if (permissionAborted && !terminalError && ctx.task.env.LANDER_API) {
+        await ctx.wedge()
+      }
       return {
         exitCode: exitCode === 0 && terminalError ? 1 : exitCode,
         stderr: [stderr.trim(), terminalError].filter(Boolean).join('\n'),
