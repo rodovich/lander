@@ -250,10 +250,11 @@ describe('Markdown rendering', () => {
     expect(html).toContain('>hi</a>')
   })
 
-  it('renders a javascript: link as literal text, never an anchor', () => {
-    const html = render('[x](javascript:alert(1))')
-    expect(html).not.toContain('<a')
-    expect(html).toContain('javascript:alert(1)')
+  it('renders only the label of a link with an unsafe scheme, never an anchor', () => {
+    expect(render('[x](javascript:void)')).toBe('<p>x</p>')
+    expect(render('see [agy.ts](file:///a/agy.ts#L1-L2).')).toBe(
+      '<p>see agy.ts.</p>',
+    )
   })
 
   it('autolinks a bare URL and excludes trailing punctuation', () => {

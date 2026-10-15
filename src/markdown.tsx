@@ -153,7 +153,7 @@ function renderInline(
       re: /\[([^\]]+)\]\(([^)\s]+)\)/gd,
       render: (m, k) => {
         const href = safeHref(group(m, 2) ?? '')
-        if (!href) return <Fragment key={k}>{src(m)}</Fragment>
+        if (!href) return <Fragment key={k}>{group(m, 1)}</Fragment>
         return (
           <a key={k} href={href} target="_blank" rel="noopener noreferrer">
             {group(m, 1)}
