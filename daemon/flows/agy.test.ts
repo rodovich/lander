@@ -40,6 +40,20 @@ const event = (name: string, data: object) => JSON.stringify({ event: name, [nam
 const init = (conversation_id: string, data: object = {}) =>
   JSON.stringify({ event: 'init', conversation_id, init: data })
 const result = (data: object = {}) => event('result', { status: 'SUCCESS', response: 'Done', ...data })
+const toolStep = (
+  step_index: number,
+  tool_name: string,
+  parameters?: object,
+  extra: object = {},
+) =>
+  event('step_update', {
+    step_index,
+    step_type: 'tool',
+    state: 'DONE',
+    tool_name,
+    tool_info: { ...(parameters ? { parameters } : {}) },
+    ...extra,
+  })
 const patches = (events: Awaited<ReturnType<typeof driveFlow>>['events']) =>
   events.flatMap((e) => e.kind === 'state-patch' ? e.ops : [])
 const steps = (events: Awaited<ReturnType<typeof driveFlow>>['events']) =>
@@ -85,20 +99,6 @@ it('reduces the recorded Antigravity stream into a session, tool lifecycle, usag
 })
 
 it('formats tool inputs, permission rules, file-edit diffs, subagent summaries, and truncated outputs', async () => {
-  const toolStep = (
-    step_index: number,
-    tool_name: string,
-    parameters?: object,
-    extra: object = {},
-  ) =>
-    event('step_update', {
-      step_index,
-      step_type: 'tool',
-      state: 'DONE',
-      tool_name,
-      tool_info: { ...(parameters ? { parameters } : {}) },
-      ...extra,
-    })
   const g = fixture([[
     toolStep(1, 'run_command', { CommandLine: 'npm test\nnpm run typecheck' }, { state: 'ACTIVE' }),
     toolStep(1, 'run_command', undefined, { tool_info: { output: 'line 1\nline 2\nline 3\nline 4' } }),
@@ -455,15 +455,37 @@ it('marks denied tool calls blocked from result.denied_actions, wedges the task,
     const drivenWithoutProse = await driveFlow(withoutProse, flow())
     const taskWithoutProse = applyEvents(goldenInput(withoutProse).start, drivenWithoutProse.events)
     const itemsWithoutProse = (taskWithoutProse.items ?? []) as (BlockedItem & { text?: string })[]
-    expect(itemsWithoutProse.filter((it) => it.kind === 'message')).toEqual([])
-    expect(blockedRequests(itemsWithoutProse)).toEqual([
+    expect(itemsWithoutProse.filter((it) => it.kind === 'message').map((it) => it.text)).toEqual([
+      'Antigravity denied a RunCommand call this turn without saying which one.',
+    ])
+    expect(blockedRequests(itemsWithoutProse)).toEqual([])
+    expect(calls).toHaveLength(2)
+
+    const deniedBeforeLaterCommands = fixture([[
+      ...[
+        ['bun run test spec.ts', 'user denied permission to run command'],
+        ['bun run typecheck'],
+        ['bun run lint', 'context canceled'],
+      ].map(([CommandLine, error], i) =>
+        toolStep(i + 1, 'run_command', undefined, {
+          ...(error ? { state: 'ERROR' } : {}),
+          tool_info: { parameters: { CommandLine }, ...(error ? { error: { message: error } } : {}) },
+        })),
+      result({
+        response: '',
+        denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
+      }),
+    ]])
+    deniedBeforeLaterCommands.start = { ...deniedBeforeLaterCommands.start, env: withProse.start.env }
+    const drivenDenied = await driveFlow(deniedBeforeLaterCommands, flow())
+    const taskDenied = applyEvents(goldenInput(deniedBeforeLaterCommands).start, drivenDenied.events)
+    expect(blockedRequests((taskDenied.items ?? []) as BlockedItem[])).toEqual([
       {
-        key: 'command(git push)',
-        rule: 'command(git push)',
+        key: 'command(bun run test spec.ts)',
+        rule: 'command(bun run test spec.ts)',
         tool: 'run_command',
       },
     ])
-    expect(calls).toHaveLength(2)
   } finally {
     vi.unstubAllGlobals()
   }

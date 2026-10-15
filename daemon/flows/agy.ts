@@ -394,7 +394,7 @@ export function makeFlow({
       })
       const tools = new Map<
         number,
-        { handle: ToolHandle; action?: string; blocked?: boolean }
+        { handle: ToolHandle; action?: string; denied?: boolean; blocked?: boolean }
       >()
       const texts = new Map<number, string>()
       const seenUsageSteps = new Set<number>()
@@ -483,31 +483,43 @@ export function makeFlow({
             }
             if (event.state !== 'ACTIVE') {
               const rawOutput = info?.output ?? info?.error?.message
+              const isError = event.state === 'ERROR' || !!info?.error
+              entry.denied = isError && /user denied permission|action denied/i.test(info?.error?.message ?? '')
               entry.handle.result({
                 ...(rawOutput !== undefined
                   ? { output: summarizeToolResult(rawOutput) }
                   : {}),
-                isError: event.state === 'ERROR' || !!info?.error,
+                isError,
               })
             }
           }
         } else if (envelope.event === 'result') {
+          flushText()
           if (Array.isArray(event.denied_actions) && event.denied_actions.length > 0) {
             permissionAborted = true
             const recorded = [...tools.values()].reverse()
             for (const denied of event.denied_actions) {
               const action =
                 typeof denied?.action === 'string' ? denied.action : undefined
+              // A denial names only the action kind. In observed streams the
+              // denied run_command step fails with "Action denied by user." or
+              // "… user denied permission to run command …", and calls the abort
+              // cuts short fail with "context canceled".
               const target = action
-                ? recorded.find((t) => !t.blocked && t.action === action)
+                ? recorded.find(
+                    (t) => t.denied && !t.blocked && t.action === action,
+                  )
                 : undefined
               if (target) {
                 target.blocked = true
                 target.handle.result({ blocked: true })
+              } else {
+                ctx.emit.message(
+                  `Antigravity denied a ${denied?.display_name ?? action ?? 'tool'} call this turn without saying which one.`,
+                )
               }
             }
           }
-          flushText()
           if (event.response && event.response !== lastText) {
             lastText = event.response
             ctx.emit.message(event.response)
