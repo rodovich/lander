@@ -271,6 +271,23 @@ describe('Markdown rendering', () => {
     )
   })
 
+  it('keeps balanced parentheses in a markdown link target', () => {
+    expect(render('[w](https://w.org/Router_(wood)) after')).toBe(
+      '<p><a href="https://w.org/Router_(wood)" target="_blank" rel="noopener noreferrer">w</a> after</p>',
+    )
+  })
+
+  it('keeps balanced parentheses in a bare URL but not an enclosing paren', () => {
+    const a = (url: string) =>
+      `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`
+    const url = 'https://w.org/Router_(wood)'
+    expect(render(`see ${url}.`)).toBe(`<p>see ${a(url)}.</p>`)
+    expect(render(`(see ${url})`)).toBe(`<p>(see ${a(url)})</p>`)
+    expect(render('(see https://w.org/x)')).toBe(
+      `<p>(see ${a('https://w.org/x')})</p>`,
+    )
+  })
+
   it('autolinks a bare URL and excludes trailing punctuation', () => {
     const html = render('see https://ex.com.')
     expect(html).toContain('href="https://ex.com"')

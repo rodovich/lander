@@ -154,7 +154,10 @@ function renderInline(
       render: (m, k) => <Fragment key={k}>{text[m.index + 1]}</Fragment>,
     },
     {
-      re: /\[([^\]]+)\]\(([^)\s]+)\)/gd,
+      // The target may hold one level of balanced parentheses, as in a
+      // Wikipedia URL. Excluding parens from the plain branch keeps the two
+      // alternatives disjoint, so the repetition can't backtrack exponentially.
+      re: /\[([^\]]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)/gd,
       link: true,
       render: (m, k) => {
         const label = renderInline(group(m, 1) ?? '', k, linkTask, true)
@@ -206,10 +209,13 @@ function renderInline(
       ),
     },
     {
-      // Bare URLs. The greedy body plus a non-punctuation final char keeps
-      // trailing punctuation (".", ")", etc.) out of the link. Markdown links
-      // win over this since their "[" sits at an earlier index.
-      re: /(?:https?:\/\/|www\.)[^\s]*[^\s.,;:!?)\]}'"]/gi,
+      // Bare URLs. The URL ends on a non-punctuation char or a balanced
+      // parenthesized group, so trailing punctuation (".", an enclosing ")",
+      // etc.) stays out of the link while "Router_(woodworking)" keeps its ")".
+      // Parens pair up as in the markdown-link target above, for the same
+      // reason. Markdown links win over this since their "[" sits at an
+      // earlier index.
+      re: /(?:https?:\/\/|www\.)(?:[^()\s]|\([^()\s]*\))*(?:\([^()\s]*\)|[^()\s.,;:!?\]}'"])/gi,
       link: true,
       render: (m, k) => {
         const raw = src(m)
