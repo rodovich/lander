@@ -288,7 +288,7 @@ async function attachmentCommand(args) {
   // Reject an unknown subcommand before the store guard, so a typo reports the
   // usage rather than a confusing "no attachments for this task".
   if (sub !== 'ls' && sub !== 'cat')
-    die('usage: lander attachment (put <path>… [--name <n>] [--mime <m>] | ls | cat <id>)')
+    dieUsage('attachment')
   if (!FILES_DIR) die('no attachments for this task (LANDER_FILES_DIR unset)')
   if (sub === 'ls') return void listLocalFiles()
   await catLocalFile(rest[0], 'usage: lander attachment cat <id>')
@@ -334,7 +334,7 @@ const isBareFlag = (s) => /^-{1,2}[A-Za-z][\w-]*$/.test(s)
 async function readMessage(verb, arg) {
   const fromStdin = arg === '-'
   const message = fromStdin ? await readStdin() : arg
-  if (!message?.trim()) die(`usage: lander ${USAGE[verb]}`)
+  if (!message?.trim()) dieUsage(verb)
   if (!fromStdin && isBareFlag(message))
     die(
       `refusing to ${verb}: the message is just "${message}", which looks like a ` +
@@ -421,7 +421,7 @@ async function rideTask(args) {
     return
   }
   if (o.date == null && o.time == null && o.await == null)
-    die(`usage: lander ${USAGE.ride}`)
+    dieUsage('ride')
   validateSchedule(o)
   o.await = resolveAwait(o.await, { self: TASK })
   const armed = await call(PROJECT, `/tasks/${TASK}/ride`, {
@@ -709,7 +709,7 @@ async function viewTask(args) {
     else if (a === '--clip') clipLen = limit(args[++i])
     else pos.push(a)
   }
-  if (!pos[0]) die(`usage: lander ${USAGE.view}`)
+  if (!pos[0]) dieUsage('view')
   // The endpoint reads both pools, so a view works whether or not the task has
   // been archived.
   const task = await call(
@@ -791,7 +791,7 @@ async function sendTask(args) {
     else pos.push(a)
   }
   const target = pos.shift()
-  if (!target) die(`usage: lander ${USAGE.send}`)
+  if (!target) dieUsage('send')
   const message = await readMessage('send', pos.shift())
   validateSchedule(o)
   const awaitIds = resolveAwait(o.await)
@@ -825,7 +825,7 @@ async function archiveTask(args) {
     if (a === '--restore') restore = true
     else pos.push(a)
   }
-  if (!pos[0]) die('usage: lander archive <id...> [--restore]')
+  if (!pos[0]) dieUsage('archive')
   for (const id of pos) {
     await call(PROJECT, `/tasks/${id}/archive`, {
       method: 'POST',
@@ -1003,7 +1003,7 @@ function runAssist(prompt, args) {
 // `lander assist <prompt> [text …]` — print the assistant's reply to stdout.
 async function assist(args) {
   const [prompt, ...rest] = args
-  if (!prompt) die('usage: lander assist <prompt> [text …]')
+  if (!prompt) dieUsage('assist')
   process.stdout.write(runAssist(prompt, rest))
 }
 
@@ -1194,7 +1194,7 @@ function coerceConfigValue(raw) {
 // `lander flow <name> [--key value …]` — the --key value pairs become inputs.
 async function runFlow(args) {
   const name = args[0]
-  if (!name) die('usage: lander flow <name> [--key value …]')
+  if (!name) dieUsage('flow')
   const inputs = {}
   for (let i = 1; i < args.length; i++) {
     const a = args[i]
@@ -1296,8 +1296,9 @@ const USAGE = {
   assist: 'assist <prompt> [text …]',
   attachment:
     'attachment (put <path>… [--name <n>] [--mime <m>] | ls | cat <id>)',
-  flow: 'flow <name> [--key <k> <v> …]',
+  flow: 'flow <name> [--<key> <value> …]',
 }
+const dieUsage = (verb) => die(`usage: lander ${USAGE[verb]}`)
 
 // Print one command's usage, or the full command index when no (known) command
 // is named. Help output goes to stdout and never mutates anything.
