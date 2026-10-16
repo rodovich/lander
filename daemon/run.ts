@@ -2,6 +2,7 @@ import type { ChildProcess } from 'node:child_process'
 import path from 'node:path'
 import type { ProviderCaps } from './flows/index'
 import type {
+  CheckoutMessage,
   CheckoutReport,
   DoneCause,
   DoneMessage,
@@ -34,6 +35,7 @@ const HOST_ENTRY = path.join(ROOT, 'daemon', 'flow-host.ts')
 export type RunManagerMessage =
   | UpdateMessage
   | DoneMessage
+  | CheckoutMessage
   | SessionMessage
   | TurnContextMessage
   | StatePatchMessage
@@ -75,6 +77,7 @@ type Run = {
   // whole list is safe — order is preserved, and a batch the server already
   // folded in is a no-op there.
   statePatches: StatePatchMessage[]
+  startCheckout?: CheckoutMessage
   done?: DoneMessage
   dropTimer?: ReturnType<typeof setTimeout>
 }
@@ -96,7 +99,7 @@ export type RunManagerOptions = {
   // there is something to do; undefined when there isn't, so the common path
   // still spawns synchronously. A rejection fails the run with its message.
   prepare?: (msg: StartRunMessage, paths: RunPaths) => Promise<void> | undefined
-  // What a run's checkout holds as it ends, for its done.
+  // What a run's checkout holds as it starts and as it ends.
   checkoutReport?: (root: string, dir: string) => Promise<CheckoutReport>
   send: (msg: RunManagerMessage) => void
   // The deterministic per-task file store dir (pure function of the run's
@@ -381,15 +384,16 @@ export function createRunManager({
       // Read here, like durationMs, so every way a run ends reports the state
       // its checkout was left in. A failed read reports nothing about it.
       if (paths.checkout)
-        checkoutReport(paths.root, paths.checkout).then(
-          (checkout) => finish({ ...doneMsg, checkout }),
-          (e) => {
-            console.error(`checkout report for ${msg.runId} failed:`, e)
-            finish(doneMsg)
-          },
+        void readCheckout(paths.checkout).then((checkout) =>
+          finish(checkout ? { ...doneMsg, checkout } : doneMsg),
         )
       else finish(doneMsg)
     }
+    const readCheckout = (dir: string): Promise<CheckoutReport | undefined> =>
+      checkoutReport(paths.root, dir).catch((e) => {
+        console.error(`checkout report for ${msg.runId} failed:`, e)
+        return undefined
+      })
     const finish = (doneMsg: DoneMessage): void => {
       rec.done = doneMsg
       rec.dropTimer = setTimeout(() => {
@@ -532,6 +536,13 @@ export function createRunManager({
     // Initial arm at spawn (host output re-arms thereafter), matching today's
     // arm-on-start idle countdown.
     arm()
+
+    if (paths.checkout)
+      void readCheckout(paths.checkout).then((checkout) => {
+        if (!checkout) return
+        rec.startCheckout = { type: 'checkout', runId: msg.runId, checkout }
+        send(rec.startCheckout)
+      })
   }
 
   function interrupt(runId: string): void {
@@ -563,6 +574,7 @@ export function createRunManager({
     // the server's applyStatePatch rev guard drop the ones it already folded in.
     for (const patch of run.statePatches) send(patch)
     for (const update of run.buffer) if (update.seq > seq) send(update)
+    if (run.startCheckout) send(run.startCheckout)
     if (run.done) send(run.done)
   }
 

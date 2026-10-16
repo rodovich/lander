@@ -535,6 +535,15 @@ export type DoneMessage = {
   checkout?: CheckoutReport
 }
 
+// A run launched in a checkout the daemon manages for the task describes that
+// checkout as the run starts, so it can be shown before the run's done. Re-sent
+// on resume-from, ahead of the done.
+export type CheckoutMessage = {
+  type: 'checkout'
+  runId: string
+  checkout: CheckoutReport
+}
+
 export type CheckoutReport = {
   path: string
   // Absent while HEAD is detached.
@@ -633,6 +642,7 @@ export type DaemonToServer =
   | RegisterMessage
   | UpdateMessage
   | DoneMessage
+  | CheckoutMessage
   | SessionMessage
   | TurnContextMessage
   | StatePatchMessage

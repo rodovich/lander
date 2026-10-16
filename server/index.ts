@@ -924,6 +924,14 @@ async function reduceRunWs(
         }).catch(() => {})
         continue
       }
+      if (ev.kind === 'checkout') {
+        // A replay comes ahead of the replayed done, whose report, if it has
+        // one, then wins.
+        await mutateTask(file, (t) => {
+          t.checkout = ev.msg.checkout
+        }).catch(() => {})
+        continue
+      }
       if (ev.kind === 'turn-context') {
         // The daemon appended a fresh dynamic context block to this turn's
         // prompt; record it as the baseline the next turn's block is compared

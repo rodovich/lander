@@ -13,6 +13,7 @@ import type {
   ServerToDaemon,
   UpdateMessage,
   DoneMessage,
+  CheckoutMessage,
   SessionMessage,
   TurnContextMessage,
   StatePatchMessage,
@@ -32,6 +33,7 @@ import { clearAnnouncedFlows, setAnnouncedFlows } from './flows'
 export type RunEvent =
   | { kind: 'update'; msg: UpdateMessage }
   | { kind: 'done'; msg: DoneMessage }
+  | { kind: 'checkout'; msg: CheckoutMessage }
   | { kind: 'session'; msg: SessionMessage }
   | { kind: 'turn-context'; msg: TurnContextMessage }
   | { kind: 'state-patch'; msg: StatePatchMessage }
@@ -528,6 +530,7 @@ export function attachDaemonServer(
         }
         case 'update':
         case 'done':
+        case 'checkout':
         case 'session':
         case 'turn-context':
         case 'state-patch':

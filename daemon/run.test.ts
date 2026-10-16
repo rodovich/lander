@@ -642,6 +642,22 @@ describe('daemon run manager', () => {
       ])
     })
 
+    it('reports the checkout once the run spawns, and replays it before the done', async () => {
+      const h = harness({
+        resolveRunPaths: checkoutPaths,
+        prepare: () => undefined,
+        checkoutReport: async () => report,
+      })
+      h.manager.startRun(makeStart())
+      const started = { type: 'checkout', runId: 'run-1', checkout: report }
+      await vi.waitFor(() => expect(h.messages).toEqual([started]))
+      push(h.hosts[0], { kind: 'done', exitCode: 0, stderr: '' })
+      await vi.waitFor(() => expect(h.messages.at(-1)).toMatchObject({ type: 'done' }))
+      h.messages.length = 0
+      h.manager.resumeFrom('run-1', 0)
+      expect(h.messages).toEqual([started, expect.objectContaining({ type: 'done' })])
+    })
+
     it('sends the done without a checkout when the report fails', async () => {
       const error = vi.spyOn(console, 'error').mockImplementation(() => {})
       try {
