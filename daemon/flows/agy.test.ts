@@ -484,11 +484,31 @@ it('marks denied tool calls blocked from result.denied_actions, wedges the task,
     const drivenWithoutProse = await driveFlow(withoutProse, flow())
     const taskWithoutProse = applyEvents(goldenInput(withoutProse).start, drivenWithoutProse.events)
     const itemsWithoutProse = (taskWithoutProse.items ?? []) as (BlockedItem & { text?: string })[]
-    expect(itemsWithoutProse.filter((it) => it.kind === 'message').map((it) => it.text)).toEqual([
+    expect(itemsWithoutProse.filter((it) => it.kind === 'message')).toEqual([])
+    expect(blockedRequests(itemsWithoutProse)).toEqual([
+      {
+        key: 'command(git push)',
+        rule: 'command(git push)',
+        tool: 'run_command',
+      },
+    ])
+    expect(calls).toHaveLength(2)
+
+    const twoSilent = fixture([[
+      toolStep(1, 'run_command', { CommandLine: 'rm -f probe.txt' }),
+      toolStep(2, 'run_command', { CommandLine: 'git status' }),
+      result({
+        response: '',
+        denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
+      }),
+    ]])
+    twoSilent.start = { ...twoSilent.start, env: withProse.start.env }
+    const drivenTwoSilent = await driveFlow(twoSilent, flow())
+    const itemsTwoSilent = (applyEvents(goldenInput(twoSilent).start, drivenTwoSilent.events).items ?? []) as (BlockedItem & { text?: string })[]
+    expect(itemsTwoSilent.filter((it) => it.kind === 'message').map((it) => it.text)).toEqual([
       'Antigravity denied a RunCommand call this turn without saying which one.',
     ])
-    expect(blockedRequests(itemsWithoutProse)).toEqual([])
-    expect(calls).toHaveLength(2)
+    expect(blockedRequests(itemsTwoSilent)).toEqual([])
 
     const deniedBeforeLaterCommands = fixture([[
       ...[

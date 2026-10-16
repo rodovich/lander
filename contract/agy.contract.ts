@@ -2,7 +2,7 @@ import { chmodSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { runAssist } from '../daemon/assist'
-import { agyProjectFile, makeFlow, onGrant } from '../daemon/flows/agy'
+import { agyProjectFile, isAgyDenial, makeFlow, onGrant } from '../daemon/flows/agy'
 import { blockedRequests, type BlockedItem } from '../src/permissions'
 import {
   TASK_PROMPT,
@@ -122,6 +122,51 @@ describe.skipIf(!VERSION)(`agy contract (${VERSION})`, () => {
     ).filter((it) => it.rideId === secondRideId)
     expect(blockedRequests(secondRideItems)).toEqual([])
     expect(replyText(granted)).toContain('unlisted-probe')
+  })
+
+  it('reports a refused command in a batch with its denial error or with nothing', async () => {
+    const root = testRoot()
+    writeFileSync(path.join(root, 'probe.txt'), 'kept\n')
+    await onGrant(undefined, { projectPath: root, rule: 'command(git)' })
+    const turn = await driveLive(flow, {
+      root,
+      prompt:
+        'In a single response, issue these two run_command tool calls in parallel, in this order: first CommandLine "rm -f probe.txt", then CommandLine "git status". Do not call any other tools.',
+    })
+
+    const items = (turn.task.items ?? []) as (BlockedItem & {
+      input?: string
+      output?: string
+    })[]
+    expect(items.map((it) => it.kind === 'tool' && it.input)).toEqual(
+      expect.arrayContaining(['rm -f probe.txt', 'git status']),
+    )
+    const rm = items.find((it) => it.kind === 'tool' && it.input === 'rm -f probe.txt')
+    expect(!rm?.output || isAgyDenial(rm.output)).toBe(true)
+    expect(readFileSync(path.join(root, 'probe.txt'), 'utf8')).toBe('kept\n')
+  })
+
+  it('fails a killed background command with an error that is not a denial', async () => {
+    const root = testRoot()
+    await onGrant(undefined, { projectPath: root, rule: 'command(sleep)' })
+    const turn = await driveLive(flow, {
+      root,
+      prompt: [
+        '1. Call run_command with CommandLine "sleep 120" and WaitMsBeforeAsync 500 so it moves to the background.',
+        '2. Call manage_task with Action "kill" and the TaskId of that background command.',
+        '3. Reply with "done". Do not call any other tools.',
+      ].join('\n'),
+    })
+
+    const items = (turn.task.items ?? []) as (BlockedItem & {
+      input?: string
+      output?: string
+    })[]
+    expect(blockedRequests(items)).toEqual([])
+    const sleep = items.find((it) => it.kind === 'tool' && it.input === 'sleep 120')
+    expect(sleep).toMatchObject({ status: 'failed' })
+    expect(sleep?.output).toContain('context canceled')
+    expect(isAgyDenial(sleep?.output)).toBe(false)
   })
 
   it('clamps runAssist so an agy one-shot cannot modify the target checkout', async () => {

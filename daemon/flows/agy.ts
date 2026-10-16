@@ -171,6 +171,14 @@ const READ_FILE_TOOLS = new Set([
   'find_by_name',
 ])
 
+// When agy marks a refused call at all, it does so in the step's error text:
+// "Action denied by user." or "permission check failed for unsandboxed …: user
+// denied permission to run command …". A call stopped mid-run fails with
+// "context canceled".
+export function isAgyDenial(message: string | undefined): boolean {
+  return /user denied permission|action denied/i.test(message ?? '')
+}
+
 function agyToolRule(
   event: AgyEvent,
 ): { action: string; rule: string } | undefined {
@@ -395,7 +403,13 @@ export function makeFlow({
       })
       const tools = new Map<
         number,
-        { handle: ToolHandle; action?: string; denied?: boolean; blocked?: boolean }
+        {
+          handle: ToolHandle
+          action?: string
+          denied?: boolean
+          silent?: boolean
+          blocked?: boolean
+        }
       >()
       const texts = new Map<number, string>()
       const seenUsageSteps = new Set<number>()
@@ -501,7 +515,8 @@ export function makeFlow({
             if (event.state !== 'ACTIVE') {
               const rawOutput = info?.output ?? info?.error?.message
               const isError = event.state === 'ERROR' || !!info?.error
-              entry.denied = isError && /user denied permission|action denied/i.test(info?.error?.message ?? '')
+              entry.denied = isError && isAgyDenial(info?.error?.message)
+              entry.silent = !isError && !info?.output
               entry.handle.result({
                 ...(rawOutput !== undefined
                   ? { output: summarizeToolResult(rawOutput) }
@@ -518,15 +533,20 @@ export function makeFlow({
             for (const denied of event.denied_actions) {
               const action =
                 typeof denied?.action === 'string' ? denied.action : undefined
-              // A denial names only the action kind. In observed streams the
-              // denied run_command step fails with "Action denied by user." or
-              // "… user denied permission to run command …", and calls the abort
-              // cuts short fail with "context canceled".
-              const target = action
-                ? recorded.find(
-                    (t) => t.denied && !t.blocked && t.action === action,
-                  )
-                : undefined
+              // A denial names only the action kind, and agy sometimes streams
+              // a denied command as a plain DONE with no output instead of with
+              // its denial error. That is also how an allowed command with no
+              // output, or one queued behind the refusal, looks, so a silent
+              // command is blamed only when it is the turn's sole one. Only
+              // command denials have been probed.
+              const open = action
+                ? recorded.filter((t) => !t.blocked && t.action === action)
+                : []
+              const silent =
+                action === 'command' ? open.filter((t) => t.silent) : []
+              const target =
+                open.find((t) => t.denied) ??
+                (silent.length === 1 ? silent[0] : undefined)
               if (target) {
                 target.blocked = true
                 target.handle.result({ blocked: true })
