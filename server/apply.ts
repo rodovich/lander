@@ -204,7 +204,25 @@ export function applyUpdate(task: ApplyTask, update: ApplyUpdate): void {
             it.kind === 'tool' && it.rideId === rideId && it.id === id,
         )
       for (const s of steps) {
-        if (s.kind === 'tool_use') {
+        if (s.kind === 'context') {
+          if (!s.context) continue
+          const { action, phase, ...details } = s.context
+          if (action === 'compaction') {
+            if (phase === 'started') ride.compacting = true
+            else delete ride.compacting
+          }
+          if (phase === 'completed') {
+            items.push({
+              id: nextItemId(task, s.createdAt),
+              at: s.createdAt,
+              rideId,
+              kind: 'context',
+              action,
+              ...details,
+            })
+            firstAt ??= s.createdAt
+          }
+        } else if (s.kind === 'tool_use') {
           items.push({
             id: s.toolUseId ?? nextItemId(task, s.createdAt),
             at: s.createdAt,

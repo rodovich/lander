@@ -4,7 +4,7 @@
 // rather than the main thread. A ToolItem/MessageItem satisfies this
 // structurally, so callers pass a ride's items straight through.
 type CollapsibleItem = {
-  kind: 'message' | 'tool' | 'event' | 'ask' | 'hook'
+  kind: 'message' | 'tool' | 'event' | 'ask' | 'hook' | 'context'
   text?: string
   parentId?: string
 }
@@ -39,24 +39,24 @@ export type TurnCollapsePlan = {
   segments: TurnCollapseSegment[]
 }
 
-// Consecutive items grouped by the groupId that produced them: an item whose
-// groupId differs from the last opens a new group, and one without a groupId
-// stays with the current group. Each group is one inference — what the turn
-// rules apart on screen, and what its fold counts as a "step".
 export function groupInferences(
-  items: readonly { groupId?: string }[],
+  items: readonly { groupId?: string; kind?: string }[],
   idxs: readonly number[],
 ): number[][] {
   const groups: number[][] = []
   let last: string | undefined
+  let afterContext = false
   for (const j of idxs) {
     const it = items[j]
     if (
       groups.length === 0 ||
+      it.kind === 'context' ||
+      afterContext ||
       (it.groupId && last !== undefined && it.groupId !== last)
     )
       groups.push([])
     groups[groups.length - 1].push(j)
+    afterContext = it.kind === 'context'
     if (it.groupId) last = it.groupId
   }
   return groups
@@ -132,6 +132,8 @@ export function planTurnCollapse(
   if (openingSeq) mark(openingSeq)
   mark(longestSeq)
   for (let pos = lastSeq[0]; pos < n; pos++) visible[pos] = true
+  for (let pos = 0; pos < n; pos++)
+    if (items[indices[pos]].kind === 'context') visible[pos] = true
 
   // Coalesce contiguous visible / hidden positions into segments.
   const segments: TurnCollapseSegment[] = []

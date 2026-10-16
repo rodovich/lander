@@ -390,7 +390,7 @@ export const Conversation = memo(function Conversation({
       {task.status === 'riding' && !openRideHasItems && (
         <div className="message">
           <PendingRow onPace={pace}>
-            {`${taskAgentModelName(task.flow ?? task.agent)} is starting…`}
+            {openR?.compacting ? 'Compacting context…' : `${taskAgentModelName(task.flow ?? task.agent)} is starting…`}
           </PendingRow>
         </div>
       )}

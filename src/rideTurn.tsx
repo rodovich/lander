@@ -104,7 +104,7 @@ export const RideTurn = memo(function RideTurn({
           open ride (no endedAt) is streaming. */}
       {!settled && (
         <PendingRow onPace={onPace}>
-          {`${taskAgentModelName(agent, ride.usage?.model)} is working…`}
+          {ride.compacting ? 'Compacting context…' : `${taskAgentModelName(agent, ride.usage?.model)} is working…`}
         </PendingRow>
       )}
       {files.length > 0 && (

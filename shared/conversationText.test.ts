@@ -25,6 +25,18 @@ const ride = (id: string, ended = true): Ride =>
   ({ id, startedAt: AT, ...(ended ? { endedAt: AT, outcome: 'done' } : {}) }) as Ride
 
 describe('conversationText', () => {
+  it('preserves context markers in a folded turn and reports only supplied metadata', () => {
+    const items = turn('r1')
+    items.splice(3, 0, {
+      id: 'compact', at: AT, rideId: 'r1', kind: 'context', action: 'compaction',
+      trigger: 'auto', beforeTokens: 182000, afterTokens: 24000, durationMs: 1250,
+    })
+    items.push({ id: 'checkpoint', at: AT, rideId: 'r1', kind: 'context', action: 'checkpoint' })
+    const [agent] = conversationText({ items, rides: [ride('r1')] }, { expand: false })
+    expect(agent.text).toContain('Context compacted · automatic · 182,000 → 24,000 tokens · 1.25 seconds')
+    expect(agent.text).toContain('Context checkpoint created')
+    expect(agent.text).not.toContain('Halfway.')
+  })
   it('folds a turn the way the UI does, leaving out the subagent’s words', () => {
     const blocks = conversationText(
       { items: [msg('u1', 'Go.'), ...turn('r1')], rides: [ride('r1')] },

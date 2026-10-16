@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { planTurnCollapse } from './turnCollapse'
+import { planTurnCollapse, groupInferences, foldSummary } from './turnCollapse'
 
 // The collapse reads a ride's main-thread items: flow `message` items carry the
 // prose it folds by, `tool` items are the separators between text sequences.
@@ -15,6 +15,17 @@ const tool = (): TestItem => ({ kind: 'tool' })
 const plan = (items: TestItem[]) => planTurnCollapse(items)
 
 describe('planTurnCollapse', () => {
+  it('keeps context markers visible within collapsed activity and separates surrounding inference groups', () => {
+    const items = [text('intro'), tool(), text('progress'), { kind: 'context' as const },
+      tool(), text('more'), tool(), text('the longest final answer')]
+    const segments = planTurnCollapse(items).segments
+    expect(segments.filter((s) => !s.hidden).flatMap((s) => s.indices)).toContain(3)
+    expect(segments.filter((s) => s.hidden).flatMap((s) => s.indices)).toEqual([1, 2, 4, 5, 6])
+    expect(groupInferences([
+      { kind: 'message', groupId: 'a' }, { kind: 'context' }, { kind: 'message', groupId: 'b' },
+    ], [0, 1, 2])).toEqual([[0], [1], [2]])
+    expect(foldSummary(items, [1, 2])).toBe('1 step, 1 tool…')
+  })
   it('keeps opening text before tools and collapses the range before the longest sequence', () => {
     const items = [
       text('intro'),

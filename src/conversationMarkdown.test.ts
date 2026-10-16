@@ -13,6 +13,16 @@ import type {
 
 const AT = '2026-06-26T10:00:00.000Z'
 
+it('includes durable context markers in copied markdown', () => {
+  const out = md(task([
+    { id: 'context-1', at: AT, rideId: 'r1', kind: 'context', action: 'compaction',
+      beforeTokens: 182000, afterTokens: 24000, trigger: 'auto' },
+    { id: 'context-2', at: AT, rideId: 'r1', kind: 'context', action: 'checkpoint' },
+  ], [{ id: 'r1', startedAt: AT, endedAt: AT }]))
+  expect(out).toContain('Context compacted · automatic · 182,000 → 24,000 tokens')
+  expect(out).toContain('Context checkpoint created')
+})
+
 const user = (id: string, text: string, over: Partial<MessageItem> = {}): MessageItem => ({
   id,
   at: AT,

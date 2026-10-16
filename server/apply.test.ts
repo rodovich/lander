@@ -35,6 +35,26 @@ const rideItems = (t: ApplyTask, rideId = 'r1') =>
   (t.items ?? []).filter((it) => it.rideId === rideId)
 
 describe('applyUpdate', () => {
+  it('records ordered context completions while keeping progress off the item log', () => {
+    const t = task()
+    const context = (phase: 'started' | 'completed' | 'idle'): Step => step({
+      kind: 'context', context: { action: 'compaction', phase },
+    })
+    applyUpdate(t, update({ steps: [context('started'), context('started')], cursor: 1 }))
+    expect(t.rides![0].compacting).toBe(true)
+    expect(rideItems(t)).toEqual([])
+    expect(t.runCursor).toBe(1)
+    applyUpdate(t, update({ steps: [context('idle')], cursor: 2 }))
+    expect(t.rides![0].compacting).toBeUndefined()
+    applyUpdate(t, update({ steps: [step({ text: 'Before' }), context('completed'), step({ text: 'After' })] }))
+    expect(rideItems(t).map((it) => it.kind)).toEqual(['message', 'context', 'message'])
+    expect(rideItems(t)[1]).toMatchObject({ kind: 'context', action: 'compaction', rideId: 'r1', at: AT })
+    expect(t.rides![0].compacting).toBeUndefined()
+    applyUpdate(t, update({ steps: [context('started')] }))
+    applyDone(t, { exitCode: 0, interrupted: true }, { at: AT, askId: 'ask-stop' })
+    expect(t.rides![0].compacting).toBeUndefined()
+    expect(rideItems(t).filter((it) => it.kind === 'context')).toHaveLength(1)
+  })
   it('appends a flow item for a text step to the open ride, creating no message array', () => {
     const t = task()
     applyUpdate(t, update({ steps: [step({ text: 'hi' })], cursor: 10 }))

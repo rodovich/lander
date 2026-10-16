@@ -1,5 +1,8 @@
+import type { ContextUpdate } from './context'
+
 export type Step = {
-  kind: 'text' | 'tool_use' | 'tool_result'
+  kind: 'text' | 'tool_use' | 'tool_result' | 'context'
+  context?: ContextUpdate
   text?: string
   tool?: string
   input?: string

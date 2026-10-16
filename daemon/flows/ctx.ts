@@ -28,6 +28,7 @@ import type { ChildProcess } from 'node:child_process'
 import type { FlowMeta, StatePatchOp } from '../../server/protocol'
 import type { Step, Usage } from '../../shared/stream'
 import type { HostEvent, HostInput, SpawnLike } from '../host-protocol'
+import type { ContextUpdate } from '../../shared/context'
 import { isAssistProvider, runAssist } from '../assist'
 import { buildRevivedBlock, buildScheduledRideBlock } from '../task-management'
 import { taskApiHeaders } from '../task-api'
@@ -187,6 +188,7 @@ export type MeterOpts = {
 }
 
 export type CtxEmit = {
+  context(update: ContextUpdate): void
   message(text: string, opts?: EmitMessageOpts): void
   tool(opts: EmitToolOpts): ToolHandle
   group(): GroupHandle
@@ -695,6 +697,7 @@ export function createCtxRuntime(
   }
 
   const emit: CtxEmit = {
+    context: (context) => steps.push({ kind: 'context', context: { ...context }, createdAt: now() }),
     message: (text, opts = {}) => emitMessageAt(text, opts, now()),
     tool: (opts) => emitToolAt(opts, now()),
     group() {

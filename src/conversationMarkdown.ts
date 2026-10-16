@@ -20,6 +20,7 @@ import { formatTimestamp } from './format'
 import { EVENT_VERB } from './lifecycleNote'
 import { toolDetail } from './toolStep'
 import { oneLine } from '../shared/conversationText'
+import { contextLabel, contextSummary } from '../shared/context'
 import { foldSummary, planTurnCollapse, turnThreads } from '../shared/turnCollapse'
 import type { TimelineEntry } from '../shared/timeline'
 import type {
@@ -214,6 +215,8 @@ function rideBlocks(
 
   const itemBlocks = (j: number): string[] => {
     const it = items[j]
+    if (it.kind === 'context')
+      return [[contextLabel(it.action), contextSummary(it)].filter(Boolean).join(' · ')]
     if (it.kind === 'message') return it.text.trim() ? [it.text.trim()] : []
     if (it.kind !== 'tool') return []
     return toolBlocks(it, childrenByParent.get(it.id) ?? [])

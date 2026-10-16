@@ -44,6 +44,7 @@ type AgyEvent = {
   step_index: number
   step_type?: string
   state?: string
+  duration_seconds?: number
   text_delta?: string
   tool_name?: string
   tool_info?: {
@@ -398,6 +399,7 @@ export function makeFlow({
       >()
       const texts = new Map<number, string>()
       const seenUsageSteps = new Set<number>()
+      const seenCheckpoints = new Set<number>()
       const priorTotal: Usage | undefined = sessionId
         ? readThreadUsage(ctx.state.get(['threadUsage']))
         : { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 }
@@ -452,7 +454,20 @@ export function makeFlow({
         ) {
           ctx.emit.meter({ drivingModel: envelope.init.model })
         } else if (envelope.event === 'step_update') {
-          if (event.step_type === 'agent_response') {
+          if (event.step_type === 'checkpoint') {
+            if (event.state === 'DONE' && !seenCheckpoints.has(event.step_index)) {
+              flushText()
+              seenCheckpoints.add(event.step_index)
+              const seconds = event.duration_seconds
+              ctx.emit.context({
+                action: 'checkpoint',
+                phase: 'completed',
+                ...(typeof seconds === 'number' && Number.isFinite(seconds) && seconds >= 0
+                  ? { durationMs: seconds * 1000 }
+                  : {}),
+              })
+            }
+          } else if (event.step_type === 'agent_response') {
             if (pendingText !== event.step_index) flushText()
             pendingText = event.step_index
             texts.set(

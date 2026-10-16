@@ -15,6 +15,35 @@ import { reduceStreamLine, sessionCost } from './claude-stream'
 // a log replayed from disk.
 const AT = '2026-01-01T00:00:00.000Z'
 
+describe('Claude context signals', () => {
+  const reduce = (event: object) => reduceStreamLine(JSON.stringify(event), AT)
+
+  it('reports live status without inventing completion markers', () => {
+    for (const [status, phase] of [['compacting', 'started'], ['requesting', 'idle'], [null, 'idle']] as const) {
+      expect(reduce({ type: 'system', subtype: 'status', status }).steps).toEqual([
+        { kind: 'context', context: { action: 'compaction', phase }, createdAt: AT },
+      ])
+    }
+    expect(reduce({ type: 'system', subtype: 'status', status: 'future-status' }).steps).toEqual([])
+  })
+
+  it('reports completion with only valid provider metadata, including zero', () => {
+    expect(reduce({ type: 'system', subtype: 'compact_boundary', compact_metadata: {
+      trigger: 'auto', pre_tokens: 182000, post_tokens: 24000, duration_ms: 0,
+    } }).steps).toEqual([
+      { kind: 'context', context: {
+        action: 'compaction', phase: 'completed', trigger: 'auto',
+        beforeTokens: 182000, afterTokens: 24000, durationMs: 0,
+      }, createdAt: AT },
+    ])
+    expect(reduce({ type: 'system', subtype: 'compact_boundary', compact_metadata: {
+      trigger: 'other', pre_tokens: '182000', post_tokens: -1, duration_ms: null,
+    } }).steps[0].context).toEqual({ action: 'compaction', phase: 'completed' })
+    expect(reduce({ type: 'system', subtype: 'compact_boundary' }).steps[0].context)
+      .toEqual({ action: 'compaction', phase: 'completed' })
+  })
+})
+
 describe('summarizeToolInput', () => {
   it('returns empty string for non-object input', () => {
     expect(summarizeToolInput(null)).toBe('')

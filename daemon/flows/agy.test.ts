@@ -68,6 +68,33 @@ it('registers an executable driver and its capabilities', () => {
   expect(resolveLaunchDir({ root: '/repo', recordedCwd: '/gone', isDir: () => false })).toEqual({ cwd: '/repo' })
 })
 
+it('keeps completed checkpoints in stream order without duplicating them or inventing compaction metadata', async () => {
+  const checkpoint = (state: string) => event('step_update', {
+    step_index: 2, step_type: 'checkpoint', state, duration_seconds: 0.53,
+    usage: { input_tokens: 120, output_tokens: 8 },
+  })
+  const g = fixture([
+    [init('checkpoint-session'), event('step_update', {
+      step_index: 1, step_type: 'agent_response', state: 'DONE', text_delta: 'Before',
+    }), checkpoint('ACTIVE')],
+    [checkpoint('DONE'), checkpoint('DONE')],
+    [event('step_update', {
+      step_index: 3, step_type: 'agent_response', state: 'DONE', text_delta: 'After',
+    }), result({ response: 'After' })],
+  ])
+  const driven = await driveFlow(g, flow())
+  expect(steps(driven.events).map((s) => s.kind)).toEqual(['text', 'context', 'text'])
+  expect(steps(driven.events)[1].context).toEqual({
+    action: 'checkpoint', phase: 'completed', durationMs: 530,
+  })
+  const task = applyEvents(goldenInput(g).start, driven.events)
+  expect(task.items).toEqual([
+    expect.objectContaining({ kind: 'message', text: 'Before' }),
+    expect.objectContaining({ kind: 'context', action: 'checkpoint', durationMs: 530 }),
+    expect.objectContaining({ kind: 'message', text: 'After' }),
+  ])
+})
+
 it('reduces the recorded Antigravity stream into a session, tool lifecycle, usage, and reply', async () => {
   const lines = readFileSync(new URL('./fixtures/agy.jsonl', import.meta.url), 'utf8').trim().split('\n')
   const g = fixture([lines])

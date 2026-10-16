@@ -2224,6 +2224,7 @@ body {
 /* No gutter to hang into here: the triangle takes its place at the head of the
    row, level with the one on a fold summary above it. */
 .timeline-note.in-turn .collapsible-toggle {
+  width: auto;
   margin-left: 0;
   justify-content: flex-start;
 }
@@ -2355,7 +2356,10 @@ body {
 
 .step-diff-caret {
   display: inline-block;
-  font-size: 0.7em;
+  width: 10px;
+  flex-shrink: 0;
+  font-family: Arial, sans-serif;
+  font-size: 10px;
   transition: transform 0.12s ease;
 }
 

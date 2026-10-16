@@ -193,7 +193,9 @@ export function makeFlow({
           ctx.emit.meter({ rateLimitResetsAt: r.rateLimitResetsAt })
 
         for (const step of r.steps) {
-          if (step.kind === 'tool_use') {
+          if (step.kind === 'context') {
+            if (step.context) ctx.emit.context(step.context)
+          } else if (step.kind === 'tool_use') {
             const h = ctx.emit.tool({
               name: step.tool ?? '',
               input: step.input ?? '',

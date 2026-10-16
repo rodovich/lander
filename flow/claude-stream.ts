@@ -5,6 +5,7 @@
 
 import type { Step, Usage } from '../shared/stream'
 import { fullToolInput, summarizeToolInput, toolRule, diffEdits, rawToolResultText, summarizeToolResult } from './stream'
+import type { ContextUpdate } from '../shared/context'
 
 // An Agent call's expanded input: its `<type>: <description>` line, then the
 // prompt the subagent was given, which the chip otherwise never shows. The cap
@@ -117,6 +118,30 @@ export function reduceStreamLine(
   if (ev.type === 'system' && ev.subtype === 'init') {
     turnStarted = true
     if (typeof ev.model === 'string') drivingModel = ev.model
+  } else if (ev.type === 'system' && ev.subtype === 'compact_boundary') {
+    const metadata = ev.compact_metadata
+    const context: ContextUpdate = { action: 'compaction', phase: 'completed' }
+    if (metadata?.trigger === 'auto' || metadata?.trigger === 'manual')
+      context.trigger = metadata.trigger
+    for (const [source, target] of [
+      ['pre_tokens', 'beforeTokens'],
+      ['post_tokens', 'afterTokens'],
+      ['duration_ms', 'durationMs'],
+    ] as const) {
+      const value = metadata?.[source]
+      if (typeof value === 'number' && Number.isFinite(value) && value >= 0)
+        context[target] = value
+    }
+    steps.push({ kind: 'context', context, createdAt: at })
+  } else if (
+    ev.type === 'system' && ev.subtype === 'status' &&
+    (ev.status === 'compacting' || ev.status === 'requesting' || ev.status === null)
+  ) {
+    steps.push({
+      kind: 'context',
+      context: { action: 'compaction', phase: ev.status === 'compacting' ? 'started' : 'idle' },
+      createdAt: at,
+    })
   } else if (ev.type === 'assistant' && Array.isArray(ev.message?.content)) {
     const inferenceId =
       typeof ev.message.id === 'string' ? ev.message.id : undefined

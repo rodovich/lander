@@ -103,6 +103,39 @@ const render = (
   )
 
 describe('Conversation timeline dispatch', () => {
+  it('renders context markers inside a folded turn without tool chips', () => {
+    const html = render(baseTask({
+      items: [
+        flow('before', 'r1', 'Before'),
+        { id: 'compact', at: AT, rideId: 'r1', kind: 'context', action: 'compaction',
+          trigger: 'auto', beforeTokens: 182000, afterTokens: 24000, durationMs: 1250 },
+        { id: 'checkpoint', at: AT, rideId: 'r1', kind: 'context', action: 'checkpoint' },
+        flow('after', 'r1', 'After'),
+      ],
+      rides: [ride('r1')],
+    }))
+    expect(html).toContain('Context compacted')
+    expect(html).toContain('automatic · 182,000 → 24,000 tokens')
+    expect(html).toContain('Context checkpoint created')
+    expect(html).toContain('Show context change details')
+    expect(html).not.toContain('tool-step')
+  })
+
+  it('shows compacting only on an open ride and otherwise uses the working indicator', () => {
+    const html = (over: Partial<Ride>) => render(baseTask({
+      status: 'riding', items: [flow('f1', 'r1', 'Before')],
+      rides: [ride('r1', { endedAt: undefined, outcome: undefined, ...over })],
+    }))
+    expect(html({ compacting: true })).toContain('Compacting context…')
+    expect(html({})).toContain('is working…')
+    expect(html({ compacting: true, endedAt: AT, outcome: 'interrupted' })).not.toContain('Compacting context…')
+    const beforeOutput = render(baseTask({
+      status: 'riding', items: [],
+      rides: [ride('r1', { endedAt: undefined, outcome: undefined, compacting: true })],
+    }))
+    expect(beforeOutput).toContain('Compacting context…')
+    expect(beforeOutput).not.toContain('is starting…')
+  })
   it('renders each entry kind as its own row component', () => {
     const html = render(
       baseTask({

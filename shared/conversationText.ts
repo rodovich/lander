@@ -1,6 +1,7 @@
 import { buildTimeline, type RideItem, type TimelineEntry } from './timeline'
 import { foldSummary, planTurnCollapse } from './turnCollapse'
 import type { Item, MessageItem, Ride } from '../src/types'
+import { contextLabel, contextSummary, contextDuration } from './context'
 
 // A task's conversation as plain text, the counterpart of the markdown copy for
 // readers without a screen — `lander view`, through the server. One block per
@@ -76,6 +77,8 @@ function rideText(items: RideItem[], expand: boolean): { text: string; folded?: 
 
   function itemLine(j: number): string {
     const it = items[j]
+    if (it.kind === 'context')
+      return [contextLabel(it.action), contextSummary(it), contextDuration(it)].filter(Boolean).join(' · ')
     if (it.kind === 'message') return it.text.trim()
     if (it.kind !== 'tool') return ''
     const input = it.input ? `: ${oneLine(it.input)}` : ''

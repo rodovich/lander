@@ -1,3 +1,5 @@
+import type { ContextAction, ContextDetails } from '../shared/context'
+
 // Token counts a turn consumed, accumulated as it streams and finalized by its
 // result event. `input` and `cacheCreation` are fresh input processed this turn
 // (uncached); `cacheRead` is the discounted re-read of cached context. `model`
@@ -77,6 +79,7 @@ export type Ask = {
 // spinner renders after its last item. A closed ride carries an `outcome` and
 // the turn's `usage`.
 export type Ride = {
+  compacting?: true
   id: string
   startedAt: string
   endedAt?: string
@@ -240,7 +243,13 @@ export type HookItem = ItemCommon & {
   durationMs?: number
 }
 
+export type ContextItem = ItemCommon & ContextDetails & {
+  kind: 'context'
+  action: ContextAction
+}
+
 export type Item =
+  | ContextItem
   | MessageItem
   | ToolItem
   | EventItem

@@ -9,6 +9,7 @@ import type { AgentKind } from './agent'
 import type { Step, Usage } from '../shared/stream'
 import type { Attachment } from './attachments'
 import type { RevivedMarker, ScheduledRide } from './protocol'
+import type { ContextAction, ContextDetails } from '../shared/context'
 // The one value we import (the rest of this module's imports are types):
 // recordStatusTransition settles open asks on the crossing. asks.ts imports only
 // types from here, so the runtime edge stays one-way — this module → asks.ts.
@@ -91,6 +92,7 @@ export type TaskEvent = {
 // Additive for now — the UI still reads Message.usage/steps; see docs/rides-plan.md.
 export type Ride = {
   id: string
+  compacting?: true
   startedAt: string
   // Absent while the ride is open. Stamped by closeRide when the run finishes.
   endedAt?: string
@@ -476,6 +478,7 @@ export function closeRide(
   const ride = openRide(task)
   if (!ride) return
   ride.endedAt = at
+  delete ride.compacting
   ride.outcome = outcome
   if (usage) {
     ride.usage = usage
@@ -708,7 +711,13 @@ export type HookItem = ItemCommon & {
   durationMs?: number
 }
 
+export type ContextItem = ItemCommon & ContextDetails & {
+  kind: 'context'
+  action: ContextAction
+}
+
 export type Item =
+  | ContextItem
   | MessageItem
   | ToolItem
   | EventItem
