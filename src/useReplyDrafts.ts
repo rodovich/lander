@@ -12,7 +12,7 @@ export type ReplyDraft = {
   sending: boolean
   setText: (text: string) => void
   addFiles: (picked: File[]) => void
-  clearFiles: () => void
+  keepFiles: (count: number) => void
   // Uploads the files and posts the reply, then clears the draft. Settles once
   // the send has finished either way; a failure lands in the app's error line.
   send: () => Promise<void>
@@ -80,9 +80,13 @@ export function useReplyDrafts(
     },
     [key],
   )
-  const clearFiles = useCallback(() => {
-    if (key) setFilesBy((prev) => ({ ...prev, [key]: [] }))
-  }, [key])
+  const keepFiles = useCallback(
+    (count: number) => {
+      if (key)
+        setFilesBy((prev) => ({ ...prev, [key]: (prev[key] ?? []).slice(0, count) }))
+    },
+    [key],
+  )
 
   // Bound to the task open when it was pressed: switching away mid-send still
   // clears and un-flags the draft it was sending, not the one now open.
@@ -116,8 +120,8 @@ export function useReplyDrafts(
   return useMemo(
     () =>
       key
-        ? { text, files, sending, setText, addFiles, clearFiles, send }
+        ? { text, files, sending, setText, addFiles, keepFiles, send }
         : null,
-    [key, text, files, sending, setText, addFiles, clearFiles, send],
+    [key, text, files, sending, setText, addFiles, keepFiles, send],
   )
 }

@@ -9,14 +9,17 @@ import {
 import { clipboardImageFiles } from './fileDrop'
 import { useFileDrop } from './hooks'
 
+type DraftSelection = { text: string; start: number; end: number }
+
 // The shell both composers wear — the reply bar under a conversation and the
 // new-task form in the sidebar. It owns the interactions the two share and must
 // not drift apart on: the whole panel is one file-drop target, a plain Enter
 // submits while Shift/Option+Enter inserts a newline, pasted images become
-// attachments, and the paperclip sits at the left of the action row. What
-// differs is passed in — the element and its class, the header above the
-// textarea, what holds the action row's right corner, and where the draft and
-// its files live, since one composer keys them by task and the other doesn't.
+// attachments that ⌘Z takes back, and the paperclip sits at the left of the
+// action row. What differs is passed in — the element and its class, the
+// header above the textarea, what holds the action row's right corner, and
+// where the draft and its files live, since one composer keys them by task and
+// the other doesn't.
 export function ComposerPanel({
   as: Tag = 'div',
   className,
@@ -34,7 +37,7 @@ export function ComposerPanel({
   busy,
   files,
   onAddFiles,
-  onClearFiles,
+  onKeepFiles,
   showAttach = true,
 }: {
   // A form when submitting is the panel's purpose (the new-task form's Launch
@@ -61,36 +64,57 @@ export function ComposerPanel({
   busy?: boolean
   files: File[]
   onAddFiles: (picked: File[]) => void
-  onClearFiles: () => void
+  onKeepFiles: (count: number) => void
   // Hidden where there is nothing to attach to — an archived task.
   showAttach?: boolean
 }) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const ordinaryPaste = useRef(false)
-  const pendingCaret = useRef<{ text: string; caret: number } | null>(null)
+  const pendingSelection = useRef<DraftSelection | null>(null)
+  // What ⌘Z restores after attaching: the draft before, with the range the
+  // markers replaced selected, and the draft after, to tell whether anything
+  // has changed it since. The browser's own undo never sees these, since each
+  // replaces the textarea's value outright.
+  const insertions = useRef<
+    { before: DraftSelection; keepFiles: number; after: string; files: number }[]
+  >([])
 
   useLayoutEffect(() => {
-    const pending = pendingCaret.current
-    pendingCaret.current = null
+    const pending = pendingSelection.current
+    pendingSelection.current = null
     if (pending?.text === value && inputRef.current) {
       inputRef.current.focus()
-      inputRef.current.setSelectionRange(pending.caret, pending.caret)
+      inputRef.current.setSelectionRange(pending.start, pending.end)
     }
   }, [value, files])
 
   function addFiles(picked: File[], replaceSelection = false) {
     if (busy || textareaDisabled || !showAttach || picked.length === 0) return
     const input = inputRef.current
-    const insertion = insertAttachmentMarkers(
-      value,
-      input?.selectionStart ?? value.length,
-      (replaceSelection ? input?.selectionEnd : input?.selectionStart) ?? value.length,
-      files.length,
-      picked.length,
-    )
-    pendingCaret.current = insertion
+    const start = input?.selectionStart ?? value.length
+    const end = (replaceSelection ? input?.selectionEnd : input?.selectionStart) ?? value.length
+    const insertion = insertAttachmentMarkers(value, start, end, files.length, picked.length)
+    pendingSelection.current = { text: insertion.text, start: insertion.caret, end: insertion.caret }
+    insertions.current.push({
+      before: { text: value, start, end },
+      keepFiles: files.length,
+      after: insertion.text,
+      files: files.length + picked.length,
+    })
     onAddFiles(picked)
     onChange(insertion.text)
+  }
+
+  function undoInsertion(): boolean {
+    const last = insertions.current.pop()
+    if (!last || last.after !== value || last.files !== files.length) {
+      insertions.current = []
+      return false
+    }
+    pendingSelection.current = last.before
+    onKeepFiles(last.keepFiles)
+    onChange(last.before.text)
+    return true
   }
 
   const drop = useFileDrop<HTMLElement>(addFiles, busy || textareaDisabled || !showAttach)
@@ -120,11 +144,19 @@ export function ComposerPanel({
         rows={rows}
         value={value}
         disabled={textareaDisabled}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => {
+          insertions.current = []
+          onChange(e.target.value)
+        }}
         onKeyDown={(e) => {
-          ordinaryPaste.current =
-            (e.code === 'KeyV' || e.key.toLowerCase() === 'v') &&
+          const plainShortcut = (letter: string) =>
+            (e.code === `Key${letter}` || e.key.toLowerCase() === letter.toLowerCase()) &&
             (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey
+          ordinaryPaste.current = plainShortcut('V')
+          if (plainShortcut('Z') && undoInsertion()) {
+            e.preventDefault()
+            return
+          }
           // Plain Enter submits; Shift+Enter / Option(Alt)+Enter inserts a newline.
           if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
             e.preventDefault()
@@ -161,7 +193,8 @@ export function ComposerPanel({
             files={files}
             onAdd={addFiles}
             onClear={() => {
-              onClearFiles()
+              insertions.current = []
+              onKeepFiles(0)
               onChange(removeAttachmentMarkers(value, files.length))
             }}
             disabled={busy}

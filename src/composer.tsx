@@ -39,7 +39,7 @@ export const Composer = memo(function Composer({
       busy={draft.sending || !!task.archived}
       files={draft.files}
       onAddFiles={draft.addFiles}
-      onClearFiles={draft.clearFiles}
+      onKeepFiles={draft.keepFiles}
       showAttach={!task.archived}
       actions={<UsageReadout task={task} />}
     />

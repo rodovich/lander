@@ -110,7 +110,7 @@ export const NewTaskForm = memo(function NewTaskForm({
       busy={submitting}
       files={newFiles}
       onAddFiles={(picked) => setNewFiles((prev) => [...prev, ...picked])}
-      onClearFiles={() => setNewFiles([])}
+      onKeepFiles={(count) => setNewFiles((prev) => prev.slice(0, count))}
       head={
         <div className="new-task-head">
           <h2>New task</h2>

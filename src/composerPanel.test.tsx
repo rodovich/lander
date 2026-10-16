@@ -15,7 +15,7 @@ const render = (over: Partial<ComponentProps<typeof ComposerPanel>> = {}) =>
       rows={3}
       files={[]}
       onAddFiles={() => {}}
-      onClearFiles={() => {}}
+      onKeepFiles={() => {}}
       {...over}
     />,
   )
