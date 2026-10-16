@@ -6,7 +6,7 @@
 
 import path from 'node:path'
 import type { AgentKind } from './agent'
-import type { Step, Usage } from './stream'
+import type { Step, Usage } from '../shared/stream'
 import type { Attachment } from './attachments'
 import type { RevivedMarker, ScheduledRide } from './protocol'
 // The one value we import (the rest of this module's imports are types):

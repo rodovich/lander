@@ -2,7 +2,7 @@
 
 import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import type { StartRunMessage, StatePatchOp } from '../server/protocol'
-import type { Step, Usage } from '../server/stream'
+import type { Step, Usage } from '../shared/stream'
 import type { MaterializedFiles } from './attachments'
 
 export type HostInput = {

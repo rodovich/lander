@@ -6,10 +6,9 @@ import {
   diffEdits,
   rawToolResultText,
   summarizeToolResult,
-  reduceStreamLine,
   addUsage,
-  sessionCost,
 } from './stream'
+import { reduceStreamLine, sessionCost } from './claude-stream'
 
 // A fixed timestamp the reducer must thread through verbatim — it never reads a
 // clock, which is the property that lets the same reduction serve a live run and

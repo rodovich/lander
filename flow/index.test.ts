@@ -2,15 +2,16 @@
 
 import { describe, expect, it } from 'vitest'
 import * as flow from 'lander/flow'
-import * as stream from '../server/stream'
+import * as stream from './stream'
+import * as claude from './claude-stream'
 import * as attachments from '../daemon/attachments'
 import * as codex from './codex-stream'
 import * as taskManagement from '../daemon/task-management'
 import { gitContext } from './git'
 
 describe('lander/flow stdlib façade', () => {
-  it('re-exports server/stream helpers by identity', () => {
-    expect(flow.reduceStreamLine).toBe(stream.reduceStreamLine)
+  it('re-exports stream helpers by identity', () => {
+    expect(flow.reduceStreamLine).toBe(claude.reduceStreamLine)
     expect(flow.addUsage).toBe(stream.addUsage)
     expect(flow.summarizeToolInput).toBe(stream.summarizeToolInput)
     expect(flow.fullToolInput).toBe(stream.fullToolInput)

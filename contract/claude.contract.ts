@@ -48,7 +48,7 @@ describe.skipIf(!VERSION)(`claude contract (${VERSION})`, () => {
 
   // Since CLI 2.1.278, total_cost_usd and modelUsage are the session's running
   // totals across --resume, while result.usage is the turn's own; the flow
-  // charges each turn the difference (server/stream.ts sessionCost).
+  // charges each turn the difference (flow/claude-stream.ts sessionCost).
   it("charges each turn its own share of the session's running cost", () => {
     const a = first.ride.usage!
     const b = second.ride.usage!

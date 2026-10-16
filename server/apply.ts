@@ -16,7 +16,7 @@
 // mints too, so a turn that streamed half its steps under v1 and half under v2
 // reconciles seamlessly.
 
-import type { Step, Usage } from './stream'
+import type { Step, Usage } from '../shared/stream'
 import type { UpdateMessage, DoneMessage } from './protocol'
 import {
   openRide,

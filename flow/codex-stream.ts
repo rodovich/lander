@@ -1,11 +1,10 @@
+import type { Step, Usage } from '../shared/stream'
 import {
   fullToolInput,
   summarizeToolInput,
   summarizeToolResult,
   toolRule,
-  type Step,
-  type Usage,
-} from '../server/stream'
+} from './stream'
 
 export type CodexLineUpdate = {
   steps: Step[]

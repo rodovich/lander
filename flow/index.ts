@@ -12,20 +12,16 @@ export {
 
 // ── Stream reduction and the item/step vocabulary ───────────────────────────
 export {
-  reduceStreamLine,
   addUsage,
-  sessionCost,
   summarizeToolInput,
   fullToolInput,
   toolRule,
   diffEdits,
   rawToolResultText,
   summarizeToolResult,
-  type Step,
-  type Usage,
-  type CacheMiss,
-  type SessionTotals,
-} from '../server/stream'
+} from './stream'
+export { reduceStreamLine, sessionCost, type SessionTotals } from './claude-stream'
+export type { Step, Usage, CacheMiss } from '../shared/stream'
 
 // Codex stream reduction and thread identity.
 export {

@@ -4,7 +4,7 @@
 //
 // (AttachmentRef below carries a turn's attachments to the daemon.)
 
-import type { Step, Usage } from './stream'
+import type { Step, Usage } from '../shared/stream'
 import type { AgentKind } from './agent'
 
 export type { AgentKind } from './agent'
