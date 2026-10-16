@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import type { ChildProcess } from 'node:child_process'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { StartRunMessage } from '../server/protocol'
 import type { HostEvent, HostInput } from './host-protocol'
 import {
@@ -656,6 +656,85 @@ describe('daemon run manager', () => {
       h.messages.length = 0
       h.manager.resumeFrom('run-1', 0)
       expect(h.messages).toEqual([started, expect.objectContaining({ type: 'done' })])
+    })
+
+    describe('after tools run', () => {
+      const toolResult: HostEvent = {
+        kind: 'update',
+        steps: [{ kind: 'tool_result', toolUseId: 't1', createdAt: 't' }],
+        blockedIds: [],
+        usageChanged: false,
+      }
+      const text: HostEvent = {
+        kind: 'update',
+        steps: [{ kind: 'text', text: 'hi', createdAt: 't' }],
+        blockedIds: [],
+        usageChanged: false,
+      }
+
+      function refreshing() {
+        const reads: ((r: typeof report) => void)[] = []
+        const h = harness({
+          resolveRunPaths: checkoutPaths,
+          prepare: () => undefined,
+          checkoutReport: () => new Promise((r) => reads.push(r)),
+          checkoutRefreshMs: 1_000,
+        })
+        h.manager.startRun(makeStart())
+        const checkouts = () => h.messages.filter((m) => m.type === 'checkout')
+        return { h, reads, checkouts }
+      }
+
+      beforeEach(() => vi.useFakeTimers())
+      afterEach(() => vi.useRealTimers())
+
+      it('reads the checkout again once the wait after the last read is over', async () => {
+        const { h, reads, checkouts } = refreshing()
+        reads[0](report)
+        await vi.advanceTimersByTimeAsync(0)
+        push(h.hosts[0], toolResult)
+        push(h.hosts[0], toolResult)
+        expect(reads).toHaveLength(1)
+        await vi.advanceTimersByTimeAsync(1_000)
+        expect(reads).toHaveLength(2)
+        const edited = { ...report, branch: 'edited' }
+        reads[1](edited)
+        await vi.advanceTimersByTimeAsync(0)
+        expect(checkouts().at(-1)).toMatchObject({ checkout: edited })
+        await vi.advanceTimersByTimeAsync(5_000)
+        expect(reads).toHaveLength(2)
+      })
+
+      it('reads after a tool that finished during a read', async () => {
+        const { h, reads } = refreshing()
+        push(h.hosts[0], toolResult)
+        reads[0](report)
+        await vi.advanceTimersByTimeAsync(1_000)
+        expect(reads).toHaveLength(2)
+      })
+
+      it('does not read again for updates without a tool result', async () => {
+        const { h, reads } = refreshing()
+        reads[0](report)
+        await vi.advanceTimersByTimeAsync(0)
+        push(h.hosts[0], text)
+        await vi.advanceTimersByTimeAsync(5_000)
+        expect(reads).toHaveLength(1)
+      })
+
+      it('replays only the latest report', async () => {
+        const { h, reads, checkouts } = refreshing()
+        reads[0](report)
+        await vi.advanceTimersByTimeAsync(0)
+        push(h.hosts[0], toolResult)
+        await vi.advanceTimersByTimeAsync(1_000)
+        const edited = { ...report, branch: 'edited' }
+        reads[1](edited)
+        await vi.advanceTimersByTimeAsync(0)
+        h.messages.length = 0
+        h.manager.resumeFrom('run-1', 0)
+        expect(checkouts()).toEqual([{ type: 'checkout', runId: 'run-1', checkout: edited }])
+      })
     })
 
     it('sends the done without a checkout when the report fails', async () => {

@@ -536,8 +536,8 @@ export type DoneMessage = {
 }
 
 // A run launched in a checkout the daemon manages for the task describes that
-// checkout as the run starts, so it can be shown before the run's done. Re-sent
-// on resume-from, ahead of the done.
+// checkout as the run starts and again after its tools run, so it can be shown
+// before the run's done. The latest is re-sent on resume-from, ahead of the done.
 export type CheckoutMessage = {
   type: 'checkout'
   runId: string

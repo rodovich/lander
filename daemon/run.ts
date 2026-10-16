@@ -77,7 +77,8 @@ type Run = {
   // whole list is safe — order is preserved, and a batch the server already
   // folded in is a no-op there.
   statePatches: StatePatchMessage[]
-  startCheckout?: CheckoutMessage
+  // The latest checkout message, re-sent on resume-from.
+  checkout?: CheckoutMessage
   done?: DoneMessage
   dropTimer?: ReturnType<typeof setTimeout>
 }
@@ -99,8 +100,10 @@ export type RunManagerOptions = {
   // there is something to do; undefined when there isn't, so the common path
   // still spawns synchronously. A rejection fails the run with its message.
   prepare?: (msg: StartRunMessage, paths: RunPaths) => Promise<void> | undefined
-  // What a run's checkout holds as it starts and as it ends.
+  // What a run's checkout holds, read as the run goes and as it ends.
   checkoutReport?: (root: string, dir: string) => Promise<CheckoutReport>
+  // The least time between reads of a run's checkout while it goes.
+  checkoutRefreshMs?: number
   send: (msg: RunManagerMessage) => void
   // The deterministic per-task file store dir (pure function of the run's
   // project/task). Set as LANDER_FILES_DIR on EVERY turn so `lander attachment`
@@ -129,12 +132,15 @@ const DEFAULT_RUN_BUFFER_TTL_MS = 120_000
 // must not hold the task riding.
 const CHECKOUT_REPORT_TIMEOUT_MS = 10_000
 
+const DEFAULT_CHECKOUT_REFRESH_MS = 5_000
+
 export function createRunManager({
   caps,
   resolveRunPaths,
   prepare,
   checkoutReport = (root, dir) =>
     readCheckoutReport(root, dir, gitWithin(CHECKOUT_REPORT_TIMEOUT_MS)),
+  checkoutRefreshMs = DEFAULT_CHECKOUT_REFRESH_MS,
   send,
   resolveFilesDir,
   materialize,
@@ -367,6 +373,7 @@ export function createRunManager({
       if (settled) return
       settled = true
       if (timer) clearTimeout(timer)
+      if (refreshTimer) clearTimeout(refreshTimer)
       const doneMsg: DoneMessage = {
         type: 'done',
         runId: msg.runId,
@@ -394,6 +401,31 @@ export function createRunManager({
         console.error(`checkout report for ${msg.runId} failed:`, e)
         return undefined
       })
+
+    // Any tool may have changed the checkout, and a busy turn runs many, so tool
+    // results that arrive close together share one read.
+    let busy = false
+    let stale = false
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined
+    const refreshCheckout = (): void => {
+      stale = true
+      if (!paths.checkout || settled || busy) return
+      busy = true
+      stale = false
+      void readCheckout(paths.checkout).then((checkout) => {
+        if (settled) return
+        if (checkout) {
+          rec.checkout = { type: 'checkout', runId: msg.runId, checkout }
+          send(rec.checkout)
+        }
+        refreshTimer = setTimeout(() => {
+          busy = false
+          if (stale) refreshCheckout()
+        }, checkoutRefreshMs)
+        refreshTimer.unref?.()
+      })
+    }
+
     const finish = (doneMsg: DoneMessage): void => {
       rec.done = doneMsg
       rec.dropTimer = setTimeout(() => {
@@ -435,6 +467,7 @@ export function createRunManager({
           }
           buffer.push(update)
           send(update)
+          if (event.steps.some((s) => s.kind === 'tool_result')) refreshCheckout()
           if (
             event.rateLimitResetsAt &&
             !sawRateLimit &&
@@ -537,12 +570,7 @@ export function createRunManager({
     // arm-on-start idle countdown.
     arm()
 
-    if (paths.checkout)
-      void readCheckout(paths.checkout).then((checkout) => {
-        if (!checkout) return
-        rec.startCheckout = { type: 'checkout', runId: msg.runId, checkout }
-        send(rec.startCheckout)
-      })
+    refreshCheckout()
   }
 
   function interrupt(runId: string): void {
@@ -574,7 +602,7 @@ export function createRunManager({
     // the server's applyStatePatch rev guard drop the ones it already folded in.
     for (const patch of run.statePatches) send(patch)
     for (const update of run.buffer) if (update.seq > seq) send(update)
-    if (run.startCheckout) send(run.startCheckout)
+    if (run.checkout) send(run.checkout)
     if (run.done) send(run.done)
   }
 
