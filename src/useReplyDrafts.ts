@@ -30,11 +30,13 @@ export function useReplyDrafts(
   task: TaskWithProject | null,
   {
     setError,
+    onSent,
     refresh,
     taskLinks,
     taskLinksLoaded,
   }: {
     setError: (message: string | null) => void
+    onSent: () => void
     refresh: () => Promise<void>
     // The global task index, which proves which project a legacy draft's id
     // belongs to.
@@ -102,13 +104,14 @@ export function useReplyDrafts(
       if (!r.ok) throw new Error(body.error ?? r.statusText)
       setReplies((prev) => ({ ...prev, [key]: '' }))
       setFilesBy((prev) => ({ ...prev, [key]: [] }))
+      onSent()
       await refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setSendingBy((prev) => ({ ...prev, [key]: false }))
     }
-  }, [key, id, slug, text, files, sending, setError, setReplies, refresh])
+  }, [key, id, slug, text, files, sending, setError, setReplies, onSent, refresh])
 
   return useMemo(
     () =>

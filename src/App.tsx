@@ -226,10 +226,19 @@ export function App() {
   // What the reader has opened on the open task's timeline, shared by the
   // timeline that draws it and the header's copy, which writes out what's showing.
   const disclosure = useTimelineDisclosure(current)
+  const clearFilter = useCallback(() => setFilter(''), [setFilter])
+  const onTaskCreated = useCallback(
+    (id: string, slug: string) => {
+      clearFilter()
+      selectTask(id, slug)
+    },
+    [clearFilter, selectTask],
+  )
   // The open task's reply in progress; every task's draft is kept above the
   // composer, which unmounts when no task is open.
   const draft = useReplyDrafts(current, {
     setError,
+    onSent: clearFilter,
     refresh,
     taskLinks,
     taskLinksLoaded,
@@ -302,7 +311,7 @@ export function App() {
             height={newTaskHeight}
             setError={setError}
             admit={admitTask}
-            onCreated={selectTask}
+            onCreated={onTaskCreated}
           />
 
           <TelemetryPanel
