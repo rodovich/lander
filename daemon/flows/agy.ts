@@ -458,6 +458,8 @@ export function makeFlow({
             if (event.state === 'DONE' && !seenCheckpoints.has(event.step_index)) {
               flushText()
               seenCheckpoints.add(event.step_index)
+              if (ctx.state.get(['landerDoc']) !== undefined)
+                ctx.state.delete(['landerDoc'])
               const seconds = event.duration_seconds
               ctx.emit.context({
                 action: 'checkpoint',

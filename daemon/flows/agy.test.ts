@@ -32,9 +32,12 @@ const flow = (doc: string | undefined = 'Project instructions') => makeFlow({
   readProjectDoc: () => doc,
   geminiConfigDir,
 })
-const fixture = (chunks: string[][] = []): Golden => ({
+const fixture = (
+  chunks: string[][] = [],
+  flowState?: Record<string, unknown>,
+): Golden => ({
   name: 'agy', chunks,
-  start: { flow: 'agy', task: {} },
+  start: { flow: 'agy', task: {}, ...(flowState ? { flowState } : {}) },
 })
 const event = (name: string, data: object) => JSON.stringify({ event: name, [name]: data })
 const init = (conversation_id: string, data: object = {}) =>
@@ -295,8 +298,7 @@ it('accounts for per-turn token usage deltas and drivingModel across conversatio
       response: 'Second turn',
       usage: { input_tokens: 1400, output_tokens: 110, thinking_tokens: 30, cache_read_tokens: 1700, total_tokens: 1510 },
     }),
-  ]])
-  secondTurn.start!.flowState = afterFirst.flowState as Record<string, unknown>
+  ]], afterFirst.flowState as Record<string, unknown>)
   const secondDriven = await driveFlow(secondTurn, flow())
   const afterSecond = applyEvents(goldenInput(secondTurn).start, secondDriven.events)
   expect(afterSecond).toMatchObject({
@@ -558,11 +560,10 @@ it('persists project grants via onGrant into the same lander-<hash>.json used by
   })
 })
 
-it('resumes without redelivering unchanged instructions and redelivers changed documents', async () => {
-  const first = await driveFlow(fixture([[result()]]), flow())
-  const state = Object.fromEntries(patches(first.events).map((op) => [op.path[0], op.value]))
-  const g = fixture([[result()]])
-  g.start!.flowState = { ...state, sessionId: 'conversation-1' }
+it('resumes without redelivering unchanged instructions and redelivers changed or checkpointed documents', async () => {
+  const first = await driveFlow(fixture([[init('conversation-1'), result()]]), flow())
+  const afterFirst = applyEvents(goldenInput(fixture()).start, first.events)
+  const g = fixture([[result()]], afterFirst.flowState as Record<string, unknown>)
   const resumed = await driveFlow(g, flow())
   expect(resumed.spawns[0].args).toContain('--conversation')
   expect(resumed.spawns[0].args).toContain('conversation-1')
@@ -570,6 +571,15 @@ it('resumes without redelivering unchanged instructions and redelivers changed d
   const changed = await driveFlow(g, flow('Updated instructions'))
   expect(changed.spawns[0].args[1]).toContain(projectDocBlock('Updated instructions'))
   expect(patches(changed.events)).toContainEqual(expect.objectContaining({ path: ['landerDoc'], value: deliveryDigest('Updated instructions') }))
+
+  const checkpointTurn = fixture([[
+    event('step_update', { step_index: 2, step_type: 'checkpoint', state: 'DONE', duration_seconds: 0.4 }),
+    result(),
+  ]], afterFirst.flowState as Record<string, unknown>)
+  const checkpointed = await driveFlow(checkpointTurn, flow())
+  const afterCheckpoint = applyEvents(goldenInput(checkpointTurn).start, checkpointed.events)
+  const redelivered = await driveFlow(fixture([[result()]], afterCheckpoint.flowState as Record<string, unknown>), flow())
+  expect(redelivered.spawns[0].args[1]).toBe(`${projectDocBlock('Project instructions')}\n\ndo the thing`)
 })
 
 it('does not acknowledge prompt delivery when the provider fails before consuming it', async () => {
