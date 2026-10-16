@@ -1,5 +1,5 @@
 import { buildTimeline, type RideItem, type TimelineEntry } from './timeline'
-import { foldSummary, planTurnCollapse } from './turnCollapse'
+import { foldSummary, planTurnCollapse, splitNotices } from './turnCollapse'
 import type { Item, MessageItem, Ride } from '../src/types'
 import { contextLabel, contextSummary, contextDuration } from './context'
 
@@ -62,15 +62,18 @@ function messageBlock(m: MessageItem): ConversationBlock {
   return { role, text: m.text }
 }
 
-function rideText(items: RideItem[], expand: boolean): { text: string; folded?: true } {
+function rideText(rideItems: RideItem[], expand: boolean): { text: string; folded?: true } {
+  const { trace: items, notices } = splitNotices(rideItems)
   const segments = planTurnCollapse(items).segments
   const folds = !expand && segments.some((seg) => seg.hidden)
-  const text = segments
-    .flatMap((seg) =>
+  const text = [
+    ...segments.flatMap((seg) =>
       seg.hidden && !expand
         ? [`[${foldSummary(items, seg.indices)}]`]
         : seg.indices.map(itemLine),
-    )
+    ),
+    ...notices.map((it) => it.text.trim()),
+  ]
     .filter((line) => line.trim())
     .join('\n\n')
   return folds ? { text, folded: true } : { text }

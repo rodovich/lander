@@ -2480,6 +2480,14 @@ body {
   cursor: pointer;
 }
 
+/* A flow's note at the foot of a turn, in .blocked-summary-line's color, size,
+   and inset. */
+.turn-notice {
+  padding: 2px 4px;
+  color: color-mix(in srgb, var(--wedged) 75%, var(--muted));
+  font-size: 0.85em;
+}
+
 .blocked-summary-line:hover {
   color: var(--wedged);
   background: color-mix(in srgb, var(--wedged) 10%, transparent);

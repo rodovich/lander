@@ -4,7 +4,7 @@
 // rather than the main thread. A ToolItem/MessageItem satisfies this
 // structurally, so callers pass a ride's items straight through.
 type CollapsibleItem = {
-  kind: 'message' | 'tool' | 'event' | 'ask' | 'hook' | 'context'
+  kind: 'message' | 'tool' | 'event' | 'ask' | 'hook' | 'context' | 'notice'
   text?: string
   parentId?: string
 }
@@ -26,6 +26,18 @@ export function turnThreads(items: readonly { parentId?: string }[]): {
     else childrenByParent.set(it.parentId, [j])
   })
   return { mainIdxs, childrenByParent }
+}
+
+// Notices sit at the foot of a turn rather than among its steps, so they never
+// fold away with them.
+export function splitNotices<T extends { kind: string }>(
+  items: T[],
+): { trace: Exclude<T, { kind: 'notice' }>[]; notices: Extract<T, { kind: 'notice' }>[] } {
+  const isNotice = (it: T): it is Extract<T, { kind: 'notice' }> => it.kind === 'notice'
+  return {
+    trace: items.filter((it): it is Exclude<T, { kind: 'notice' }> => !isNotice(it)),
+    notices: items.filter(isNotice),
+  }
 }
 
 // A run of items that either stays visible or folds away together. The plan is

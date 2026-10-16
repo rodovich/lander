@@ -222,6 +222,15 @@ export function applyUpdate(task: ApplyTask, update: ApplyUpdate): void {
             })
             firstAt ??= s.createdAt
           }
+        } else if (s.kind === 'notice') {
+          items.push({
+            id: nextItemId(task, s.createdAt),
+            at: s.createdAt,
+            rideId,
+            kind: 'notice',
+            text: s.text ?? '',
+          })
+          firstAt ??= s.createdAt
         } else if (s.kind === 'tool_use') {
           items.push({
             id: s.toolUseId ?? nextItemId(task, s.createdAt),

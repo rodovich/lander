@@ -321,6 +321,17 @@ describe('RideTurn settled/open footers', () => {
     expect(html).not.toContain('pending-pace')
   })
 
+  it('shows a flow notice below the trace, after the blocked summary', () => {
+    const html = render([
+      flow('a', 'agent-prose'),
+      tool('t1', { status: 'blocked', rule: 'Bash(rm:*)' }),
+      { id: 'n1', at: T('10:00:09'), rideId: 'r1', kind: 'notice', text: 'notice-text' },
+    ])
+    expect(html).toContain('turn-notice')
+    expect(html.indexOf('notice-text')).toBeGreaterThan(html.indexOf('blocked-summary'))
+    expect(html.indexOf('notice-text')).toBeGreaterThan(html.indexOf('agent-prose'))
+  })
+
   it('gathers the flow items’ attachments below the turn', () => {
     const html = render([
       flow('a', 'done', {

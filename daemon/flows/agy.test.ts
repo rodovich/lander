@@ -505,7 +505,8 @@ it('marks denied tool calls blocked from result.denied_actions, wedges the task,
     twoSilent.start = { ...twoSilent.start, env: withProse.start.env }
     const drivenTwoSilent = await driveFlow(twoSilent, flow())
     const itemsTwoSilent = (applyEvents(goldenInput(twoSilent).start, drivenTwoSilent.events).items ?? []) as (BlockedItem & { text?: string })[]
-    expect(itemsTwoSilent.filter((it) => it.kind === 'message').map((it) => it.text)).toEqual([
+    expect(itemsTwoSilent.filter((it) => it.kind === 'message')).toEqual([])
+    expect(itemsTwoSilent.filter((it) => it.kind === 'notice').map((it) => it.text)).toEqual([
       'Antigravity denied a RunCommand call this turn without saying which one.',
     ])
     expect(blockedRequests(itemsTwoSilent)).toEqual([])

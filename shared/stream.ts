@@ -1,7 +1,8 @@
 import type { ContextUpdate } from './context'
 
 export type Step = {
-  kind: 'text' | 'tool_use' | 'tool_result' | 'context'
+  // `notice`: a flow's own note about the turn, carried in `text`.
+  kind: 'text' | 'tool_use' | 'tool_result' | 'context' | 'notice'
   context?: ContextUpdate
   text?: string
   tool?: string

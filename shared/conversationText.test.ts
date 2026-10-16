@@ -52,6 +52,15 @@ describe('conversationText', () => {
     ])
   })
 
+  it('puts a notice at the foot of the turn, outside the fold', () => {
+    const items = turn('r1')
+    items.splice(3, 0, { id: 'n1', at: AT, rideId: 'r1', kind: 'notice', text: 'A call was denied.' })
+    const [agent] = conversationText({ items, rides: [ride('r1')] }, { expand: false })
+    expect(agent.text).toBe(
+      'Starting.\n\n[3 steps, 2 tools…]\n\nAll done: the final report, longer than every other line.\n\nA call was denied.',
+    )
+  })
+
   it('opens every fold when expanded, still without the subagent’s words', () => {
     const [, agent] = conversationText(
       { items: [msg('u1', 'Go.'), ...turn('r1')], rides: [ride('r1')] },

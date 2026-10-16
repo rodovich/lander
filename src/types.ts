@@ -248,8 +248,14 @@ export type ContextItem = ItemCommon & ContextDetails & {
   action: ContextAction
 }
 
+export type NoticeItem = ItemCommon & {
+  kind: 'notice'
+  text: string
+}
+
 export type Item =
   | ContextItem
+  | NoticeItem
   | MessageItem
   | ToolItem
   | EventItem

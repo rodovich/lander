@@ -55,6 +55,18 @@ describe('applyUpdate', () => {
     expect(t.rides![0].compacting).toBeUndefined()
     expect(rideItems(t).filter((it) => it.kind === 'context')).toHaveLength(1)
   })
+
+  it('records a notice as its own item that the reply text never overwrites', () => {
+    const t = task()
+    applyUpdate(t, update({
+      steps: [step({ kind: 'notice', text: 'A call was denied.' })],
+      finalText: 'Reply',
+    }))
+    expect(rideItems(t).map((it) => [it.kind, 'text' in it ? it.text : undefined])).toEqual([
+      ['notice', 'A call was denied.'],
+      ['message', 'Reply'],
+    ])
+  })
   it('appends a flow item for a text step to the open ride, creating no message array', () => {
     const t = task()
     applyUpdate(t, update({ steps: [step({ text: 'hi' })], cursor: 10 }))

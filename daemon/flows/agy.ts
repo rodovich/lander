@@ -551,7 +551,7 @@ export function makeFlow({
                 target.blocked = true
                 target.handle.result({ blocked: true })
               } else {
-                ctx.emit.message(
+                ctx.emit.notice(
                   `Antigravity denied a ${denied?.display_name ?? action ?? 'tool'} call this turn without saying which one.`,
                 )
               }

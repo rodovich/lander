@@ -4,6 +4,7 @@ import { MessageAttachments } from './attachments'
 import { formatTimestamp } from './format'
 import { BlockedSummary } from './grants'
 import { blockedRequests } from './permissions'
+import { splitNotices } from '../shared/turnCollapse'
 import { taskAgentModelName } from './taskMeta'
 import { TurnTrace } from './turnTrace'
 import type { RideItem } from '../shared/timeline'
@@ -74,6 +75,7 @@ export const RideTurn = memo(function RideTurn({
   onRetry?: () => Promise<boolean>
 }) {
   const settled = !!ride.endedAt
+  const { trace, notices } = splitNotices(items)
   // A finished turn's confirmed denials. Denials are authoritative at ride end,
   // so an open ride shows none, and a task whose agent never reports them
   // (codex) simply has no line.
@@ -90,7 +92,7 @@ export const RideTurn = memo(function RideTurn({
       </div>
       <div className="steps">
         <TurnTrace
-          items={items}
+          items={trace}
           actions={actions}
           rideId={ride.id}
           settled={settled}
@@ -100,6 +102,11 @@ export const RideTurn = memo(function RideTurn({
       {denied.length > 0 && (
         <BlockedSummary requests={denied} grants={grants} onAllow={onAllow} onRetry={onRetry} />
       )}
+      {notices.map((it) => (
+        <div key={it.id} className="turn-notice">
+          {it.text}
+        </div>
+      ))}
       {/* The in-flight turn's working spinner, after the ride's last item — an
           open ride (no endedAt) is streaming. */}
       {!settled && (

@@ -21,7 +21,12 @@ import { EVENT_VERB } from './lifecycleNote'
 import { toolDetail } from './toolStep'
 import { oneLine } from '../shared/conversationText'
 import { contextLabel, contextSummary } from '../shared/context'
-import { foldSummary, planTurnCollapse, turnThreads } from '../shared/turnCollapse'
+import {
+  foldSummary,
+  planTurnCollapse,
+  splitNotices,
+  turnThreads,
+} from '../shared/turnCollapse'
 import type { TimelineEntry } from '../shared/timeline'
 import type {
   AskItem,
@@ -207,7 +212,7 @@ function rideBlocks(
   openDetails: Set<string>,
   expandedTurns: Set<string>,
 ): string[] {
-  const items = entry.items
+  const { trace: items, notices } = splitNotices(entry.items)
   const { childrenByParent } = turnThreads(items)
 
   const renderIdxs = (idxs: number[]): string[] =>
@@ -271,6 +276,7 @@ function rideBlocks(
   return [
     heading('agent', entry.ride.startedAt),
     ...body,
+    ...notices.flatMap((it) => (it.text.trim() ? [it.text.trim()] : [])),
     ...(files.length ? [attachmentLine(files)] : []),
   ]
 }
