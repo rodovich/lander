@@ -758,6 +758,7 @@ async function runTurn(
     startRide(t, runId, new Date().toISOString())
     // A new turn supersedes any pending retry from the last failed one.
     delete t.retry
+    withdrawOpenAsks(t, 'retry')
   })
 
   const start: StartRunMessage = {

@@ -3816,9 +3816,9 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
       },
       body: JSON.stringify(body),
     })
-  const finish = (runId: string) =>
+  const finish = (runId: string, exitCode = 0) =>
     ws.send(
-      JSON.stringify({ type: 'done', runId, exitCode: 0, interrupted: false, stderr: '' }),
+      JSON.stringify({ type: 'done', runId, exitCode, interrupted: false, stderr: '' }),
     )
 
   it('a message from another task leaves the scheduled ride, and the turn is reminded', async () => {
@@ -3961,6 +3961,27 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
       expect.objectContaining({ to: sender, rideId: second }),
     ])
     expect(answered.notify).toBeUndefined()
+  })
+
+  // A message queued mid-turn still drives a turn after that turn fails.
+  it('withdraws a failed turn’s retry ask when a queued message drives the next turn', async () => {
+    const sender = 'requeue-sender'
+    const id = 'requeue-after-error'
+    await seed(sender)
+    await seed(id)
+
+    expect((await sendAs(sender, id, { message: 'first' })).status).toBe(200)
+    await waitFor(() => startRuns(id).length === 1)
+    expect((await sendAs(sender, id, { message: 'follow-up' })).status).toBe(200)
+
+    finish(startRuns(id)[0].runId!, 1)
+    await waitFor(() => startRuns(id).length === 2)
+    finish(startRuns(id)[1].runId!, 1)
+    const raw = await waitForRaw(id, (r) => !r.runId && r.status === 'wedged')
+    expect(asksOf(raw).filter((a) => a.origin === 'retry')).toHaveLength(2)
+    expect(
+      asksOf(raw).filter((a) => a.origin === 'retry' && a.state === 'open'),
+    ).toHaveLength(1)
   })
 
   // Runs before the crash test, which disconnects the shared daemon.

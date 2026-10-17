@@ -265,9 +265,11 @@ export function answerDelivery(ask: AskItem): string | null {
   return ask.prompt ? `Answer to "${firstLine(ask.prompt)}": ${value}` : value
 }
 
-// Flip every open ask on the task to `withdrawn`. Called wherever the user's new
-// intent supersedes a pending ask — a fresh /messages send, applyRelaunch, or a
-// manual status change away from wedged — so a stale ask stops reading as open.
-export function withdrawOpenAsks(task: AskTask): void {
-  for (const a of askItems(task)) if (a.state === 'open') a.state = 'withdrawn'
+// Called wherever something supersedes a pending ask, so a stale ask stops
+// reading as open. `origin` limits it to one kind, as when a new turn supersedes
+// only the last failed turn's retry ask.
+export function withdrawOpenAsks(task: AskTask, origin?: AskItem['origin']): void {
+  for (const a of askItems(task)) {
+    if (a.state === 'open' && (!origin || a.origin === origin)) a.state = 'withdrawn'
+  }
 }
