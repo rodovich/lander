@@ -287,6 +287,23 @@ const FileChip = forwardRef<
   )
 })
 
+type PreviewState = {
+  fileId: string
+  status: 'loading' | 'ready' | 'error'
+  blob: Blob | null
+  objectUrl: string | null
+  text: string | null
+  truncated: boolean
+}
+
+const LOADING_PREVIEW: Omit<PreviewState, 'fileId'> = {
+  status: 'loading',
+  blob: null,
+  objectUrl: null,
+  text: null,
+  truncated: false,
+}
+
 export function FilePreviewModal({
   file,
   load,
@@ -313,19 +330,11 @@ export function FilePreviewModal({
     width: number
     height: number
   } | null>(null)
-  const [preview, setPreview] = useState<{
-    status: 'loading' | 'ready' | 'error'
-    blob: Blob | null
-    objectUrl: string | null
-    text: string | null
-    truncated: boolean
-  }>({
-    status: 'loading',
-    blob: null,
-    objectUrl: null,
-    text: null,
-    truncated: false,
+  const [loadedPreview, setLoadedPreview] = useState<PreviewState>({
+    fileId: file.id,
+    ...LOADING_PREVIEW,
   })
+  const preview = loadedPreview.fileId === file.id ? loadedPreview : LOADING_PREVIEW
 
   useEffect(() => {
     modalRef.current?.focus()
@@ -368,12 +377,9 @@ export function FilePreviewModal({
   useEffect(() => {
     let canceled = false
     let objectUrl: string | null = null
-    setPreview({
-      status: 'loading',
-      blob: null,
-      objectUrl: null,
-      text: null,
-      truncated: false,
+    setLoadedPreview({
+      fileId: file.id,
+      ...LOADING_PREVIEW,
     })
     setNaturalSize(null)
     setCopied(false)
@@ -392,16 +398,21 @@ export function FilePreviewModal({
         if (canceled) return
         if (!isText && kind !== 'html' && kind !== 'unknown')
           objectUrl = URL.createObjectURL(blob)
-        setPreview({ status: 'ready', blob, objectUrl, text, truncated })
+        setLoadedPreview({
+          fileId: file.id,
+          status: 'ready',
+          blob,
+          objectUrl,
+          text,
+          truncated,
+        })
       })
       .catch(() => {
         if (!canceled)
-          setPreview({
+          setLoadedPreview({
+            fileId: file.id,
+            ...LOADING_PREVIEW,
             status: 'error',
-            blob: null,
-            objectUrl: null,
-            text: null,
-            truncated: false,
           })
       })
 
