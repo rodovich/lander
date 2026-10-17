@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { loadAttachment } from './api'
 import { formatBytes } from './format'
 import { Markdown } from './markdown'
+import { SegmentedControl } from './segmentedControl'
 import { useTaskLink } from './taskLinkContext'
 import type { Attachment } from './types'
 
@@ -15,6 +16,33 @@ type PreviewKind =
   | 'audio'
   | 'video'
   | 'unknown'
+
+type ImageScale = 'auto' | '0.5x' | '1x' | '2x'
+
+const IMAGE_SCALE_OPTIONS: { value: ImageScale; label: string }[] = [
+  { value: 'auto', label: 'Auto' },
+  { value: '0.5x', label: '0.5x' },
+  { value: '1x', label: '1x' },
+  { value: '2x', label: '2x' },
+]
+
+const IMAGE_SCALE_FACTORS: Record<Exclude<ImageScale, 'auto'>, number> = {
+  '0.5x': 0.5,
+  '1x': 1,
+  '2x': 2,
+}
+
+export function imageScaleStyle(
+  scale: ImageScale,
+  naturalSize: { width: number; height: number } | null,
+): { width: number; height: number } | undefined {
+  if (scale === 'auto' || !naturalSize) return undefined
+  const factor = IMAGE_SCALE_FACTORS[scale]
+  return {
+    width: naturalSize.width * factor,
+    height: naturalSize.height * factor,
+  }
+}
 
 // Where a gallery's bytes come from: a file's contents, or null when they
 // can't be had. The gallery never learns what serves them. Its identity is an
@@ -259,7 +287,7 @@ const FileChip = forwardRef<
   )
 })
 
-function FilePreviewModal({
+export function FilePreviewModal({
   file,
   load,
   index,
@@ -280,6 +308,11 @@ function FilePreviewModal({
   const modalRef = useRef<HTMLDivElement>(null)
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [copied, setCopied] = useState(false)
+  const [scale, setScale] = useState<ImageScale>('auto')
+  const [naturalSize, setNaturalSize] = useState<{
+    width: number
+    height: number
+  } | null>(null)
   const [preview, setPreview] = useState<{
     status: 'loading' | 'ready' | 'error'
     blob: Blob | null
@@ -308,7 +341,7 @@ function FilePreviewModal({
       if (event.key === 'Tab') {
         const focusable = Array.from(
           modalRef.current?.querySelectorAll<HTMLElement>(
-            'button:not(:disabled), audio[controls], video[controls], iframe',
+            'button:not(:disabled):not([tabindex="-1"]), audio[controls], video[controls], iframe',
           ) ?? [],
         )
         const first = focusable[0]
@@ -322,7 +355,7 @@ function FilePreviewModal({
         else if (!event.shiftKey && document.activeElement === last) first.focus()
         else return
       } else if (event.key === 'Escape') onClose()
-      else if (event.target instanceof HTMLMediaElement) return
+      else if (event.defaultPrevented || event.target instanceof HTMLMediaElement) return
       else if (event.key === 'ArrowLeft' && total > 1) onMove(-1)
       else if (event.key === 'ArrowRight' && total > 1) onMove(1)
       else return
@@ -342,6 +375,7 @@ function FilePreviewModal({
       text: null,
       truncated: false,
     })
+    setNaturalSize(null)
     setCopied(false)
     if (copyTimer.current) clearTimeout(copyTimer.current)
 
@@ -421,6 +455,12 @@ function FilePreviewModal({
     }
   }
 
+  const imageStyle =
+    kind === 'image' && preview.status === 'ready'
+      ? imageScaleStyle(scale, naturalSize)
+      : undefined
+  const scaledImage = imageStyle !== undefined
+
   return (
     <div
       className="attachment-preview-backdrop"
@@ -467,7 +507,7 @@ function FilePreviewModal({
           >
             ‹
           </button>
-          <div className="attachment-preview-viewport">
+          <div className={`attachment-preview-viewport${scaledImage ? ' scaled' : ''}`}>
             {preview.status === 'loading' ? (
               <div className="attachment-preview-status">
                 <span className="spinner" aria-hidden />
@@ -477,9 +517,16 @@ function FilePreviewModal({
               <div className="attachment-preview-status">Preview could not be loaded.</div>
             ) : kind === 'image' ? (
               <img
-                className="attachment-preview-image"
+                className={`attachment-preview-image${scaledImage ? ' scaled' : ''}`}
                 src={preview.objectUrl!}
                 alt={file.name}
+                style={imageStyle}
+                onLoad={(event) =>
+                  setNaturalSize({
+                    width: event.currentTarget.naturalWidth,
+                    height: event.currentTarget.naturalHeight,
+                  })
+                }
               />
             ) : kind === 'html' ? (
               <iframe
@@ -540,6 +587,14 @@ function FilePreviewModal({
             {formatBytes(file.size)} · {file.mime}
           </span>
           <div className="attachment-preview-actions">
+            {kind === 'image' && (
+              <SegmentedControl
+                label="Scale"
+                value={scale}
+                onChange={setScale}
+                options={IMAGE_SCALE_OPTIONS}
+              />
+            )}
             {kind === 'html' && (
               <button
                 type="button"

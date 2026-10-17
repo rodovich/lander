@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import {
   adjacentFileIndex,
+  FilePreviewModal,
   HTML_PREVIEW_SANDBOX,
+  imageScaleStyle,
   MessageAttachments,
   previewKind,
   sandboxedHtml,
@@ -56,6 +58,39 @@ describe('attachment previews', () => {
     expect(adjacentFileIndex(2, 1, 3)).toBe(0)
     expect(adjacentFileIndex(1, 1, 3)).toBe(2)
     expect(adjacentFileIndex(0, 1, 1)).toBe(0)
+  })
+
+  it('computes scaled image dimensions only for explicit scale factors', () => {
+    const size = { width: 200, height: 100 }
+    expect(imageScaleStyle('auto', size)).toBeUndefined()
+    expect(imageScaleStyle('auto', null)).toBeUndefined()
+    expect(imageScaleStyle('1x', null)).toBeUndefined()
+    expect(imageScaleStyle('0.5x', size)).toEqual({ width: 100, height: 50 })
+    expect(imageScaleStyle('1x', size)).toEqual({ width: 200, height: 100 })
+    expect(imageScaleStyle('2x', size)).toEqual({ width: 400, height: 200 })
+  })
+
+  it('shows the scale toggle defaulted to Auto for images and omits it for other kinds', () => {
+    const renderModal = (f: Attachment) =>
+      renderToStaticMarkup(
+        <FilePreviewModal
+          file={f}
+          load={async () => null}
+          index={0}
+          total={1}
+          onClose={() => {}}
+          onMove={() => {}}
+        />,
+      )
+
+    const imageHtml = renderModal(file('image/png', 'diagram.png'))
+    expect(imageHtml).toContain('aria-label="Scale"')
+    expect(imageHtml.match(/role="radio"/g)).toHaveLength(4)
+    expect(imageHtml).toMatch(/aria-checked="true"[^>]*>Auto</)
+    for (const label of ['0.5x', '1x', '2x']) expect(imageHtml).toContain(`>${label}<`)
+
+    const textHtml = renderModal(file('text/plain', 'notes.txt'))
+    expect(textHtml).not.toContain('aria-label="Scale"')
   })
 
   it('makes file chips open a dialog instead of downloading directly', () => {
