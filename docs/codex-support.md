@@ -5,8 +5,10 @@ Antigravity (`agy`). The complete bundled list lives
 in [the flow registry](../daemon/flows/index.ts). This document covers Codex and
 its differences from Claude; it is not a complete account of agent support.
 Codex is intended as a first-class target; tasks run through Codex when Codex
-is selected in the UI, when it is launched with `lander launch --flow codex`,
-or when `LANDER_FLOW=codex` sets the instance default.
+is selected in the UI or when it is launched with `lander launch --flow codex`.
+Without `--flow`, a launch inherits its parent task’s driver. The UI supplies
+the selected driver when creating a task; creation without a parent requires
+an explicit flow.
 
 ## Multi-agent architecture
 
@@ -72,7 +74,7 @@ thread id is recorded.
 `lander assist` and the flow API are provider-aware one-shot helpers. They use
 `claude -p` for Claude and `codex exec` for Codex, taking the provider from **the
 calling task**, which the server puts on the turn's environment already resolved.
-The instance default is only the fallback for a call made outside a task turn.
+Calls without a supported task provider fail rather than selecting a default.
 
 Both are clamped read-only — `--disallowedTools Bash,Edit,Write,NotebookEdit` for
 Claude, `--sandbox read-only` for Codex. The clamp is asymmetric in kind because
@@ -82,9 +84,9 @@ was asked a question about.
 
 ## Current Codex coverage
 
-Codex tasks can be created from the new-task form or selected as the default with
-`LANDER_AGENT=codex`. The server persists that provider choice on the task and
-uses it for follow-up turns.
+Codex tasks can be created from the new-task form or launched with
+`lander launch --flow codex`. The server persists that provider choice on the task
+and uses it for follow-up turns.
 
 The Codex flow supports first turns and resumed turns, including explicit
 `--cd` handling so resumed Codex turns launch from the daemon-resolved cwd. It

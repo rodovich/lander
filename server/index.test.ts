@@ -138,7 +138,7 @@ async function createTask(
   title: string,
   projectSlug = slug,
 ): Promise<{ id: string; agent: string }> {
-  const res = await post(`/api/${projectSlug}/tasks`, { title })
+  const res = await post(`/api/${projectSlug}/tasks`, { title, flow: 'codex' })
   expect(res.status).toBe(201)
   return (await res.json()) as { id: string; agent: string }
 }
@@ -168,7 +168,6 @@ beforeAll(async () => {
   process.env.LANDER_DATA_ROOT = dataDirRoot
   process.env.PROJECT_DIRS = `${projectDir}\n${secondProjectDir}`
   process.env.LANDER_UI_TOKEN = UI_TOKEN
-  process.env.LANDER_AGENT = 'codex'
 
   ;({ app } = await import('./index'))
 })
@@ -830,6 +829,7 @@ describe('the title length limit', () => {
 
   it('refuses a launch with a title over the limit', async () => {
     const res = await post(`/api/${slug}/tasks`, {
+      flow: 'codex',
       title: 'x'.repeat(TITLE_MAX_CHARS + 1),
       message: 'go',
     })
@@ -1133,9 +1133,6 @@ describe('the launch', () => {
     ])
   })
 
-  // The neutrality rule: a Codex task is reviewed by Codex. Through `taskFlow`,
-  // so the pre-flow population — which carries `agent` and no `flow` — resolves
-  // to its own provider rather than to the instance default.
   it.each([
     ['flow', { flow: 'codex' }, 'codex'],
     ['legacy agent only', { agent: 'codex' }, 'codex'],
@@ -1299,7 +1296,7 @@ describe('privileged paths by principal', () => {
     app.request(`/api/${slug}/tasks`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...headers },
-      body: JSON.stringify({ title: 'Child', ...body }),
+      body: JSON.stringify({ title: 'Child', flow: 'codex', ...body }),
     })
 
   const patch = (
@@ -1409,7 +1406,7 @@ describe('a task born without a name', () => {
   // Read straight after the 201, before the naming child (seconds) can answer:
   // this is the state a process death during generation would leave behind.
   const launched = async (body: Record<string, unknown>) => {
-    const res = await post(`/api/${slug}/tasks`, body)
+    const res = await post(`/api/${slug}/tasks`, { flow: 'codex', ...body })
     expect(res.status).toBe(201)
     const { id } = (await res.json()) as { id: string }
     return await record(id)
@@ -1575,8 +1572,65 @@ describe('hook materialization re-check', () => {
 })
 
 describe('server task provider behavior', () => {
-  it('stores the configured default provider on new tasks', async () => {
-    const task = await createTask('Codex default task')
+  it.each([undefined, '', '   ', 42])(
+    'requires a flow without a parent (%s)',
+    async (flow) => {
+      const res = await post(`/api/${slug}/tasks`, { title: 'No driver', flow })
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({ error: 'flow is required' })
+    },
+  )
+
+  it.each([
+    ['claude flow', { flow: 'claude' }, 'claude'],
+    ['codex flow', { flow: 'codex' }, 'codex'],
+    ['legacy agent', { agent: 'codex' }, 'codex'],
+  ])('inherits the parent driver (%s)', async (_label, provider, expected) => {
+    const parent = await createTask('Parent driver')
+    const file = path.join(tasksDir, `${parent.id}.json`)
+    const raw = JSON.parse(await readFile(file, 'utf8'))
+    delete raw.flow
+    delete raw.agent
+    Object.assign(raw, provider)
+    await writeFile(file, JSON.stringify(raw))
+    const res = await app.request(`/api/${slug}/tasks`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-lander-task': parent.id,
+        'x-lander-project': slug,
+        'x-lander-token': raw.token,
+      },
+      body: JSON.stringify({ title: 'Inherited driver' }),
+    })
+    expect(res.status).toBe(201)
+    const child = await res.json()
+    expect(child.flow).toBe(expected)
+    expect(await readTaskField(child.id, 'flow')).toBe(expected)
+    expect(child.spawnedBy).toBe(parent.id)
+  })
+
+  it('honors an explicit flow over the parent driver', async () => {
+    const parent = await createTask('Codex parent')
+    const raw = JSON.parse(
+      await readFile(path.join(tasksDir, `${parent.id}.json`), 'utf8'),
+    )
+    const res = await app.request(`/api/${slug}/tasks`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-lander-task': parent.id,
+        'x-lander-project': slug,
+        'x-lander-token': raw.token,
+      },
+      body: JSON.stringify({ title: 'Claude child', flow: 'claude' }),
+    })
+    expect(res.status).toBe(201)
+    expect(await res.json()).toMatchObject({ flow: 'claude' })
+  })
+
+  it('stores the explicitly selected provider on new tasks', async () => {
+    const task = await createTask('Explicit Codex task')
 
     expect(task.agent).toBe('codex')
     const raw = JSON.parse(
@@ -1634,6 +1688,7 @@ describe('server task provider behavior', () => {
   it('validates flowConfig shape and size', async () => {
     // bin/ has no typecheck coverage, so the CLI's --key parsing rests on this.
     const notObject = await post(`/api/${slug}/tasks`, {
+      flow: 'codex',
       title: 'Bad config',
       flowConfig: 'nope',
     })
@@ -1643,12 +1698,14 @@ describe('server task provider behavior', () => {
     )
 
     const arrayConfig = await post(`/api/${slug}/tasks`, {
+      flow: 'codex',
       title: 'Bad config',
       flowConfig: [1, 2, 3],
     })
     expect(arrayConfig.status).toBe(400)
 
     const tooBig = await post(`/api/${slug}/tasks`, {
+      flow: 'codex',
       title: 'Big config',
       flowConfig: { blob: 'x'.repeat(20 * 1024) },
     })
@@ -1656,6 +1713,7 @@ describe('server task provider behavior', () => {
     expect(((await tooBig.json()) as { error: string }).error).toContain('too large')
 
     const ok = await post(`/api/${slug}/tasks`, {
+      flow: 'codex',
       title: 'Good config',
       flowConfig: { dryRun: false, attempts: 3, name: 'x' },
     })
@@ -1884,9 +1942,8 @@ describe('server task provider behavior', () => {
     )
   })
 
-  it('serves the persisted provider instead of re-resolving the environment', async () => {
+  it('serves the persisted provider', async () => {
     const task = await createTask('Persisted Codex task')
-    process.env.LANDER_AGENT = 'claude'
 
     const res = await app.request(`/api/${slug}/tasks/${task.id}`)
     expect(res.status).toBe(200)
@@ -2133,6 +2190,7 @@ describe('acting task coordination history', () => {
       },
       body: JSON.stringify({
         title: 'UI child',
+        flow: 'codex',
         message: 'Acknowledge and land.',
         notify: true,
       }),
@@ -2597,6 +2655,7 @@ describe('attachments', () => {
 
   it('rejects a task created with an unknown attachment id', async () => {
     const res = await post(`/api/${slug}/tasks`, {
+      flow: 'codex',
       title: 'bad',
       message: 'hi',
       attachments: ['no-such-id'],
@@ -4428,7 +4487,11 @@ describe('flow dispatch gate', () => {
 
 describe('GET /api/:project/tasks/:id', () => {
   it('adds the rendered conversation only when asked for it', async () => {
-    const res = await post(`/api/${slug}/tasks`, { title: 'Viewed task', message: 'Hello.' })
+    const res = await post(`/api/${slug}/tasks`, {
+      title: 'Viewed task',
+      message: 'Hello.',
+      flow: 'codex',
+    })
     const { id } = (await res.json()) as { id: string }
     const get = (query: string) =>
       app.request(`/api/${slug}/tasks/${id}${query}`, {

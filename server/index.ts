@@ -133,7 +133,7 @@ import {
   type Ask,
   type AskForm,
 } from './asks'
-import { LEGACY_FLOW, flowCaps, flowRegistry, isAnnouncedFlow } from './flows'
+import { flowCaps, flowRegistry, isAnnouncedFlow } from './flows'
 import {
   approveHookPairs,
   effectiveApprovals,
@@ -168,15 +168,6 @@ const PROJECTS = parseProjects(DATA_ROOT, process.env, process.cwd())
 const PROJECT_BY_SLUG = new Map<string, Project>(
   PROJECTS.map((p) => [p.slug, p]),
 )
-// Validate the default per request: the daemon's flow registry is empty at boot.
-const DEFAULT_NEW_TASK_FLOW = (
-  process.env.LANDER_FLOW ??
-  process.env.LANDER_AGENT ??
-  ''
-)
-  .trim()
-  .toLowerCase()
-
 // Daemon split: runs are driven by the host
 // daemon over a WebSocket — the server holds task state, drives the queue, and
 // serves the API/UI, but never spawns a process, touches a pid, or parses
@@ -662,8 +653,6 @@ async function runTurn(
     LANDER_PROJECT: project.slug,
     LANDER_TASK: id,
     LANDER_TOKEN: token,
-    // Resolve one-shot calls here because the synchronous flow API cannot query
-    // the server, and the inherited LANDER_AGENT may belong to another provider.
     ...(assistProvider ? { LANDER_ASSIST_PROVIDER: assistProvider } : {}),
   }
 
@@ -2327,40 +2316,21 @@ function validateFlowConfig(
   return { config: value as Record<string, unknown> }
 }
 
-// Unknown values of LANDER_FLOW we've already warned about, so a misconfigured
-// env logs once rather than on every task creation.
-const warnedUnknownDefaultFlows = new Set<string>()
-
-// A bad default falls back so a configuration typo cannot block task creation.
-// Check the registry per request because daemon registration happens after boot.
 function resolveNewTaskFlow(
   slug: string,
   requested: unknown,
 ): { flow: string } | { error: string } {
-  const known = (name: string): boolean =>
-    flowRegistry(slug).some((f) => f.name === name)
-
-  if (typeof requested === 'string' && requested.trim()) {
-    const name = requested.trim()
-    if (!known(name))
-      return {
-        error:
-          `unknown flow: ${name}` +
-          ` (available: ${flowRegistry(slug).map((f) => f.name).join(', ') || 'none'})`,
-      }
-    return { flow: name }
-  }
-
-  const fromEnv = DEFAULT_NEW_TASK_FLOW
-  if (!fromEnv) return { flow: LEGACY_FLOW }
-  if (known(fromEnv)) return { flow: fromEnv }
-  if (!warnedUnknownDefaultFlows.has(fromEnv)) {
-    warnedUnknownDefaultFlows.add(fromEnv)
-    console.warn(
-      `default flow '${fromEnv}' is not available; falling back to ${LEGACY_FLOW}`,
-    )
-  }
-  return { flow: LEGACY_FLOW }
+  if (typeof requested !== 'string' || !requested.trim())
+    return { error: 'flow is required' }
+  const name = requested.trim()
+  const flows = flowRegistry(slug)
+  if (!flows.some((f) => f.name === name))
+    return {
+      error:
+        `unknown flow: ${name}` +
+        ` (available: ${flows.map((f) => f.name).join(', ') || 'none'})`,
+    }
+  return { flow: name }
 }
 
 app.post('/api/:project/tasks', async (c) => {
@@ -2374,7 +2344,6 @@ app.post('/api/:project/tasks', async (c) => {
       time?: unknown
       await?: unknown
       notify?: unknown
-      agent?: unknown
       flow?: unknown
       flowConfig?: unknown
       attachments?: unknown
@@ -2418,8 +2387,6 @@ app.post('/api/:project/tasks', async (c) => {
         { ok: false, reason: 'error', error: 'a hook launch needs a message' },
         400,
       )
-    // The target, read once, here: the flow default below needs it ~80 lines
-    // before the action record does.
     const hookTarget = cred ? await readTask(project.dataDir, cred.target) : undefined
     // What a deduped launch answers with: the task the original created.
     let existingTaskId: string | undefined
@@ -2429,19 +2396,21 @@ app.post('/api/:project/tasks', async (c) => {
         404,
       )
 
-    // An explicitly-named flow must exist. 400 rather than a silent default:
-    // inheriting the `isAgentKind(...) ? … : DEFAULT` shape would make
-    // `lander launch --flow example-flow` against a daemon lacking it quietly
-    // produce a CLAUDE task that runs the prompt — strictly worse than failing.
-    //
-    // A hook launch with no flow of its own inherits the TARGET's, so a Codex
-    // task is reviewed by Codex — the same rule that takes ctx.assist's provider
-    // from the target. Through `taskFlow`, not `target.flow`: that field is
-    // optional and the pre-flow population carries only `agent`, so reading it
-    // directly would resolve the instance default for exactly those tasks.
+    // Identify the caller once: it gates cross-project launches below and, when
+    // a task spawned this one, is recorded as the spawner and message sender.
+    const principal = await resolvePrincipal(c.req)
+
+    if (principal.kind === 'task' && principal.slug !== project.slug)
+      return c.json(
+        { error: 'a task may only launch tasks in its own project' },
+        403,
+      )
+
+    const parent =
+      hookTarget ?? (principal.kind === 'task' ? principal.task : undefined)
     const flowResolution = resolveNewTaskFlow(
       project.slug,
-      body.flow ?? (hookTarget ? taskFlow(hookTarget) : undefined),
+      body.flow ?? (parent ? taskFlow(parent) : undefined),
     )
     if ('error' in flowResolution)
       return c.json(
@@ -2489,20 +2458,6 @@ app.post('/api/:project/tasks', async (c) => {
     const deferred =
       (scheduledFor !== undefined || waitingFor !== undefined) &&
       rawMessage.trim() !== ''
-
-    // Identify the caller once: it gates cross-project launches below and, when
-    // a task spawned this one, is recorded as the spawner and message sender.
-    const principal = await resolvePrincipal(c.req)
-
-    // A task may only launch tasks in its own project, the same rule a send is
-    // held to (the human, via the UI, may launch anywhere). The `lander launch`
-    // CLI always targets the caller's own project, so this just enforces that
-    // server-side — which is what lets a task's spawner be named by id alone.
-    if (principal.kind === 'task' && principal.slug !== project.slug)
-      return c.json(
-        { error: 'a task may only launch tasks in its own project' },
-        403,
-      )
 
     // When a task spawns this one, the opening message records the spawner as its
     // sender, and the agent reads it named ahead of the words (attributedPrompt).

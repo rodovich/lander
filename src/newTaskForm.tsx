@@ -73,13 +73,6 @@ export const NewTaskForm = memo(function NewTaskForm({
         body: JSON.stringify({
           message,
           flow,
-          // `agent` rides along for the legacy flows only. Vite HMR and the
-          // server's tsx watch reload independently, so there is a sub-second
-          // window where a new client can post to a server that predates
-          // `flow` and would otherwise fall back to the env default. Free to
-          // close, and meaningless for a non-legacy flow (which such a server
-          // couldn't run anyway).
-          ...(flow === 'claude' || flow === 'codex' ? { agent: flow } : {}),
           ...(attachments.length ? { attachments } : {}),
         }),
       })

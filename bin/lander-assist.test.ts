@@ -27,11 +27,7 @@ async function makeHarness(): Promise<Harness> {
   // it. These tests run inside a lander task, whose turn now carries
   // LANDER_ASSIST_PROVIDER — so a base of `process.env` made the fallback case
   // pass or fail depending on which provider happened to be running it.
-  const {
-    LANDER_ASSIST_PROVIDER: _p,
-    LANDER_AGENT: _a,
-    ...rest
-  } = process.env
+  const { LANDER_ASSIST_PROVIDER: _p, ...rest } = process.env
   return {
     dir,
     log,
@@ -115,7 +111,10 @@ describe('lander assist', () => {
   it('runs a clamped claude one-shot, with the argv daemon/assist.ts builds', async () => {
     const h = await makeHarness()
     try {
-      const { stdout } = await execLander(['assist', 'summarize:', 'notes'], h.env)
+      const { stdout } = await execLander(['assist', 'summarize:', 'notes'], {
+        ...h.env,
+        LANDER_ASSIST_PROVIDER: 'claude',
+      })
 
       expect(stdout).toBe('claude reply\n')
       expect(await readCalls(h.log)).toEqual([
@@ -138,14 +137,11 @@ describe('lander assist', () => {
     }
   })
 
-  it('takes the provider from the task, not from the instance default', async () => {
+  it('takes the provider from the task', async () => {
     const h = await makeHarness()
     try {
-      // LANDER_AGENT says claude — it is the server's default for NEW tasks and
-      // reaches every shell. The task's own provider must win.
       const { stdout } = await execLander(['assist', 'summarize:', 'notes'], {
         ...h.env,
-        LANDER_AGENT: 'claude',
         LANDER_ASSIST_PROVIDER: ' CODEX ',
       })
 
@@ -181,21 +177,15 @@ describe('lander assist', () => {
     }
   })
 
-  it('falls back to the instance default outside a task turn', async () => {
+  it('requires a provider outside a task turn', async () => {
     const h = await makeHarness()
     try {
-      // No LANDER_ASSIST_PROVIDER: either this call is not inside a turn, or the
-      // turn predates the variable. Either way the old behavior, not an error —
-      // the CLI cannot tell those apart from an announced flow.
-      const { stdout } = await execLander(['assist', 'summarize:', 'notes'], {
-        ...h.env,
-        LANDER_AGENT: 'codex',
+      await expect(
+        execLander(['assist', 'summarize:', 'notes'], h.env),
+      ).rejects.toMatchObject({
+        stderr: expect.stringContaining('no supported provider in LANDER_ASSIST_PROVIDER'),
       })
-
-      expect(stdout).toBe('codex reply\n')
-      expect(await readCalls(h.log)).toEqual([
-        { command: 'codex', args: assistArgv('codex', PROMPT, {}).args },
-      ])
+      await expect(readFile(h.log, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
     } finally {
       await h.cleanup()
     }
@@ -218,18 +208,18 @@ describe('lander assist', () => {
     }
   })
 
-  it('falls back to claude for an unsupported provider value', async () => {
+  it('rejects an unsupported provider value', async () => {
     const h = await makeHarness()
     try {
-      const { stdout } = await execLander(['assist', 'summarize:', 'notes'], {
-        ...h.env,
-        LANDER_ASSIST_PROVIDER: 'other',
+      await expect(
+        execLander(['assist', 'summarize:', 'notes'], {
+          ...h.env,
+          LANDER_ASSIST_PROVIDER: 'other',
+        }),
+      ).rejects.toMatchObject({
+        stderr: expect.stringContaining('no supported provider in LANDER_ASSIST_PROVIDER'),
       })
-
-      expect(stdout).toBe('claude reply\n')
-      expect(await readCalls(h.log)).toEqual([
-        { command: 'claude', args: assistArgv('claude', PROMPT, {}).args },
-      ])
+      await expect(readFile(h.log, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
     } finally {
       await h.cleanup()
     }

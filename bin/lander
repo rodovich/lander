@@ -931,24 +931,10 @@ async function askTask(args) {
 // notes. A non-zero exit from the provider aborts. Shared by the `lander assist` CLI
 // command and the `lander.assist()` flow API.
 //
-// THE PROVIDER IS THE TASK'S, not the environment's. LANDER_ASSIST_PROVIDER is
-// put on every turn's environment by the server, already resolved from the
-// task's own flow. LANDER_AGENT — which this used to read — is the server's
-// default for NEW tasks and reaches every shell because all three processes
-// descend from one `npm run dev`, so a Codex task's one-shot reasoned with
-// Claude. It stays as the fallback for a call made outside a task turn.
-//
-// No error when it is absent: the CLI cannot tell "this task rides an announced
-// flow with no one-shot provider" from "this turn's environment predates the
-// variable", and refusing on a case it cannot identify is worse than the
-// fallback. A hook body's ctx.assist DOES error there, because it has the flow.
 function assistAgentFromEnv(env) {
-  const value = (env.LANDER_ASSIST_PROVIDER ?? env.LANDER_AGENT)
-    ?.trim()
-    .toLowerCase()
-  if (value === 'codex') return 'codex'
-  if (value === 'agy') return 'agy'
-  return 'claude'
+  const value = env.LANDER_ASSIST_PROVIDER?.trim().toLowerCase()
+  if (value === 'claude' || value === 'codex' || value === 'agy') return value
+  die('assist: no supported provider in LANDER_ASSIST_PROVIDER')
 }
 
 const AGY_ASSIST_PROJECT_ID = 'lander-assist-readonly'

@@ -63,8 +63,8 @@ Choose the cheapest instrument that is still faithful:
   good.
 - **Launch a sibling** when the subject is task creation, message delivery,
   inheritance, permission grants, or anything the parent cannot do to itself.
-  `--flow codex` launches it as a Codex task; without it you get the instance
-  default.
+  `--flow codex` launches it as a Codex task; without it the child inherits
+  the parent’s driver.
 - **Ask the user to drive the UI.** Anything that has to be seen or clicked — an
   ask's option buttons, a chip's disclosure, a status transition in the list — is
   verified by doing the thing and telling the user plainly what to look at and
