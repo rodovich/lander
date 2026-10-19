@@ -34,7 +34,7 @@ import {
   taskTurnContext,
   setTaskTurnContext,
   clearTaskThread,
-  recordAssistantError,
+  recordUndispatchedRide,
   recordRideEnded,
   acceptHookAction,
   dropHookAction,
@@ -1301,22 +1301,17 @@ describe('the task-hook trigger funnel', () => {
     expect(fires(t)).toEqual([])
   })
 
-  // The third close site: this branch does not merely close a ride, it opens and
+  // The third close site: this one does not merely close a ride, it opens and
   // closes a complete one, from runTurn's pre-startRide failures — which are the
   // "wedged for mechanical reasons" case supervision exists for.
   it('records exactly one fire for a synthesized error ride', () => {
     const t = { ...task('riding'), rides: [] as Ride[] }
-    recordAssistantError(t, 'no daemon connected for this project', AT)
+    recordUndispatchedRide(t, AT)
     expect(fires(t)).toEqual(['ride-ended/system'])
     expect(t.pendingHooks![0].rideId).toBe(t.rides[0].id)
-  })
-
-  // Its other branch fills an open ride and closes nothing, so applyDone or the
-  // platform-kill branch will record that ride's end — not this.
-  it('records nothing when it fills a ride that is already open', () => {
-    const t = { ...task('riding'), rides: [{ id: 'ride-1', startedAt: AT }] }
-    recordAssistantError(t, 'error running assistant: exited 1', AT)
-    expect(fires(t)).toEqual([])
+    expect(t.rides[0].outcome).toBe('error')
+    // No agent ran, so the ride carries no message in its voice.
+    expect(t.items.filter((i) => i.kind === 'message')).toEqual([])
   })
 })
 

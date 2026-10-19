@@ -15,7 +15,6 @@ import { fileURLToPath } from 'node:url'
 import {
   applyUpdate,
   applyDone,
-  hasStreamedText,
   turnCommitted,
   wedgeForRetry,
 } from './apply'
@@ -85,7 +84,7 @@ import {
   userItems,
   promptItems,
   eventItems,
-  recordAssistantError,
+  recordUndispatchedRide,
   recordRideEnded,
   lastFlowItem,
   scheduledRideOf,
@@ -621,11 +620,29 @@ async function runTurn(
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     await mutateTask(file, (t) => {
-      recordAssistantError(
+      recordUndispatchedRide(
         t,
-        `error running assistant: ${message}`,
         new Date().toISOString(),
+        `error running assistant: ${message}`,
       )
+    }).catch(() => {})
+    return 'crashed'
+  }
+
+  // Wedge a turn that never reached an agent. Nothing was committed, so a retry
+  // re-sends the prompt(s). No agent ran to say anything, so the ask's `prompt`
+  // is the turn's only record and names the cause.
+  const wedgeUndispatched = async (prompt: string): Promise<'crashed'> => {
+    await mutateTask(file, (t) => {
+      const at = new Date().toISOString()
+      recordUndispatchedRide(t, at)
+      wedgeForRetry(t, {
+        committed: false,
+        askId: nextAskId(t, Date.parse(at)),
+        at,
+        prompt,
+      })
+      t.updatedAt = at
     }).catch(() => {})
     return 'crashed'
   }
@@ -659,35 +676,18 @@ async function runTurn(
 
   // Wait briefly for a daemon serving this project to be connected (dev launches
   // it with the server, so it's normally already up); if none arrives, wedge the
-  // turn with an error rather than hang.
-  if (!(await awaitDaemonServing(project.slug))) {
-    await mutateTask(file, (t) => {
-      const at = new Date().toISOString()
-      // Distinguish the two ways this fails: no daemon at all vs. a daemon that
-      // is connected but doesn't serve this project's slug (a path/slug mismatch
-      // between how the daemon was launched and how the task is keyed). The
-      // latter is otherwise indistinguishable and the usual silent culprit, so
-      // name the slug we wanted and the slugs the daemon actually serves.
-      const text = daemonConnected()
-        ? `error running assistant: a daemon is connected but does not serve this project (slug '${project.slug}'); daemon serves: ${daemonSlugs().join(', ') || '(none)'}`
-        : 'error running assistant: no daemon connected for this project'
-      recordAssistantError(t, text, at)
-      // The turn never reached the agent, so nothing was committed — wedge and
-      // stash the prompt(s) so the user can just retry once a daemon is back (a
-      // transient daemon outage is the expected cause). The retry ask names the
-      // cause rather than reading as a generic assistant error.
-      wedgeForRetry(t, {
-        committed: false,
-        askId: nextAskId(t, Date.parse(at)),
-        at,
-        prompt: daemonConnected()
-          ? 'The connected daemon does not serve this project.'
-          : 'No daemon is connected to run this task.',
-      })
-      t.updatedAt = at
-    }).catch(() => {})
-    return 'crashed'
-  }
+  // turn rather than hang. A transient daemon outage is the expected cause.
+  //
+  // A daemon that is connected but doesn't serve this project's slug (a
+  // path/slug mismatch between how the daemon was launched and how the task is
+  // keyed) is otherwise indistinguishable from none at all, and the usual silent
+  // culprit, so name the slug we wanted and the slugs the daemon serves.
+  if (!(await awaitDaemonServing(project.slug)))
+    return wedgeUndispatched(
+      daemonConnected()
+        ? `The connected daemon does not serve this project (slug '${project.slug}'); it serves: ${daemonSlugs().join(', ') || '(none)'}.`
+        : 'No daemon is connected to run this task.',
+    )
 
   // Refuse to dispatch a flow the current primary hasn't announced. A legacy
   // flow is exempt: it carries `agent`, so even a daemon that announces nothing
@@ -698,23 +698,11 @@ async function runTurn(
   // has registered, and setAnnouncedFlows runs before the slug set that released
   // us. Failing here is a wedge with a named cause, never a silent run as some
   // other flow.
-  if (!isAgentKind(flow) && !isAnnouncedFlow(flow)) {
-    await mutateTask(file, (t) => {
-      const at = new Date().toISOString()
-      const text =
-        `error running assistant: no connected daemon provides the flow '${flow}'` +
-        `; available: ${flowRegistry(project.slug).map((f) => f.name).join(', ') || '(none)'}`
-      recordAssistantError(t, text, at)
-      wedgeForRetry(t, {
-        committed: false,
-        askId: nextAskId(t, Date.parse(at)),
-        at,
-        prompt: `The connected daemon does not provide the '${flow}' flow.`,
-      })
-      t.updatedAt = at
-    }).catch(() => {})
-    return 'crashed'
-  }
+  if (!isAgentKind(flow) && !isAnnouncedFlow(flow))
+    return wedgeUndispatched(
+      `The connected daemon does not provide the '${flow}' flow; available: ` +
+        `${flowRegistry(project.slug).map((f) => f.name).join(', ') || '(none)'}.`,
+    )
 
   // Mark riding and record the run before sending, so a crash between here and the
   // first update still leaves a resumable pointer (recoverQueues reattaches via
@@ -787,7 +775,7 @@ async function runTurn(
   return reduceRunWs(project, id, runId)
 }
 
-// The transcript line and retry-ask prompt for a platform kill: the daemon that
+// The retry-ask prompt for a platform kill: the daemon that
 // held an in-flight run died and stayed gone past the reconnect grace, so it never
 // settled its own done (unlike a user interrupt, which emits a clean interrupted
 // done). The `crashed` handler names the cause here so the wedge reads as a
@@ -804,8 +792,6 @@ async function runTurn(
 // stack was restarted (an `npm run dev` restart kills the daemon and its
 // children). Otherwise the server stayed up and watched the daemon drop and
 // never come back.
-const PLATFORM_KILL_ERROR =
-  'error running assistant: the daemon running this task stopped before the turn finished'
 const PLATFORM_KILL_PROMPT_RESTART =
   'This ride was killed when lander restarted while work was in flight.'
 const PLATFORM_KILL_PROMPT_DAEMON_LOST =
@@ -852,11 +838,6 @@ async function reduceRunWs(
           const ride = openRide(t)
           if (ride) {
             const rideItems = (t.items ?? []).filter((it) => it.rideId === ride.id)
-            const streamedText = hasStreamedText(rideItems)
-            // Only fill an otherwise-empty turn: the ask's prompt is the kill's
-            // durable record (it outlives the form), so a turn that streamed
-            // needs no synthetic line saying the same thing twice.
-            if (!streamedText) recordAssistantError(t, PLATFORM_KILL_ERROR, at)
             // A platform kill — the daemon died mid-turn and never came back, so it
             // could not settle its own done — needs the user's attention just like
             // an assistant error. Wedge with a retry ask that names the cause.

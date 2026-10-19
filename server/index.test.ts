@@ -3461,16 +3461,14 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
   let http: Server
   let ws: WebSocket
   const received: { type: string; runId?: string; taskId?: string; project?: string }[] = []
-  // The platform-kill retry ask's prompts (index.ts PLATFORM_KILL_PROMPT_*) and error
-  // line — pinned here as the user-facing contract. The prompt states the kill
-  // rather than asking about it: the options are the question, and the prompt
-  // stays behind as the record once they're gone.
+  // The platform-kill retry ask's prompts (index.ts PLATFORM_KILL_PROMPT_*) —
+  // pinned here as the user-facing contract. The prompt states the kill rather
+  // than asking about it: the options are the question, and the prompt stays
+  // behind as the record once they're gone.
   const KILL_PROMPT =
     'This ride was killed when the daemon running it stopped while work was in flight.'
   const RESTART_PROMPT =
     'This ride was killed when lander restarted while work was in flight.'
-  const KILL_ERROR =
-    'error running assistant: the daemon running this task stopped before the turn finished'
   // When true, the fake daemon answers an interrupt with a clean interrupted done,
   // mirroring the real daemon's stop → done{interrupted:true}. Off during the
   // crash test (which ends the run by disconnecting, not interrupting).
@@ -4199,13 +4197,12 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     expect(raw.status).toBe('wedged')
     // The ride closed as an error (a platform kill, not a user interrupt).
     expect((raw.rides as Raw[]).at(-1)?.outcome).toBe('error')
-    // Nothing streamed, so the turn's ride would render blank — the error line
-    // fills it (the one case that still needs it; a turn that streamed keeps its
-    // text and leaves the record to the ask prompt).
+    // Nothing streamed, and nothing is written in the agent's voice on its
+    // behalf: the ask prompt is the kill's record.
     const flow = ((raw.items as Raw[]) ?? []).filter(
       (i) => i.kind === 'message' && i.role === 'flow',
     )
-    expect(flow.map((i) => i.text)).toEqual([KILL_ERROR])
+    expect(flow).toEqual([])
     // Wedged with a platform-kill retry ask naming the cause; nothing streamed, so
     // the turn is uncommitted and the ask offers a single Resend.
     const ask = asksOf(raw).find((a) => a.origin === 'retry')
@@ -4462,8 +4459,15 @@ describe('flow dispatch gate', () => {
     ).toBe(200)
 
     const raw = await waitForRaw(id, (r) => r.status === 'wedged')
-    // It wedged with a named cause rather than running as something else.
-    expect(JSON.stringify(raw.items)).toContain("no connected daemon provides the flow 'example-flow'")
+    // It wedged with a named cause rather than running as something else. The
+    // retry ask carries the cause alone: no agent ran, so nothing is written in
+    // its voice.
+    const items = raw.items as Record<string, unknown>[]
+    expect(items.filter((i) => i.kind === 'message' && i.role === 'flow')).toEqual([])
+    const ask = items.find((i) => i.kind === 'ask' && i.origin === 'retry')
+    expect(ask?.prompt).toBe(
+      "The connected daemon does not provide the 'example-flow' flow; available: claude, codex.",
+    )
     // And crucially: nothing was dispatched for this task.
     expect(startRunFor(id)).toBeUndefined()
     ws.close()

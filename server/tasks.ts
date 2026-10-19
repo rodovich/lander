@@ -955,42 +955,35 @@ export function eventItems(task: { items?: Item[] }): EventItem[] {
   return (task.items ?? []).filter((it): it is EventItem => it.kind === 'event')
 }
 
-// Record an assistant error/interrupt reply on the task. If a ride is open, fill
-// its last empty flow item (or append one) with `text`; otherwise the run never
-// opened a ride (an unreadable task file, or no daemon) — synthesize a one-item
-// closed error ride so the failure still shows as an assistant turn.
-export function recordAssistantError(
+// Open and close an error ride for a turn that failed before it could start one.
+// runTurn's undispatched turns (no daemon serving the project, a flow the primary
+// has not announced) pass no `text`: no agent ran to say anything, so their
+// retry ask is the record and the ride shows nothing. Only runTurn's
+// unreadable-task-file path passes `text`, its read error.
+//
+// This is a third place a ride transitions to closed with an outcome, alongside
+// applyDone and the platform-kill branch, so it records the ride-ended fire too.
+// Those undispatched turns are exactly the "wedged for mechanical reasons" case
+// supervision exists for, so omitting them would leave the trigger blind to its
+// own motivating example.
+export function recordUndispatchedRide(
   task: {
     items?: Item[]
     rides?: Ride[]
     pendingHooks?: PendingHook[]
     hookFireSeq?: number
   },
-  text: string,
   at: string,
+  text?: string,
 ): void {
-  let ride = openRide(task)
-  if (!ride) {
-    const id = `ride-${Math.floor(Date.parse(at) || 0).toString(36)}-e${
-      task.rides?.length ?? 0
-    }`
-    startRide(task, id, at)
-    ride = openRide(task) as Ride
-    pushFlowItem(task, ride.id, text, at)
-    // This branch does not merely close a ride — it OPENS and closes a complete
-    // one, so it is a third place a ride transitions to closed with an outcome,
-    // alongside applyDone and the platform-kill branch. Its live callers are
-    // runTurn's pre-startRide failures: no daemon serving the project, and a
-    // flow the primary has not announced. Those are exactly the "wedged for
-    // mechanical reasons" case supervision exists for, so omitting them would
-    // leave the trigger blind to its own motivating example.
-    recordRideEnded(task, ride, 'error', at)
-    closeRide(task, 'error', at)
-    return
-  }
-  const last = lastFlowItem(task, ride.id)
-  if (last && !last.text) last.text = text
-  else pushFlowItem(task, ride.id, text, at)
+  const id = `ride-${Math.floor(Date.parse(at) || 0).toString(36)}-e${
+    task.rides?.length ?? 0
+  }`
+  startRide(task, id, at)
+  const ride = openRide(task) as Ride
+  if (text) pushFlowItem(task, ride.id, text, at)
+  recordRideEnded(task, ride, 'error', at)
+  closeRide(task, 'error', at)
 }
 
 // A repeating-relaunch spec carried on a scheduled relaunch message (`lander

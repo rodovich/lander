@@ -158,7 +158,7 @@ export function turnCommitted(
   )
 }
 
-export function hasStreamedText(rideItems: readonly Item[]): boolean {
+function hasStreamedText(rideItems: readonly Item[]): boolean {
   return rideItems.some(
     (it) => it.kind === 'message' && it.text.trim().length > 0,
   )
