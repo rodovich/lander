@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -27,11 +27,14 @@ afterEach(() => {
   rmSync(geminiConfigDir, { recursive: true, force: true })
 })
 
-const flow = (doc: string | undefined = 'Project instructions') => makeFlow({
+const flow = (doc: string | undefined = 'Project instructions', log?: string) => makeFlow({
   taskPromptTemplate: 'Task {{id}}.',
   readProjectDoc: () => doc,
   geminiConfigDir,
+  readAgyLog: () => log,
 })
+const refusalLine = (conversation: string, step: number) =>
+  `I1019 11:03:49.944734     920 server.go:2611] Tool confirmation for conversation ${conversation} step ${step} (type=*gemini_coder_go_proto.Step_Generic approved=false)\n`
 const fixture = (
   chunks: string[][] = [],
   flowState?: Record<string, unknown>,
@@ -363,6 +366,8 @@ it('passes --mode accept-edits, --project lander-<hash>, canonicalized --add-dir
   expect(spawn.args[1]).toContain(projectDocBlock('Project instructions'))
   expect(spawn.args[1]).toContain('Attachment manifest')
   expect(spawn.args.filter((arg) => arg === '/tmp')).toHaveLength(1)
+  const logFile = spawn.args[spawn.args.indexOf('--log-file') + 1]
+  expect(existsSync(path.dirname(logFile))).toBe(false)
 
   const projectConfig = JSON.parse(
     readFileSync(agyProjectFile('/repo', geminiConfigDir), 'utf8'),
@@ -380,7 +385,7 @@ it('passes --mode accept-edits, --project lander-<hash>, canonicalized --add-dir
   })
 })
 
-it('marks denied tool calls blocked from result.denied_actions, wedges the task, preserves earlier prose, and omits blank messages', async () => {
+it('marks refused tool calls blocked from their denial error or agy\'s log, wedges the task, preserves earlier prose, and omits blank messages', async () => {
   const calls: { url: string; method: string; body: unknown }[] = []
   vi.stubGlobal(
     'fetch',
@@ -459,33 +464,27 @@ it('marks denied tool calls blocked from result.denied_actions, wedges the task,
       },
     ])
 
-    const withoutProse = fixture([[
-      event('step_update', {
-        step_index: 1,
-        step_type: 'tool',
-        state: 'DONE',
-        tool_name: 'run_command',
-        tool_info: { name: 'run_command', parameters: { CommandLine: 'git push' } },
-      }),
-      result({
-        response: '',
-        denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
-      }),
-    ]])
-    withoutProse.start = {
-      ...withoutProse.start,
-      env: {
-        LANDER_API: 'http://api.test',
-        LANDER_PROJECT: 'proj',
-        LANDER_TASK: 'task-1',
-        LANDER_TOKEN: 'tok',
-      },
+    const turnItems = async (lines: string[], log?: string) => {
+      const g = fixture([lines])
+      g.start = { ...g.start, env: withProse.start?.env }
+      const driven = await driveFlow(g, flow(undefined, log))
+      return (applyEvents(goldenInput(g).start, driven.events).items ?? []) as (BlockedItem & { text?: string })[]
     }
-    const drivenWithoutProse = await driveFlow(withoutProse, flow())
-    const taskWithoutProse = applyEvents(goldenInput(withoutProse).start, drivenWithoutProse.events)
-    const itemsWithoutProse = (taskWithoutProse.items ?? []) as (BlockedItem & { text?: string })[]
-    expect(itemsWithoutProse.filter((it) => it.kind === 'message')).toEqual([])
-    expect(blockedRequests(itemsWithoutProse)).toEqual([
+    const notices = (items: (BlockedItem & { text?: string })[]) =>
+      items.filter((it) => it.kind === 'notice').map((it) => it.text)
+    const deniedCommand = result({
+      response: '',
+      denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
+    })
+    const silentGitPush = [
+      init('conv-1'),
+      toolStep(1, 'run_command', { CommandLine: 'git push' }),
+      deniedCommand,
+    ]
+
+    const itemsLogged = await turnItems(silentGitPush, refusalLine('conv-1', 1))
+    expect(itemsLogged.filter((it) => it.kind === 'message')).toEqual([])
+    expect(blockedRequests(itemsLogged)).toEqual([
       {
         key: 'command(git push)',
         rule: 'command(git push)',
@@ -494,22 +493,39 @@ it('marks denied tool calls blocked from result.denied_actions, wedges the task,
     ])
     expect(calls).toHaveLength(2)
 
-    const twoSilent = fixture([[
-      toolStep(1, 'run_command', { CommandLine: 'rm -f probe.txt' }),
-      toolStep(2, 'run_command', { CommandLine: 'git status' }),
-      result({
-        response: '',
-        denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
-      }),
-    ]])
-    twoSilent.start = { ...twoSilent.start, env: withProse.start.env }
-    const drivenTwoSilent = await driveFlow(twoSilent, flow())
-    const itemsTwoSilent = (applyEvents(goldenInput(twoSilent).start, drivenTwoSilent.events).items ?? []) as (BlockedItem & { text?: string })[]
-    expect(itemsTwoSilent.filter((it) => it.kind === 'message')).toEqual([])
-    expect(itemsTwoSilent.filter((it) => it.kind === 'notice').map((it) => it.text)).toEqual([
+    const itemsUnlogged = await turnItems(silentGitPush)
+    expect(notices(itemsUnlogged)).toEqual([
       'Antigravity denied a RunCommand call this turn without saying which one.',
     ])
-    expect(blockedRequests(itemsTwoSilent)).toEqual([])
+    expect(blockedRequests(itemsUnlogged)).toEqual([])
+
+    const itemsTwoSilent = await turnItems([
+      init('conv-2'),
+      toolStep(1, 'run_command', { CommandLine: 'rm -f probe.txt' }),
+      toolStep(2, 'run_command', { CommandLine: 'git status' }),
+      deniedCommand,
+    ], refusalLine('conv-2', 1))
+    expect(notices(itemsTwoSilent)).toEqual([])
+    expect(blockedRequests(itemsTwoSilent)).toEqual([
+      {
+        key: 'command(rm -f probe.txt)',
+        rule: 'command(rm -f probe.txt)',
+        tool: 'run_command',
+      },
+    ])
+
+    const itemsSubagent = await turnItems([
+      init('conv-3'),
+      toolStep(2, 'invoke_subagent', { Subagents: [{ TypeName: 'self', Role: 'Probe Runner' }] }),
+      result({
+        response: 'Waiting for the subagent.',
+        denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
+      }),
+    ], refusalLine('sub-conv', 2))
+    expect(notices(itemsSubagent)).toEqual([
+      'Antigravity refused a RunCommand call in a subagent.',
+    ])
+    expect(blockedRequests(itemsSubagent)).toEqual([])
 
     const deniedBeforeLaterCommands = fixture([[
       ...[

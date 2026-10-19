@@ -2,13 +2,14 @@ import { chmodSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { runAssist } from '../daemon/assist'
-import { agyProjectFile, isAgyDenial, makeFlow, onGrant } from '../daemon/flows/agy'
+import { agyLogRefusals, agyProjectFile, agyProjectId, isAgyDenial, makeFlow, onGrant } from '../daemon/flows/agy'
 import { blockedRequests, type BlockedItem } from '../src/permissions'
 import {
   TASK_PROMPT,
   cliVersion,
   driveLive,
   replyText,
+  runJsonl,
   scratchDir,
 } from './live'
 
@@ -124,7 +125,7 @@ describe.skipIf(!VERSION)(`agy contract (${VERSION})`, () => {
     expect(replyText(granted)).toContain('unlisted-probe')
   })
 
-  it('reports a refused command in a batch with its denial error or with nothing', async () => {
+  it('blocks the refused command in a batch, not the allowed one canceled with it', async () => {
     const root = testRoot()
     writeFileSync(path.join(root, 'probe.txt'), 'kept\n')
     await onGrant(undefined, { projectPath: root, rule: 'command(git)' })
@@ -134,16 +135,36 @@ describe.skipIf(!VERSION)(`agy contract (${VERSION})`, () => {
         'In a single response, issue these two run_command tool calls in parallel, in this order: first CommandLine "rm -f probe.txt", then CommandLine "git status". Do not call any other tools.',
     })
 
-    const items = (turn.task.items ?? []) as (BlockedItem & {
-      input?: string
-      output?: string
-    })[]
+    const items = (turn.task.items ?? []) as (BlockedItem & { input?: string })[]
     expect(items.map((it) => it.kind === 'tool' && it.input)).toEqual(
       expect.arrayContaining(['rm -f probe.txt', 'git status']),
     )
-    const rm = items.find((it) => it.kind === 'tool' && it.input === 'rm -f probe.txt')
-    expect(!rm?.output || isAgyDenial(rm.output)).toBe(true)
+    expect(blockedRequests(items)).toEqual([
+      { key: 'command(rm -f probe.txt)', rule: 'command(rm -f probe.txt)', tool: 'run_command' },
+    ])
     expect(readFileSync(path.join(root, 'probe.txt'), 'utf8')).toBe('kept\n')
+  })
+
+  it('logs each refused call with the conversation and step the stream reports', async () => {
+    const root = testRoot()
+    await onGrant(undefined, { projectPath: root, rule: 'command(lander)' })
+    const logFile = path.join(root, 'agy.log')
+    const run = runJsonl('agy', [
+      '-p', 'Call run_command once with CommandLine "echo log-probe" and nothing else.',
+      '--output-format', 'stream-json', '--print-timeout', '0s',
+      '--mode', 'accept-edits', '--project', agyProjectId(root), '--log-file', logFile,
+    ], { cwd: root })
+
+    const step = run.lines.find((l) =>
+      l.event === 'step_update' &&
+      l.step_update?.tool_info?.parameters?.CommandLine === 'echo log-probe')?.step_update
+    expect(step).toBeDefined()
+    expect(run.lines.find((l) => l.event === 'result')?.result?.denied_actions).toEqual([
+      { action: 'command', display_name: 'RunCommand' },
+    ])
+    expect(agyLogRefusals(readFileSync(logFile, 'utf8'))).toEqual([
+      { conversation: step.conversation_id, step: step.step_index },
+    ])
   })
 
   it('fails a killed background command with an error that is not a denial', async () => {

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import {
   addUsage,
@@ -179,6 +179,22 @@ export function isAgyDenial(message: string | undefined): boolean {
   return /user denied permission|action denied/i.test(message ?? '')
 }
 
+// `denied_actions` names only the action kind, so when the stream reports a
+// refused call as a plain DONE, or the call was a subagent's, the debug log is
+// the only record of which call agy refused.
+export function agyLogRefusals(log: string): { conversation: string; step: number }[] {
+  return [...log.matchAll(/Tool confirmation for conversation (\S+) step (\d+) \([^)]*approved=false\)/g)]
+    .map((m) => ({ conversation: m[1], step: Number(m[2]) }))
+}
+
+function readFileIfPresent(file: string): string | undefined {
+  try {
+    return readFileSync(file, 'utf8')
+  } catch {
+    return undefined
+  }
+}
+
 function agyToolRule(
   event: AgyEvent,
 ): { action: string; rule: string } | undefined {
@@ -343,10 +359,12 @@ export function makeFlow({
   taskPromptTemplate,
   readProjectDoc,
   geminiConfigDir,
+  readAgyLog = readFileIfPresent,
 }: {
   taskPromptTemplate: string
   readProjectDoc: (dir: string) => string | undefined
   geminiConfigDir?: string
+  readAgyLog?: (file: string) => string | undefined
 }) {
   return {
     meta,
@@ -398,6 +416,7 @@ export function makeFlow({
         priorTotal: sessionId
           ? readThreadUsage(ctx.state.get(['threadUsage']))
           : { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
+        readLog: readAgyLog,
       })
       if (run.producedOutput) {
         if (sendTaskPrompt) ctx.state.set(['taskPrompt'], digest)
@@ -425,7 +444,33 @@ type AgyRun = {
 async function runAgy(
   ctx: Ctx,
   args: string[],
-  { sessionId, priorTotal }: { sessionId: string | undefined; priorTotal: Usage | undefined },
+  { sessionId, priorTotal, readLog }: {
+    sessionId: string | undefined
+    priorTotal: Usage | undefined
+    readLog: (file: string) => string | undefined
+  },
+): Promise<AgyRun> {
+  // The log carries the user's account email, so it outlives the process only
+  // long enough to be read.
+  const logDir = mkdtempSync(path.join(tmpdir(), 'lander-agy-'))
+  const logFile = path.join(logDir, 'agy.log')
+  try {
+    return await reduceAgy(ctx, [...args, '--log-file', logFile], {
+      sessionId, priorTotal, readRunLog: () => readLog(logFile),
+    })
+  } finally {
+    rmSync(logDir, { recursive: true, force: true })
+  }
+}
+
+async function reduceAgy(
+  ctx: Ctx,
+  args: string[],
+  { sessionId, priorTotal, readRunLog }: {
+    sessionId: string | undefined
+    priorTotal: Usage | undefined
+    readRunLog: () => string | undefined
+  },
 ): Promise<AgyRun> {
   const child = ctx.spawn('agy', args, {
     cwd: ctx.task.cwd,
@@ -441,7 +486,6 @@ async function runAgy(
       handle: ToolHandle
       action?: string
       denied?: boolean
-      silent?: boolean
       blocked?: boolean
     }
   >()
@@ -451,9 +495,9 @@ async function runAgy(
   let liveUsage: Usage | undefined
   let pendingText: number | undefined
   let lastText = ''
-  let announced = sessionId !== undefined
+  let conversationId = sessionId
   let producedOutput = false
-  let permissionAborted = false
+  let deniedActions: NonNullable<AgyEvent['denied_actions']> = []
   let terminalError: string | undefined
   let stderr = ''
   const collectStderr = (async () => {
@@ -484,13 +528,9 @@ async function runAgy(
       ? envelope.step_update
       : envelope.event === 'result' ? envelope.result : envelope
     if (!event) continue
-    if (
-      !announced &&
-      typeof event.conversation_id === 'string' &&
-      event.conversation_id
-    ) {
-      ctx.state.set(['sessionId'], event.conversation_id)
-      announced = true
+    if (!conversationId && typeof event.conversation_id === 'string' && event.conversation_id) {
+      conversationId = event.conversation_id
+      ctx.state.set(['sessionId'], conversationId)
     }
     if (
       envelope.event === 'init' &&
@@ -547,7 +587,6 @@ async function runAgy(
           const rawOutput = info?.output ?? info?.error?.message
           const isError = event.state === 'ERROR' || !!info?.error
           entry.denied = isError && isAgyDenial(info?.error?.message)
-          entry.silent = !isError && !info?.output
           entry.handle.result({
             ...(rawOutput !== undefined
               ? { output: summarizeToolResult(rawOutput) }
@@ -558,36 +597,7 @@ async function runAgy(
       }
     } else if (envelope.event === 'result') {
       flushText()
-      if (Array.isArray(event.denied_actions) && event.denied_actions.length > 0) {
-        permissionAborted = true
-        const recorded = [...tools.values()].reverse()
-        for (const denied of event.denied_actions) {
-          const action =
-            typeof denied?.action === 'string' ? denied.action : undefined
-          // A denial names only the action kind, and agy sometimes streams
-          // a denied command as a plain DONE with no output instead of with
-          // its denial error. That is also how an allowed command with no
-          // output, or one queued behind the refusal, looks, so a silent
-          // command is blamed only when it is the turn's sole one. Only
-          // command denials have been probed.
-          const open = action
-            ? recorded.filter((t) => !t.blocked && t.action === action)
-            : []
-          const silent =
-            action === 'command' ? open.filter((t) => t.silent) : []
-          const target =
-            open.find((t) => t.denied) ??
-            (silent.length === 1 ? silent[0] : undefined)
-          if (target) {
-            target.blocked = true
-            target.handle.result({ blocked: true })
-          } else {
-            ctx.emit.notice(
-              `Antigravity denied a ${denied?.display_name ?? action ?? 'tool'} call this turn without saying which one.`,
-            )
-          }
-        }
-      }
+      if (Array.isArray(event.denied_actions)) deniedActions = event.denied_actions
       if (event.response && event.response !== lastText) {
         lastText = event.response
         ctx.emit.message(event.response)
@@ -611,7 +621,40 @@ async function runAgy(
   flushText()
   const exitCode = await child.exit
   await collectStderr
-  return { exitCode, stderr, terminalError, permissionAborted, producedOutput }
+  if (deniedActions.length) {
+    const refusals = agyLogRefusals(readRunLog() ?? '')
+    const refusedSteps = new Set(
+      refusals.filter((r) => r.conversation === conversationId).map((r) => r.step),
+    )
+    let inSubagents = refusals.filter((r) => r.conversation !== conversationId).length
+    const recorded = [...tools].reverse()
+    for (const denied of deniedActions) {
+      const action =
+        typeof denied?.action === 'string' ? denied.action : undefined
+      const name = denied?.display_name ?? action ?? 'tool'
+      const target = recorded.find(([step, t]) =>
+        !t.blocked && t.action === action && (t.denied || refusedSteps.has(step)),
+      )?.[1]
+      if (target) {
+        target.blocked = true
+        target.handle.result({ blocked: true })
+      } else if (inSubagents > 0) {
+        inSubagents--
+        ctx.emit.notice(`Antigravity refused a ${name} call in a subagent.`)
+      } else {
+        ctx.emit.notice(
+          `Antigravity denied a ${name} call this turn without saying which one.`,
+        )
+      }
+    }
+  }
+  return {
+    exitCode,
+    stderr,
+    terminalError,
+    permissionAborted: deniedActions.length > 0,
+    producedOutput,
+  }
 }
 
 export async function onGrant(
