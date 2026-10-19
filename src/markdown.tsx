@@ -88,6 +88,23 @@ function maskEscapes(masked: string): { masked: string; escapeAt: Set<number> } 
   return { masked: out, escapeAt }
 }
 
+// CommonMark's flanking rules keep path globs (`/tmp/a-* and /tmp/b-*`,
+// `/tmp/*a and /tmp/*b`, `src/a*/b and src/c*/d`) and `2 * 3 * 4` literal
+// while still emphasizing `(*a*)` and intraword `foo*bar*baz`.
+function emphasisRe(star: string, starBody: string, under: string): RegExp {
+  const sOpen = `(?<!\\*)${star}(?!\\s)(?!(?<=[\\p{L}\\p{N}]${star})[\\p{P}\\p{S}])`
+  const sClose = `(?<!\\s)${star}(?!\\*)(?!(?<=[\\p{P}\\p{S}]${star})[\\p{L}\\p{N}])`
+  const uOpen = `(?<![\\p{L}\\p{N}_])${under}(?!\\s)`
+  const uClose = `(?<!\\s)${under}(?![\\p{L}\\p{N}_])`
+  return new RegExp(
+    `${sOpen}(${starBody})${sClose}|${uOpen}([^_]+)${uClose}`,
+    'gud',
+  )
+}
+
+const STRONG_RE = emphasisRe('\\*\\*', '(?:[^*]|\\*(?!\\*))+?', '__')
+const EM_RE = emphasisRe('\\*', '[^*]+', '_')
+
 // Parse inline spans (bold, italic, strikethrough, code, links) into React
 // nodes. Operates on plain text, so anything it doesn't recognize stays literal.
 // `inLink` is set while rendering a link's label, where CommonMark allows every
@@ -182,7 +199,7 @@ function renderInline(
       // (e.g. **bold *italic* bold**) is kept inside the bold and reparsed by the
       // recursive renderInline below, rather than splitting the "**" off as
       // literal text.
-      re: /\*\*([\s\S]+?)\*\*|(?<![\p{L}\p{N}_])__([^_]+)__(?![\p{L}\p{N}_])/gud,
+      re: new RegExp(STRONG_RE),
       render: (m, k) => (
         <strong key={k}>
           {renderInline(group(m, 1) ?? group(m, 2) ?? '', k, linkTask, inLink)}
@@ -190,7 +207,7 @@ function renderInline(
       ),
     },
     {
-      re: /\*([^*]+)\*|(?<![\p{L}\p{N}_])_([^_]+)_(?![\p{L}\p{N}_])/gud,
+      re: new RegExp(EM_RE),
       render: (m, k) => (
         <em key={k}>
           {renderInline(group(m, 1) ?? group(m, 2) ?? '', k, linkTask, inLink)}

@@ -243,6 +243,27 @@ describe('Markdown rendering', () => {
     )
   })
 
+  it('requires emphasis delimiters to be flanking, leaving globs and operators literal', () => {
+    for (const s of [
+      'what are all the /tmp/lander-projectdoc-* and /tmp/lander-supervise-state-* directories?',
+      '/tmp/*projectdoc and /tmp/*supervise',
+      'src/projectdoc*/a and src/supervise*/b',
+      'projectdoc*, supervise*',
+      'src/**/a.ts and src/*.ts',
+      '*a and *b and 2 * 3 * 4',
+      '/tmp/a-_ and /tmp/b-_ and _ a _ and __ b __',
+    ]) {
+      expect(render(s)).toBe(`<p>${s}</p>`)
+    }
+    expect(render('**a and **b**')).toBe('<p>**a and <strong>b</strong></p>')
+    expect(render('/tmp/a-* and *italic*')).toBe(
+      '<p>/tmp/a-* and <em>italic</em></p>',
+    )
+    expect(render('(*italic*) and *"quoted"*')).toBe(
+      '<p>(<em>italic</em>) and <em>&quot;quoted&quot;</em></p>',
+    )
+  })
+
   it('renders a safe markdown link with security attributes', () => {
     const html = render('[hi](https://example.com)')
     expect(html).toContain('href="https://example.com"')
