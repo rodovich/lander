@@ -545,8 +545,11 @@ async function reduceAgy(
   })()
   const flushText = () => {
     if (pendingText !== undefined) {
-      lastText = texts.get(pendingText) ?? ''
-      if (lastText) ctx.emit.message(lastText)
+      const text = texts.get(pendingText) ?? ''
+      if (text) {
+        lastText = text
+        ctx.emit.message(text)
+      }
       pendingText = undefined
     }
   }
@@ -640,7 +643,7 @@ async function reduceAgy(
     } else if (envelope.event === 'result') {
       flushText()
       if (Array.isArray(event.denied_actions)) deniedActions = event.denied_actions
-      if (event.response && event.response !== lastText) {
+      if (!lastText && event.response) {
         lastText = event.response
         ctx.emit.message(event.response)
       }

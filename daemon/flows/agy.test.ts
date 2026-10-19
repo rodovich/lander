@@ -414,15 +414,22 @@ it('marks refused tool calls blocked from their denial error or agy\'s log, pres
         state: 'DONE',
         text_delta: 'Running the check now.',
       }),
+      toolStep(2, 'run_command', { CommandLine: 'git status' }),
       event('step_update', {
-        step_index: 2,
+        step_index: 3,
+        step_type: 'agent_response',
+        state: 'DONE',
+        usage: { input_tokens: 10, output_tokens: 2 },
+      }),
+      event('step_update', {
+        step_index: 4,
         step_type: 'tool',
         state: 'ACTIVE',
         tool_name: 'run_command',
         tool_info: { name: 'run_command', parameters: { CommandLine: 'echo unlisted-probe' } },
       }),
       event('step_update', {
-        step_index: 2,
+        step_index: 4,
         step_type: 'tool',
         state: 'ERROR',
         tool_name: 'run_command',
@@ -432,7 +439,7 @@ it('marks refused tool calls blocked from their denial error or agy\'s log, pres
         },
       }),
       result({
-        response: '',
+        response: 'Running the check now.',
         denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
       }),
     ]])
@@ -683,13 +690,13 @@ it('does not acknowledge prompt delivery when the provider fails before consumin
   expect(patches(driven.events)).toEqual([])
 })
 
-it('emits intermediate text, terminal tool errors, and a final response fallback', async () => {
+it('emits intermediate text, terminal tool errors, and does not duplicate concatenated result.response', async () => {
   const g = fixture([[
     event('step_update', { step_index: 1, step_type: 'agent_response', text_delta: 'Checking' }),
     event('step_update', { step_index: 1, step_type: 'agent_response', text_delta: ' now' }),
     event('step_update', { step_index: 2, step_type: 'tool', state: 'ERROR', tool_info: { name: 'run_command', error: { message: 'Command failed' } } }),
     event('step_update', { step_index: 3, step_type: 'agent_response', text_delta: 'Finished' }),
-    result({ response: undefined }),
+    result({ response: 'Checking nowFinished' }),
   ]])
   const driven = await driveFlow(g, flow())
   expect(steps(driven.events).filter((step) => step.kind === 'text').map((step) => step.text)).toEqual(['Checking now', 'Finished'])
