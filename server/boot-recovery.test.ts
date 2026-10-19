@@ -144,6 +144,28 @@ describe('boot recovery leaves a deferred task to the scheduler', () => {
   })
 })
 
+// Landing a deferred task deletes its trigger but leaves the opening message
+// queued. Observed 2026-10-19: two deferred probes landed before their time rode
+// together on the next server restart.
+describe('boot recovery leaves a landed task alone', () => {
+  it('does not drive the queue a landed deferred task left behind', async () => {
+    await seed('boot-landed-deferred', { status: 'landed' })
+    await seed('boot-landed-control', {})
+
+    await recoverQueues()
+
+    // The sweep fire-and-forgets driveTask, so wait for the control's drain
+    // before reading the landed task's record.
+    await vi.waitFor(async () => {
+      expect((await readRaw('boot-landed-control')).queued ?? []).not.toEqual(['opening'])
+    })
+    const raw = await readRaw('boot-landed-deferred')
+    expect(raw.queued).toEqual(['opening'])
+    expect(raw.rides ?? []).toEqual([])
+    expect(raw.updatedAt).toBe(AT)
+  })
+})
+
 // A turn the restart cut off, in a task that had already replied once: lander
 // tells the task so, as its notification rather than as the human speaking.
 describe('boot recovery notifies a task its ride was interrupted', () => {

@@ -4100,6 +4100,11 @@ export async function recoverQueues(): Promise<void> {
         void driveTask(project, id)
         continue
       }
+      // A landed task at rest with a queue is, in practice, one landed while a
+      // trigger held that queue back: the landed crossing deletes the trigger but
+      // not the queue, and a message that reaches a landed task un-lands it.
+      // Driving it would run the deferred launch or retry that landing cancelled.
+      if (task.status === 'landed') continue
       // A task whose trigger holds back queued work waits for it — launchScheduled
       // owns both kinds, not the queue recovery (a deferred launch carries a
       // queued opening message, a wedged task its deferred retry, which is
@@ -4123,7 +4128,7 @@ export async function recoverQueues(): Promise<void> {
       // too, so "riding" no longer means "mid-run" — the real signal is unfinished
       // work with no live run: a still-open ride, or a trailing user item that
       // never got its reply (its queue was drained before the crash). A tracked run
-      // (runId) was handled above; wedged/landed are left alone.
+      // (runId) and landed tasks were handled above.
       const lastItem = task.items[task.items.length - 1]
       // A hook's nudge counts as a trailing prompt exactly as a user message
       // does: it was queued, and the queue may have drained before the ride
