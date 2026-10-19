@@ -388,211 +388,230 @@ export function makeFlow({
       addDir('/tmp')
       addDir(process.env.TMPDIR)
       if (ctx.turn.filesDir && ctx.turn.filesDirExists) addDir(ctx.turn.filesDir)
-      const child = ctx.spawn('agy', [
+      const run = await runAgy(ctx, [
         '-p', prompt, '--output-format', 'stream-json', '--print-timeout', '0s',
         '--mode', 'accept-edits', '--project', projectId,
         ...(sessionId ? ['--conversation', sessionId] : []),
         ...[...dirs].flatMap((dir) => ['--add-dir', dir]),
       ], {
-        cwd: ctx.task.cwd,
-        env: {
-          ...ctx.task.env,
-          ...(ctx.turn.filesDir ? { LANDER_FILES_DIR: ctx.turn.filesDir } : {}),
-          ...(ctx.turn.run ? { LANDER_RUN: ctx.turn.run } : {}),
-        },
+        sessionId,
+        priorTotal: sessionId
+          ? readThreadUsage(ctx.state.get(['threadUsage']))
+          : { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
       })
-      const tools = new Map<
-        number,
-        {
-          handle: ToolHandle
-          action?: string
-          denied?: boolean
-          silent?: boolean
-          blocked?: boolean
-        }
-      >()
-      const texts = new Map<number, string>()
-      const seenUsageSteps = new Set<number>()
-      const seenCheckpoints = new Set<number>()
-      const priorTotal: Usage | undefined = sessionId
-        ? readThreadUsage(ctx.state.get(['threadUsage']))
-        : { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 }
-      let liveUsage: Usage | undefined
-      let pendingText: number | undefined
-      let lastText = ''
-      let announced = sessionId !== undefined
-      let producedOutput = false
-      let permissionAborted = false
-      let terminalError: string | undefined
-      let stderr = ''
-      const collectStderr = (async () => {
-        for await (const line of child.stderr) stderr += `${line}\n`
-      })()
-      const flushText = () => {
-        if (pendingText !== undefined) {
-          lastText = texts.get(pendingText) ?? ''
-          if (lastText) ctx.emit.message(lastText)
-          pendingText = undefined
-        }
-      }
-      for await (const line of child.lines()) {
-        if (!line.trim()) continue
-        let envelope: AgyEvent & {
-          event: string
-          init?: { model?: string }
-          step_update?: AgyEvent
-          result?: AgyEvent
-        }
-        try {
-          envelope = JSON.parse(line)
-        } catch {
-          continue
-        }
-        if (!envelope || typeof envelope !== 'object') continue
-        const event = envelope.event === 'step_update'
-          ? envelope.step_update
-          : envelope.event === 'result' ? envelope.result : envelope
-        if (!event) continue
-        if (
-          !announced &&
-          typeof event.conversation_id === 'string' &&
-          event.conversation_id
-        ) {
-          ctx.state.set(['sessionId'], event.conversation_id)
-          announced = true
-        }
-        if (
-          envelope.event === 'init' &&
-          typeof envelope.init?.model === 'string' &&
-          envelope.init.model
-        ) {
-          ctx.emit.meter({ drivingModel: envelope.init.model })
-        } else if (envelope.event === 'step_update') {
-          if (event.step_type === 'checkpoint') {
-            if (event.state === 'DONE' && !seenCheckpoints.has(event.step_index)) {
-              flushText()
-              seenCheckpoints.add(event.step_index)
-              if (ctx.state.get(['landerDoc']) !== undefined)
-                ctx.state.delete(['landerDoc'])
-              const seconds = event.duration_seconds
-              ctx.emit.context({
-                action: 'checkpoint',
-                phase: 'completed',
-                ...(typeof seconds === 'number' && Number.isFinite(seconds) && seconds >= 0
-                  ? { durationMs: seconds * 1000 }
-                  : {}),
-              })
-            }
-          } else if (event.step_type === 'agent_response') {
-            if (pendingText !== event.step_index) flushText()
-            pendingText = event.step_index
-            texts.set(
-              event.step_index,
-              (texts.get(event.step_index) ?? '') + (event.text_delta ?? ''),
-            )
-            const stepUsage = parseAgyUsage(event.usage)
-            if (stepUsage && !seenUsageSteps.has(event.step_index)) {
-              seenUsageSteps.add(event.step_index)
-              liveUsage = addUsage(liveUsage, stepUsage)
-              ctx.emit.meter({ usage: liveUsage })
-            }
-            if (event.text_delta || stepUsage) producedOutput = true
-          } else if (event.step_type === 'tool') {
-            flushText()
-            producedOutput = true
-            const info = event.tool_info
-            let entry = tools.get(event.step_index)
-            if (!entry) {
-              const ruleInfo = agyToolRule(event)
-              const handle = ctx.emit.tool({
-                name: event.tool_name ?? info?.name ?? 'tool',
-                ...formatToolCall(event),
-                ...(ruleInfo ? { rule: ruleInfo.rule } : {}),
-              })
-              entry = { handle, action: ruleInfo?.action }
-              tools.set(event.step_index, entry)
-            }
-            if (event.state !== 'ACTIVE') {
-              const rawOutput = info?.output ?? info?.error?.message
-              const isError = event.state === 'ERROR' || !!info?.error
-              entry.denied = isError && isAgyDenial(info?.error?.message)
-              entry.silent = !isError && !info?.output
-              entry.handle.result({
-                ...(rawOutput !== undefined
-                  ? { output: summarizeToolResult(rawOutput) }
-                  : {}),
-                isError,
-              })
-            }
-          }
-        } else if (envelope.event === 'result') {
-          flushText()
-          if (Array.isArray(event.denied_actions) && event.denied_actions.length > 0) {
-            permissionAborted = true
-            const recorded = [...tools.values()].reverse()
-            for (const denied of event.denied_actions) {
-              const action =
-                typeof denied?.action === 'string' ? denied.action : undefined
-              // A denial names only the action kind, and agy sometimes streams
-              // a denied command as a plain DONE with no output instead of with
-              // its denial error. That is also how an allowed command with no
-              // output, or one queued behind the refusal, looks, so a silent
-              // command is blamed only when it is the turn's sole one. Only
-              // command denials have been probed.
-              const open = action
-                ? recorded.filter((t) => !t.blocked && t.action === action)
-                : []
-              const silent =
-                action === 'command' ? open.filter((t) => t.silent) : []
-              const target =
-                open.find((t) => t.denied) ??
-                (silent.length === 1 ? silent[0] : undefined)
-              if (target) {
-                target.blocked = true
-                target.handle.result({ blocked: true })
-              } else {
-                ctx.emit.notice(
-                  `Antigravity denied a ${denied?.display_name ?? action ?? 'tool'} call this turn without saying which one.`,
-                )
-              }
-            }
-          }
-          if (event.response && event.response !== lastText) {
-            lastText = event.response
-            ctx.emit.message(event.response)
-          }
-          if (lastText) {
-            ctx.emit.reply(lastText)
-            producedOutput = true
-          }
-          const totalUsage = parseAgyUsage(event.usage)
-          if (totalUsage) {
-            const usage = codexTurnUsage(totalUsage, priorTotal)
-            if (usage) ctx.emit.meter({ usage })
-            ctx.state.set(['threadUsage'], totalUsage)
-          }
-          if (event.status !== 'SUCCESS') {
-            terminalError = event.error ||
-              `Antigravity turn failed (${event.status ?? 'unknown status'}).`
-          }
-        }
-      }
-      flushText()
-      if (producedOutput) {
+      if (run.producedOutput) {
         if (sendTaskPrompt) ctx.state.set(['taskPrompt'], digest)
         if (sendDoc && docDigest !== undefined) ctx.state.set(['landerDoc'], docDigest)
       }
-      const exitCode = await child.exit
-      await collectStderr
-      if (permissionAborted && !terminalError && ctx.task.env.LANDER_API) {
+      if (run.permissionAborted && !run.terminalError && ctx.task.env.LANDER_API) {
         await ctx.wedge()
       }
       return {
-        exitCode: exitCode === 0 && terminalError ? 1 : exitCode,
-        stderr: [stderr.trim(), terminalError].filter(Boolean).join('\n'),
+        exitCode: run.exitCode === 0 && run.terminalError ? 1 : run.exitCode,
+        stderr: [run.stderr.trim(), run.terminalError].filter(Boolean).join('\n'),
       }
     },
   }
+}
+
+type AgyRun = {
+  exitCode: number
+  stderr: string
+  terminalError?: string
+  permissionAborted: boolean
+  producedOutput: boolean
+}
+
+async function runAgy(
+  ctx: Ctx,
+  args: string[],
+  { sessionId, priorTotal }: { sessionId: string | undefined; priorTotal: Usage | undefined },
+): Promise<AgyRun> {
+  const child = ctx.spawn('agy', args, {
+    cwd: ctx.task.cwd,
+    env: {
+      ...ctx.task.env,
+      ...(ctx.turn.filesDir ? { LANDER_FILES_DIR: ctx.turn.filesDir } : {}),
+      ...(ctx.turn.run ? { LANDER_RUN: ctx.turn.run } : {}),
+    },
+  })
+  const tools = new Map<
+    number,
+    {
+      handle: ToolHandle
+      action?: string
+      denied?: boolean
+      silent?: boolean
+      blocked?: boolean
+    }
+  >()
+  const texts = new Map<number, string>()
+  const seenUsageSteps = new Set<number>()
+  const seenCheckpoints = new Set<number>()
+  let liveUsage: Usage | undefined
+  let pendingText: number | undefined
+  let lastText = ''
+  let announced = sessionId !== undefined
+  let producedOutput = false
+  let permissionAborted = false
+  let terminalError: string | undefined
+  let stderr = ''
+  const collectStderr = (async () => {
+    for await (const line of child.stderr) stderr += `${line}\n`
+  })()
+  const flushText = () => {
+    if (pendingText !== undefined) {
+      lastText = texts.get(pendingText) ?? ''
+      if (lastText) ctx.emit.message(lastText)
+      pendingText = undefined
+    }
+  }
+  for await (const line of child.lines()) {
+    if (!line.trim()) continue
+    let envelope: AgyEvent & {
+      event: string
+      init?: { model?: string }
+      step_update?: AgyEvent
+      result?: AgyEvent
+    }
+    try {
+      envelope = JSON.parse(line)
+    } catch {
+      continue
+    }
+    if (!envelope || typeof envelope !== 'object') continue
+    const event = envelope.event === 'step_update'
+      ? envelope.step_update
+      : envelope.event === 'result' ? envelope.result : envelope
+    if (!event) continue
+    if (
+      !announced &&
+      typeof event.conversation_id === 'string' &&
+      event.conversation_id
+    ) {
+      ctx.state.set(['sessionId'], event.conversation_id)
+      announced = true
+    }
+    if (
+      envelope.event === 'init' &&
+      typeof envelope.init?.model === 'string' &&
+      envelope.init.model
+    ) {
+      ctx.emit.meter({ drivingModel: envelope.init.model })
+    } else if (envelope.event === 'step_update') {
+      if (event.step_type === 'checkpoint') {
+        if (event.state === 'DONE' && !seenCheckpoints.has(event.step_index)) {
+          flushText()
+          seenCheckpoints.add(event.step_index)
+          if (ctx.state.get(['landerDoc']) !== undefined)
+            ctx.state.delete(['landerDoc'])
+          const seconds = event.duration_seconds
+          ctx.emit.context({
+            action: 'checkpoint',
+            phase: 'completed',
+            ...(typeof seconds === 'number' && Number.isFinite(seconds) && seconds >= 0
+              ? { durationMs: seconds * 1000 }
+              : {}),
+          })
+        }
+      } else if (event.step_type === 'agent_response') {
+        if (pendingText !== event.step_index) flushText()
+        pendingText = event.step_index
+        texts.set(
+          event.step_index,
+          (texts.get(event.step_index) ?? '') + (event.text_delta ?? ''),
+        )
+        const stepUsage = parseAgyUsage(event.usage)
+        if (stepUsage && !seenUsageSteps.has(event.step_index)) {
+          seenUsageSteps.add(event.step_index)
+          liveUsage = addUsage(liveUsage, stepUsage)
+          ctx.emit.meter({ usage: liveUsage })
+        }
+        if (event.text_delta || stepUsage) producedOutput = true
+      } else if (event.step_type === 'tool') {
+        flushText()
+        producedOutput = true
+        const info = event.tool_info
+        let entry = tools.get(event.step_index)
+        if (!entry) {
+          const ruleInfo = agyToolRule(event)
+          const handle = ctx.emit.tool({
+            name: event.tool_name ?? info?.name ?? 'tool',
+            ...formatToolCall(event),
+            ...(ruleInfo ? { rule: ruleInfo.rule } : {}),
+          })
+          entry = { handle, action: ruleInfo?.action }
+          tools.set(event.step_index, entry)
+        }
+        if (event.state !== 'ACTIVE') {
+          const rawOutput = info?.output ?? info?.error?.message
+          const isError = event.state === 'ERROR' || !!info?.error
+          entry.denied = isError && isAgyDenial(info?.error?.message)
+          entry.silent = !isError && !info?.output
+          entry.handle.result({
+            ...(rawOutput !== undefined
+              ? { output: summarizeToolResult(rawOutput) }
+              : {}),
+            isError,
+          })
+        }
+      }
+    } else if (envelope.event === 'result') {
+      flushText()
+      if (Array.isArray(event.denied_actions) && event.denied_actions.length > 0) {
+        permissionAborted = true
+        const recorded = [...tools.values()].reverse()
+        for (const denied of event.denied_actions) {
+          const action =
+            typeof denied?.action === 'string' ? denied.action : undefined
+          // A denial names only the action kind, and agy sometimes streams
+          // a denied command as a plain DONE with no output instead of with
+          // its denial error. That is also how an allowed command with no
+          // output, or one queued behind the refusal, looks, so a silent
+          // command is blamed only when it is the turn's sole one. Only
+          // command denials have been probed.
+          const open = action
+            ? recorded.filter((t) => !t.blocked && t.action === action)
+            : []
+          const silent =
+            action === 'command' ? open.filter((t) => t.silent) : []
+          const target =
+            open.find((t) => t.denied) ??
+            (silent.length === 1 ? silent[0] : undefined)
+          if (target) {
+            target.blocked = true
+            target.handle.result({ blocked: true })
+          } else {
+            ctx.emit.notice(
+              `Antigravity denied a ${denied?.display_name ?? action ?? 'tool'} call this turn without saying which one.`,
+            )
+          }
+        }
+      }
+      if (event.response && event.response !== lastText) {
+        lastText = event.response
+        ctx.emit.message(event.response)
+      }
+      if (lastText) {
+        ctx.emit.reply(lastText)
+        producedOutput = true
+      }
+      const totalUsage = parseAgyUsage(event.usage)
+      if (totalUsage) {
+        const usage = codexTurnUsage(totalUsage, priorTotal)
+        if (usage) ctx.emit.meter({ usage })
+        ctx.state.set(['threadUsage'], totalUsage)
+      }
+      if (event.status !== 'SUCCESS') {
+        terminalError = event.error ||
+          `Antigravity turn failed (${event.status ?? 'unknown status'}).`
+      }
+    }
+  }
+  flushText()
+  const exitCode = await child.exit
+  await collectStderr
+  return { exitCode, stderr, terminalError, permissionAborted, producedOutput }
 }
 
 export async function onGrant(
