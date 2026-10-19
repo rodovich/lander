@@ -15,6 +15,10 @@ import type { ContextAction, ContextDetails } from '../shared/context'
 // types from here, so the runtime edge stays one-way — this module → asks.ts.
 import { withdrawOpenAsks, type Ask, type AskForm } from './asks'
 import { LEGACY_FLOW, flowCaps, type FlowCaps } from './flows'
+import { isUnread, type ReadableTask } from '../shared/readMarker'
+import { openRide } from '../shared/timeline'
+
+export { openRide }
 
 export type Message = {
   role: 'user' | 'assistant'
@@ -445,16 +449,6 @@ export function checkoutReleasable(
   if (task.runId || openRide(task)) return false
   if (archived) return true
   return task.status === 'landed' && !task.pendingHooks?.length
-}
-
-// The task's currently-open ride (the last one without an `endedAt`), if any —
-// what a riding task is streaming into. Undefined when no run is in flight, and
-// for tasks saved before rides existed (no `rides` array).
-export function openRide(task: { rides?: Ride[] }): Ride | undefined {
-  const rides = task.rides
-  if (!rides) return undefined
-  for (let i = rides.length - 1; i >= 0; i--) if (!rides[i].endedAt) return rides[i]
-  return undefined
 }
 
 // Open a ride for a run being handed to the daemon: push `{ id, startedAt }`. The
@@ -1232,6 +1226,7 @@ export function publicTask<T extends object>(
 // still occupies its slot.
 export function taskSummary<T extends object>(task: T, opts?: { caps?: FlowCaps }) {
   const full = publicTask(task, opts)
+  const unread = isUnread(full as ReadableTask)
   const {
     items: _items,
     rides: _rides,
@@ -1251,6 +1246,7 @@ export function taskSummary<T extends object>(task: T, opts?: { caps?: FlowCaps 
   }
   return {
     ...rest,
+    ...(unread ? { unread: true } : {}),
     ...(scheduled
       ? {
           scheduledMessages: scheduled.map((m) => ({

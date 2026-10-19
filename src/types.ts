@@ -308,6 +308,7 @@ export type Task = {
   // through. Timeline entries stamped after it are unread (see readMarker.ts).
   // Advanced monotonically via the /seen endpoint, set back by /unread.
   readThrough?: string
+  unread?: boolean
   // Set on tasks the server reads from the archive dir (when the list is
   // fetched with ?archived=1). Marks the row and swaps the kebab's Archive item
   // for Restore. Absent on active tasks.

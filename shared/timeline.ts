@@ -89,6 +89,16 @@ export type TimelineEntry =
 
 export type RideItem = Exclude<Item, TaskActionItem>
 
+export function openRide<R extends { endedAt?: string } = Ride>(task: {
+  rides?: R[]
+}): R | undefined {
+  const rides = task.rides
+  if (!rides) return undefined
+  for (let i = rides.length - 1; i >= 0; i--)
+    if (!rides[i].endedAt) return rides[i]
+  return undefined
+}
+
 export function buildTimeline(
   task: { items?: Item[]; rides?: Ride[] },
   now: string,

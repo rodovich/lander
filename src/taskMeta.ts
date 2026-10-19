@@ -1,16 +1,9 @@
 import { agentDisplayName, formatAgentModelName } from './agentDisplay'
 import { formatCost, formatDuration } from './format'
+import { openRide } from '../shared/timeline'
 import type { Ride, Task, TelemetryItem, TokenUsage } from './types'
 
-// The task's currently-open ride (the last one without an `endedAt`), if any —
-// what a riding task is streaming into. Mirrors the server's openRide.
-export function openRide(task: { rides?: Ride[] }): Ride | undefined {
-  const rides = task.rides
-  if (!rides) return undefined
-  for (let i = rides.length - 1; i >= 0; i--)
-    if (!rides[i].endedAt) return rides[i]
-  return undefined
-}
+export { openRide }
 
 export function taskAgentModelName(agent: string | undefined, model?: string): string {
   return formatAgentModelName(agentDisplayName(agent), model)

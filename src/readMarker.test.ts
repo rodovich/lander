@@ -89,6 +89,12 @@ describe('firstUnreadIndex', () => {
     // Read through t(4) while r2 streamed; it ended at t(5).
     expect(isUnread(conversation(t(4)))).toBe(true)
   })
+
+  it('reads the summary unread flag when items have been stripped', () => {
+    expect(isUnread(task({ items: undefined, unread: true }))).toBe(true)
+    expect(isUnread(task({ items: undefined, unread: false }))).toBe(false)
+    expect(isUnread(task({ items: undefined }))).toBe(false)
+  })
 })
 
 describe('readThroughOf', () => {

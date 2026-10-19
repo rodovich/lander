@@ -418,6 +418,26 @@ describe('taskSummary', () => {
       false,
     )
   })
+
+  it('stamps unread before dropping items and rides, and omits it when caught up', () => {
+    const unread = taskSummary({
+      id: 's',
+      status: 'paced',
+      readThrough: AT,
+      items: [userItem('u1', AT), flowItem('f1', 'r0', later(1))],
+      rides: [closedR2],
+    })
+    expect((unread as { unread?: boolean }).unread).toBe(true)
+
+    const read = taskSummary({
+      id: 's',
+      status: 'paced',
+      readThrough: later(1),
+      items: [userItem('u1', AT), flowItem('f1', 'r0', later(1))],
+      rides: [closedR2],
+    })
+    expect('unread' in read).toBe(false)
+  })
 })
 
 describe('migrateSeenAt', () => {
