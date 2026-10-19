@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, describe, expect, it } from 'vitest'
+import { spawnDaemonProcess } from './daemon-spawn.mjs'
+import { createSupervisor } from './daemon-supervisor.mjs'
 
 // End-to-end regression test for the drain-signal delivery bug. The supervisor
 // used to spawn the daemon via the `tsx` bin — a wrapper process that relays
@@ -17,11 +19,13 @@ import { afterAll, describe, expect, it } from 'vitest'
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
 
 // A minimal .ts entry standing in for daemon/index.ts: installs the drain
-// handler, announces readiness, and idles like a daemon (open handles).
+// handler, announces readiness (to the supervisor too, as daemon/index.ts does
+// once the server registers it), and idles like a daemon (open handles).
 const FIXTURE = `
 for (const sig of ['SIGUSR1', 'SIGUSR2'] as const)
   process.on(sig, () => { console.log('drain-signal-received'); process.exit(7) })
 console.log('probe-ready')
+process.send?.({ type: 'registered' })
 setInterval(() => {}, 60_000)
 `
 
@@ -77,11 +81,7 @@ function waitForExit(child: ChildProcess, timeoutMs = 10_000): Promise<number | 
 
 describe('daemon spawn + drain signal delivery', () => {
   it('SIGUSR2 sent to a directly-spawned (node --import tsx) child reaches its handler', async () => {
-    // The exact spawn shape from daemon-watch.mjs.
-    const child = spawn(process.execPath, ['--import', 'tsx', fixture], {
-      cwd: ROOT,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
+    const child = spawnDaemonProcess(fixture, { cwd: ROOT, stdio: 'pipe' })
     children.push(child)
     await waitForStdout(child, 'probe-ready')
     child.kill('SIGUSR2')
@@ -121,5 +121,41 @@ describe('daemon spawn + drain signal delivery', () => {
     // Cleanup through the one signal tsx does relay.
     wrapper.kill('SIGTERM')
     await waitForExit(wrapper).catch(() => {})
+  }, 30_000)
+})
+
+// The handoff over real processes and a real IPC channel: the supervisor drains
+// the running daemon only once its replacement reports it registered, so a
+// replacement that fails to parse leaves the running one alone.
+describe('daemon handoff over IPC', () => {
+  const brokenFixture = path.join(dir, 'broken-daemon.ts')
+  writeFileSync(brokenFixture, 'export const unbalanced = {\n')
+
+  it('drains the running daemon only after a replacement registers', async () => {
+    let entry = fixture
+    const sup = createSupervisor({
+      spawn: () => {
+        const child = spawnDaemonProcess(entry, { cwd: ROOT, stdio: 'pipe' })
+        children.push(child)
+        return child
+      },
+    })
+    const d0 = sup.spawnDaemon() as ChildProcess
+    await waitForStdout(d0, 'probe-ready')
+    const d0Exit = waitForExit(d0, 25_000)
+
+    entry = brokenFixture
+    const broken = sup.reload() as ChildProcess
+    expect(await waitForExit(broken)).not.toBe(0)
+    expect(d0.exitCode).toBeNull()
+    expect(sup.current).toBe(d0)
+
+    entry = fixture
+    const d1 = sup.reload() as ChildProcess
+    // Exit code 7 is the fixture's drain handler.
+    expect(await d0Exit).toBe(7)
+    expect(sup.current).toBe(d1)
+    sup.shutdown()
+    await waitForExit(d1)
   }, 30_000)
 })

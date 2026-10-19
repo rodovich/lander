@@ -435,6 +435,12 @@ export type ServerToDaemon =
   | HookRunMessage
   | ReleaseCheckoutMessage
 
+// The server has applied a `register`: if it was not draining, the daemon that
+// sent it is now the primary. The dev supervisor waits on this before draining
+// the daemon it replaces. Sent straight back on the registering socket, so it
+// is not among the ServerToDaemon messages sendToDaemon routes.
+export type RegisteredMessage = { type: 'registered' }
+
 // ── Daemon → server ────────────────────────────────────────────────────────
 
 // On connect (and on change), the daemon announces which project slugs it serves

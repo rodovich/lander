@@ -14,7 +14,9 @@ import {
   daemonServes,
 } from './daemon'
 import type { RunEvent } from './daemon'
-import type { FlowAnnouncement, ServerToDaemon } from './protocol'
+import type { FlowAnnouncement, RegisteredMessage, ServerToDaemon } from './protocol'
+
+type Received = ServerToDaemon | RegisteredMessage
 import {
   announcedFlows,
   clearAnnouncedFlows,
@@ -44,13 +46,14 @@ async function waitFor(pred: () => boolean, ms = 1000): Promise<void> {
 }
 
 type RegisterOpts = {
+  slug?: string
   draining?: boolean
   runs?: string[]
   flows?: FlowAnnouncement[]
 }
 
 type FakeDaemon = {
-  received: ServerToDaemon[]
+  received: Received[]
   register: (opts?: RegisterOpts) => void
   send: (m: object) => void
   close: () => Promise<void>
@@ -60,10 +63,10 @@ type FakeDaemon = {
 function connectDaemon(port: number): Promise<FakeDaemon> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://localhost:${port}/daemon?token=${TOKEN}`)
-    const received: ServerToDaemon[] = []
+    const received: Received[] = []
     ws.on('message', (d) => {
       try {
-        received.push(JSON.parse(d.toString()) as ServerToDaemon)
+        received.push(JSON.parse(d.toString()) as Received)
       } catch {
         // ignore non-JSON
       }
@@ -72,11 +75,11 @@ function connectDaemon(port: number): Promise<FakeDaemon> {
     ws.on('open', () =>
       resolve({
         received,
-        register: ({ draining = false, runs = [], flows }: RegisterOpts = {}) =>
+        register: ({ slug = 'proj', draining = false, runs = [], flows }: RegisterOpts = {}) =>
           ws.send(
             JSON.stringify({
               type: 'register',
-              projects: [{ slug: 'proj' }],
+              projects: [{ slug }],
               draining,
               runs,
               // Omitted entirely when not given — that IS the old-daemon case.
@@ -223,6 +226,59 @@ describe('daemon transport handoff', () => {
     closeRunChannel('r3')
     await a2.close()
     await b.close()
+    await waitFor(() => !daemonConnected())
+  })
+
+  // The ack is what the dev supervisor waits on before draining the daemon the
+  // sender replaces, so it must follow the register's effect, not precede it.
+  it('acknowledges a register once it has taken effect', async () => {
+    const d = await connectDaemon(port)
+    d.register()
+    await waitFor(() => d.received.some((m) => m.type === 'registered'))
+    expect(daemonServes('proj')).toBe(true)
+    await d.close()
+    await waitFor(() => !daemonConnected())
+  })
+
+  it('hands primary to another live daemon when the primary drops', async () => {
+    const a = await connectDaemon(port)
+    a.register({ slug: 'proj-a' })
+    await waitFor(() => daemonServes('proj-a'))
+    const b = await connectDaemon(port)
+    b.register({ slug: 'proj-b' })
+    await waitFor(() => daemonServes('proj-b'))
+
+    await b.close()
+    await waitFor(() => daemonServes('proj-a') && !daemonServes('proj-b'))
+    openRunChannel('r-succ')
+    expect(sendToDaemon(start('r-succ'))).toBe(true)
+    await waitFor(() => a.has('start-run', 'r-succ'))
+
+    closeRunChannel('r-succ')
+    await a.close()
+    await waitFor(() => !daemonConnected())
+  })
+
+  // A server reload mid-handoff: both daemons reconnect, and the outgoing one's
+  // register lands last, so it is primary when it starts draining.
+  it('moves primary off a daemon that re-registers as draining', async () => {
+    const fresh = await connectDaemon(port)
+    fresh.register({ slug: 'proj-fresh' })
+    await waitFor(() => daemonServes('proj-fresh'))
+    const outgoing = await connectDaemon(port)
+    outgoing.register({ slug: 'proj-outgoing' })
+    await waitFor(() => daemonServes('proj-outgoing'))
+    outgoing.register({ slug: 'proj-outgoing', draining: true })
+
+    await waitFor(() => daemonServes('proj-fresh') && !daemonServes('proj-outgoing'))
+    openRunChannel('r-drain')
+    expect(sendToDaemon(start('r-drain'))).toBe(true)
+    await waitFor(() => fresh.has('start-run', 'r-drain'))
+    expect(outgoing.has('start-run', 'r-drain')).toBe(false)
+
+    closeRunChannel('r-drain')
+    await outgoing.close()
+    await fresh.close()
     await waitFor(() => !daemonConnected())
   })
 

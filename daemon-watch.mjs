@@ -3,22 +3,24 @@
 // running daemon: it owns the claude children for every riding task, so a hard
 // restart aborts each in-flight turn (the old "decision 2" behavior). Instead we
 // signal the running daemon to *drain* (SIGUSR2 — finish its turns, take no new
-// ones, exit when empty) and spawn a fresh daemon. The server adopts the newcomer
-// as primary and routes all future turns to it, while the draining one finishes
-// what it's riding. So a daemon edit takes effect at turn boundaries with no
-// interruption. A max-drain timer SIGTERMs a daemon that never finishes, bounding
-// the worst case to today's hard-restart behavior. And if the live daemon exits
-// on its own (crash, idle-kill, an external kill), we respawn it — the stack must
-// never sit daemon-less, or tasks fail to start with "no daemon connected".
+// ones, exit when empty) once a fresh daemon has registered with the server. The
+// server adopts the newcomer as primary and routes all future turns to it, while
+// the draining one finishes what it's riding. So a daemon edit takes effect at
+// turn boundaries with no interruption, and an edit that leaves the daemon unable
+// to boot leaves the previous one serving. A max-drain timer SIGTERMs a daemon
+// that never finishes, bounding the worst case to today's hard-restart behavior.
+// And if the live daemon exits on its own (crash, idle-kill, an external kill),
+// we respawn it — the stack must never sit daemon-less, or tasks fail to start
+// with "no daemon connected".
 //
 // The lifecycle decisions live in daemon-supervisor.mjs (unit-tested); this file
 // wires them to the real `tsx` spawner, the fs watcher, and process signals. Runs
 // the daemon with plain `tsx` (no --watch); this file owns the watching.
 
-import { spawn } from 'node:child_process'
 import { watch } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { spawnDaemonProcess } from './daemon-spawn.mjs'
 import { createSupervisor } from './daemon-supervisor.mjs'
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
@@ -50,18 +52,7 @@ const WATCHED_SERVER_FILES = [
 const isDaemonSource = (name) => name.endsWith('.ts') && !name.endsWith('.test.ts')
 
 const sup = createSupervisor({
-  // Spawn the daemon as a DIRECT node child (`node --import tsx`), not via the
-  // `tsx` bin. The bin is a wrapper process that relays only SIGINT/SIGTERM to
-  // the real daemon underneath, so the supervisor's drain signal sent to the
-  // wrapper pid never reached the daemon — graceful drain silently never worked;
-  // every superseded daemon sat as a non-draining zombie until max-drain's
-  // SIGTERM. Direct spawn means kill() hits the daemon itself.
-  spawn: () =>
-    spawn(process.execPath, ['--import', 'tsx', ENTRY], {
-      cwd: ROOT,
-      stdio: 'inherit',
-      env: process.env,
-    }),
+  spawn: () => spawnDaemonProcess(ENTRY, { cwd: ROOT }),
   // How long to let a draining daemon finish before forcing it down. A last
   // resort, not a routine bound: the run-level idle watchdog (15m of silence)
   // already ends hung runs, so a daemon still draining here is either serving a

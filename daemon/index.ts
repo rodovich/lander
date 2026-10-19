@@ -23,6 +23,7 @@ import { scrubProcessEnv } from '../server/secrets'
 import type { AgentKind, TelemetryItem } from '../server/protocol'
 import type {
   ServerToDaemon,
+  RegisteredMessage,
   StartRunMessage,
   HooksResolveMessage,
   HookRunMessage,
@@ -420,9 +421,9 @@ function forRun(
 }
 
 function onMessage(raw: string): void {
-  let msg: ServerToDaemon
+  let msg: ServerToDaemon | RegisteredMessage
   try {
-    msg = JSON.parse(raw) as ServerToDaemon
+    msg = JSON.parse(raw) as ServerToDaemon | RegisteredMessage
   } catch {
     return
   }
@@ -450,6 +451,12 @@ function onMessage(raw: string): void {
     // Taken while draining too: it spawns no run, and the drain waits for it.
     case 'release-checkout':
       return releaseCheckout(msg)
+    // Tell the dev supervisor the server has us registered, so it can drain the
+    // daemon we replace (daemon-supervisor.mjs). Unavailable when nothing spawned
+    // us with IPC, or once the supervisor has gone.
+    case 'registered':
+      if (process.connected) process.send?.({ type: 'registered' })
+      return
   }
 }
 
@@ -526,13 +533,9 @@ function runHookFire(msg: HookRunMessage): void {
     // Refused while draining, unlike hooks-resolve: this one spawns a host that
     // may run for minutes, and a daemon on its way out must not accept work it
     // would have to abandon. The server treats the refusal as a hold — no
-    // attempt counted, no report item — and retries once the successor is
-    // primary, which is seconds away.
-    //
-    // This is the only mechanism, not a race-closer on top of one: the server
-    // keeps no per-socket draining state and a SIGUSR2'd daemon never
-    // re-registers, so its `primary` still points here for the whole handoff
-    // window.
+    // attempt counted, no report item — and retries on whichever daemon is
+    // primary by then. One can still reach us in the moment between the drain
+    // starting and our draining `register` reaching the server.
     if (drain.draining() || exiting)
       return {
         ok: false,
@@ -598,7 +601,27 @@ process.on('SIGUSR2', () => {
   if (drain.draining()) return
   console.log(`draining ${runManager.size()} run(s) before handoff`)
   drain.begin()
+  // Re-register as draining, so the server routes no new work here even if it
+  // still has us as primary.
+  sendRegister()
 })
+
+function sendRegister(): void {
+  send({
+    type: 'register',
+    projects: [...pathBySlug.keys()].map((slug) => ({ slug })),
+    // Tell the server whether we're handing off (so it routes no new runs to us)
+    // and exactly which in-flight runs we still hold, so it resumes each only on
+    // its real owner — and a reconnect mid-drain reclaims our runs instead of
+    // losing them to the fresh primary.
+    draining: drain.draining(),
+    runs: runManager.heldRunIds(),
+    // Everything we can drive, so the server knows what it may dispatch. Every
+    // flow is bundled today; the scope envelope leaves room for user- and
+    // project-scoped flows without another wire change.
+    flows: announcedFlows(),
+  })
+}
 
 // Dial the server, announce our projects, and reconnect with a fixed backoff if
 // the link drops. In-flight children keep running across a reconnect, and their
@@ -610,20 +633,7 @@ function connect(): void {
   ws = sock
   sock.addEventListener('open', () => {
     console.log(`connected to ${WS_URL}`)
-    send({
-      type: 'register',
-      projects: [...pathBySlug.keys()].map((slug) => ({ slug })),
-      // Tell the server whether we're handing off (so it routes no new runs to us)
-      // and exactly which in-flight runs we still hold, so it resumes each only on
-      // its real owner — and a reconnect mid-drain reclaims our runs instead of
-      // losing them to the fresh primary.
-      draining: drain.draining(),
-      runs: runManager.heldRunIds(),
-      // Everything we can drive, so the server knows what it may dispatch. Every
-      // flow is bundled today; the scope envelope leaves room for user- and
-      // project-scoped flows without another wire change.
-      flows: announcedFlows(),
-    })
+    sendRegister()
     // Prime the server's snapshot: re-push the last one we hold (so a reconnect
     // re-fills the server cache immediately), then fetch a fresh one (the boot /
     // connect trigger; the TTL floor collapses a redundant fetch).

@@ -16,9 +16,13 @@ the task is running inside.
 
 `npm run dev` runs the web client, the API server, and the host daemon together.
 The client and server hot-reload on change. Editing `daemon/**` makes the dev
-supervisor drain the running daemon (SIGUSR2) and spawn a fresh one, but the
-superseded daemon refuses new runs and stays alive until its riding turns end —
-so an in-flight turn survives the reload and reports into the updated server.
+supervisor spawn a fresh daemon and, once it has registered with the server,
+drain the running one (SIGUSR2). The superseded daemon refuses new runs and stays
+alive until its riding turns end — so an in-flight turn survives the reload and
+reports into the updated server. A fresh daemon that exits before registering (an
+edit that doesn't parse) leaves the running one serving until the next edit.
+Changes to `daemon-watch.mjs`, `daemon-supervisor.mjs`, and `daemon-spawn.mjs`
+themselves take effect only when `npm run dev` restarts.
 
 The practical rules that follow from that topology:
 

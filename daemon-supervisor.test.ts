@@ -64,6 +64,9 @@ function makeHarness() {
   return { sup, spawned, advance, logs }
 }
 
+// The daemon's report, over IPC, that it has registered with the server.
+const register = (child: FakeChild) => child.emit('message', { type: 'registered' })
+
 describe('daemon supervisor', () => {
   it('respawns the live daemon when it exits unexpectedly', () => {
     const { sup, spawned, advance } = makeHarness()
@@ -83,15 +86,85 @@ describe('daemon supervisor', () => {
     const { sup, spawned, advance } = makeHarness()
     sup.spawnDaemon()
     const d0 = sup.current as FakeChild
-    sup.reload()
+    const d1 = sup.reload() as FakeChild
+    register(d1)
     expect(d0.killed).toBe('SIGUSR2') // drained, not killed outright
-    const d1 = sup.current
-    expect(d1).not.toBe(d0)
+    expect(sup.current).toBe(d1)
     expect(spawned).toHaveLength(2)
     d0.exit(0) // the drained predecessor finishes
     advance(10_000)
     expect(spawned).toHaveLength(2) // no respawn
     expect(sup.current).toBe(d1)
+  })
+
+  it('keeps the running daemon serving until its replacement registers', () => {
+    const { sup } = makeHarness()
+    sup.spawnDaemon()
+    const d0 = sup.current as FakeChild
+    const d1 = sup.reload() as FakeChild
+    expect(d0.killed).toBeUndefined()
+    expect(sup.current).toBe(d0)
+    expect(sup.pending).toBe(d1)
+    register(d1)
+    expect(d0.killed).toBe('SIGUSR2')
+    expect(sup.pending).toBeNull()
+  })
+
+  it('keeps the running daemon when its replacement cannot boot', () => {
+    const { sup, spawned, advance, logs } = makeHarness()
+    sup.spawnDaemon()
+    const d0 = sup.current as FakeChild
+    const d1 = sup.reload() as FakeChild
+    d1.exit(1) // a syntax error: exits before it ever registers
+    advance(10_000)
+    expect(d0.killed).toBeUndefined()
+    expect(sup.current).toBe(d0)
+    expect(sup.pending).toBeNull()
+    expect(spawned).toHaveLength(2) // no respawn of the broken code
+    expect(logs.some((l) => l.includes('previous daemon keeps serving'))).toBe(true)
+    // The edit that fixes it hands off normally.
+    const d2 = sup.reload() as FakeChild
+    register(d2)
+    expect(d0.killed).toBe('SIGUSR2')
+    expect(sup.current).toBe(d2)
+  })
+
+  it('a reload supersedes a replacement that has not registered yet', () => {
+    const { sup, spawned, advance } = makeHarness()
+    sup.spawnDaemon()
+    const d0 = sup.current as FakeChild
+    const d1 = sup.reload() as FakeChild
+    const d2 = sup.reload() as FakeChild
+    expect(d1.killed).toBe('SIGUSR2')
+    expect(sup.pending).toBe(d2)
+    register(d1) // a late report from the superseded one changes nothing
+    expect(d0.killed).toBeUndefined()
+    d1.exit(0)
+    advance(10_000)
+    expect(spawned).toHaveLength(3)
+    register(d2)
+    expect(sup.current).toBe(d2)
+    expect(d0.killed).toBe('SIGUSR2')
+  })
+
+  it('a pending replacement takes over when the running daemon exits', () => {
+    const { sup, spawned, advance } = makeHarness()
+    sup.spawnDaemon()
+    const d0 = sup.current as FakeChild
+    const d1 = sup.reload() as FakeChild
+    d0.exit(1)
+    advance(10_000)
+    expect(sup.current).toBe(d1)
+    expect(sup.pending).toBeNull()
+    expect(spawned).toHaveLength(2) // no respawn beside it
+  })
+
+  it('stops a pending replacement on shutdown', () => {
+    const { sup } = makeHarness()
+    sup.spawnDaemon()
+    const d1 = sup.reload() as FakeChild
+    sup.shutdown()
+    expect(d1.killed).toBe('SIGTERM')
   })
 
   it('does not respawn during shutdown', () => {
@@ -143,7 +216,7 @@ describe('daemon supervisor', () => {
     ;(sup.current as FakeChild).exit(1) // t=1000 → crashes=2
     advance(2_000) // d2 spawned
     expect(sup.crashes).toBe(2)
-    sup.reload() // fix applied: drains d2, spawns fresh, crash state cleared
+    register(sup.reload() as FakeChild) // fix applied: hands off from d2, crash state cleared
     expect(sup.crashes).toBe(0)
     ;(sup.current as FakeChild).exit(1) // counts from a clean slate, not 3
     expect(sup.crashes).toBe(1)

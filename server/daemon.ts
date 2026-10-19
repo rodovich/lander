@@ -11,6 +11,8 @@ import { WebSocketServer, type WebSocket } from 'ws'
 import type {
   DaemonToServer,
   ServerToDaemon,
+  RegisterMessage,
+  RegisteredMessage,
   UpdateMessage,
   DoneMessage,
   CheckoutMessage,
@@ -82,6 +84,12 @@ const RECONNECT_GRACE_MS = 15_000
 // the daemon that actually holds it (never aborted by a daemon that doesn't).
 let primary: WebSocket | null = null
 const daemons = new Set<WebSocket>()
+// Each connected daemon's latest `register`, oldest first, so that when the
+// primary drops or starts draining, the newest daemon still taking new runs can
+// succeed it. Without this, a handoff whose two registers land in the wrong
+// order (a server reload mid-handoff, where both daemons reconnect) left the
+// draining one primary, and no daemon at all once it exited.
+const registrations = new Map<WebSocket, RegisterMessage>()
 const runOwner = new Map<string, WebSocket>()
 const registeredSlugs = new Set<string>()
 const channels = new Map<string, RunChannel>()
@@ -187,12 +195,9 @@ export function sendToDaemon(msg: ServerToDaemon): boolean {
   ) {
     // Not tied to a run, so there is no owner to follow — the primary answers.
     //
-    // For `hook-run` that means a DRAINING daemon may receive it: `primary` is
-    // reassigned only when a non-draining daemon registers, and a daemon told to
-    // drain neither re-registers nor drops its socket, so it stays primary for
-    // the whole handoff window. The daemon refuses one while draining and the
-    // server treats that as a hold, which is the mechanism rather than a
-    // fallback — there is no per-socket draining state here to route around it.
+    // For `hook-run` that means a DRAINING daemon may receive it, in the moment
+    // between its drain starting and its draining `register` reaching us. The
+    // daemon refuses one while draining and the server treats that as a hold.
     target = primary
   } else {
     target = runOwner.get(msg.runId) ?? primary
@@ -424,6 +429,35 @@ export function attachDaemonServer(
 ): void {
   const wss = new WebSocketServer({ noServer: true })
 
+  // Make `ws` the primary, serving what its `register` announced.
+  const adopt = (ws: WebSocket, msg: RegisterMessage) => {
+    primary = ws
+    // BEFORE registeredSlugs/onRegister, deliberately: awaitDaemonServing
+    // unblocks off the slug set, so setting the registry after it would let a
+    // runTurn through to read a stale one.
+    //
+    // Unconditional in the sense that matters — `?? []` rather than
+    // `if (msg.flows)`. An old or rolled-back daemon that sends no flows
+    // announces NOTHING, which is what stops it inheriting its predecessor's
+    // set. Callers adopt only non-draining registrations, so a draining daemon
+    // can't overwrite the live registry on its way out.
+    setAnnouncedFlows(msg.flows ?? [])
+    registeredSlugs.clear()
+    for (const p of msg.projects) registeredSlugs.add(p.slug)
+    opts.onRegister?.([...registeredSlugs])
+  }
+
+  // The primary dropped or started draining: hand off to the most recently
+  // registered daemon still taking new runs, if there is one.
+  const succeedPrimary = () => {
+    primary = null
+    registeredSlugs.clear()
+    // The registry describes the PRIMARY's capabilities, so it goes with it.
+    clearAnnouncedFlows()
+    const next = [...registrations].reverse().find(([, m]) => !m.draining)
+    if (next) adopt(...next)
+  }
+
   // Start any grace boot recovery left pending, now that a daemon can reach us.
   const onListening = () => {
     endpointListening = true
@@ -487,25 +521,13 @@ export function attachDaemonServer(
       }
       switch (msg.type) {
         case 'register': {
+          registrations.delete(ws)
+          registrations.set(ws, msg)
           // A non-draining daemon is the live primary — new runs route to it. A
           // draining one (handing off) keeps only the runs it owns and takes none,
-          // so it must not become primary.
-          if (!msg.draining) {
-            primary = ws
-            // BEFORE registeredSlugs/onRegister, deliberately: awaitDaemonServing
-            // unblocks off the slug set, so setting the registry after it would
-            // let a runTurn through to read a stale one.
-            //
-            // Unconditional in the sense that matters — `?? []` rather than
-            // `if (msg.flows)`. An old or rolled-back daemon that sends no flows
-            // announces NOTHING, which is what stops it inheriting its
-            // predecessor's set. Confined to the primary branch so a draining
-            // daemon can't overwrite the live registry on its way out.
-            setAnnouncedFlows(msg.flows ?? [])
-            registeredSlugs.clear()
-            for (const p of msg.projects) registeredSlugs.add(p.slug)
-            opts.onRegister?.([...registeredSlugs])
-          }
+          // so it must not become primary, and stops being it.
+          if (!msg.draining) adopt(ws, msg)
+          else if (primary === ws) succeedPrimary()
           // Rebuild ownership from the runs the daemon says it holds, and replay
           // each open one from our last-applied seq. A daemon that omits `runs` is
           // a pre-announcement daemon — treat it the legacy single-daemon way:
@@ -526,6 +548,7 @@ export function attachDaemonServer(
               `${[...registeredSlugs].join(', ') || '(no slugs)'}; holds ${held.length} run(s)` +
               `; flows: ${msg.flows?.map((f) => f.meta.name).join(', ') || '(none)'}`,
           )
+          ws.send(JSON.stringify({ type: 'registered' } satisfies RegisteredMessage))
           break
         }
         case 'update':
@@ -568,15 +591,8 @@ export function attachDaemonServer(
     const drop = () => {
       if (!daemons.has(ws)) return // already gone
       daemons.delete(ws)
-      if (primary === ws) {
-        primary = null
-        registeredSlugs.clear()
-        // The registry describes the PRIMARY's capabilities, so it dies with it.
-        // Gated on `primary === ws` (as the slug clear already is), which is
-        // what keeps a *draining* non-primary's disconnect from clearing the
-        // live daemon's announcement mid-handoff.
-        clearAnnouncedFlows()
-      }
+      registrations.delete(ws)
+      if (primary === ws) succeedPrimary()
       console.log('daemon disconnected')
       // Release the runs this daemon held. We don't reassign them to another
       // daemon — only the daemon that actually holds a run can replay it, so the
