@@ -156,10 +156,11 @@ export async function writeTask<T>(file: string, task: T): Promise<void> {
   }
 }
 
-// Per-file queue of in-flight mutations, keyed by file path. All task-JSON
-// writes happen in this single server process, so chaining each file's
-// read-modify-writes onto one promise makes the whole read→modify→write atomic
-// with respect to every other writer to the same file.
+// Queues of in-flight mutations, one per lock key: the caller's key for a task
+// record (one key per task, whichever pool its file is in), the file path for
+// mutateJson. All task-JSON writes happen in this single server process, so
+// chaining each key's read-modify-writes onto one promise makes the whole
+// read→modify→write atomic with respect to every other writer under that key.
 const chains = new Map<string, Promise<unknown>>()
 
 // Read-modify-write a record under a single fresh read, so a streaming update
@@ -168,21 +169,24 @@ const chains = new Map<string, Promise<unknown>>()
 // tolerate that wrap the call). The read and the write each await I/O (the read
 // a file, the write a rename), so two overlapping calls would otherwise both
 // read before either writes and the second would lose the first writer's
-// update. We serialize them per file: each call runs only after the prior
-// mutation of the same file has fully committed, then reads fresh.
+// update. We serialize them per key: each call runs only after the prior
+// mutation under the same key has settled, then reads fresh.
 export function mutateTask<T>(
   file: string,
   fn: (task: T) => void,
-  opts?: { key?: string; afterCommit?: (task: T) => void },
+  opts: { key: string; afterCommit?: (task: T) => void },
 ): Promise<void> {
-  const key = opts?.key ?? file
+  return withMutationLock(opts.key, () => applyMutation<T>(file, fn, opts.afterCommit))
+}
+
+export function withMutationLock<T>(
+  key: string,
+  fn: () => Promise<T>,
+): Promise<T> {
   const prior = chains.get(key) ?? Promise.resolve()
   // Sequence after the prior op whether it resolved or rejected, so one failed
-  // mutation doesn't wedge the file's queue.
-  const run = prior.then(
-    () => applyMutation<T>(file, fn, opts?.afterCommit),
-    () => applyMutation<T>(file, fn, opts?.afterCommit),
-  )
+  // mutation doesn't wedge the key's queue.
+  const run = prior.then(fn, fn)
   // The tail swallows outcomes so the next waiter only sequences on it; the
   // caller still observes this op's real result/error via `run`. Drop the map
   // entry once this op is the queue's tail, so it doesn't grow without bound.
@@ -197,46 +201,16 @@ export function mutateTask<T>(
   return run
 }
 
-export function withMutationLock<T>(
-  key: string,
-  fn: () => Promise<T>,
-): Promise<T> {
-  const prior = chains.get(key) ?? Promise.resolve()
-  const run = prior.then(fn, fn)
-  const tail = run.then(
-    () => {},
-    () => {},
-  )
-  chains.set(key, tail)
-  void tail.then(() => {
-    if (chains.get(key) === tail) chains.delete(key)
-  })
-  return run
-}
-
-// Read-modify-write a JSON file that may not exist yet, on the same per-file
-// queue as mutateTask — so a record whose absence is its initial state (the hook
-// approval store) gets the same atomicity as a task without a create-then-mutate
-// dance that two callers could race. Returns the committed value.
+// Read-modify-write a JSON file that may not exist yet, so a record whose absence
+// is its initial state (the hook approval store) gets the same atomicity as a
+// task without a create-then-mutate dance that two callers could race. Returns
+// the committed value.
 export function mutateJson<T>(
   file: string,
   initial: () => T,
   fn: (value: T) => void,
 ): Promise<T> {
-  const prior = chains.get(file) ?? Promise.resolve()
-  const run = prior.then(
-    () => applyJsonMutation<T>(file, initial, fn),
-    () => applyJsonMutation<T>(file, initial, fn),
-  )
-  const tail = run.then(
-    () => {},
-    () => {},
-  )
-  chains.set(file, tail)
-  void tail.then(() => {
-    if (chains.get(file) === tail) chains.delete(file)
-  })
-  return run
+  return withMutationLock(file, () => applyJsonMutation<T>(file, initial, fn))
 }
 
 async function applyJsonMutation<T>(

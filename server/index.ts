@@ -468,8 +468,9 @@ const mutateTask = (
   afterCommit?: (task: Task) => void,
 ) => {
   const loc = taskLocation(file)
+  if (!loc) return Promise.reject(new Error(`not a task file in any project: ${file}`))
   return mutateTaskStore(file, fn, {
-    ...(loc ? { key: taskKey(loc.project.slug, loc.id) } : {}),
+    key: taskKey(loc.project.slug, loc.id),
     ...(afterCommit ? { afterCommit } : {}),
   })
 }
