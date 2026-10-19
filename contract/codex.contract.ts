@@ -95,12 +95,13 @@ describe.skipIf(!VERSION)(`codex contract (${VERSION})`, () => {
     const turn = await driveLive(flow, {
       root: scratchDir({ git: true }),
       prompt: 'Open the attached image with view_image and report its three vertical ' +
-        'band colors from left to right, using common English color names. ' +
+        'band colors from left to right. Choose the closest color name from this palette: ' +
+        'black, white, red, orange, yellow, green, cyan, blue, purple, magenta. ' +
         'Do not decode pixels with scripts or read any other files.\n\n' +
         buildManifestBlock(filesDir, [attachment]),
     })
     expect(turn.result.exitCode, turn.result.stderr).toBe(0)
-    expect(replyText(turn).toLowerCase()).toMatch(/red[\s\S]*cyan[\s\S]*yellow/)
+    expect(replyText(turn).toLowerCase()).toMatch(/\bred\b[\s\S]*\bcyan\b[\s\S]*\byellow\b/)
   })
 
   it('runs a turn in a project that is not a git repo', async () => {
