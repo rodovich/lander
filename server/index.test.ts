@@ -4,7 +4,7 @@ import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import path from 'node:path'
 import { WebSocket } from 'ws'
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   attachDaemonServer,
   closeRunChannel,
@@ -392,7 +392,13 @@ describe('hook approval', () => {
 // the side effects an ordinary message delivery carries.
 describe('the nudge', () => {
   const HOOK = '.lander/hooks/ride-ended/any/supervise.js'
-  const ID = 'tsk-nudged'
+  // A fresh id per test: a nudge drives a turn, whose drainer outlives the test
+  // and would write into the next test's seed of a shared id.
+  let ID = ''
+  let n = 0
+  beforeEach(() => {
+    ID = `tsk-nudged-${++n}`
+  })
 
   afterEach(() => clearHookRunState())
 
@@ -455,9 +461,7 @@ describe('the nudge', () => {
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ ok: true })
 
-    // `drained`, not `settled`: the drain's write must land before the next test
-    // seeds this same id, or it carries this test's record over that seed.
-    const t = JSON.parse(await drained(ID))
+    const t = await raw()
     const hooks = t.items.filter((i: any) => i.kind === 'message' && i.role === 'hook')
     expect(hooks).toHaveLength(1)
     // Attribution is the server's, from the credential — a body cannot forge it.
@@ -734,7 +738,13 @@ describe('the nudge', () => {
 // principal is known — and a sibling task can re-arm a runaway indefinitely,
 // while every other test in this suite still passes. That is what these pin.
 describe('the action bound’s reset', () => {
-  const ID = 'tsk-reset'
+  // A fresh id per test, for the same reason as the nudge suite's: a message
+  // drives a turn.
+  let ID = ''
+  let n = 0
+  beforeEach(() => {
+    ID = `tsk-reset-${++n}`
+  })
   const SIBLING = 'tsk-sibling'
 
   const seedPair = async (): Promise<void> => {
