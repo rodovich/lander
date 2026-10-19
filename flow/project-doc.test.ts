@@ -1,16 +1,26 @@
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { PROJECT_DOC_FILENAME, projectDocBlock, readProjectDoc } from './project-doc'
 
 // Real fixtures on disk rather than a mocked fs: the contract this function has
 // to keep is precisely about what the filesystem does to it — a directory with
 // the doc's name, a symlink loop, a file bigger than the cap. A mock would assert
 // what we already believe.
+const scratchDirs: string[] = []
+
 function scratch(): string {
-  return mkdtempSync(path.join(tmpdir(), 'lander-projectdoc-'))
+  const dir = mkdtempSync(path.join(tmpdir(), 'lander-projectdoc-'))
+  scratchDirs.push(dir)
+  return dir
 }
+
+afterEach(() => {
+  for (const dir of scratchDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
 
 function withDoc(contents: string | Buffer): string {
   const dir = scratch()

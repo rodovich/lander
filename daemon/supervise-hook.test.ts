@@ -6,7 +6,15 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+} from 'vitest'
 import { runHook } from './hook-run'
 import type { HookRunMessage, HookRunReport } from '../server/protocol'
 
@@ -42,6 +50,13 @@ let server: Server
 let api: string
 let blob: string
 let target: Record<string, unknown>
+const stateDirs: string[] = []
+
+async function makeStateDir(): Promise<string> {
+  const dir = await mkdtemp(path.join(tmpdir(), 'lander-supervise-state-'))
+  stateDirs.push(dir)
+  return dir
+}
 
 const user = (id: string, text: string, at = BEFORE, over = {}) => ({
   id,
@@ -201,10 +216,16 @@ const judgePrompts = (): Promise<string> =>
   readFile(judgeCalls, 'utf8').catch(() => '')
 
 beforeEach(async () => {
-  stateDir = await mkdtemp(path.join(tmpdir(), 'lander-supervise-state-'))
+  stateDir = await makeStateDir()
   await rm(judgeCalls, { force: true })
   await setVerdict(DEFAULT_VERDICT)
   calledPaths = []
+})
+
+afterEach(async () => {
+  await Promise.all(
+    stateDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+  )
 })
 
 afterAll(async () => {
@@ -476,7 +497,7 @@ describe('the supervision hook', () => {
     expect(first.reports).toEqual([])
     expect((await loggedRows())[0].skipped).toBe('segment-open')
 
-    stateDir = await mkdtemp(path.join(tmpdir(), 'lander-supervise-state-'))
+    stateDir = await makeStateDir()
     const second = await run('ride-2')
     expect(second.reports[0]).toContain('enumerated')
   })
