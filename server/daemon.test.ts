@@ -459,9 +459,9 @@ describe('flow announcement over the daemon link', () => {
     // to read a registry that hasn't been written yet. If setAnnouncedFlows
     // moved after the slug loop, this sees [].
     const d = await connectDaemon(port2)
-    d.register({ flows: [flowAnn('claude'), flowAnn('open-pr')] })
+    d.register({ flows: [flowAnn('claude'), flowAnn('example-flow')] })
     await waitFor(() => seenAtRegister !== null)
-    expect(seenAtRegister).toEqual(['claude', 'open-pr'])
+    expect(seenAtRegister).toEqual(['claude', 'example-flow'])
     await d.close()
   })
 
@@ -469,12 +469,12 @@ describe('flow announcement over the daemon link', () => {
     // The old-daemon and rolled-back-daemon case. It must not inherit whatever
     // the previous primary announced.
     const a = await connectDaemon(port2)
-    a.register({ flows: [flowAnn('open-pr')] })
-    await waitFor(() => isAnnouncedFlow('open-pr'))
+    a.register({ flows: [flowAnn('example-flow')] })
+    await waitFor(() => isAnnouncedFlow('example-flow'))
 
     const b = await connectDaemon(port2)
     b.register() // no `flows` key at all — a daemon built before the field
-    await waitFor(() => !isAnnouncedFlow('open-pr'))
+    await waitFor(() => !isAnnouncedFlow('example-flow'))
     expect(announcedFlows()).toEqual([])
 
     await a.close()
@@ -486,13 +486,13 @@ describe('flow announcement over the daemon link', () => {
     // primary can run. Letting a handoff's outgoing half write here would
     // announce the wrong capability set mid-drain.
     const primary = await connectDaemon(port2)
-    primary.register({ flows: [flowAnn('open-pr')] })
-    await waitFor(() => isAnnouncedFlow('open-pr'))
+    primary.register({ flows: [flowAnn('example-flow')] })
+    await waitFor(() => isAnnouncedFlow('example-flow'))
 
     const draining = await connectDaemon(port2)
     draining.register({ draining: true, flows: [flowAnn('something-else')] })
     await delay(50)
-    expect(isAnnouncedFlow('open-pr')).toBe(true)
+    expect(isAnnouncedFlow('example-flow')).toBe(true)
     expect(isAnnouncedFlow('something-else')).toBe(false)
 
     await primary.close()
@@ -501,8 +501,8 @@ describe('flow announcement over the daemon link', () => {
 
   it('clears the registry when the primary drops, but not a non-primary', async () => {
     const primary = await connectDaemon(port2)
-    primary.register({ flows: [flowAnn('open-pr')] })
-    await waitFor(() => isAnnouncedFlow('open-pr'))
+    primary.register({ flows: [flowAnn('example-flow')] })
+    await waitFor(() => isAnnouncedFlow('example-flow'))
 
     // A draining non-primary disconnecting is the normal end of a handoff — it
     // must not take the live daemon's announcement with it.
@@ -510,9 +510,9 @@ describe('flow announcement over the daemon link', () => {
     draining.register({ draining: true })
     await draining.close()
     await delay(50)
-    expect(isAnnouncedFlow('open-pr')).toBe(true)
+    expect(isAnnouncedFlow('example-flow')).toBe(true)
 
     await primary.close()
-    await waitFor(() => !isAnnouncedFlow('open-pr'))
+    await waitFor(() => !isAnnouncedFlow('example-flow'))
   })
 })

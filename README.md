@@ -1,6 +1,6 @@
 # lander
 
-A web UI for spawning and managing coding agents against target project directories. Each "task" runs a driver flow; the bundled agent drivers are Claude (`claude`), Codex (`codex`), and Antigravity (`agy`). The bundled `open-pr` flow automates a workflow rather than adding another agent provider. [The flow registry](daemon/flows/index.ts) is the source of truth for bundled flows; [docs/codex-support.md](docs/codex-support.md) covers the Codex integration specifically.
+A web UI for spawning and managing coding agents against target project directories. Each "task" runs a driver flow; the bundled agent drivers are Claude (`claude`), Codex (`codex`), and Antigravity (`agy`). [The flow registry](daemon/flows/index.ts) is the source of truth for bundled flows; [docs/codex-support.md](docs/codex-support.md) covers the Codex integration specifically.
 
 ## What it does
 

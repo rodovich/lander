@@ -87,7 +87,7 @@ describe('lander launch --flow', () => {
     await execLander([
       'launch',
       '--flow',
-      'open-pr',
+      'example-flow',
       '--key',
       'n',
       '3',

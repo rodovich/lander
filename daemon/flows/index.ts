@@ -6,7 +6,6 @@ import type { AgentLaunchDir, AgentLaunchDirInput } from '../agent'
 import * as agyFlowModule from './agy'
 import * as claudeFlowModule from './claude'
 import * as codexFlowModule from './codex'
-import * as openPrFlowModule from './open-pr'
 import type { Ctx, FlowMeta, TurnResult } from './ctx'
 
 export type BundledFlow = {
@@ -55,10 +54,6 @@ export const FLOW_MODULES: Record<string, BundledFlowModule> = {
     ...agyFlowModule,
     create: ({ taskPromptTemplate }) =>
       agyFlowModule.makeFlow({ taskPromptTemplate, readProjectDoc }),
-  },
-  'open-pr': {
-    ...openPrFlowModule,
-    create: () => openPrFlowModule.makeFlow(),
   },
 }
 

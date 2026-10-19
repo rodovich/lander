@@ -1619,7 +1619,7 @@ describe('server task provider behavior', () => {
   })
 
   it('rejects an unknown flow rather than silently defaulting', async () => {
-    // A silent default would make `--flow open-pr` against a daemon lacking it
+    // A silent default would make `--flow example-flow` against a daemon lacking it
     // produce a claude task that runs the prompt anyway.
     const res = await post(`/api/${slug}/tasks`, {
       title: 'Bad flow',
@@ -4354,7 +4354,7 @@ describe('flow dispatch gate', () => {
   it('wedges a task whose flow the daemon never announced', async () => {
     await connect(['claude', 'codex'])
     const id = 'gate-unknown'
-    await seed(id, { flow: 'open-pr' })
+    await seed(id, { flow: 'example-flow' })
 
     expect(
       (await post(`/api/${slug}/tasks/${id}/messages`, { message: 'go' })).status,
@@ -4362,7 +4362,7 @@ describe('flow dispatch gate', () => {
 
     const raw = await waitForRaw(id, (r) => r.status === 'wedged')
     // It wedged with a named cause rather than running as something else.
-    expect(JSON.stringify(raw.items)).toContain("no connected daemon provides the flow 'open-pr'")
+    expect(JSON.stringify(raw.items)).toContain("no connected daemon provides the flow 'example-flow'")
     // And crucially: nothing was dispatched for this task.
     expect(startRunFor(id)).toBeUndefined()
     ws.close()
@@ -4370,9 +4370,9 @@ describe('flow dispatch gate', () => {
   }, 20_000)
 
   it('dispatches an announced non-legacy flow with `flow` and no `agent`', async () => {
-    await connect(['claude', 'codex', 'open-pr'])
+    await connect(['claude', 'codex', 'example-flow'])
     const id = 'gate-announced'
-    await seed(id, { flow: 'open-pr', flowConfig: { dryRun: true } })
+    await seed(id, { flow: 'example-flow', flowConfig: { dryRun: true } })
 
     expect(
       (await post(`/api/${slug}/tasks/${id}/messages`, { message: 'go' })).status,
@@ -4380,7 +4380,7 @@ describe('flow dispatch gate', () => {
 
     await waitFor(() => !!startRunFor(id))
     const start = startRunFor(id)!
-    expect(start.flow).toBe('open-pr')
+    expect(start.flow).toBe('example-flow')
     // No `agent`: an old daemon must not be able to read this as a claude run.
     expect(start.agent).toBeUndefined()
     expect(start.flowConfig).toEqual({ dryRun: true })

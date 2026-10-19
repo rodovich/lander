@@ -183,7 +183,7 @@ function pushEv(): Item {
 
 describe('taskFlow', () => {
   it('prefers a stored flow over the legacy agent', () => {
-    expect(taskFlow({ flow: 'open-pr', agent: 'claude' })).toBe('open-pr')
+    expect(taskFlow({ flow: 'example-flow', agent: 'claude' })).toBe('example-flow')
   })
 
   it('reads a pre-step-4 task’s agent as its flow — permanently', () => {
@@ -200,7 +200,7 @@ describe('taskFlow', () => {
 describe('publicTask', () => {
   it('derives and serves the flow name', () => {
     expect(publicTask({ id: 's', agent: 'codex' }).flow).toBe('codex')
-    expect(publicTask({ id: 's', flow: 'open-pr' }).flow).toBe('open-pr')
+    expect(publicTask({ id: 's', flow: 'example-flow' }).flow).toBe('example-flow')
     // A structural fixture with no provider field at all still gets one.
     expect(publicTask({ id: 's' }).flow).toBe('claude')
   })
@@ -851,8 +851,6 @@ describe('recordAttachmentOnMessage', () => {
   })
 
   it('opens a flow item when the ride has said nothing yet', () => {
-    // The open-pr case: a flow writes its outputs before it emits any prose. The
-    // artifact path dropped these on the floor; here the publish begins the turn.
     const t = { items: [] as Item[], rides: [{ id: 'r1', startedAt: AT } as Ride] }
     const host = recordAttachmentOnMessage(t, blob(), later(1))
     expect(host).toBeDefined()
@@ -928,8 +926,6 @@ describe('migrateArtifactsToAttachments', () => {
   })
 
   it('surfaces a slot no item referenced, rather than losing its last pointer', () => {
-    // The open-pr shape: published before the flow emitted anything, so the ref
-    // had no host and only the registry held it.
     const spoke = flowItem('said something', 'r1')
     const t = { items: [spoke] as Item[], artifacts: [art('b1', 'diff.patch')] }
     const counts = migrateArtifactsToAttachments(t, new Set(['b1']))

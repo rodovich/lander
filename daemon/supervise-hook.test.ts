@@ -421,7 +421,7 @@ describe('the supervision hook', () => {
     target = {
       id: 'tsk-1',
       status: 'paced',
-      flow: 'open-pr',
+      flow: 'example-flow',
       items: [
         user('u1', 'Fix the parser and then land.'),
         flow('f1', 'ride-1', 'Fixed the parser.'),

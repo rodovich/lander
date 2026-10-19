@@ -203,8 +203,6 @@ describe('usageBreakdown', () => {
       turn: '—',
       total: '—',
     })
-    // And a flow that reports no account cost at all (codex, open-pr) reads the
-    // same: the table states what it knows, and here it knows no number.
     const free = { ...riding, reportsCost: false } as Task
     expect(cell(usageBreakdown(free).groups, 'cost')).toMatchObject({
       turn: '—',

@@ -168,15 +168,7 @@ const PROJECTS = parseProjects(DATA_ROOT, process.env, process.cwd())
 const PROJECT_BY_SLUG = new Map<string, Project>(
   PROJECTS.map((p) => [p.slug, p]),
 )
-// The configured default flow, read ONCE at boot — a task must serve the
-// provider it was created with, not re-resolve the environment on every read
-// (which is what DEFAULT_NEW_TASK_AGENT, now superseded, guaranteed). Its
-// VALIDATION, though, is deferred to each request (resolveNewTaskFlow): at boot
-// no daemon has registered, so a boot-time registry check would permanently
-// degrade a valid LANDER_FLOW=open-pr to claude and warn about it wrongly.
-//
-// LANDER_AGENT is still honored as the fallback name, so an existing
-// configuration keeps working.
+// Validate the default per request: the daemon's flow registry is empty at boot.
 const DEFAULT_NEW_TASK_FLOW = (
   process.env.LANDER_FLOW ??
   process.env.LANDER_AGENT ??
@@ -670,17 +662,8 @@ async function runTurn(
     LANDER_PROJECT: project.slug,
     LANDER_TASK: id,
     LANDER_TOKEN: token,
-    // Which provider a one-shot run from inside this task should use — the
-    // TASK's, resolved here rather than guessed there.
-    //
-    // `lander assist` otherwise reads LANDER_AGENT, which is this server's
-    // default for NEW tasks and reaches every task's shell because all three
-    // processes descend from one `npm run dev` — so a Codex task's one-shot
-    // reasoned with Claude. It has to arrive already resolved and it has to
-    // arrive in the environment: `lander.assist()` is synchronous and documented
-    // without `await` (README), so the CLI cannot go and ask.
-    //
-    // Omitted for a flow that declares no one-shot provider (e.g. open-pr).
+    // Resolve one-shot calls here because the synchronous flow API cannot query
+    // the server, and the inherited LANDER_AGENT may belong to another provider.
     ...(assistProvider ? { LANDER_ASSIST_PROVIDER: assistProvider } : {}),
   }
 
@@ -2348,19 +2331,8 @@ function validateFlowConfig(
 // env logs once rather than on every task creation.
 const warnedUnknownDefaultFlows = new Set<string>()
 
-// The flow for a new task. An EXPLICIT flow that doesn't exist is an error; a
-// bad *default* only degrades. That asymmetry is deliberate: making the default
-// 400 too would turn a single typo'd LANDER_FLOW into a total task-creation
-// outage for the project.
-//
-// Its registry check runs per request rather than at module scope (as the old
-// DEFAULT_NEW_TASK_AGENT
-// is), because at boot no daemon has registered and the registry is empty — a
-// boot-time check would permanently degrade a perfectly valid
-// LANDER_FLOW=open-pr to claude and log a warning that is always wrong. The
-// residual window is the same one every registry read lives with: between boot
-// and the first register, an unknown-but-valid default degrades to
-// LEGACY_FLOW. It fails toward the legacy flow, never toward a mis-dispatch.
+// A bad default falls back so a configuration typo cannot block task creation.
+// Check the registry per request because daemon registration happens after boot.
 function resolveNewTaskFlow(
   slug: string,
   requested: unknown,
@@ -2459,7 +2431,7 @@ app.post('/api/:project/tasks', async (c) => {
 
     // An explicitly-named flow must exist. 400 rather than a silent default:
     // inheriting the `isAgentKind(...) ? … : DEFAULT` shape would make
-    // `lander launch --flow open-pr` against a daemon lacking it quietly
+    // `lander launch --flow example-flow` against a daemon lacking it quietly
     // produce a CLAUDE task that runs the prompt — strictly worse than failing.
     //
     // A hook launch with no flow of its own inherits the TARGET's, so a Codex

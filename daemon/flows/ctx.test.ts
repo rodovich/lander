@@ -759,7 +759,7 @@ process.stdout.write('  ${command} reply  \\n')
       // An announced flow is not a provider: it has no `agent`, and nothing
       // anywhere declares which one-shot it would want.
       const h = harness(
-        makeInput({ agent: undefined, flow: 'open-pr' }, { cwd: s.dir, root: s.dir }),
+        makeInput({ agent: undefined, flow: 'example-flow' }, { cwd: s.dir, root: s.dir }),
       )
       let thrown: unknown
       await runFlow(h, async (ctx) => {
@@ -770,7 +770,7 @@ process.stdout.write('  ${command} reply  \\n')
         }
         return { exitCode: 0 }
       })
-      expect(String(thrown)).toContain('open-pr')
+      expect(String(thrown)).toContain('example-flow')
       // And it never reached a provider.
       await expect(readFile(s.log, 'utf8')).rejects.toThrow()
     } finally {

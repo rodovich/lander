@@ -12,8 +12,6 @@ export function openRide(task: { rides?: Ride[] }): Ride | undefined {
   return undefined
 }
 
-// Takes a flow NAME, not a closed agent union: agentDisplayName falls back to
-// the trimmed raw string, so an `open-pr` task renders "open-pr".
 export function taskAgentModelName(agent: string | undefined, model?: string): string {
   return formatAgentModelName(agentDisplayName(agent), model)
 }

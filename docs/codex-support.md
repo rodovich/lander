@@ -1,7 +1,7 @@
 # Codex support
 
 Lander bundles driver flows for Claude (`claude`), Codex (`codex`), and
-Antigravity (`agy`), plus the `open-pr` workflow. The complete bundled list lives
+Antigravity (`agy`). The complete bundled list lives
 in [the flow registry](../daemon/flows/index.ts). This document covers Codex and
 its differences from Claude; it is not a complete account of agent support.
 Codex is intended as a first-class target; tasks run through Codex when Codex

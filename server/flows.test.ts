@@ -76,9 +76,9 @@ describe('flow registry', () => {
   })
 
   it('unions announced flows with the legacy entries, announced first', () => {
-    setAnnouncedFlows([bundled(meta('open-pr')), bundled(meta('claude'))])
+    setAnnouncedFlows([bundled(meta('example-flow')), bundled(meta('claude'))])
     expect(flowRegistry('proj').map((f) => f.name)).toEqual([
-      'open-pr',
+      'example-flow',
       'claude',
       'codex',
     ])
@@ -88,7 +88,7 @@ describe('flow registry', () => {
     // The picker invariant. Anything flowRegistry returns must either have been
     // announced (so dispatch is gated open) or be a legacy flow (which carries
     // StartRunMessage.agent and so bypasses the gate).
-    setAnnouncedFlows([bundled(meta('open-pr'))])
+    setAnnouncedFlows([bundled(meta('example-flow'))])
     const legacy = new Set(BOOTSTRAP_FLOWS.map((m) => m.name))
     for (const f of flowRegistry('proj'))
       expect(isAnnouncedFlow(f.name) || legacy.has(f.name)).toBe(true)
@@ -129,16 +129,16 @@ describe('flow registry', () => {
   it('clears the announcement when the primary drops', () => {
     // A rolled-back daemon must not inherit its predecessor's announcement —
     // otherwise the dispatch gate lets through a flow the live daemon lacks.
-    setAnnouncedFlows([bundled(meta('open-pr'))])
-    expect(isAnnouncedFlow('open-pr')).toBe(true)
+    setAnnouncedFlows([bundled(meta('example-flow'))])
+    expect(isAnnouncedFlow('example-flow')).toBe(true)
     clearAnnouncedFlows()
-    expect(isAnnouncedFlow('open-pr')).toBe(false)
+    expect(isAnnouncedFlow('example-flow')).toBe(false)
     expect(flowRegistry('proj').map((f) => f.name)).toEqual(['claude', 'codex'])
   })
 
   it('treats an absent flows field as an announcement of nothing', () => {
-    setAnnouncedFlows([bundled(meta('open-pr'))])
+    setAnnouncedFlows([bundled(meta('example-flow'))])
     setAnnouncedFlows([]) // what `msg.flows ?? []` yields from an old daemon
-    expect(isAnnouncedFlow('open-pr')).toBe(false)
+    expect(isAnnouncedFlow('example-flow')).toBe(false)
   })
 })
