@@ -66,6 +66,7 @@ export function App() {
     project,
     setProject,
     refresh,
+    loadTaskDetail,
     beginTaskMutation,
     finishTaskMutation,
     beginTaskRemoval,
@@ -194,6 +195,9 @@ export function App() {
     onNavigate: leavePanel,
   })
   currentRef.current = current
+  useEffect(() => {
+    loadTaskDetail(current)
+  }, [current, loadTaskDetail])
 
   // The search match last opened from the list, which the conversation brings
   // into view while that task stays open and the query stands.

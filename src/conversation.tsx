@@ -181,7 +181,7 @@ export const Conversation = memo(function Conversation({
   // turn streams. The open-ride flag tracks the trailing working-spinner row,
   // which adds and removes a row (changing the timeline's height) without any
   // item text changing, so the effect must re-pin for that too.
-  const itemCount = task.items?.length ?? 0
+  const itemCount = task.items?.length ?? -1
   const streamLen =
     task.items?.reduce(
       (n, it) =>
@@ -199,7 +199,7 @@ export const Conversation = memo(function Conversation({
 
   useEffect(() => {
     const el = messagesRef.current
-    if (!el) return
+    if (!el || !task.items) return
     const key = taskKeyOf(task)
     const switched = prevTaskIdRef.current !== key
     prevTaskIdRef.current = key

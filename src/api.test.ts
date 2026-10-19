@@ -8,7 +8,7 @@
 // fails to typecheck — the dots just stop appearing. Hence a test on the URL.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { loadShownTasks, loadTaskLinks } from './api'
+import { loadShownTasks, loadTask, loadTaskLinks } from './api'
 
 let seen: string[]
 
@@ -174,6 +174,42 @@ describe('unreadable bodies', () => {
     respond(JSON.stringify({ telemetry: {} }), { status: 200 })
     await expect(loadShownTasks(['p'], false)).rejects.toThrow(
       'unreadable response from /api/p/tasks (HTTP 200)',
+    )
+  })
+})
+
+describe('loadTask', () => {
+  it('fetches a single task, tags its project, and defaults missing items to []', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            id: 'arc-1',
+            title: 'Archived one',
+            status: 'landed',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            archived: true,
+          }),
+          { status: 200 },
+        ),
+      ),
+    )
+    const loaded = await loadTask('proj', 'arc-1')
+    expect(loaded).toMatchObject({
+      id: 'arc-1',
+      projectSlug: 'proj',
+      title: 'Archived one',
+      status: 'landed',
+      archived: true,
+      items: [],
+    })
+  })
+
+  it('rejects a 200 response that carries no task id', async () => {
+    vi.stubGlobal('fetch', async () => new Response('{}', { status: 200 }))
+    await expect(loadTask('proj', 'arc-1')).rejects.toThrow(
+      'unreadable response from /api/proj/tasks/arc-1 (HTTP 200)',
     )
   })
 })

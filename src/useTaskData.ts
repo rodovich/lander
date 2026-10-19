@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { loadShownTasks, loadTaskLinks, type FlowTelemetry } from './api'
+import { loadShownTasks, loadTask, loadTaskLinks, type FlowTelemetry } from './api'
 import { useSessionState } from './hooks'
 import type { TaskLinkResolver } from './markdown'
 import { startPoll } from './poll'
 import { MonotonicRequestGate } from './requestOrder'
-import { taskHref } from './taskRef'
+import { taskHref, taskKeyOf } from './taskRef'
 import {
   admitTask as admitToFence,
   beginTaskPatch,
@@ -158,6 +158,7 @@ export function useTaskData(
   // poll effect's `canceled` flag, extended to the action-path refreshes.
   const epochRef = useRef(0)
   const refreshOrderRef = useRef(new MonotonicRequestGate())
+  const loadingDetailsRef = useRef(new Set<string>())
   const refresh = useCallback(async () => {
     const epoch = epochRef.current
     const requestOrder = refreshOrderRef.current
@@ -165,7 +166,9 @@ export function useTaskData(
     const mutationFence = taskMutationFenceRef.current
     const issuedAt = mutationFence.clock
     try {
-      const { tasks, telemetry } = await loadShownTasks([project], archived)
+      const { tasks, telemetry } = await loadShownTasks([project], archived, {
+        summary: archived,
+      })
       if (
         refreshScope !== refreshScopeRef.current ||
         epoch !== epochRef.current ||
@@ -190,6 +193,33 @@ export function useTaskData(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project, archived])
 
+  const loadTaskDetail = useCallback(
+    (task: TaskWithProject | null) => {
+      if (!task || task.items !== undefined) return
+      const key = taskKeyOf(task)
+      if (loadingDetailsRef.current.has(key)) return
+      loadingDetailsRef.current.add(key)
+      const epoch = epochRef.current
+      void loadTask(task.projectSlug, task.id).then(
+        (loaded) => {
+          loadingDetailsRef.current.delete(key)
+          if (epoch !== epochRef.current) return
+          setTasks((current) => {
+            const prev = current.find((t) => taskKeyOf(t) === key)
+            if (!prev || prev.items !== undefined) return current
+            return replaceTask(current, key, loaded)
+          })
+        },
+        (e) => {
+          loadingDetailsRef.current.delete(key)
+          if (epoch !== epochRef.current) return
+          onPollError(e.message ?? String(e))
+        },
+      )
+    },
+    [onPollError],
+  )
+
   useEffect(() => {
     if (project === '') return
     // Poll so assistant replies appear once the server appends them.
@@ -213,6 +243,7 @@ export function useTaskData(
     return () => {
       epochRef.current++
       refreshOrderRef.current.invalidate()
+      loadingDetailsRef.current.clear()
       stop()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -324,6 +355,7 @@ export function useTaskData(
     project,
     setProject,
     refresh,
+    loadTaskDetail,
     beginTaskMutation,
     finishTaskMutation,
     beginTaskRemoval,

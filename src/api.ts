@@ -1,6 +1,7 @@
 import type { StatsFacts } from './stats'
 import type {
   FlowMeta,
+  Item,
   ProjectHooks,
   Task,
   TaskLink,
@@ -47,20 +48,25 @@ const unreadable = (url: string, status: number) =>
 // restart opens a window of those — with an empty 500, and a restart mid-response
 // truncates a 200.
 async function readJson(
-  r: Response,
   url: string,
+  valid?: (body: Record<string, unknown>) => boolean,
 ): Promise<Record<string, unknown>> {
-  const body = (await r.json().catch(() => undefined)) as
-    | Record<string, unknown>
-    | undefined
-  if (!r.ok) {
-    const stated = typeof body?.error === 'string' ? body.error : ''
-    throw new Error(
-      stated || `${url} failed: HTTP ${r.status} ${r.statusText}`.trimEnd(),
-    )
+  try {
+    const r = await fetch(url, { signal: readTimeout() })
+    const body = (await r.json().catch(() => undefined)) as
+      | Record<string, unknown>
+      | undefined
+    if (!r.ok) {
+      const stated = typeof body?.error === 'string' ? body.error : ''
+      throw new Error(
+        stated || `${url} failed: HTTP ${r.status} ${r.statusText}`.trimEnd(),
+      )
+    }
+    if (!body || (valid && !valid(body))) throw unreadable(url, r.status)
+    return body
+  } catch (e) {
+    throw describeTimeout(e, url)
   }
-  if (!body) throw unreadable(url, r.status)
-  return body
 }
 
 // One installation-wide link projection, conditionally fetched. After the
@@ -167,13 +173,7 @@ export async function loadFlows(slug: string): Promise<FlowMeta[]> {
 // Every configured project's stats facts; the dashboard narrows and buckets
 // them itself.
 export async function loadStats(): Promise<StatsFacts> {
-  const url = '/api/stats'
-  try {
-    const r = await fetch(url, { signal: readTimeout() })
-    return (await readJson(r, url)) as StatsFacts
-  } catch (e) {
-    throw describeTimeout(e, url)
-  }
+  return (await readJson('/api/stats')) as StatsFacts
 }
 
 // What a project's tree declares under .lander/hooks/, and each declared
@@ -218,12 +218,26 @@ export async function setTrustedBranch(
   return (body.ref ?? null) as string | null
 }
 
+export async function loadTask(
+  slug: string,
+  id: string,
+): Promise<TaskWithProject> {
+  const body = await readJson(
+    `/api/${slug}/tasks/${id}`,
+    (b) => typeof b.id === 'string',
+  )
+  return {
+    ...(body as unknown as Task),
+    items: Array.isArray(body.items) ? (body.items as Item[]) : [],
+    projectSlug: slug,
+  }
+}
+
 // Fetch and merge tasks across every shown project, tagging each with its
 // project slug and sorting the combined list by recency.
 // `summary` asks the server for the metadata-only projection (see taskSummary):
 // the tasks come back without `items`/`rides`, which is the whole conversation
-// and ~99% of the bytes. Only for callers that read metadata alone — the
-// displayed list reads the conversation on every row.
+// and ~99% of the bytes.
 export async function loadShownTasks(
   slugs: string[],
   includeArchived: boolean,
@@ -235,18 +249,12 @@ export async function loadShownTasks(
   const lists = await Promise.all(
     slugs.map(async (slug) => {
       const url = `/api/${slug}/tasks${query ? `?${query}` : ''}`
-      try {
-        const r = await fetch(url, { signal: readTimeout() })
-        const body = await readJson(r, url)
-        // A parsed body still owes us the list. Without this the truncated-200
-        // case reaches `.map` and reads as "Cannot read properties of undefined".
-        if (!Array.isArray(body.tasks)) throw unreadable(url, r.status)
-        return {
-          tasks: (body.tasks as Task[]).map((t) => ({ ...t, projectSlug: slug })),
-          telemetry: (body.telemetry ?? {}) as FlowTelemetry,
-        }
-      } catch (e) {
-        throw describeTimeout(e, url)
+      // A parsed body still owes us the list. Without this the truncated-200
+      // case reaches `.map` and reads as "Cannot read properties of undefined".
+      const body = await readJson(url, (b) => Array.isArray(b.tasks))
+      return {
+        tasks: (body.tasks as Task[]).map((t) => ({ ...t, projectSlug: slug })),
+        telemetry: (body.telemetry ?? {}) as FlowTelemetry,
       }
     }),
   )

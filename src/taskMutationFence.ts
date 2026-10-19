@@ -80,6 +80,24 @@ export function removeTask(
   return tasks.filter((task) => taskKeyOf(task) !== key)
 }
 
+function carryConversation(
+  source: TaskWithProject | undefined,
+  target: TaskWithProject,
+): TaskWithProject {
+  if (
+    target.items !== undefined ||
+    !source ||
+    source.items === undefined ||
+    source.updatedAt !== target.updatedAt
+  )
+    return target
+  return {
+    ...target,
+    items: source.items,
+    ...(source.rides !== undefined ? { rides: source.rides } : {}),
+  }
+}
+
 // Merge a server snapshot task by task. A request issued before the latest
 // local mutation boundary may update unrelated tasks but not this one — not
 // even to bring back a task removed locally. A request issued while the
@@ -95,22 +113,24 @@ export function mergeTaskRefresh(
   const currentByKey = new Map(current.map((task) => [taskKeyOf(task), task]))
   const incomingKeys = new Set<string>()
   const merged: TaskWithProject[] = []
-  for (const task of incoming) {
-    const key = taskKeyOf(task)
+  for (const rawTask of incoming) {
+    const key = taskKeyOf(rawTask)
     incomingKeys.add(key)
+    const prev = currentByKey.get(key)
     if ((fence.boundaryByKey.get(key) ?? 0) > issuedAt) {
-      const kept = currentByKey.get(key)
-      if (kept) merged.push(kept)
+      if (prev) merged.push(prev)
       continue
     }
 
+    const task = carryConversation(prev, rawTask)
     const pending = fence.pendingByKey.get(key)
     if (!pending) {
       merged.push(task)
       continue
     }
-    pending.base = task
-    if (pending.patch !== 'removed') merged.push({ ...task, ...pending.patch })
+    pending.base = carryConversation(pending.base, task)
+    if (pending.patch !== 'removed')
+      merged.push({ ...pending.base, ...pending.patch })
   }
 
   // A snapshot begun before a mutation can also omit its task (for example,
