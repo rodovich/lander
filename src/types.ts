@@ -253,9 +253,15 @@ export type NoticeItem = ItemCommon & {
   text: string
 }
 
+export type RepromptItem = ItemCommon & {
+  kind: 'reprompt'
+  text: string
+}
+
 export type Item =
   | ContextItem
   | NoticeItem
+  | RepromptItem
   | MessageItem
   | ToolItem
   | EventItem

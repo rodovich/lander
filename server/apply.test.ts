@@ -67,6 +67,21 @@ describe('applyUpdate', () => {
       ['message', 'Reply'],
     ])
   })
+  it('records a reprompt as its own item between the prose around it', () => {
+    const t = task()
+    applyUpdate(t, update({
+      steps: [
+        step({ text: 'Before' }),
+        step({ kind: 'reprompt', text: 'Your call was refused.' }),
+        step({ text: 'After' }),
+      ],
+    }))
+    expect(rideItems(t).map((it) => [it.kind, 'text' in it ? it.text : undefined])).toEqual([
+      ['message', 'Before'],
+      ['reprompt', 'Your call was refused.'],
+      ['message', 'After'],
+    ])
+  })
   it('appends a flow item for a text step to the open ride, creating no message array', () => {
     const t = task()
     applyUpdate(t, update({ steps: [step({ text: 'hi' })], cursor: 10 }))

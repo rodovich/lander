@@ -24,6 +24,8 @@ export function conversationText(
   })
 }
 
+export const REPROMPT_LABEL = 'Lander prompted the agent again'
+
 // A tool chip's input rides one line, so a multi-line input (a codex command)
 // collapses to spaces exactly as it does in the chip's span.
 export function oneLine(s: string): string {
@@ -82,6 +84,7 @@ function rideText(rideItems: RideItem[], expand: boolean): { text: string; folde
     const it = items[j]
     if (it.kind === 'context')
       return [contextLabel(it.action), contextSummary(it), contextDuration(it)].filter(Boolean).join(' · ')
+    if (it.kind === 'reprompt') return `${REPROMPT_LABEL}:\n${it.text.trim()}`
     if (it.kind === 'message') return it.text.trim()
     if (it.kind !== 'tool') return ''
     const input = it.input ? `: ${oneLine(it.input)}` : ''

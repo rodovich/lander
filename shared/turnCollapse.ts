@@ -1,10 +1,12 @@
+import type { Item } from '../src/types'
+
 // The subset of a ride item the collapse reads: whether it carries assistant
 // prose (a flow `message`) and how much, whether it's a tool call (the
 // separator that splits text sequences), and whether it belongs to a subagent
 // rather than the main thread. A ToolItem/MessageItem satisfies this
 // structurally, so callers pass a ride's items straight through.
 type CollapsibleItem = {
-  kind: 'message' | 'tool' | 'event' | 'ask' | 'hook' | 'context' | 'notice'
+  kind: Item['kind']
   text?: string
   parentId?: string
 }
@@ -51,24 +53,28 @@ export type TurnCollapsePlan = {
   segments: TurnCollapseSegment[]
 }
 
+// A note that marks a point in the turn rather than a step of it, so it stands
+// in its own group and never folds away.
+const isMarker = (kind: string | undefined) => kind === 'context' || kind === 'reprompt'
+
 export function groupInferences(
   items: readonly { groupId?: string; kind?: string }[],
   idxs: readonly number[],
 ): number[][] {
   const groups: number[][] = []
   let last: string | undefined
-  let afterContext = false
+  let afterMarker = false
   for (const j of idxs) {
     const it = items[j]
     if (
       groups.length === 0 ||
-      it.kind === 'context' ||
-      afterContext ||
+      isMarker(it.kind) ||
+      afterMarker ||
       (it.groupId && last !== undefined && it.groupId !== last)
     )
       groups.push([])
     groups[groups.length - 1].push(j)
-    afterContext = it.kind === 'context'
+    afterMarker = isMarker(it.kind)
     if (it.groupId) last = it.groupId
   }
   return groups
@@ -145,7 +151,7 @@ export function planTurnCollapse(
   mark(longestSeq)
   for (let pos = lastSeq[0]; pos < n; pos++) visible[pos] = true
   for (let pos = 0; pos < n; pos++)
-    if (items[indices[pos]].kind === 'context') visible[pos] = true
+    if (isMarker(items[indices[pos]].kind)) visible[pos] = true
 
   // Coalesce contiguous visible / hidden positions into segments.
   const segments: TurnCollapseSegment[] = []

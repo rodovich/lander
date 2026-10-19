@@ -61,6 +61,15 @@ describe('conversationText', () => {
     )
   })
 
+  it('keeps a reprompt in place, outside the fold, with the message the flow sent', () => {
+    const items = turn('r1')
+    items.splice(3, 0, { id: 'rp1', at: AT, rideId: 'r1', kind: 'reprompt', text: 'Your call was refused.' })
+    const [agent] = conversationText({ items, rides: [ride('r1')] }, { expand: false })
+    expect(agent.text).toBe(
+      'Starting.\n\n[2 steps, 1 tool…]\n\nLander prompted the agent again:\nYour call was refused.\n\n[1 step, 1 tool…]\n\nAll done: the final report, longer than every other line.',
+    )
+  })
+
   it('opens every fold when expanded, still without the subagent’s words', () => {
     const [, agent] = conversationText(
       { items: [msg('u1', 'Go.'), ...turn('r1')], rides: [ride('r1')] },

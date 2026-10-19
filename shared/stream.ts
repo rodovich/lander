@@ -2,7 +2,9 @@ import type { ContextUpdate } from './context'
 
 export type Step = {
   // `notice`: a flow's own note about the turn, carried in `text`.
-  kind: 'text' | 'tool_use' | 'tool_result' | 'context' | 'notice'
+  // `reprompt`: the flow prompted its agent again within the turn; `text` is
+  // what it sent.
+  kind: 'text' | 'tool_use' | 'tool_result' | 'context' | 'notice' | 'reprompt'
   context?: ContextUpdate
   text?: string
   tool?: string

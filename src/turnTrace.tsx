@@ -2,6 +2,7 @@ import { Fragment } from 'react'
 import { Collapsible } from './collapsible'
 import { MessageText } from './messageText'
 import { ContextNote } from './contextNote'
+import { RepromptNote } from './repromptNote'
 import { TaskActionNote } from './taskActionNote'
 import { ToolStep, toolDetail } from './toolStep'
 import { planTurnActions } from './turnActions'
@@ -87,6 +88,7 @@ export function TurnTrace({
   const renderBody = (j: number) => {
     const it = items[j]
     if (it.kind === 'context') return <ContextNote key={it.id} item={it} />
+    if (it.kind === 'reprompt') return <RepromptNote key={it.id} item={it} />
     if (it.kind === 'tool') {
       // A subagent spawner (Agent/Explore) carries its subagent's items as
       // children; render them as the chip's nested trace. renderItem recurses,

@@ -5,9 +5,10 @@
 // summary the fold shows in its place. What is on screen is what lands on the
 // clipboard.
 //
-// Three disclosures stay closed here whatever the reader did with them: a task
-// action's sent message, a message another task sent this one, and a message a
-// lifecycle event delivered (a relaunch's brief). Their
+// Four disclosures stay closed here whatever the reader did with them: a task
+// action's sent message, a message another task sent this one, a message a
+// lifecycle event delivered (a relaunch's brief), and the message a flow sent
+// when it prompted its agent again mid-turn. Their
 // open/closed state lives inside the row's own component rather than in the
 // pane's state, so this module can't see it. The collapsed reading is the one a
 // freshly-opened task shows.
@@ -19,7 +20,7 @@
 import { formatTimestamp } from './format'
 import { EVENT_VERB } from './lifecycleNote'
 import { toolDetail } from './toolStep'
-import { oneLine } from '../shared/conversationText'
+import { oneLine, REPROMPT_LABEL } from '../shared/conversationText'
 import { contextLabel, contextSummary } from '../shared/context'
 import {
   foldSummary,
@@ -222,6 +223,7 @@ function rideBlocks(
     const it = items[j]
     if (it.kind === 'context')
       return [[contextLabel(it.action), contextSummary(it)].filter(Boolean).join(' · ')]
+    if (it.kind === 'reprompt') return [REPROMPT_LABEL]
     if (it.kind === 'message') return it.text.trim() ? [it.text.trim()] : []
     if (it.kind !== 'tool') return []
     return toolBlocks(it, childrenByParent.get(it.id) ?? [])

@@ -321,6 +321,17 @@ describe('RideTurn settled/open footers', () => {
     expect(html).not.toContain('pending-pace')
   })
 
+  it('shows a reprompt in place in the trace, between the prose around it', () => {
+    const html = render([
+      flow('a', 'before-prose'),
+      tool('t1', { status: 'blocked', rule: 'Bash(rm:*)' }),
+      { id: 'rp1', at: T('10:00:09'), rideId: 'r1', kind: 'reprompt', text: 'reprompt-text' },
+      flow('b', 'after-prose'),
+    ])
+    expect(html.indexOf('Lander prompted the agent again')).toBeGreaterThan(html.indexOf('before-prose'))
+    expect(html.indexOf('Lander prompted the agent again')).toBeLessThan(html.indexOf('after-prose'))
+  })
+
   it('shows a flow notice below the trace, after the blocked summary', () => {
     const html = render([
       flow('a', 'agent-prose'),

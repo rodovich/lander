@@ -222,12 +222,12 @@ export function applyUpdate(task: ApplyTask, update: ApplyUpdate): void {
             })
             firstAt ??= s.createdAt
           }
-        } else if (s.kind === 'notice') {
+        } else if (s.kind === 'notice' || s.kind === 'reprompt') {
           items.push({
             id: nextItemId(task, s.createdAt),
             at: s.createdAt,
             rideId,
-            kind: 'notice',
+            kind: s.kind,
             text: s.text ?? '',
           })
           firstAt ??= s.createdAt
