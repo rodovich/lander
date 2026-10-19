@@ -38,9 +38,6 @@ export const meta: FlowMeta = {
   description: 'Drive a task as a Codex conversation',
   driver: true,
   capabilities: {
-    // Codex takes image paths on the CLI and delivers them to its own vision,
-    // so the manifest block words them as already attached.
-    vision: 'flag',
     grants: { task: false, project: false },
     usageSnapshot: false,
     rateLimitRetry: false,
@@ -324,14 +321,7 @@ function buildCodexArgs(
     ),
     ...codexShellEnvConfigOverrides(),
   ]
-  // One `-i <path>` per image (the repeatable short form), then `--`, then the
-  // prompt. Without the terminator a fresh `exec`'s variadic --image swallows a
-  // trailing positional, so the flags must precede it. It also keeps a prompt
-  // that begins with `-` out of argv parsing, which matters because a turn that
-  // has already delivered the task prompt leads with the user's own text
-  // (confirmed Codex v0.144.5: a bare `- bullet…` prompt errors with "unexpected
-  // argument", and codex's own tip is to pass it after `--`).
-  const imageArgs = ctx.turn.images.flatMap((p) => ['-i', p])
+  // The terminator keeps user prompts beginning with `-` out of argv parsing.
   // `--skip-git-repo-check` because a project need not be a git repo, and
   // without it codex refuses to run outside a trusted one (confirmed v0.154.0:
   // exit 1, "Not inside a trusted directory…"). Given at the exec level, it
@@ -346,7 +336,6 @@ function buildCodexArgs(
       ctx.task.cwd,
       'resume',
       sessionId,
-      ...imageArgs,
       '--',
       prompt,
     ]
@@ -357,7 +346,6 @@ function buildCodexArgs(
     ...codexConfigArgs(profile, configOverridesWithLanderDefaults),
     '--cd',
     ctx.task.cwd,
-    ...imageArgs,
     '--',
     prompt,
   ]

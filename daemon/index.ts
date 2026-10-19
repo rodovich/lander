@@ -337,7 +337,6 @@ async function fetchAttachmentBytes(
 // prompt manifest. Bound to the start message's project/task and env identity.
 async function materialize(
   msg: StartRunMessage,
-  { visionNative }: { visionNative: boolean },
 ): Promise<MaterializedFiles | undefined> {
   if (!msg.attachments?.length) return undefined
   const filesDir = taskFilesDir(FILES_ROOT, msg.project, msg.taskId)
@@ -345,7 +344,6 @@ async function materialize(
     filesDir,
     attachments: msg.attachments,
     fetchBytes: (ref) => fetchAttachmentBytes(msg.env, ref),
-    visionNative,
     run: msg.runId,
   })
 }

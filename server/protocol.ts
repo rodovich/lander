@@ -53,7 +53,6 @@ export type FlowMeta = {
   description: string
   driver: boolean
   capabilities: {
-    vision: 'read' | 'flag'
     grants: { task: boolean; project: boolean }
     usageSnapshot: boolean
     rateLimitRetry: boolean
@@ -174,7 +173,7 @@ export type StartRunMessage = {
   turnContext?: string
   // The attachments belonging to this turn's user message(s), refs only. The
   // daemon materializes them into LANDER_FILES_DIR, generates the prompt manifest
-  // block, and hands image paths to the adapter's vision channel. Absent/empty
+  // block with local image paths. Absent/empty
   // when the turn carries none. Persisted on the message, so a retry/resume
   // rebuilds the same list for free.
   attachments?: AttachmentRef[]

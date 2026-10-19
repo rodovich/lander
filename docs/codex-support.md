@@ -119,6 +119,10 @@ that went down is taken whole as a restarted count. A thread resumed before any
 total was saved has no baseline, so that one turn is left without usage rather
 than charged the thread's whole history again.
 
+Image attachments are listed by local path in the turn’s attachment manifest.
+Codex can open them with `view_image` when needed; Lander does not pass them
+through `--image` or load their pixels into the initial prompt.
+
 Codex tasks can call back into Lander with `lander land`, `lander wedge`,
 `lander ride`, `lander launch`, `lander send`, and related commands when the
 Codex shell environment receives the injected `LANDER_*` values.

@@ -145,7 +145,6 @@ describe('Claude flow', () => {
       root: '/repo',
       cwd: '/repo',
       env: { LANDER_TASK: 't', LANDER_FILES_DIR: '/files/proj/t' },
-      images: ['/files/proj/t/img1'],
       filesDir: '/files/proj/t',
     })
     // --add-dir lets Read open the image under LANDER_FILES_DIR (outside cwd).
@@ -173,7 +172,6 @@ describe('Claude flow', () => {
       root: '/repo',
       cwd: '/repo',
       env: { LANDER_TASK: 't', LANDER_FILES_DIR: '/files/proj/t' },
-      images: ['/files/proj/t/img1'],
       filesDir: '/files/proj/t',
     })
     expect(addDirsOf(launch.args)).toEqual(['/files/proj/t', ...SCRATCH_ROOTS])

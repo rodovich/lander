@@ -1,7 +1,8 @@
-import { existsSync } from 'node:fs'
+import { existsSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { makeFlow } from '../daemon/flows/codex'
+import { buildManifestBlock } from '../daemon/attachments'
 import { captureDriverTurn } from '../daemon/flows/testCtx'
 import {
   TASK_PROMPT,
@@ -83,6 +84,23 @@ describe.skipIf(!VERSION)(`codex contract (${VERSION})`, () => {
     for (const k of ['input', 'output', 'cacheRead', 'cacheCreation'] as const)
       expect(a[k] + b[k]).toBe(total[k])
     expect(b.input + b.cacheRead).toBeLessThan(1.5 * (a.input + a.cacheRead))
+  })
+
+  it('opens an image from the attachment manifest by local path', async () => {
+    const filesDir = scratchDir({ git: false })
+    const attachment = { id: 'image', name: 'sample.png', mime: 'image/png', size: 0 }
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAASwAAABkCAIAAACzY5qXAAACpklEQVR4nO3ToQ3DUADFwGxQUpL91wop6QblXeGzJ0sneQTf9b1vHfZ6Hh32+7x12DU/O9T87FDzs0NBCCGEEHaanx1qfnYoCCGEEMJO87NDzc8OBSGEEELYaX52qPnZoSCEEEIIO83PDjU/OxSEEEIIYaf52aHmZ4eCEEIIIew0PzvU/OxQEEIIIYSd5meHmp8dCkIIIYSw0/zsUPOzQ0EIIYQQdpqfHWp+digIIYQQwk7zs0PNzw4FIYQQQthpfnao+dmhIIQQQgg7zc8ONT87FIQQQghhp/nZoeZnh4IQQggh7DQ/O9T87FAQQgghhJ3mZ4eanx0KQgghhLDT/OxQ87NDQQghhBB2mp8dan52KAghhBDCTvOzQ83PDgUhhBBC2Gl+dqj52aEghBBCCDvNzw41PzsUhBBCCGGn+dmh5meHghBCCCHsND871PzsUBBCCCGEneZnh5qfHQpCCCGEsNP87FDzs0NBCCGEEHaanx1qfnYoCCGEEMJO87NDzc8OBSGEEELYaX52qPnZoSCEEEIIO83PDjU/OxSEEEIIYaf52aHmZ4eCEEIIIew0PzvU/OxQEEIIIYSd5meHmp8dCkIIIYSw0/zsUPOzQ0EIIYQQdpqfHWp+digIIYQQwk7zs0PNzw4FIYQQQthpfnao+dmhIIQQQgg7zc8ONT87FIQQQghhp/nZoeZnh4IQQggh7DQ/O9T87FAQQgghhJ3mZ4eanx0KQgghhLDT/OxQ87NDQQghhBB2mp8dan52KAghhBDCTvOzQ83PDgUhhBBC2Gl+dqj52aEghBBCCDvNzw41PzsUhBBCCGGn+dmh5meHghBCCCHsND871PzsUBBCCCGEneZnh5qfHQpCCCGEsNP87FDzs0NBCCGEEHaanx1qfnaoP8FH9nfmNRSiAAAAAElFTkSuQmCC', 'base64')
+    attachment.size = png.length
+    writeFileSync(path.join(filesDir, attachment.id), png)
+    const turn = await driveLive(flow, {
+      root: scratchDir({ git: true }),
+      prompt: 'Open the attached image with view_image and report its three vertical ' +
+        'band colors from left to right, using common English color names. ' +
+        'Do not decode pixels with scripts or read any other files.\n\n' +
+        buildManifestBlock(filesDir, [attachment]),
+    })
+    expect(turn.result.exitCode, turn.result.stderr).toBe(0)
+    expect(replyText(turn).toLowerCase()).toMatch(/red[\s\S]*cyan[\s\S]*yellow/)
   })
 
   it('runs a turn in a project that is not a git repo', async () => {

@@ -101,8 +101,6 @@ export type CtxTurn = {
   // withdraws open asks, which supersedes the question rather than losing it.
   answer?: StructuredAnswer
   attachments: TurnAttachment[]
-  // Absolute paths of this turn's image blobs (the vision channel).
-  images: string[]
   // The prompt-facing attachment manifest, already built by the daemon as part
   // of materializing the blobs. The flow decides whether and where to append it
   // (prompt assembly is the flow's job) but does not rebuild it: the block is a
@@ -837,7 +835,7 @@ export function createCtxRuntime(
     size: ref.size,
     // The refs carry no path; the local file is id-keyed inside filesDir. Joining
     // them here is why ctx.turn.attachments needs both halves — MaterializedFiles
-    // alone ({ manifestBlock, images, filesDir }) has no refs.
+    // alone ({ manifestBlock, filesDir }) has no refs.
     path: filesDir ? `${filesDir}/${ref.id}` : ref.id,
   }))
 
@@ -956,7 +954,6 @@ export function createCtxRuntime(
     turn: {
       prompts: [start.prompt],
       attachments,
-      images: materialized?.images ?? [],
       ...(materialized?.manifestBlock
         ? { manifestBlock: materialized.manifestBlock }
         : {}),

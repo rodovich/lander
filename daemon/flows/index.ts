@@ -88,13 +88,9 @@ export function announcedFlows(): FlowAnnouncement[] {
 }
 
 // What the daemon needs to know about a flow BEFORE a host exists: where to
-// launch, whether images go to vision natively, and whether it owns the global
-// usage panel.
+// launch, whether it owns the global usage panel, and which grants it supports.
 export type ProviderCaps = {
   resolveLaunchDir(input: AgentLaunchDirInput): AgentLaunchDir
-  // The manifest block words image attachments differently depending on whether
-  // the provider delivers them to its own vision or the agent must Read the path.
-  visionNative: boolean
   usageSnapshot: boolean
   projectGrants: boolean
   projectGrantsUnsupportedReason?: string
@@ -106,7 +102,6 @@ export function providerCaps(): Record<string, ProviderCaps> {
     const mod = FLOW_MODULES[name]
     return {
       resolveLaunchDir: mod.resolveLaunchDir,
-      visionNative: mod.meta.capabilities.vision === 'flag',
       usageSnapshot: mod.meta.capabilities.usageSnapshot,
       projectGrants: mod.meta.capabilities.grants.project,
       ...(mod.meta.projectGrantsUnsupportedReason

@@ -116,7 +116,6 @@ export type RunManagerOptions = {
   // returns undefined (or is absent) when there's nothing to do.
   materialize?: (
     msg: StartRunMessage,
-    opts: { visionNative: boolean },
   ) => Promise<MaterializedFiles | undefined>
   refreshUsage?: () => void | Promise<void>
   runBufferTtlMs?: number
@@ -223,9 +222,7 @@ export function createRunManager({
       let materialized: MaterializedFiles | undefined
       if (attachments)
         try {
-          materialized = await materialize!(msg, {
-            visionNative: activeCaps.visionNative,
-          })
+          materialized = await materialize!(msg)
         } catch (e) {
           return failBeforeSpawn('failed to materialize attachments')(e)
         }

@@ -27,9 +27,6 @@ export const meta: FlowMeta = {
   description: 'Drive a task as a Claude Code conversation',
   driver: true,
   capabilities: {
-    // Claude has no vision flag on the CLI: it Reads an image by its local path,
-    // which the manifest block words accordingly.
-    vision: 'read',
     grants: { task: true, project: true },
     usageSnapshot: true,
     rateLimitRetry: true,

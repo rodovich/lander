@@ -26,7 +26,6 @@ export const meta: FlowMeta = {
   description: 'Antigravity coding agent',
   driver: true,
   capabilities: {
-    vision: 'read',
     grants: { task: false, project: true },
     usageSnapshot: false,
     rateLimitRetry: false,

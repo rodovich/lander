@@ -147,7 +147,7 @@ export const CODEX_GOLDENS: Golden[] = [
     },
   },
   {
-    name: 'image turn places -i before the prompt on resume',
+    name: 'resumed image turn supplies a local path in the prompt',
     chunks: [[threadStarted('thread-1'), turnStarted(), agentMessage('looked')]],
     start: {
       ...codexStart,
@@ -160,14 +160,13 @@ export const CODEX_GOLDENS: Golden[] = [
       filesDir: '/tmp',
       materialized: {
         filesDir: '/tmp',
-        images: ['/tmp/img1'],
         manifestBlock:
-          '<task-attachments>\np.png\n\nThe image(s) above are already attached to your vision.\n</task-attachments>',
+          '<task-attachments>\np.png\n\nTo view an image, open its local path with your image-viewing tool:\n- p.png: /tmp/img1\n</task-attachments>',
       },
     },
   },
   {
-    name: 'image turn places -i after the prompt on a fresh exec',
+    name: 'fresh image turn supplies a local path in the prompt',
     chunks: [[threadStarted(), turnStarted(), agentMessage('looked')]],
     start: {
       ...codexStart,
@@ -178,9 +177,8 @@ export const CODEX_GOLDENS: Golden[] = [
       filesDir: '/tmp',
       materialized: {
         filesDir: '/tmp',
-        images: ['/tmp/img1'],
         manifestBlock:
-          '<task-attachments>\np.png\n\nThe image(s) above are already attached to your vision.\n</task-attachments>',
+          '<task-attachments>\np.png\n\nTo view an image, open its local path with your image-viewing tool:\n- p.png: /tmp/img1\n</task-attachments>',
       },
     },
   },

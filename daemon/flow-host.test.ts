@@ -748,7 +748,7 @@ describe('flow host', () => {
     expect(h.stderr).toContain('agent noise')
   })
 
-  it('passes materialized image paths and LANDER_FILES_DIR to Codex', () => {
+  it('passes the attachment listing and LANDER_FILES_DIR to Codex', () => {
     const h = harness()
     h.run(
       makeInput(
@@ -757,7 +757,6 @@ describe('flow host', () => {
           filesDir: '/files/proj/task-1',
           materialized: {
             filesDir: '/files/proj/task-1',
-            images: ['/files/proj/task-1/img1'],
             manifestBlock: '<task-attachments>\n…\n</task-attachments>',
           },
         },
@@ -765,15 +764,11 @@ describe('flow host', () => {
     )
 
     const [call] = h.spawns
-    // Image flags precede the `--` terminator; the prompt is the final arg.
     const prompt = call.args.at(-1)
     expect(prompt).toContain('look')
     expect(prompt).toContain('<task-attachments>')
-    expect(call.args.slice(-4, -1)).toEqual([
-      '-i',
-      '/files/proj/task-1/img1',
-      '--',
-    ])
+    expect(call.args).not.toContain('-i')
+    expect(call.args).not.toContain('--image')
     expect((call.options.env as Record<string, string>).LANDER_FILES_DIR).toBe(
       '/files/proj/task-1',
     )

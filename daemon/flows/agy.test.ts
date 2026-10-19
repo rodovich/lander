@@ -68,7 +68,7 @@ const steps = (events: Awaited<ReturnType<typeof driveFlow>>['events']) =>
 
 it('registers an executable driver and its capabilities', () => {
   expect(announcedFlows()).toContainEqual({ scope: 'bundled', meta })
-  expect(providerCaps().agy).toMatchObject({ visionNative: false, projectGrants: true, usageSnapshot: false })
+  expect(providerCaps().agy).toMatchObject({ projectGrants: true, usageSnapshot: false })
   expect(FLOW_MODULES.agy.onGrant).toBe(onGrant)
   expect(buildFlows({ root: process.cwd(), env: {} }).agy.meta).toEqual(meta)
   expect(resolveLaunchDir({ root: '/repo', recordedCwd: '/repo/sub', isDir: () => true })).toEqual({ cwd: '/repo/sub' })
@@ -338,7 +338,7 @@ it('passes --mode accept-edits, --project lander-<hash>, canonicalized --add-dir
     root: '/repo',
     cwd: '/repo/sub',
     filesDir: symlinkFilesDir,
-    materialized: { filesDir: symlinkFilesDir, images: [], manifestBlock: 'Attachment manifest' },
+    materialized: { filesDir: symlinkFilesDir, manifestBlock: 'Attachment manifest' },
   }
   const driven = await driveFlow(g, flow())
   const spawn = driven.spawns[0]

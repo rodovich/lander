@@ -4439,7 +4439,7 @@ do the thing",
 }
 `;
 
-exports[`codex transcript regressions > image turn places -i after the prompt on a fresh exec 1`] = `
+exports[`codex transcript regressions > fresh image turn supplies a local path in the prompt 1`] = `
 {
   "done": {
     "exitCode": 0,
@@ -4464,8 +4464,6 @@ exports[`codex transcript regressions > image turn places -i after the prompt on
         "shell_environment_policy.include_only=["PATH","LANDER_*"]",
         "--cd",
         "/repo",
-        "-i",
-        "/tmp/img1",
         "--",
         "Task prompt.
 
@@ -4474,7 +4472,8 @@ look at this
 <task-attachments>
 p.png
 
-The image(s) above are already attached to your vision.
+To view an image, open its local path with your image-viewing tool:
+- p.png: /tmp/img1
 </task-attachments>",
       ],
       "command": "codex",
@@ -4524,121 +4523,6 @@ The image(s) above are already attached to your vision.
         "startedAt": "2026-01-01T00:00:00.000Z",
       },
     ],
-    "shape": 2,
-    "status": "riding",
-    "title": "Parity task",
-    "updatedAt": "2026-01-01T00:00:00.000Z",
-  },
-  "updates": [
-    {
-      "blockedIds": [],
-      "committed": true,
-      "drivingModel": undefined,
-      "finalText": "looked",
-      "kind": "update",
-      "rateLimitResetsAt": undefined,
-      "steps": [
-        {
-          "createdAt": "2026-01-01T00:00:00.000Z",
-          "kind": "text",
-          "text": "looked",
-        },
-      ],
-      "usage": undefined,
-      "usageChanged": false,
-    },
-  ],
-}
-`;
-
-exports[`codex transcript regressions > image turn places -i before the prompt on resume 1`] = `
-{
-  "done": {
-    "exitCode": 0,
-    "kind": "done",
-    "stderr": "",
-  },
-  "launch": [
-    {
-      "args": [
-        "exec",
-        "--json",
-        "--skip-git-repo-check",
-        "--config",
-        "default_permissions="lander-edit"",
-        "--config",
-        "permissions.lander-edit={description="Lander workspace edit access",extends=":workspace",workspace_roots={"/repo"=true},filesystem={":workspace_roots"={".git"="write"},"/repo/.git"="write"},network={enabled=true,allow_local_binding=true}}",
-        "--config",
-        "shell_environment_policy.inherit=all",
-        "--config",
-        "shell_environment_policy.ignore_default_excludes=true",
-        "--config",
-        "shell_environment_policy.include_only=["PATH","LANDER_*"]",
-        "--cd",
-        "/repo",
-        "resume",
-        "thread-1",
-        "-i",
-        "/tmp/img1",
-        "--",
-        "Task prompt.
-
-look at this
-
-<task-attachments>
-p.png
-
-The image(s) above are already attached to your vision.
-</task-attachments>",
-      ],
-      "command": "codex",
-      "cwd": "/repo",
-      "envDelta": {
-        "LANDER_FILES_DIR": "/tmp",
-        "LANDER_PROJECT": "proj",
-        "LANDER_RUN": "ride-1",
-        "LANDER_TASK": "task-1",
-      },
-    },
-  ],
-  "task": {
-    "createdAt": "2026-01-01T00:00:00.000Z",
-    "flowState": {
-      "sessionId": "thread-1",
-      "taskPrompt": "sha256:3af023016e80fe609115753a5d742c4e508418b09c65442ba966bf2041aa808f",
-    },
-    "flowStateRev": 1,
-    "hookFireSeq": 1,
-    "id": "task-1",
-    "items": [
-      {
-        "at": "2026-01-01T00:00:00.000Z",
-        "id": "itm-mjuohs00-0",
-        "kind": "message",
-        "rideId": "ride-1",
-        "role": "flow",
-        "text": "looked",
-      },
-    ],
-    "pendingHooks": [
-      {
-        "at": "2026-01-01T00:00:00.000Z",
-        "by": "agent",
-        "id": "fire-1-mjuohs00",
-        "outcome": "done",
-        "rideId": "ride-1",
-        "trigger": "ride-ended",
-      },
-    ],
-    "rides": [
-      {
-        "endedAt": "2026-01-01T00:00:00.000Z",
-        "id": "ride-1",
-        "outcome": "done",
-        "startedAt": "2026-01-01T00:00:00.000Z",
-      },
-    ],
-    "sessionId": "thread-1",
     "shape": 2,
     "status": "riding",
     "title": "Parity task",
@@ -5037,6 +4921,120 @@ do the thing",
           "createdAt": "2026-01-01T00:00:00.000Z",
           "kind": "text",
           "text": "ok",
+        },
+      ],
+      "usage": undefined,
+      "usageChanged": false,
+    },
+  ],
+}
+`;
+
+exports[`codex transcript regressions > resumed image turn supplies a local path in the prompt 1`] = `
+{
+  "done": {
+    "exitCode": 0,
+    "kind": "done",
+    "stderr": "",
+  },
+  "launch": [
+    {
+      "args": [
+        "exec",
+        "--json",
+        "--skip-git-repo-check",
+        "--config",
+        "default_permissions="lander-edit"",
+        "--config",
+        "permissions.lander-edit={description="Lander workspace edit access",extends=":workspace",workspace_roots={"/repo"=true},filesystem={":workspace_roots"={".git"="write"},"/repo/.git"="write"},network={enabled=true,allow_local_binding=true}}",
+        "--config",
+        "shell_environment_policy.inherit=all",
+        "--config",
+        "shell_environment_policy.ignore_default_excludes=true",
+        "--config",
+        "shell_environment_policy.include_only=["PATH","LANDER_*"]",
+        "--cd",
+        "/repo",
+        "resume",
+        "thread-1",
+        "--",
+        "Task prompt.
+
+look at this
+
+<task-attachments>
+p.png
+
+To view an image, open its local path with your image-viewing tool:
+- p.png: /tmp/img1
+</task-attachments>",
+      ],
+      "command": "codex",
+      "cwd": "/repo",
+      "envDelta": {
+        "LANDER_FILES_DIR": "/tmp",
+        "LANDER_PROJECT": "proj",
+        "LANDER_RUN": "ride-1",
+        "LANDER_TASK": "task-1",
+      },
+    },
+  ],
+  "task": {
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "flowState": {
+      "sessionId": "thread-1",
+      "taskPrompt": "sha256:3af023016e80fe609115753a5d742c4e508418b09c65442ba966bf2041aa808f",
+    },
+    "flowStateRev": 1,
+    "hookFireSeq": 1,
+    "id": "task-1",
+    "items": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "id": "itm-mjuohs00-0",
+        "kind": "message",
+        "rideId": "ride-1",
+        "role": "flow",
+        "text": "looked",
+      },
+    ],
+    "pendingHooks": [
+      {
+        "at": "2026-01-01T00:00:00.000Z",
+        "by": "agent",
+        "id": "fire-1-mjuohs00",
+        "outcome": "done",
+        "rideId": "ride-1",
+        "trigger": "ride-ended",
+      },
+    ],
+    "rides": [
+      {
+        "endedAt": "2026-01-01T00:00:00.000Z",
+        "id": "ride-1",
+        "outcome": "done",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    "sessionId": "thread-1",
+    "shape": 2,
+    "status": "riding",
+    "title": "Parity task",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+  },
+  "updates": [
+    {
+      "blockedIds": [],
+      "committed": true,
+      "drivingModel": undefined,
+      "finalText": "looked",
+      "kind": "update",
+      "rateLimitResetsAt": undefined,
+      "steps": [
+        {
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "kind": "text",
+          "text": "looked",
         },
       ],
       "usage": undefined,

@@ -27,7 +27,7 @@ const ref = (over: Partial<AttachmentRef> = {}): AttachmentRef => ({
 })
 
 describe('materializeAttachments', () => {
-  it('fetches missing blobs, writes them, and returns image paths + block', async () => {
+  it('fetches missing blobs and lists the local image path in the prompt', async () => {
     const fetchBytes = vi.fn(async (r: AttachmentRef) =>
       new TextEncoder().encode(`bytes-of-${r.id}`),
     )
@@ -35,14 +35,12 @@ describe('materializeAttachments', () => {
       filesDir: dir,
       attachments: [ref(), ref({ id: 'img1', name: 'p.png', mime: 'image/png' })],
       fetchBytes,
-      visionNative: true,
     })
     expect(fetchBytes).toHaveBeenCalledTimes(2)
     // Blobs written at <dir>/<id>.
     expect(await readFile(path.join(dir, 'id1'), 'utf8')).toBe('bytes-of-id1')
     expect(await readFile(path.join(dir, 'img1'), 'utf8')).toBe('bytes-of-img1')
-    // Only images surface for the vision channel.
-    expect(out.images).toEqual([path.join(dir, 'img1')])
+    expect(out.manifestBlock).toContain(path.join(dir, 'img1'))
     expect(out.filesDir).toBe(dir)
     expect(out.manifestBlock).toContain('data.csv')
   })
@@ -54,7 +52,6 @@ describe('materializeAttachments', () => {
       filesDir: dir,
       attachments: [ref()],
       fetchBytes,
-      visionNative: false,
     })
     expect(fetchBytes).not.toHaveBeenCalled()
     expect(await readFile(path.join(dir, 'id1'), 'utf8')).toBe('already-here')
@@ -66,13 +63,11 @@ describe('materializeAttachments', () => {
       filesDir: dir,
       attachments: [ref({ id: 'a' })],
       fetchBytes,
-      visionNative: false,
     })
     await materializeAttachments({
       filesDir: dir,
       attachments: [ref({ id: 'b', name: 'b.txt', mime: 'text/plain' })],
       fetchBytes,
-      visionNative: false,
     })
     const manifest = JSON.parse(
       await readFile(path.join(dir, 'manifest.json'), 'utf8'),
@@ -88,14 +83,12 @@ describe('refreshManifest run stamping', () => {
       filesDir: dir,
       attachments: [ref({ id: 'a', name: 'a.txt' })],
       fetchBytes,
-      visionNative: true,
       run: 'ride-1',
     })
     await materializeAttachments({
       filesDir: dir,
       attachments: [ref({ id: 'a', name: 'a.txt' }), ref({ id: 'b', name: 'b.txt' })],
       fetchBytes,
-      visionNative: true,
       run: 'ride-2',
     })
     const manifest = JSON.parse(
@@ -110,30 +103,20 @@ describe('refreshManifest run stamping', () => {
 
 describe('buildManifestBlock', () => {
   it('is empty when there are no attachments', () => {
-    expect(buildManifestBlock(dir, [], true)).toBe('')
+    expect(buildManifestBlock(dir, [])).toBe('')
   })
 
-  it('tells a vision-native agent images are already attached', () => {
+  it('lists image paths and attachment commands without choosing a provider tool', () => {
     const block = buildManifestBlock(
       dir,
       [ref({ id: 'img', name: 'p.png', mime: 'image/png' })],
-      true,
     )
-    expect(block).toContain('already attached to your vision')
-    expect(block).toContain('lander attachment cat')
-    // The block also advertises the write direction, so an agent knows it can
-    // hand a file back without being told separately.
-    expect(block).toContain('lander attachment put')
-  })
-
-  it('gives a non-vision agent the image path to Read', () => {
-    const block = buildManifestBlock(
-      dir,
-      [ref({ id: 'img', name: 'p.png', mime: 'image/png' })],
-      false,
-    )
-    expect(block).toContain('Read tool')
+    expect(block).toContain('image-viewing tool')
     expect(block).toContain(path.join(dir, 'img'))
+    expect(block).toContain('lander attachment cat')
+    expect(block).toContain('lander attachment put')
+    expect(block).not.toContain('already attached to your vision')
+    expect(block).not.toContain('Read tool')
   })
 })
 

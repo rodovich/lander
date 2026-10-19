@@ -14,18 +14,6 @@ import { meta as codexMeta } from './codex'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 
 describe('provider caps', () => {
-  it('remaps the flow vision capability onto the daemon’s visionNative flag', () => {
-    // 'read' means the agent must Read the path (claude); 'flag' means the
-    // provider takes the image on the CLI and feeds its own vision (codex). The
-    // manifest block is worded from this, so getting the remap backwards would
-    // silently tell an agent its images are attached when they are not.
-    const caps = providerCaps()
-    expect(claudeMeta.capabilities.vision).toBe('read')
-    expect(caps.claude.visionNative).toBe(false)
-    expect(codexMeta.capabilities.vision).toBe('flag')
-    expect(caps.codex.visionNative).toBe(true)
-  })
-
   it('makes one registration announced, capable, and executable by the host', async () => {
     const synthetic: (typeof FLOW_MODULES)[string] = {
       meta: {
@@ -34,7 +22,6 @@ describe('provider caps', () => {
         description: 'an orchestration flow',
         driver: true,
         capabilities: {
-          vision: 'read' as const,
           grants: { task: false, project: false },
           usageSnapshot: false,
           rateLimitRetry: false,
@@ -83,7 +70,6 @@ describe('provider caps', () => {
       const caps = providerCaps()
       expect(caps.synthetic).toBeDefined()
       expect(caps.synthetic.projectGrants).toBe(false)
-      expect(caps.synthetic.visionNative).toBe(false)
       expect(
         caps.synthetic.resolveLaunchDir({
           root: '/repo',

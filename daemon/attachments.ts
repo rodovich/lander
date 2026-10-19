@@ -2,9 +2,8 @@
 // attachment bytes from the server's authed download endpoint into a stable
 // per-task dir (LANDER_FILES_DIR, cached across turns so `lander attachment cat` keeps
 // working), refreshes that dir's manifest.json, and builds the prompt-facing
-// manifest block. Images additionally surface their local path for the vision
-// channel (Codex --image / Claude Read). Pure of the run manager's wiring so the
-// fetch is injectable for tests.
+// manifest block with local image paths. Pure of the run manager's wiring so
+// the fetch is injectable for tests.
 
 import { mkdir, readFile, writeFile, stat } from 'node:fs/promises'
 import path from 'node:path'
@@ -36,8 +35,6 @@ export type ManifestEntry = AttachmentRef & { run?: string }
 export type MaterializedFiles = {
   // The per-task dir, injected to the child as LANDER_FILES_DIR.
   filesDir: string
-  // Absolute paths of this turn's image blobs, for the flow's vision channel.
-  images: string[]
   // The prompt-facing manifest block to append to the outgoing message.
   manifestBlock: string
 }
@@ -51,14 +48,11 @@ export async function materializeAttachments(opts: {
   filesDir: string
   attachments: AttachmentRef[]
   fetchBytes: FetchBytes
-  // Whether the provider delivers images to vision itself (Codex) — the block's
-  // image instructions differ when the agent must Read the path instead (Claude).
-  visionNative: boolean
   // The run these attachments arrive on, stamped onto their manifest rows.
   run?: string
   fileExists?: (p: string) => Promise<boolean>
 }): Promise<MaterializedFiles> {
-  const { filesDir, attachments, fetchBytes, visionNative } = opts
+  const { filesDir, attachments, fetchBytes } = opts
   const exists = opts.fileExists ?? defaultFileExists
   await mkdir(filesDir, { recursive: true })
 
@@ -71,11 +65,8 @@ export async function materializeAttachments(opts: {
 
   await refreshManifest(filesDir, attachments, opts.run)
 
-  const images = attachments
-    .filter((a) => isImage(a.mime))
-    .map((a) => path.join(filesDir, a.id))
-  const manifestBlock = buildManifestBlock(filesDir, attachments, visionNative)
-  return { filesDir, images, manifestBlock }
+  const manifestBlock = buildManifestBlock(filesDir, attachments)
+  return { filesDir, manifestBlock }
 }
 
 // The on-disk manifest.json `lander attachment ls` reads, unioned by id with
@@ -114,7 +105,6 @@ async function refreshManifest(
 export function buildManifestBlock(
   filesDir: string,
   attachments: AttachmentRef[],
-  visionNative: boolean,
 ): string {
   if (!attachments.length) return ''
   const lines: string[] = [
@@ -131,15 +121,9 @@ export function buildManifestBlock(
   const images = attachments.filter((a) => isImage(a.mime))
   if (images.length) {
     lines.push('')
-    if (visionNative) {
-      lines.push('The image(s) above are already attached to your vision.')
-    } else {
-      lines.push(
-        'To view an image, use the Read tool on its local path:',
-      )
-      for (const a of images)
-        lines.push(`- ${a.name}: ${path.join(filesDir, a.id)}`)
-    }
+    lines.push('To view an image, open its local path with your image-viewing tool:')
+    for (const a of images)
+      lines.push(`- ${a.name}: ${path.join(filesDir, a.id)}`)
   }
   lines.push(
     '',

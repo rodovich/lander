@@ -417,7 +417,6 @@ export type FlowMeta = {
   description: string
   driver: boolean
   capabilities: {
-    vision: 'read' | 'flag'
     grants: { task: boolean; project: boolean }
     usageSnapshot: boolean
     rateLimitRetry: boolean

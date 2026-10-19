@@ -64,7 +64,6 @@ export const BOOTSTRAP_FLOWS: FlowMeta[] = [
     description: 'Drive a task as a Claude Code conversation',
     driver: true,
     capabilities: {
-      vision: 'read',
       grants: { task: true, project: true },
       usageSnapshot: true,
       rateLimitRetry: true,
@@ -77,7 +76,6 @@ export const BOOTSTRAP_FLOWS: FlowMeta[] = [
     description: 'Drive a task as a Codex conversation',
     driver: true,
     capabilities: {
-      vision: 'flag',
       grants: { task: false, project: false },
       usageSnapshot: false,
       rateLimitRetry: false,

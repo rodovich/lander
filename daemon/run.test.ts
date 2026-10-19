@@ -120,7 +120,6 @@ describe('daemon run manager', () => {
     const h = harness({
       materialize: async () => ({
         filesDir: '/mat',
-        images: ['/mat/img1'],
         manifestBlock: '<task-attachments>\n…\n</task-attachments>',
       }),
     })
@@ -146,7 +145,7 @@ describe('daemon run manager', () => {
     expect(input.cwd).toBe('/repo')
     // The persistent per-task store dir wins over the just-materialized one.
     expect(input.filesDir).toBe('/files/proj/task-1')
-    expect(input.materialized).toMatchObject({ images: ['/mat/img1'] })
+    expect(input.materialized).toMatchObject({ manifestBlock: '<task-attachments>\n…\n</task-attachments>' })
   })
 
   it('sets the files dir in the HostInput on a turn carrying no attachments', () => {
@@ -555,7 +554,7 @@ describe('daemon run manager', () => {
     const h = harness({
       materialize: async () => {
         await gate
-        return { filesDir: '/mat', images: [], manifestBlock: '' }
+        return { filesDir: '/mat', manifestBlock: '' }
       },
     })
 
@@ -794,7 +793,7 @@ describe('daemon run manager', () => {
         materialize: async () => {
           await gate
           if (fail) throw new Error('fetch failed')
-          return { filesDir: '/mat', images: [], manifestBlock: '' }
+          return { filesDir: '/mat', manifestBlock: '' }
         },
       })
       h.manager.startRun(
@@ -862,7 +861,7 @@ describe('daemon run manager', () => {
         },
         materialize: async () => {
           await gate
-          return { filesDir: '/mat', images: [], manifestBlock: '' }
+          return { filesDir: '/mat', manifestBlock: '' }
         },
       })
       h.manager.startRun(

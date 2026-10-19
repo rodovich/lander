@@ -9,6 +9,7 @@ import {
   codexOptionsFromEnv,
   type CodexFlowDeps,
 } from './codex'
+import { buildManifestBlock } from '../attachments'
 import { captureDriverTurn, driveFlow, type DriverTurnFixture } from './testCtx'
 
 const TASK_PROMPT_TEMPLATE = 'Task prompt.'
@@ -355,28 +356,30 @@ describe('Codex flow launch', () => {
     expect(launch.args.at(-1)).toContain('--help me')
   })
 
-  // The terminator is what makes image placement uniform: everything past `--`
-  // is positional, so the repeatable `-i` flags must precede it. Before the
-  // terminator they had to trail the prompt on a fresh exec, because the
-  // variadic form would otherwise swallow it.
-  it('places image flags before the terminator on a fresh exec', async () => {
+  it.each([undefined, 'thread-1'])('offers image paths without attaching pixels (session %s)', async (sessionId) => {
+    const attachments = [
+      { id: 'img1', name: 'first.png', mime: 'image/png', size: 12 },
+      { id: 'img2', name: 'second.png', mime: 'image/png', size: 13 },
+    ]
+    const filesDir = '/files'
+    const manifestBlock = buildManifestBlock(filesDir, attachments)
     const launch = await runCodex({
-      task: {},
+      task: { sessionId },
       prompt: 'look at this',
       root: '/repo',
       cwd: '/repo',
       env: {},
-      images: ['/files/img1', '/files/img2'],
+      attachments,
+      filesDir,
+      materialized: { filesDir, manifestBlock },
     })
 
-    expect(launch.args.slice(-6)).toEqual([
-      '-i',
-      '/files/img1',
-      '-i',
-      '/files/img2',
-      '--',
-      launch.args.at(-1),
-    ])
+    expect(launch.args).not.toContain('-i')
+    expect(launch.args).not.toContain('--image')
+    expect(launch.args.at(-2)).toBe('--')
+    expect(launch.args.at(-1)).toContain(manifestBlock)
+    expect(launch.args.at(-1)).toContain('/files/img1')
+    expect(launch.args.at(-1)).toContain('/files/img2')
   })
 
   it('parses optional Codex profile and config overrides from env', async () => {

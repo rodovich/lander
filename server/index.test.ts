@@ -4408,7 +4408,6 @@ describe('flow dispatch gate', () => {
             driver: true,
             capabilities: {
               worktrees: false,
-              vision: 'read',
               grants: { task: false, project: false },
               usageSnapshot: false,
               rateLimitRetry: false,

@@ -357,7 +357,6 @@ export const CLAUDE_GOLDENS: Golden[] = [
       filesDir: '/tmp',
       materialized: {
         filesDir: '/tmp',
-        images: ['/tmp/att1'],
         manifestBlock: '<task-attachments>\nshot.png, notes.txt\n</task-attachments>',
       },
     },

@@ -172,7 +172,8 @@ export type DriverTurnFixture = {
   checkout?: string
   recordedCwd?: string
   env?: Record<string, string>
-  images?: string[]
+  attachments?: StartRunMessage['attachments']
+  materialized?: HostInput['materialized']
   filesDir?: string
 }
 
@@ -185,6 +186,7 @@ export async function captureDriverTurn(
     chunks: [],
     start: {
       task: fixture.task,
+      attachments: fixture.attachments,
       recordedCwd: fixture.recordedCwd,
       sessionId: fixture.task.sessionId,
       prompt: fixture.prompt ?? 'go',
@@ -195,11 +197,7 @@ export async function captureDriverTurn(
       cwd: fixture.cwd,
       ...(fixture.checkout !== undefined ? { checkout: fixture.checkout } : {}),
       filesDir: fixture.filesDir,
-      materialized: fixture.images ? {
-        images: fixture.images,
-        filesDir: fixture.filesDir ?? '/files',
-        manifestBlock: '',
-      } : undefined,
+      materialized: fixture.materialized,
     },
   }, flow)
   const context = result.events.flatMap((e) => e.kind === 'state-patch' ? e.ops : [])
