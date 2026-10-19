@@ -990,7 +990,8 @@ function claimTaskRun(project: Project, id: string): boolean {
 // one turn (see the batch note below) — until the queue empties. Only one
 // drainer runs per task at a time. The task is served as "paced" once the queue
 // is empty, unless the agent set its own status mid-run (e.g. `lander wedge` to
-// ask for input, or `lander land`), which we must not clobber.
+// ask for input, or `lander land`), which we must not clobber — though a message
+// queued during that turn still revives the task to run.
 async function driveTask(project: Project, id: string): Promise<void> {
   if (!claimTaskRun(project, id)) return
   return driveClaimedTask(project, id)
@@ -1037,14 +1038,13 @@ async function driveClaimedTask(project: Project, id: string): Promise<void> {
       let atts: Attachment[] = []
       let revived: RevivedMarker | undefined
       await mutateTask(file, (t) => {
-        // Take the one-shot revival marker with the batch, under the same lock
-        // that drains it: it then rides with exactly the turn the reviving
-        // message produced and cannot leak into the next one. Cleared even when
-        // the drain finds nothing to send — a marker with no turn left to ride
-        // is stale, not pending.
-        revived = t.revived
-        delete t.revived
         if (t.queued && t.queued.length) {
+          // A message queued during a turn that ended wedged or landed still gets
+          // its turn, so the drain records the crossing out of the wedge or land.
+          // `system` loses the sender: one crossing covers a batch that can mix
+          // senders.
+          recordStatusTransition(t, 'riding', new Date().toISOString(), 'system')
+          t.status = 'riding'
           batch = t.queued
           // Gather the attachments off the trailing user items this batch is made
           // of, under the same lock, so the run carries exactly this turn's files.
@@ -1056,6 +1056,13 @@ async function driveClaimedTask(project: Project, id: string): Promise<void> {
           deliverQueuedBatch(t, batch.length, runId)
           delete t.queued
         }
+        // Take the one-shot revival marker with the batch, under the same lock
+        // that drains it and after the crossing above stamps it: it then rides
+        // with exactly the turn the reviving message produced and cannot leak
+        // into the next one. Cleared even when the drain finds nothing to send —
+        // a marker with no turn left to ride is stale, not pending.
+        revived = t.revived
+        delete t.revived
       }).catch(() => {})
       if (!batch.length) break
       await runTurn(project, id, batch.join('\n\n'), runId, atts, revived)

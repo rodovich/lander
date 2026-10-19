@@ -455,7 +455,9 @@ describe('the nudge', () => {
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ ok: true })
 
-    const t = await raw()
+    // `drained`, not `settled`: the drain's write must land before the next test
+    // seeds this same id, or it carries this test's record over that seed.
+    const t = JSON.parse(await drained(ID))
     const hooks = t.items.filter((i: any) => i.kind === 'message' && i.role === 'hook')
     expect(hooks).toHaveLength(1)
     // Attribution is the server's, from the credential — a body cannot forge it.
@@ -4043,6 +4045,29 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     ).toHaveLength(1)
   })
 
+  it('un-wedges a task whose queued message drives the turn after a failure', async () => {
+    const sender = 'requeue-revive-sender'
+    const id = 'requeue-revive'
+    await seed(sender)
+    await seed(id)
+
+    expect((await sendAs(sender, id, { message: 'first' })).status).toBe(200)
+    await waitFor(() => startRuns(id).length === 1)
+    expect((await sendAs(sender, id, { message: 'follow-up' })).status).toBe(200)
+
+    finish(startRuns(id)[0].runId!, 1)
+    await waitFor(() => startRuns(id).length === 2)
+    expect((startRuns(id)[1] as { revived?: unknown }).revived).toEqual({ from: 'wedged' })
+    finish(startRuns(id)[1].runId!)
+    const raw = await waitForRaw(id, (r) => !r.runId)
+    expect(raw.status).toBe('riding')
+    expect(raw.revived).toBeUndefined()
+    const events = (raw.items as Record<string, unknown>[])
+      .filter((i) => i.kind === 'event')
+      .map((i) => i.eventKind)
+    expect(events).toEqual(expect.arrayContaining(['wedged', 'unwedged']))
+  })
+
   // Runs before the crash test, which disconnects the shared daemon.
   it('a user PATCH interrupt wedges without a retry ask (semantics unchanged)', async () => {
     const id = 'kill-user-interrupt'
@@ -4282,12 +4307,19 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
         await vi.advanceTimersByTimeAsync(30_000)
         await new Promise((r) => setImmediate(r))
         raw = await readRaw(id)
-      } while (raw.status !== 'wedged' && Date.now() < deadline)
+      } while (
+        !asksOf(raw).some((a) => a.origin === 'retry') &&
+        Date.now() < deadline
+      )
       expect((await posted).status).toBe(200)
     } finally {
       vi.useRealTimers()
     }
-    expect(raw.status).toBe('wedged')
+    // The queued 'go' drives a turn as soon as the crash wedges the task, so the
+    // wedge shows in the record's events and retry ask, not its status.
+    expect(raw.items as Record<string, unknown>[]).toContainEqual(
+      expect.objectContaining({ kind: 'event', eventKind: 'wedged' }),
+    )
     const ask = asksOf(raw).find((a) => a.origin === 'retry')
     expect(ask!.prompt).toBe(RESTART_PROMPT)
     closeRunChannel('run-kill-restart')
