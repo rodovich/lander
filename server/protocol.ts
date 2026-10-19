@@ -602,15 +602,14 @@ export type ProjectGrantResultMessage = {
 // to any run; the server caches it keyed by flow and serves the items verbatim,
 // never learning what they mean. A flow that publishes nothing (Codex) simply
 // never sends this, so its panel stays empty.
+//
+// `flow` is the cache key. `agent` rides along for a legacy kind until step 5
+// retires them, and a daemon that predates `flow` sends only `agent`, so the
+// server reads `flow ?? agent`.
 export type TelemetryMessage = {
   type: 'telemetry'
-  agent: AgentKind
-  // The producing flow's name. Supersedes `agent` as the cache key — the server
-  // reads `flow ?? agent`, so an old daemon that sends only `agent` still keys
-  // correctly. `agent` stays required until step 5 retires the legacy kinds.
-  flow?: string
   items: TelemetryItem[]
-}
+} & ({ agent: AgentKind; flow?: string } | { agent?: AgentKind; flow: string })
 
 // One durable-state mutation a flow produces via `ctx.state.set/delete/push/patch`.
 // `path` walks into the opaque flowState tree (creating intermediate objects);

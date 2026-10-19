@@ -1,9 +1,6 @@
-// Claude subscription-usage fetch + normalization, extracted so both sides of
-// the split can read the credential and hit the OAuth endpoint: the server when
-// the daemon is off, and the host daemon — which owns usage end to end (decision
-// 6) once it is. Pure given the host (credential store + network); holds no task
-// or server state. Types are the shared protocol ones, so the snapshot the daemon
-// pushes, the server caches, and the API serves are all one shape.
+// Subscription-usage snapshots for the flows' onStatus hooks: the Claude OAuth
+// fetch + normalization, and the mapping from a usage body to meters. Pure given
+// the host (credential store + network); holds no task or server state.
 
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -107,11 +104,10 @@ function formatResetWhen(iso: string): string {
     : d.toLocaleDateString([], { weekday: 'short' })
 }
 
-// Map a Claude usage snapshot to the generic telemetry items the status panel
-// renders: the session (5-hour) and weekly windows as two meters, each with a
-// 'warn' band at ≥90% and a preformatted "resets …" note (session as a clock time,
-// weekly as clock-if-today-else-weekday). This is Claude-flow knowledge — the codex
-// path publishes no items at all, so its panel stays empty.
+// Map a usage snapshot to the generic telemetry items the status panel renders:
+// the session (5-hour) and weekly windows as two meters, each with a 'warn' band
+// at ≥90% and a preformatted "resets …" note (session as a clock time, weekly as
+// clock-if-today-else-weekday).
 export function usageTelemetry(body: UsageBody): TelemetryItem[] {
   const meter = (
     id: string,
@@ -150,6 +146,24 @@ export function usageTelemetry(body: UsageBody): TelemetryItem[] {
       ),
     )
   return items
+}
+
+// A flow's onStatus answer for a usage snapshot: its meters, and a refresh just
+// past the soonest window reset so the readout catches utilization dropping
+// back. The daemon still clamps refreshAt against its TTL floor — a reset
+// already in the past must not become a busy loop.
+export type UsageStatus = { items: TelemetryItem[]; refreshAt?: string }
+
+export function usageStatus(body: UsageBody): UsageStatus {
+  const resets = [body.session?.resetsAt, body.weekly?.resetsAt]
+    .map((s) => (s ? Date.parse(s) : NaN))
+    .filter((n) => Number.isFinite(n))
+  return {
+    items: usageTelemetry(body),
+    ...(resets.length
+      ? { refreshAt: new Date(Math.min(...resets) + 2_000).toISOString() }
+      : {}),
+  }
 }
 
 // Fetch the current subscription usage straight from the OAuth endpoint. Returns

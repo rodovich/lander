@@ -3,12 +3,14 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import {
+  agyUsageBody,
   agyProjectFile,
   agyProjectId,
   makeFlow,
   meta,
   normalizeAgyRule,
   onGrant,
+  onStatus,
   agyRepromptMessage,
   resolveLaunchDir,
 } from './agy'
@@ -68,11 +70,40 @@ const steps = (events: Awaited<ReturnType<typeof driveFlow>>['events']) =>
 
 it('registers an executable driver and its capabilities', () => {
   expect(announcedFlows()).toContainEqual({ scope: 'bundled', meta })
-  expect(providerCaps().agy).toMatchObject({ projectGrants: true, usageSnapshot: false })
+  expect(providerCaps().agy).toMatchObject({ projectGrants: true, usageSnapshot: true })
   expect(FLOW_MODULES.agy.onGrant).toBe(onGrant)
+  expect(FLOW_MODULES.agy.onStatus).toBe(onStatus)
   expect(buildFlows({ root: process.cwd(), env: {} }).agy.meta).toEqual(meta)
   expect(resolveLaunchDir({ root: '/repo', recordedCwd: '/repo/sub', isDir: () => true })).toEqual({ cwd: '/repo/sub' })
   expect(resolveLaunchDir({ root: '/repo', recordedCwd: '/gone', isDir: () => false })).toEqual({ cwd: '/repo' })
+})
+
+it('reads the Gemini group of /usage as used percentages', () => {
+  const bucket = (id: string, remaining_fraction: number, reset_time: string) =>
+    ({ id, window: id.endsWith('5h') ? '5h' : 'weekly', remaining_fraction, reset_time })
+  const output = {
+    status: 'SUCCESS',
+    command: {
+      name: 'usage',
+      data: {
+        groups: [
+          { name: 'Gemini Models', buckets: [
+            bucket('gemini-weekly', 0.75, '2026-10-23T22:23:42Z'),
+            bucket('gemini-5h', 0.25, '2026-10-19T20:30:14Z'),
+          ] },
+          { name: 'Claude and GPT models', buckets: [
+            bucket('3p-weekly', 1, '2026-10-26T19:45:43Z'),
+            bucket('3p-5h', 1, '2026-10-20T00:45:43Z'),
+          ] },
+        ],
+      },
+    },
+  }
+  expect(agyUsageBody(output)).toEqual({
+    session: { utilization: 75, resetsAt: '2026-10-19T20:30:14Z' },
+    weekly: { utilization: 25, resetsAt: '2026-10-23T22:23:42Z' },
+  })
+  expect(agyUsageBody({ command: { name: 'usage', data: { groups: [] } } })).toBeNull()
 })
 
 it('keeps completed checkpoints in stream order without duplicating them or inventing compaction metadata', async () => {

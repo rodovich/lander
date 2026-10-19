@@ -516,7 +516,7 @@ describe('daemon run manager', () => {
 
     push(h.hosts[0], { kind: 'done', exitCode: 0, stderr: '' })
 
-    expect(refreshUsage).toHaveBeenCalled()
+    expect(refreshUsage).toHaveBeenCalledWith('claude')
   })
 
   it('stops every held host on stopAll, naming the shutdown as the cause', async () => {

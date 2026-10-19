@@ -117,7 +117,7 @@ export type RunManagerOptions = {
   materialize?: (
     msg: StartRunMessage,
   ) => Promise<MaterializedFiles | undefined>
-  refreshUsage?: () => void | Promise<void>
+  refreshUsage?: (flow: string) => void | Promise<void>
   runBufferTtlMs?: number
   spawnHost?: SpawnHostLike
   onEmpty?: () => void
@@ -183,6 +183,7 @@ export function createRunManager({
       return
     }
     const activeCaps = known
+    const usageFlow = activeCaps.usageSnapshot ? flow : undefined
 
     let paths: RunPaths
     let prepared: Promise<void> | undefined
@@ -200,7 +201,7 @@ export function createRunManager({
     // LANDER_FILES_DIR, build the manifest block).
     const attachments = !!(msg.attachments?.length && materialize)
     if (!prepared && !attachments) {
-      spawnRun(msg, activeCaps, paths, undefined)
+      spawnRun(msg, usageFlow, paths, undefined)
       return
     }
     // Held from here until it spawns or settles: no Run record exists during
@@ -226,7 +227,7 @@ export function createRunManager({
         } catch (e) {
           return failBeforeSpawn('failed to materialize attachments')(e)
         }
-      spawnAfterDetour(msg, activeCaps, paths, materialized)
+      spawnAfterDetour(msg, usageFlow, paths, materialized)
     })()
   }
 
@@ -242,12 +243,12 @@ export function createRunManager({
   // path a synchronous throw takes.
   function spawnAfterDetour(
     msg: StartRunMessage,
-    activeCaps: ProviderCaps,
+    usageFlow: string | undefined,
     paths: Parameters<typeof spawnRun>[2],
     materialized: MaterializedFiles | undefined,
   ): void {
     try {
-      spawnRun(msg, activeCaps, paths, materialized)
+      spawnRun(msg, usageFlow, paths, materialized)
     } catch (e) {
       failRun(msg.runId, `daemon error: ${e instanceof Error ? e.message : String(e)}`)
     }
@@ -255,7 +256,7 @@ export function createRunManager({
 
   function spawnRun(
     msg: StartRunMessage,
-    activeCaps: ProviderCaps,
+    usageFlow: string | undefined,
     paths: RunPaths,
     materialized: MaterializedFiles | undefined,
   ): void {
@@ -431,7 +432,7 @@ export function createRunManager({
       }, runBufferTtlMs)
       rec.dropTimer.unref?.()
       send(doneMsg)
-      if (activeCaps.usageSnapshot) void refreshUsage()
+      if (usageFlow) void refreshUsage(usageFlow)
     }
 
     // The executor → supervisor seam: assign seq + buffer + relay each event, and
@@ -465,13 +466,9 @@ export function createRunManager({
           buffer.push(update)
           send(update)
           if (event.steps.some((s) => s.kind === 'tool_result')) refreshCheckout()
-          if (
-            event.rateLimitResetsAt &&
-            !sawRateLimit &&
-            activeCaps.usageSnapshot
-          ) {
+          if (event.rateLimitResetsAt && !sawRateLimit && usageFlow) {
             sawRateLimit = true
-            void refreshUsage()
+            void refreshUsage(usageFlow)
           }
           break
         }

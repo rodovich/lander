@@ -20,7 +20,8 @@ import {
   type ProviderCaps,
 } from './flows/index'
 import { scrubProcessEnv } from '../server/secrets'
-import type { AgentKind, TelemetryItem } from '../server/protocol'
+import type { TelemetryItem } from '../server/protocol'
+import { isAgentKind } from '../server/agent'
 import type {
   ServerToDaemon,
   RegisteredMessage,
@@ -105,54 +106,55 @@ function send(
 }
 
 // ── Usage ───────────────────────────────────────────────────────────────────
-// The daemon owns the SCHEDULE for the global usage panel — the 60s TTL floor
+// The daemon owns the SCHEDULE for each flow's usage panel — the 60s TTL floor
 // every trigger shares, the per-turn trigger, the boot/connect fetch, and the
 // reset timer — because that schedule has to run when no run, and therefore no
-// flow host, is alive. It no longer owns the CONTENT: what a snapshot is (the
-// credential read, the fetch, the item mapping, and when to look again) belongs
-// to whichever flow declares usageSnapshot, reached through its out-of-turn
+// flow host, is alive. It does not own the CONTENT: what a snapshot is (where
+// the numbers come from, the item mapping, and when to look again) belongs
+// to each flow that declares usageSnapshot, reached through its out-of-turn
 // onStatus hook. A provider that publishes nothing simply exports no hook and its
 // panel stays empty.
 const USAGE_TTL_MS = 60_000
-// The provider whose flow owns the panel. At most one does today; a registry
-// makes this a list later.
-const USAGE_AGENT = (Object.keys(CAPS) as AgentKind[]).find(
-  (agent) => CAPS[agent].usageSnapshot,
+type UsageSchedule = {
+  items: TelemetryItem[] | null
+  triedAt: number
+  refreshing: boolean
+  resetTimer: ReturnType<typeof setTimeout> | null
+}
+const usageByFlow = new Map<string, UsageSchedule>(
+  Object.keys(CAPS)
+    .filter((flow) => CAPS[flow].usageSnapshot)
+    .map((flow) => [flow, { items: null, triedAt: 0, refreshing: false, resetTimer: null }]),
 )
-let usageItems: TelemetryItem[] | null = null
-let usageAt = 0
-let usageRefreshing = false
-let usageResetTimer: ReturnType<typeof setTimeout> | null = null
 
-function pushUsage(): void {
-  if (usageItems && USAGE_AGENT)
+function pushUsage(flow: string): void {
+  const items = usageByFlow.get(flow)?.items
+  if (items)
     send({
       type: 'telemetry',
-      agent: USAGE_AGENT,
-      // The flow name is the cache key going forward; `agent` rides along until
-      // step 5 retires it, so an older server still keys this correctly.
-      flow: USAGE_AGENT,
-      items: usageItems,
+      ...(isAgentKind(flow) ? { agent: flow } : {}),
+      flow,
+      items,
     })
 }
 
-// Refresh unless a snapshot was taken within the TTL, so no trigger can hammer
-// the endpoint or the keychain. A fresh snapshot pushes to the server and re-arms
-// the reset timer; a failed one leaves the last snapshot in place.
-function refreshUsage(): Promise<void> {
-  if (!USAGE_AGENT) return Promise.resolve()
-  if (usageItems && Date.now() - usageAt < USAGE_TTL_MS) return Promise.resolve()
-  if (usageRefreshing) return Promise.resolve()
-  const onStatus = FLOW_MODULES[USAGE_AGENT].onStatus
+// The TTL counts from the last attempt, not the last success, so no trigger can
+// hammer the endpoint, the keychain, or the CLI even while every attempt fails.
+function refreshUsage(flow: string): Promise<void> {
+  const s = usageByFlow.get(flow)
+  if (!s) return Promise.resolve()
+  if (Date.now() - s.triedAt < USAGE_TTL_MS) return Promise.resolve()
+  if (s.refreshing) return Promise.resolve()
+  const onStatus = FLOW_MODULES[flow].onStatus
   if (!onStatus) return Promise.resolve()
-  usageRefreshing = true
+  s.refreshing = true
+  s.triedAt = Date.now()
   return (async () => {
     const snapshot = await onStatus()
     if (snapshot) {
-      usageItems = snapshot.items as TelemetryItem[]
-      usageAt = Date.now()
-      pushUsage()
-      scheduleUsageReset(snapshot.refreshAt)
+      s.items = snapshot.items as TelemetryItem[]
+      pushUsage(flow)
+      scheduleUsageReset(flow, s, snapshot.refreshAt)
     }
   })()
     .catch(() => {
@@ -160,7 +162,7 @@ function refreshUsage(): Promise<void> {
       // it; the last snapshot stands until the next trigger.
     })
     .finally(() => {
-      usageRefreshing = false
+      s.refreshing = false
     })
 }
 
@@ -168,17 +170,21 @@ function refreshUsage(): Promise<void> {
 // readout catches utilization dropping back without waiting for the next turn.
 // Clamped to the TTL floor: a reset already in the past must not become a busy
 // loop.
-function scheduleUsageReset(refreshAt: string | undefined): void {
+function scheduleUsageReset(
+  flow: string,
+  s: UsageSchedule,
+  refreshAt: string | undefined,
+): void {
   if (!refreshAt) return
   const at = Date.parse(refreshAt)
   if (!Number.isFinite(at)) return
   const delay = Math.max(at - Date.now(), USAGE_TTL_MS)
-  if (usageResetTimer) clearTimeout(usageResetTimer)
-  usageResetTimer = setTimeout(() => {
-    usageResetTimer = null
-    void refreshUsage()
+  if (s.resetTimer) clearTimeout(s.resetTimer)
+  s.resetTimer = setTimeout(() => {
+    s.resetTimer = null
+    void refreshUsage(flow)
   }, delay)
-  usageResetTimer.unref()
+  s.resetTimer.unref()
 }
 
 function isDir(p: string): boolean {
@@ -635,9 +641,9 @@ function connect(): void {
     // Prime the server's snapshot: re-push the last one we hold (so a reconnect
     // re-fills the server cache immediately), then fetch a fresh one (the boot /
     // connect trigger; the TTL floor collapses a redundant fetch).
-    if (USAGE_AGENT) {
-      pushUsage()
-      void refreshUsage()
+    for (const flow of usageByFlow.keys()) {
+      pushUsage(flow)
+      void refreshUsage(flow)
     }
   })
   sock.addEventListener('message', (ev) => onMessage(String(ev.data)))

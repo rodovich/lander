@@ -582,9 +582,11 @@ export function attachDaemonServer(
             report: msg.report,
           } satisfies HookRunResponse)
           break
-        case 'telemetry':
-          opts.onTelemetry?.(msg.flow ?? msg.agent, msg.items)
+        case 'telemetry': {
+          const flow = msg.flow ?? msg.agent
+          if (flow) opts.onTelemetry?.(flow, msg.items)
           break
+        }
       }
     })
 

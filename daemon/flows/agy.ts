@@ -1,7 +1,9 @@
+import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
+import { promisify } from 'node:util'
 import {
   addUsage,
   checkoutNote,
@@ -19,6 +21,14 @@ import {
 } from 'lander/flow'
 import type { AgentLaunchDir, AgentLaunchDirInput } from '../agent'
 import type { Ctx, FlowMeta, ToolHandle, TurnResult } from './ctx'
+import {
+  usageStatus,
+  type UsageBody,
+  type UsageStatus,
+  type UsageWindow,
+} from '../../server/usage'
+
+const execFileAsync = promisify(execFile)
 
 export const meta: FlowMeta = {
   api: 1,
@@ -27,7 +37,7 @@ export const meta: FlowMeta = {
   driver: true,
   capabilities: {
     grants: { task: false, project: true },
-    usageSnapshot: false,
+    usageSnapshot: true,
     rateLimitRetry: false,
     reportsCost: false,
   },
@@ -722,6 +732,37 @@ export async function onGrant(
   }: { projectPath: string; rule: string; geminiConfigDir?: string },
 ): Promise<void> {
   ensureAgyProjectRules(projectPath, [rule], geminiConfigDir)
+}
+
+export function agyUsageBody(output: unknown): UsageBody | null {
+  const groups = asRecord(asRecord(asRecord(output)?.command)?.data)?.groups
+  if (!Array.isArray(groups)) return null
+  const buckets = groups.flatMap((g) => {
+    const b = asRecord(g)?.buckets
+    return Array.isArray(b) ? b.map(asRecord) : []
+  })
+  const window = (id: string): UsageWindow | null => {
+    const b = buckets.find((b) => b?.id === id)
+    if (typeof b?.remaining_fraction !== 'number') return null
+    return {
+      utilization: (1 - b.remaining_fraction) * 100,
+      resetsAt: typeof b.reset_time === 'string' ? b.reset_time : null,
+    }
+  }
+  const body = { session: window('gemini-5h'), weekly: window('gemini-weekly') }
+  return body.session || body.weekly ? body : null
+}
+
+const USAGE_TIMEOUT_MS = 30_000
+
+export async function onStatus(): Promise<UsageStatus | null> {
+  const { stdout } = await execFileAsync(
+    'agy',
+    ['-p', '/usage', '--output-format', 'json'],
+    { timeout: USAGE_TIMEOUT_MS },
+  )
+  const body = agyUsageBody(JSON.parse(stdout))
+  return body ? usageStatus(body) : null
 }
 
 export function resolveLaunchDir({

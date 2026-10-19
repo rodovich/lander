@@ -42,7 +42,7 @@ Each project gets a URL slug from its path (e.g. `/Users/me/code/app` → `users
 |------|-------|------|------|
 | Web | React 18 + Vite | 41414 | SPA, proxies `/api` → 6181 |
 | API | Hono on `@hono/node-server` | 6181 | Task CRUD, scheduling, and daemon coordination |
-| Daemon | Node host process | — | Owns flow hosts, agent subprocesses (`claude`/`codex`/`agy`), stream reduction, and Claude usage polling |
+| Daemon | Node host process | — | Owns flow hosts, agent subprocesses (`claude`/`codex`/`agy`), stream reduction, and Claude and Antigravity usage polling |
 
 - A turn doesn't run as a child of the server. The server sends a flow-neutral `start-run` message to the host daemon over WebSocket. The daemon runs the selected flow in a flow-host subprocess, where agent drivers launch their CLI and reduce its stream into normalized updates. The daemon enforces the idle timeout and keeps a short replay buffer for reconnects. The server applies those updates to task JSON and surfaces a non-zero exit with no reply as an error message.
 - Because the daemon survives a server restart, an in-flight turn keeps going across a reload and a fresh server **reattaches** to it, resuming from the persisted run cursor. The server stays the **sole writer of task JSON**; the daemon only owns live process state and replay buffers, so the two can later run on separate hosts.
