@@ -9,6 +9,7 @@ import {
   meta,
   normalizeAgyRule,
   onGrant,
+  agyRepromptMessage,
   resolveLaunchDir,
 } from './agy'
 import { announcedFlows, buildFlows, FLOW_MODULES, providerCaps } from './index'
@@ -385,7 +386,7 @@ it('passes --mode accept-edits, --project lander-<hash>, canonicalized --add-dir
   })
 })
 
-it('marks refused tool calls blocked from their denial error or agy\'s log, wedges the task, preserves earlier prose, and omits blank messages', async () => {
+it('marks refused tool calls blocked from their denial error or agy\'s log, preserves earlier prose, and omits blank messages', async () => {
   const calls: { url: string; method: string; body: unknown }[] = []
   vi.stubGlobal(
     'fetch',
@@ -406,6 +407,7 @@ it('marks refused tool calls blocked from their denial error or agy\'s log, wedg
   )
   try {
     const withProse = fixture([[
+      init('conv-0'),
       event('step_update', {
         step_index: 1,
         step_type: 'agent_response',
@@ -456,13 +458,6 @@ it('marks refused tool calls blocked from their denial error or agy\'s log, wedg
         tool: 'run_command',
       },
     ])
-    expect(calls).toEqual([
-      {
-        url: 'http://api.test/api/proj/tasks/task-1',
-        method: 'PATCH',
-        body: { status: 'wedged' },
-      },
-    ])
 
     const turnItems = async (lines: string[], log?: string) => {
       const g = fixture([lines])
@@ -491,7 +486,6 @@ it('marks refused tool calls blocked from their denial error or agy\'s log, wedg
         tool: 'run_command',
       },
     ])
-    expect(calls).toHaveLength(2)
 
     const itemsUnlogged = await turnItems(silentGitPush)
     expect(notices(itemsUnlogged)).toEqual([
@@ -528,6 +522,7 @@ it('marks refused tool calls blocked from their denial error or agy\'s log, wedg
     expect(blockedRequests(itemsSubagent)).toEqual([])
 
     const deniedBeforeLaterCommands = fixture([[
+      init('conv-4'),
       ...[
         ['bun run test spec.ts', 'user denied permission to run command'],
         ['bun run typecheck'],
@@ -552,9 +547,72 @@ it('marks refused tool calls blocked from their denial error or agy\'s log, wedg
         tool: 'run_command',
       },
     ])
+    expect(calls).toEqual([])
   } finally {
     vi.unstubAllGlobals()
   }
+})
+
+it('prompts the agent again with only what it can\'t see, and wedges once agy keeps refusing', async () => {
+  const calls: { url: string; method: string }[] = []
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    calls.push({ url, method: init?.method ?? 'GET' })
+    return { ok: true, status: 200, statusText: 'OK', json: async () => ({}) } as Response
+  }))
+  try {
+    const denied = (step: number, CommandLine: string, usage: object) => [
+      init('conv-r'),
+      toolStep(step, 'run_command', { CommandLine }),
+      result({
+        response: '',
+        denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
+        usage,
+      }),
+    ]
+    const g = fixture([denied(1, 'git push', { input_tokens: 100, output_tokens: 10 })])
+    g.start = { ...g.start, env: { LANDER_API: 'http://api.test', LANDER_PROJECT: 'proj', LANDER_TASK: 'task-1', LANDER_TOKEN: 'tok' } }
+    g.later = [{
+      chunks: [[
+        event('step_update', { step_index: 3, step_type: 'agent_response', state: 'DONE', text_delta: 'I need permission to push.' }),
+        result({ response: 'I need permission to push.', usage: { input_tokens: 250, output_tokens: 30 } }),
+      ]],
+    }]
+    const driven = await driveFlow(g, flow(undefined, refusalLine('conv-r', 1)))
+    const message = '[lander] Antigravity ended your turn because it refused a call needing a permission the user has not granted.\n- Your run_command call `git push` was refused. Its result says it was canceled.'
+    expect(driven.spawns).toHaveLength(2)
+    expect(driven.spawns[1].args.slice(0, 2)).toEqual(['-p', message])
+    expect(driven.spawns[1].args).toEqual(expect.arrayContaining(['--conversation', 'conv-r']))
+    const task = applyEvents(goldenInput(g).start, driven.events)
+    const items = (task.items ?? []) as { kind: string; text?: string }[]
+    expect(items.map((it) => [it.kind, it.text])).toEqual([
+      ['tool', undefined],
+      ['reprompt', message],
+      ['message', 'I need permission to push.'],
+    ])
+    expect(task).toMatchObject({ rides: [expect.objectContaining({ usage: expect.objectContaining({ input: 250, output: 30 }) })] })
+    expect(calls).toEqual([])
+
+    const stubborn = fixture([denied(1, 'git push', {})])
+    stubborn.start = g.start
+    stubborn.later = [2, 3, 4].map((n) => ({ chunks: [denied(n * 2, 'git push', {})] }))
+    const drivenStubborn = await driveFlow(stubborn, flow(undefined, refusalLine('conv-r', 1)))
+    expect(drivenStubborn.spawns).toHaveLength(4)
+    expect(calls).toEqual([{ url: 'http://api.test/api/proj/tasks/task-1', method: 'PATCH' }])
+  } finally {
+    vi.unstubAllGlobals()
+  }
+})
+
+it('states each kind of refusal the agent can\'t place for itself, and nothing about ones it saw', () => {
+  expect(agyRepromptMessage([
+    { in: 'turn', tool: 'run_command', input: 'echo seen', seen: true },
+    { in: 'subagent', action: 'RunCommand', conversation: 'sub-1' },
+    { in: 'unknown', action: 'WriteToFile' },
+  ])).toBe([
+    '[lander] Antigravity ended your turn because it refused 3 calls needing a permission the user has not granted.',
+    '- A RunCommand call by your subagent (conversation sub-1) was refused. Antigravity stopped the subagent when it ended your turn.',
+    '- Antigravity did not say which WriteToFile call it refused.',
+  ].join('\n'))
 })
 
 it('persists project grants via onGrant into the same lander-<hash>.json used by onTurn across worktrees', async () => {

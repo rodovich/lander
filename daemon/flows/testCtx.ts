@@ -65,6 +65,9 @@ export type Golden = {
   stderrChunks?: string[]
   start?: Partial<StartRunMessage>
   input?: Partial<HostInput>
+  // What each later child the flow spawns in the same turn says, in spawn
+  // order. A child with no entry here exits 0 having said nothing.
+  later?: Pick<Golden, 'chunks' | 'exitCode' | 'stderrChunks'>[]
 }
 
 export function goldenInput(g: Golden): HostInput {
@@ -120,7 +123,10 @@ export async function driveFlow(
 
   // Let the flow reach its spawn before feeding it anything.
   await settle()
-  if (calls.length) await feed(calls[0].child, g)
+  for (let i = 0; i < calls.length; i++) {
+    await feed(calls[i].child, i === 0 ? g : g.later?.[i - 1] ?? { chunks: [] })
+    await settle()
+  }
   await turn
   return { events, spawns: calls, result: captured }
 }
@@ -129,7 +135,10 @@ export async function driveFlow(
 // lets the consumer drain one chunk's lines and flush before the next arrives —
 // i.e. it reproduces the real per-chunk cadence rather than dumping everything
 // into one batch.
-export async function feed(child: FakeChild, g: Golden): Promise<void> {
+export async function feed(
+  child: FakeChild,
+  g: Pick<Golden, 'chunks' | 'exitCode' | 'stderrChunks'>,
+): Promise<void> {
   for (const chunk of g.chunks) {
     child.stdout.emit(
       'data',

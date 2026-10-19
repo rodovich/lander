@@ -1,4 +1,4 @@
-import { chmodSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { runAssist } from '../daemon/assist'
@@ -125,10 +125,58 @@ describe.skipIf(!VERSION)(`agy contract (${VERSION})`, () => {
     expect(replyText(granted)).toContain('unlisted-probe')
   })
 
+  it('ends the turn at a call no rule covers, where a deny rule lets the agent carry on', async () => {
+    const run = (root: string) => {
+      runJsonl('agy', [
+        '-p', [
+          'Do these steps in order, one tool call at a time, and continue to the next step whatever happens.',
+          '1. Call run_command with CommandLine "echo abort-probe".',
+          `2. Call write_to_file to create ${path.join(root, 'after.txt')} with content "after".`,
+          '3. Reply "done".',
+        ].join('\n'),
+        '--output-format', 'stream-json', '--print-timeout', '0s',
+        '--mode', 'accept-edits', '--project', agyProjectId(root),
+      ], { cwd: root })
+      return existsSync(path.join(root, 'after.txt'))
+    }
+
+    const unlisted = testRoot()
+    await onGrant(undefined, { projectPath: unlisted, rule: 'command(lander)' })
+    expect(run(unlisted)).toBe(false)
+
+    const denied = testRoot()
+    writeFileSync(agyProjectFile(denied), JSON.stringify({
+      id: agyProjectId(denied),
+      name: path.basename(denied),
+      projectResources: {},
+      permissionGrants: { permissionGrants: { allow: ['command(lander)'], deny: ['command(echo)'] }, v2Migrated: true },
+    }))
+    expect(run(denied)).toBe(true)
+  })
+
+  it('prompts the agent again after a refusal, so it finishes the rest of the turn', async () => {
+    const root = testRoot()
+    const after = path.join(root, 'after.txt')
+    const turn = await driveLive(flow, {
+      root,
+      prompt: [
+        '1. Call run_command with CommandLine "echo reprompt-probe".',
+        `2. Call write_to_file to create ${after} with content "after".`,
+        '3. Reply "done".',
+      ].join('\n'),
+    })
+
+    const items = (turn.task.items ?? []) as (BlockedItem & { text?: string })[]
+    expect(blockedRequests(items).map((r) => r.rule)).toContain('command(echo reprompt-probe)')
+    expect(items.some((it) => it.kind === 'reprompt')).toBe(true)
+    expect(existsSync(after)).toBe(true)
+    expect(turn.task.rides).toHaveLength(1)
+  })
+
   it('blocks the refused command in a batch, not the allowed one canceled with it', async () => {
     const root = testRoot()
     writeFileSync(path.join(root, 'probe.txt'), 'kept\n')
-    await onGrant(undefined, { projectPath: root, rule: 'command(git)' })
+    await onGrant(undefined, { projectPath: root, rule: 'command(git status)' })
     const turn = await driveLive(flow, {
       root,
       prompt:
@@ -139,9 +187,9 @@ describe.skipIf(!VERSION)(`agy contract (${VERSION})`, () => {
     expect(items.map((it) => it.kind === 'tool' && it.input)).toEqual(
       expect.arrayContaining(['rm -f probe.txt', 'git status']),
     )
-    expect(blockedRequests(items)).toEqual([
-      { key: 'command(rm -f probe.txt)', rule: 'command(rm -f probe.txt)', tool: 'run_command' },
-    ])
+    const blocked = blockedRequests(items).map((r) => r.rule)
+    expect(blocked).toContain('command(rm -f probe.txt)')
+    expect(blocked).not.toContain('command(git status)')
     expect(readFileSync(path.join(root, 'probe.txt'), 'utf8')).toBe('kept\n')
   })
 

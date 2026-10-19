@@ -192,6 +192,7 @@ export type CtxEmit = {
   message(text: string, opts?: EmitMessageOpts): void
   // A note from the flow itself, not the agent, shown at the foot of the turn.
   notice(text: string): void
+  reprompt(text: string): void
   tool(opts: EmitToolOpts): ToolHandle
   group(): GroupHandle
   // The turn's reply text WITHOUT contributing a step. Claude's terminal
@@ -702,6 +703,7 @@ export function createCtxRuntime(
     context: (context) => steps.push({ kind: 'context', context: { ...context }, createdAt: now() }),
     message: (text, opts = {}) => emitMessageAt(text, opts, now()),
     notice: (text) => steps.push({ kind: 'notice', text, createdAt: now() }),
+    reprompt: (text) => steps.push({ kind: 'reprompt', text, createdAt: now() }),
     tool: (opts) => emitToolAt(opts, now()),
     group() {
       const g = { __brand: 'lander.group' } as unknown as GroupHandle

@@ -406,49 +406,90 @@ export function makeFlow({
       addDir('/tmp')
       addDir(process.env.TMPDIR)
       if (ctx.turn.filesDir && ctx.turn.filesDirExists) addDir(ctx.turn.filesDir)
-      const run = await runAgy(ctx, [
-        '-p', prompt, '--output-format', 'stream-json', '--print-timeout', '0s',
-        '--mode', 'accept-edits', '--project', projectId,
-        ...(sessionId ? ['--conversation', sessionId] : []),
-        ...[...dirs].flatMap((dir) => ['--add-dir', dir]),
-      ], {
-        sessionId,
-        priorTotal: sessionId
-          ? readThreadUsage(ctx.state.get(['threadUsage']))
-          : { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
-        readLog: readAgyLog,
-      })
-      if (run.producedOutput) {
-        if (sendTaskPrompt) ctx.state.set(['taskPrompt'], digest)
-        if (sendDoc && docDigest !== undefined) ctx.state.set(['landerDoc'], docDigest)
-      }
-      if (run.permissionAborted && !run.terminalError && ctx.task.env.LANDER_API) {
-        await ctx.wedge()
-      }
-      return {
-        exitCode: run.exitCode === 0 && run.terminalError ? 1 : run.exitCode,
-        stderr: [run.stderr.trim(), run.terminalError].filter(Boolean).join('\n'),
+      const priorTotal = sessionId
+        ? readThreadUsage(ctx.state.get(['threadUsage']))
+        : { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 }
+      let conversation = sessionId
+      let message = prompt
+      let liveUsage: Usage | undefined
+      for (let reprompts = 0; ; reprompts++) {
+        const run = await runAgy(ctx, [
+          '-p', message, '--output-format', 'stream-json', '--print-timeout', '0s',
+          '--mode', 'accept-edits', '--project', projectId,
+          ...(conversation ? ['--conversation', conversation] : []),
+          ...[...dirs].flatMap((dir) => ['--add-dir', dir]),
+        ], { sessionId: conversation, priorTotal, liveUsage, readLog: readAgyLog })
+        if (reprompts === 0 && run.producedOutput) {
+          if (sendTaskPrompt) ctx.state.set(['taskPrompt'], digest)
+          if (sendDoc && docDigest !== undefined) ctx.state.set(['landerDoc'], docDigest)
+        }
+        // agy ends the turn at a call no rule covers instead of letting the
+        // agent carry on without it, so tell the agent and let it choose.
+        const aborted = run.refusals.length > 0 && !run.terminalError
+        if (aborted && !ctx.signal.aborted && run.conversationId && reprompts < MAX_REPROMPTS) {
+          conversation = run.conversationId
+          message = agyRepromptMessage(run.refusals)
+          liveUsage = run.liveUsage
+          ctx.emit.reprompt(message)
+          continue
+        }
+        if (aborted && !ctx.signal.aborted && ctx.task.env.LANDER_API) await ctx.wedge()
+        return {
+          exitCode: run.exitCode === 0 && run.terminalError ? 1 : run.exitCode,
+          stderr: [run.stderr.trim(), run.terminalError].filter(Boolean).join('\n'),
+        }
       }
     },
   }
+}
+
+const MAX_REPROMPTS = 3
+
+// One refused call, as far as lander can identify it. `seen` is set when the
+// call's own result already told the agent it was refused.
+export type AgyRefusal =
+  | { in: 'turn'; tool: string; input: string; seen: boolean }
+  | { in: 'subagent'; action: string; conversation: string }
+  | { in: 'unknown'; action: string }
+
+// Only what the agent can't see for itself: that agy ended its turn, and what
+// lander knows of each refusal its own results don't report.
+export function agyRepromptMessage(refusals: AgyRefusal[]): string {
+  const n = refusals.length
+  const lines = [
+    `[lander] Antigravity ended your turn because it refused ${n === 1 ? 'a call' : `${n} calls`} needing a permission the user has not granted.`,
+  ]
+  for (const r of refusals) {
+    if (r.in === 'turn' && !r.seen)
+      lines.push(`- Your ${r.tool} call \`${r.input}\` was refused. Its result says it was canceled.`)
+    else if (r.in === 'subagent')
+      lines.push(`- A ${r.action} call by your subagent (conversation ${r.conversation}) was refused. Antigravity stopped the subagent when it ended your turn.`)
+    else if (r.in === 'unknown')
+      lines.push(`- Antigravity did not say which ${r.action} call it refused.`)
+  }
+  return lines.join('\n')
 }
 
 type AgyRun = {
   exitCode: number
   stderr: string
   terminalError?: string
-  permissionAborted: boolean
+  refusals: AgyRefusal[]
   producedOutput: boolean
+  conversationId?: string
+  liveUsage?: Usage
+}
+
+type RunOpts = {
+  sessionId: string | undefined
+  priorTotal: Usage | undefined
+  liveUsage: Usage | undefined
 }
 
 async function runAgy(
   ctx: Ctx,
   args: string[],
-  { sessionId, priorTotal, readLog }: {
-    sessionId: string | undefined
-    priorTotal: Usage | undefined
-    readLog: (file: string) => string | undefined
-  },
+  { readLog, ...opts }: RunOpts & { readLog: (file: string) => string | undefined },
 ): Promise<AgyRun> {
   // The log carries the user's account email, so it outlives the process only
   // long enough to be read.
@@ -456,7 +497,7 @@ async function runAgy(
   const logFile = path.join(logDir, 'agy.log')
   try {
     return await reduceAgy(ctx, [...args, '--log-file', logFile], {
-      sessionId, priorTotal, readRunLog: () => readLog(logFile),
+      ...opts, readRunLog: () => readLog(logFile),
     })
   } finally {
     rmSync(logDir, { recursive: true, force: true })
@@ -466,9 +507,7 @@ async function runAgy(
 async function reduceAgy(
   ctx: Ctx,
   args: string[],
-  { sessionId, priorTotal, readRunLog }: {
-    sessionId: string | undefined
-    priorTotal: Usage | undefined
+  { sessionId, priorTotal, liveUsage: startUsage, readRunLog }: RunOpts & {
     readRunLog: () => string | undefined
   },
 ): Promise<AgyRun> {
@@ -484,6 +523,8 @@ async function reduceAgy(
     number,
     {
       handle: ToolHandle
+      name: string
+      input: string
       action?: string
       denied?: boolean
       blocked?: boolean
@@ -492,7 +533,7 @@ async function reduceAgy(
   const texts = new Map<number, string>()
   const seenUsageSteps = new Set<number>()
   const seenCheckpoints = new Set<number>()
-  let liveUsage: Usage | undefined
+  let liveUsage = startUsage
   let pendingText: number | undefined
   let lastText = ''
   let conversationId = sessionId
@@ -575,12 +616,14 @@ async function reduceAgy(
         let entry = tools.get(event.step_index)
         if (!entry) {
           const ruleInfo = agyToolRule(event)
+          const name = event.tool_name ?? info?.name ?? 'tool'
+          const call = formatToolCall(event)
           const handle = ctx.emit.tool({
-            name: event.tool_name ?? info?.name ?? 'tool',
-            ...formatToolCall(event),
+            name,
+            ...call,
             ...(ruleInfo ? { rule: ruleInfo.rule } : {}),
           })
-          entry = { handle, action: ruleInfo?.action }
+          entry = { handle, name, input: call.input, action: ruleInfo?.action }
           tools.set(event.step_index, entry)
         }
         if (event.state !== 'ACTIVE') {
@@ -609,7 +652,10 @@ async function reduceAgy(
       const totalUsage = parseAgyUsage(event.usage)
       if (totalUsage) {
         const usage = codexTurnUsage(totalUsage, priorTotal)
-        if (usage) ctx.emit.meter({ usage })
+        if (usage) {
+          liveUsage = usage
+          ctx.emit.meter({ usage })
+        }
         ctx.state.set(['threadUsage'], totalUsage)
       }
       if (event.status !== 'SUCCESS') {
@@ -621,12 +667,15 @@ async function reduceAgy(
   flushText()
   const exitCode = await child.exit
   await collectStderr
+  const refusals: AgyRefusal[] = []
   if (deniedActions.length) {
-    const refusals = agyLogRefusals(readRunLog() ?? '')
+    const logged = agyLogRefusals(readRunLog() ?? '')
     const refusedSteps = new Set(
-      refusals.filter((r) => r.conversation === conversationId).map((r) => r.step),
+      logged.filter((r) => r.conversation === conversationId).map((r) => r.step),
     )
-    let inSubagents = refusals.filter((r) => r.conversation !== conversationId).length
+    const subagents = logged
+      .filter((r) => r.conversation !== conversationId)
+      .map((r) => r.conversation)
     const recorded = [...tools].reverse()
     for (const denied of deniedActions) {
       const action =
@@ -635,16 +684,19 @@ async function reduceAgy(
       const target = recorded.find(([step, t]) =>
         !t.blocked && t.action === action && (t.denied || refusedSteps.has(step)),
       )?.[1]
+      const subagent = target ? undefined : subagents.shift()
       if (target) {
         target.blocked = true
         target.handle.result({ blocked: true })
-      } else if (inSubagents > 0) {
-        inSubagents--
+        refusals.push({ in: 'turn', tool: target.name, input: target.input, seen: !!target.denied })
+      } else if (subagent) {
         ctx.emit.notice(`Antigravity refused a ${name} call in a subagent.`)
+        refusals.push({ in: 'subagent', action: name, conversation: subagent })
       } else {
         ctx.emit.notice(
           `Antigravity denied a ${name} call this turn without saying which one.`,
         )
+        refusals.push({ in: 'unknown', action: name })
       }
     }
   }
@@ -652,8 +704,10 @@ async function reduceAgy(
     exitCode,
     stderr,
     terminalError,
-    permissionAborted: deniedActions.length > 0,
+    refusals,
     producedOutput,
+    conversationId,
+    liveUsage,
   }
 }
 
