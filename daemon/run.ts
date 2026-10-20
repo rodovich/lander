@@ -131,6 +131,11 @@ const DEFAULT_RUN_BUFFER_TTL_MS = 120_000
 // must not hold the task riding.
 const CHECKOUT_REPORT_TIMEOUT_MS = 10_000
 
+// How long past a flow's `waiting` deadline the run may stay silent. The CLI
+// reports the work's end within moments of stopping it; the rest is margin for
+// a deadline the flow estimates from the CLI's limits rather than reads from it.
+const WAIT_GRACE_MS = 2 * 60_000
+
 const DEFAULT_CHECKOUT_REFRESH_MS = 5_000
 
 export function createRunManager({
@@ -323,9 +328,15 @@ export function createRunManager({
     // host output and, on fire, stops the host.
     let timer: ReturnType<typeof setTimeout> | undefined
     const idleWindowMs = msg.idleTimeoutMs
+    let waitingUntil: number | null = null
+    let armedWindowMs = idleWindowMs
     const arm = () => {
       if (timer) clearTimeout(timer)
-      timer = setTimeout(() => stopHost('idle-timeout'), idleWindowMs)
+      armedWindowMs =
+        waitingUntil === null
+          ? idleWindowMs
+          : Math.max(idleWindowMs, waitingUntil + WAIT_GRACE_MS - Date.now())
+      timer = setTimeout(() => stopHost('idle-timeout'), armedWindowMs)
       timer.unref?.()
     }
     // Host output: the run did something. Kept apart from `arm` so the initial arm
@@ -485,6 +496,10 @@ export function createRunManager({
           send(patch)
           break
         }
+        case 'waiting':
+          waitingUntil = event.until
+          if (!stopReason) arm()
+          break
         case 'done':
           // A stopped run settles from the stop, not from the done its flow
           // reports while it winds down.
@@ -555,7 +570,7 @@ export function createRunManager({
           stderr: '',
           interrupted: false,
           ...(cause ? { cause } : {}),
-          ...(cause === 'idle-timeout' ? { idleMs: idleWindowMs } : {}),
+          ...(cause === 'idle-timeout' ? { idleMs: armedWindowMs } : {}),
         })
       }
     })

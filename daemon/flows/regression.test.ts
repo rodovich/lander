@@ -10,7 +10,7 @@ import { CLAUDE_GOLDENS } from './claude.goldens'
 import { CODEX_GOLDENS } from './codex.goldens'
 import type { HostEvent } from '../host-protocol'
 import { applyEvents } from './testTask'
-import { driveFlow, goldenInput, type Golden } from './testCtx'
+import { driveFlow, FIXED_NOW, goldenInput, type Golden } from './testCtx'
 
 const TASK_PROMPT = 'Task prompt.'
 const LANDER_BIN = '/repo/bin/lander'
@@ -207,6 +207,46 @@ describe('claude thread identity', () => {
     const usage = updatesOf(flow.events).at(-1)?.usage
     expect(usage).toMatchObject({ input: 10, output: 308, cacheRead: 81660 })
     expect(usage?.costUsd).toBeCloseTo(0.1235)
+  })
+
+  describe('background work the CLI waits on after the result', () => {
+    const lines = {
+      init: '{"type":"system","subtype":"init","model":"m"}',
+      bash: JSON.stringify({
+        type: 'assistant',
+        message: { id: 'm1', content: [{ type: 'tool_use', id: 'tu1', name: 'Bash', input: { command: 'sleep', run_in_background: true, timeout: 45_000 } }] },
+      }),
+      started: '{"type":"system","subtype":"task_started","task_id":"b1","tool_use_id":"tu1","task_type":"local_bash"}',
+      live: '{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b1"}]}',
+      done: '{"type":"system","subtype":"background_tasks_changed","tasks":[]}',
+      result: '{"type":"result","result":"ok"}',
+    }
+    const waits = (events: HostEvent[]) =>
+      events.flatMap((e) => (e.kind === 'waiting' ? [e.until] : []))
+
+    it('reports the latest deadline while waiting, and clears it once the work ends', async () => {
+      const g: Golden = {
+        name: 'background command outlives the result',
+        chunks: [
+          [lines.init, lines.bash, lines.started, lines.live, lines.result],
+          [lines.done],
+          [lines.init, lines.result],
+        ],
+        start: {},
+      }
+      const flow = await driveFlow(g, claudeFlow())
+      expect(waits(flow.events)).toEqual([Date.parse(FIXED_NOW) + 45_000, null])
+    })
+
+    it('reports no wait for background work that ends before the result', async () => {
+      const g: Golden = {
+        name: 'background command ends inside the turn',
+        chunks: [[lines.init, lines.bash, lines.started, lines.live, lines.done, lines.result]],
+        start: {},
+      }
+      const flow = await driveFlow(g, claudeFlow())
+      expect(waits(flow.events)).toEqual([])
+    })
   })
 
   it('always sends the full context block when it mints a fresh session', async () => {

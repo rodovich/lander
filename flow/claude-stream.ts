@@ -97,6 +97,18 @@ export function reduceStreamLine(
   // reported apart from `usage` for the flow to difference against the previous
   // turn's — see sessionCost.
   sessionTotals?: SessionTotals
+  // Set on a `result` event: the agent has finished a model turn. The process
+  // can outlive it, waiting on background work (see backgroundTaskIds).
+  turnEnded?: true
+  // From a `system`/`task_started` event: the CLI began tracking a task for this
+  // tool call — a command, a monitor or a subagent.
+  taskStarted?: { taskId: string; toolUseId: string }
+  // From a `system`/`background_tasks_changed` event: every background task
+  // still running. The CLI keeps the process alive until this is empty.
+  backgroundTaskIds?: string[]
+  // For each Bash or Monitor call, how long from its start the CLI lets its work
+  // run before stopping it (see backgroundLimitMs).
+  backgroundLimits?: { toolUseId: string; limitMs: number }[]
 } {
   let ev: any
   try {
@@ -115,7 +127,20 @@ export function reduceStreamLine(
   let apiError: string | undefined
   let rateLimitResetsAt: string | undefined
   let sessionTotals: SessionTotals | undefined
-  if (ev.type === 'system' && ev.subtype === 'init') {
+  let turnEnded: true | undefined
+  let taskStarted: { taskId: string; toolUseId: string } | undefined
+  let backgroundTaskIds: string[] | undefined
+  let backgroundLimits: { toolUseId: string; limitMs: number }[] | undefined
+  if (
+    ev.type === 'system' && ev.subtype === 'task_started' &&
+    typeof ev.task_id === 'string' && typeof ev.tool_use_id === 'string'
+  ) {
+    taskStarted = { taskId: ev.task_id, toolUseId: ev.tool_use_id }
+  } else if (ev.type === 'system' && ev.subtype === 'background_tasks_changed' && Array.isArray(ev.tasks)) {
+    backgroundTaskIds = ev.tasks
+      .map((t: any) => t?.task_id)
+      .filter((id: unknown): id is string => typeof id === 'string')
+  } else if (ev.type === 'system' && ev.subtype === 'init') {
     turnStarted = true
     if (typeof ev.model === 'string') drivingModel = ev.model
   } else if (ev.type === 'system' && ev.subtype === 'compact_boundary') {
@@ -182,6 +207,9 @@ export function reduceStreamLine(
           edits: diffEdits(block.name, block.input),
           createdAt: at,
         })
+        const limitMs = backgroundLimitMs(block.name, block.input)
+        if (limitMs !== undefined && typeof block.id === 'string')
+          (backgroundLimits ??= []).push({ toolUseId: block.id, limitMs })
       }
     }
     // The event carries this inference's running usage; report it (tagged with
@@ -237,6 +265,7 @@ export function reduceStreamLine(
       }
     }
   } else if (ev.type === 'result') {
+    turnEnded = true
     if (typeof ev.result === 'string') finalText = ev.result
     if (Array.isArray(ev.permission_denials))
       blockedIds = ev.permission_denials
@@ -285,6 +314,55 @@ export function reduceStreamLine(
     ...(apiError ? { apiError } : {}),
     rateLimitResetsAt,
     sessionTotals,
+    ...(turnEnded ? { turnEnded } : {}),
+    ...(taskStarted ? { taskStarted } : {}),
+    ...(backgroundTaskIds ? { backgroundTaskIds } : {}),
+    ...(backgroundLimits ? { backgroundLimits } : {}),
+  }
+}
+
+// How long, from its start, the CLI lets a tool call's work run before
+// stopping it. A background command stops at its own `timeout` (default 30
+// minutes, at most 2 hours, per the CLI changelog). A foreground command moves
+// to the background at its `timeout` (default 2 minutes, at most 10), and the
+// CLI's notice then gives it 30 minutes. A Monitor stops at its `timeout_ms`
+// (default 5 minutes), capped at 10 in `-p`. Measured on CLI 2.1.296: the
+// background stop at a command's own timeout, the 10-minute foreground cap, and
+// the Monitor cap.
+export function backgroundLimitMs(tool: string, input: unknown): number | undefined {
+  const params = (input ?? {}) as Record<string, unknown>
+  const num = (v: unknown) => (typeof v === 'number' && v > 0 ? v : undefined)
+  const MINUTE = 60_000
+  if (tool === 'Bash') {
+    if (params.run_in_background === true)
+      return Math.min(num(params.timeout) ?? 30 * MINUTE, 120 * MINUTE)
+    return Math.min(num(params.timeout) ?? 2 * MINUTE, 10 * MINUTE) + 30 * MINUTE
+  }
+  if (tool === 'Monitor') return Math.min(num(params.timeout_ms) ?? 5 * MINUTE, 10 * MINUTE)
+  return undefined
+}
+
+// Folds a run's reduced lines into the latest time the CLI will stop the
+// background work it waits on after the agent's turn ends: null while a turn is
+// under way or nothing with a limit is still running. A background subagent has
+// no limit, and the CLI holds back the turn's result until it finishes.
+export function backgroundWait(): (
+  r: ReturnType<typeof reduceStreamLine>,
+  nowMs: number,
+) => number | null {
+  const limits = new Map<string, number>()
+  const deadlines = new Map<string, number>()
+  let live: string[] = []
+  let turnEnded = false
+  return (r, nowMs) => {
+    for (const { toolUseId, limitMs } of r.backgroundLimits ?? []) limits.set(toolUseId, limitMs)
+    const limitMs = r.taskStarted && limits.get(r.taskStarted.toolUseId)
+    if (r.taskStarted && limitMs) deadlines.set(r.taskStarted.taskId, nowMs + limitMs)
+    if (r.backgroundTaskIds) live = r.backgroundTaskIds
+    if (r.turnStarted) turnEnded = false
+    if (r.turnEnded) turnEnded = true
+    const pending = turnEnded ? live.flatMap((id) => deadlines.get(id) ?? []) : []
+    return pending.length ? Math.max(...pending) : null
   }
 }
 

@@ -207,6 +207,11 @@ export type CtxEmit = {
   // skips already-applied updates and a one-shot value on a skipped seq would be
   // unrecoverable after a restart (losing, say, the scheduled-retry timestamp).
   meter(opts: MeterOpts): void
+  // The agent's turn has ended but its process is waiting on background work,
+  // which the flow expects the CLI to stop by `until` (epoch ms); null when
+  // nothing with a known limit is pending. Unlike the batched outputs, it goes
+  // only to the supervisor's idle watchdog, not on to the server.
+  waiting(until: number | null): void
   // The provider has recorded this turn's user message in its session, so a
   // retry after a failure should nudge the session rather than send the message
   // again. Call it at the earliest stream event that implies the record exists.
@@ -410,6 +415,7 @@ export function createCtxRuntime(
   let rateLimitResetsAt: string | undefined
   let committed = false
   let committedChanged = false
+  let waitingUntil: number | null = null
 
   function flush(): void {
     // The empty-batch rule: a chunk that reduced to nothing puts nothing on the
@@ -718,6 +724,11 @@ export function createCtxRuntime(
       }
       if (model) drivingModel = model
       if (resets) rateLimitResetsAt = resets
+    },
+    waiting(until) {
+      if (until === waitingUntil) return
+      waitingUntil = until
+      emitEvent({ kind: 'waiting', until })
     },
     committed() {
       if (!committed) committed = committedChanged = true

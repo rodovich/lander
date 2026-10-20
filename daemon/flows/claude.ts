@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
   addUsage,
+  backgroundWait,
   checkoutNote,
   fillTaskPrompt,
   gitContext as realGitContext,
@@ -169,6 +170,7 @@ export function makeFlow({
         : { costUsd: 0, tokens: 0 }
       let stderrText = ''
       let apiError: string | undefined
+      const waitingUntil = backgroundWait()
 
       const collectStderr = (async () => {
         for await (const l of child.stderr) stderrText += `${l}\n`
@@ -181,6 +183,7 @@ export function makeFlow({
 
         if (r.turnStarted) ctx.emit.committed()
         if (r.apiError) apiError = r.apiError
+        ctx.emit.waiting(waitingUntil(r, Date.parse(ctx.now())))
         if (r.drivingModel) ctx.emit.meter({ drivingModel: r.drivingModel })
         // Claude reports a reliable reset time, so the scheduled-retry option is
         // safe to arm from it (meta.capabilities.rateLimitRetry). The retry ask

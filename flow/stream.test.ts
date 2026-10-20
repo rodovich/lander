@@ -44,6 +44,37 @@ describe('Claude context signals', () => {
   })
 })
 
+describe('Claude background work', () => {
+  const reduce = (event: object) => reduceStreamLine(JSON.stringify(event), AT)
+  const MINUTE = 60_000
+  const call = (name: string, input: object) =>
+    reduce({
+      type: 'assistant',
+      message: { id: 'm1', content: [{ type: 'tool_use', id: 'tu1', name, input }] },
+    }).backgroundLimits
+
+  it('reports the live set, the task a tool call started, and the end of a model turn', () => {
+    expect(reduce({ type: 'system', subtype: 'task_started', task_id: 'b1', tool_use_id: 'tu1' }).taskStarted)
+      .toEqual({ taskId: 'b1', toolUseId: 'tu1' })
+    expect(reduce({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'b1' }, { task_id: 'b2' }] }).backgroundTaskIds)
+      .toEqual(['b1', 'b2'])
+    expect(reduce({ type: 'system', subtype: 'background_tasks_changed', tasks: [] }).backgroundTaskIds).toEqual([])
+    expect(reduce({ type: 'result', result: 'ok' }).turnEnded).toBe(true)
+    expect(reduce({ type: 'system', subtype: 'init' }).turnEnded).toBeUndefined()
+  })
+
+  it('gives each Bash and Monitor call the time the CLI lets its work run', () => {
+    expect(call('Bash', { command: 'x', run_in_background: true })).toEqual([{ toolUseId: 'tu1', limitMs: 30 * MINUTE }])
+    expect(call('Bash', { command: 'x', run_in_background: true, timeout: 45_000 })).toEqual([{ toolUseId: 'tu1', limitMs: 45_000 }])
+    expect(call('Bash', { command: 'x', run_in_background: true, timeout: 999 * MINUTE })).toEqual([{ toolUseId: 'tu1', limitMs: 120 * MINUTE }])
+    expect(call('Bash', { command: 'x' })).toEqual([{ toolUseId: 'tu1', limitMs: 32 * MINUTE }])
+    expect(call('Bash', { command: 'x', timeout: 780_000 })).toEqual([{ toolUseId: 'tu1', limitMs: 40 * MINUTE }])
+    expect(call('Monitor', { command: 'x' })).toEqual([{ toolUseId: 'tu1', limitMs: 5 * MINUTE }])
+    expect(call('Monitor', { command: 'x', timeout_ms: 1_800_000 })).toEqual([{ toolUseId: 'tu1', limitMs: 10 * MINUTE }])
+    expect(call('Read', { file_path: '/x' })).toBeUndefined()
+  })
+})
+
 describe('summarizeToolInput', () => {
   it('returns empty string for non-object input', () => {
     expect(summarizeToolInput(null)).toBe('')

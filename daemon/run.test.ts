@@ -228,6 +228,67 @@ describe('daemon run manager', () => {
     }
   })
 
+  describe('a flow waiting on background work', () => {
+    const MINUTE = 60_000
+    const wait = (host: FakeHost, until: number | null) => push(host, { kind: 'waiting', until })
+
+    it('stays silent until the flow’s deadline plus a grace period, then is stopped', () => {
+      vi.useFakeTimers({ now: 0 })
+      try {
+        const h = harness()
+        h.manager.startRun(makeStart({ idleTimeoutMs: 50 }))
+        const host = h.hosts[0]
+        wait(host, 10 * MINUTE)
+
+        vi.advanceTimersByTime(12 * MINUTE - 1)
+        expect(host.kill).not.toHaveBeenCalled()
+        vi.advanceTimersByTime(1)
+        expect(host.kill).toHaveBeenCalledWith('SIGTERM')
+
+        host.emit('close', 137)
+        expect(h.messages.at(-1)).toMatchObject({ cause: 'idle-timeout', idleMs: 12 * MINUTE })
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('returns to the idle window once the wait ends', () => {
+      vi.useFakeTimers({ now: 0 })
+      try {
+        const h = harness()
+        h.manager.startRun(makeStart({ idleTimeoutMs: 50 }))
+        const host = h.hosts[0]
+        wait(host, 10 * MINUTE)
+        vi.advanceTimersByTime(5 * MINUTE)
+        wait(host, null)
+
+        vi.advanceTimersByTime(49)
+        expect(host.kill).not.toHaveBeenCalled()
+        vi.advanceTimersByTime(1)
+        expect(host.kill).toHaveBeenCalledWith('SIGTERM')
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('keeps the idle window when it is longer than the wait', () => {
+      vi.useFakeTimers({ now: 0 })
+      try {
+        const h = harness()
+        h.manager.startRun(makeStart({ idleTimeoutMs: 15 * MINUTE }))
+        const host = h.hosts[0]
+        wait(host, MINUTE)
+
+        vi.advanceTimersByTime(15 * MINUTE - 1)
+        expect(host.kill).not.toHaveBeenCalled()
+        vi.advanceTimersByTime(1)
+        expect(host.kill).toHaveBeenCalledWith('SIGTERM')
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+  })
+
   // The run's working time (DoneMessage.durationMs). Measured around the flow
   // host, so these hold identically for every provider — the fake host below is
   // the only executor involved.

@@ -20,7 +20,7 @@ export {
   rawToolResultText,
   summarizeToolResult,
 } from './stream'
-export { reduceStreamLine, sessionCost, type SessionTotals } from './claude-stream'
+export { backgroundWait, reduceStreamLine, sessionCost, type SessionTotals } from './claude-stream'
 export type { Step, Usage, CacheMiss } from '../shared/stream'
 
 // Codex stream reduction and thread identity.

@@ -12,6 +12,7 @@ import { gitContext } from './git'
 describe('lander/flow stdlib façade', () => {
   it('re-exports stream helpers by identity', () => {
     expect(flow.reduceStreamLine).toBe(claude.reduceStreamLine)
+    expect(flow.backgroundWait).toBe(claude.backgroundWait)
     expect(flow.addUsage).toBe(stream.addUsage)
     expect(flow.summarizeToolInput).toBe(stream.summarizeToolInput)
     expect(flow.fullToolInput).toBe(stream.fullToolInput)
