@@ -60,12 +60,17 @@ describe('Claude flow', () => {
     // Edit access rides --permission-mode, not the allowlist: only Bash(lander:*)
     // and the per-task allow rule ride --allowedTools. git and other Bash follow
     // the project's .claude permissions.
-    expect(launch.args.slice(2, 8)).toEqual([
+    expect(launch.args.slice(2, 13)).toEqual([
       '--permission-mode',
       'acceptEdits',
       '--allowedTools',
       'Bash(lander:*)',
       'Bash(npm test)',
+      '--disallowedTools',
+      'ScheduleWakeup',
+      'CronCreate',
+      'CronDelete',
+      'CronList',
       '--add-dir',
     ])
     expect(addDirsOf(launch.args)).toEqual(SCRATCH_ROOTS)

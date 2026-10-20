@@ -388,6 +388,8 @@ function manualCdHint(root: string, recordedCwd: string): string {
   )
 }
 
+const SELF_SCHEDULING_TOOLS = ['ScheduleWakeup', 'CronCreate', 'CronDelete', 'CronList']
+
 function buildClaudeArgs(
   ctx: Ctx,
   prompt: string,
@@ -447,6 +449,13 @@ function buildClaudeArgs(
     'acceptEdits',
     '--allowedTools',
     ...allowed,
+    // Claude's own scheduling tools act only while the turn's process lives, and
+    // the CLI keeps that process alive, silent, until a pending wakeup fires —
+    // so a wakeup further out than the idle window holds the task "working"
+    // until the watchdog stops the run. `lander ride` schedules the same wake
+    // outside the process.
+    '--disallowedTools',
+    ...SELF_SCHEDULING_TOOLS,
     ...filesDirArgs,
     ...tmpDirArgs,
     '--settings',
