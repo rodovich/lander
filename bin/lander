@@ -1241,9 +1241,7 @@ async function runFlow(args) {
 // Wired in by the Claude flow as a PreToolUse hook on the Bash tool (see
 // daemon/flows/claude.ts). claude pipes the tool call as JSON on stdin; when the
 // agent runs a Bash command with run_in_background set, we attach an advisory
-// note. The 15 minutes it quotes is the server's run idle window
-// (`idleTimeoutMs`): claude writes nothing while it waits on the job, so that
-// window, not the job's `timeout`, is what cuts a long wait short.
+// note.
 //
 // Crucially this is advisory only: we emit `additionalContext` and set NO
 // permissionDecision, so the normal permission flow is untouched — run_in_background
@@ -1259,12 +1257,9 @@ async function bashGuard() {
   if (input.tool_name !== 'Bash' || input.tool_input?.run_in_background !== true)
     return
   const context =
-    'Heads-up: this turn stays open until this background job finishes or ' +
-    "reaches its `timeout`, and you are woken when it does. Until then the task " +
-    'shows as still working and messages to it wait. Lander stops a turn after ' +
-    '15 minutes without output, so the job has about 15 minutes; set `timeout` ' +
-    'below that. For anything longer, or to wait on something outside this ' +
-    'task, end the turn and resume later with `lander ride --time <minutes>` / ' +
+    'Heads-up: once this job is running, end your turn rather than waiting on ' +
+    'it; you are woken when it finishes or reaches its `timeout`. To wait on ' +
+    'something outside this task, use `lander ride --time <minutes>` / ' +
     '`--date <when>` / `--await <ids>`. For parallel agentic work, spawn a ' +
     'sibling task with `lander launch <message>`.'
   process.stdout.write(

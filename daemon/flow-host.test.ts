@@ -250,7 +250,7 @@ describe('flow host', () => {
         expect.any(String),
         '--append-system-prompt',
         expect.stringMatching(
-          /^Lander instructions\.\n\n# Git\n- Interactive flags \(`-i`, e\.g\. `git rebase -i`, `git add -i`\) are not supported in this environment\.\n- Use the `gh` CLI for GitHub operations \(PRs, issues, API\)\.\n- Commit or push only when the user asks\. If on the default branch, branch first\.$/,
+          /^Lander instructions\.\n\n# Git\n- Interactive flags \(`-i`, e\.g\. `git rebase -i`, `git add -i`\) are not supported in this environment\.\n- Use the `gh` CLI for GitHub operations \(PRs, issues, API\)\.\n- Commit or push only when the user asks\. If on the default branch, branch first\.\n\n# Long-running commands\n/,
         ),
         '--output-format',
         'stream-json',

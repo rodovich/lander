@@ -33,6 +33,11 @@ exports[`claude transcript regressions > a task checkout is the launch dir, snap
 - Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
 - Commit or push only when the user asks. If on the default branch, branch first.
 
+# Long-running commands
+- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
+- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.
+
 This task works in a git worktree lander created for it at \`/repo/.worktrees/task-1\`, starting detached at whatever the project's main checkout (\`/repo\`) had checked out. Commit on a branch you create: lander removes this worktree when the task is landed or archived, and leaves branches alone.",
         "--output-format",
         "stream-json",
@@ -168,7 +173,12 @@ exports[`claude transcript regressions > a turn with a ride still scheduled is r
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
 - Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
+- Commit or push only when the user asks. If on the default branch, branch first.
+
+# Long-running commands
+- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
+- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -307,7 +317,12 @@ exports[`claude transcript regressions > agent stderr is aggregated into the don
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
 - Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
+- Commit or push only when the user asks. If on the default branch, branch first.
+
+# Long-running commands
+- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
+- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -443,7 +458,12 @@ exports[`claude transcript regressions > an API failure leads the done stderr wi
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
 - Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
+- Commit or push only when the user asks. If on the default branch, branch first.
+
+# Long-running commands
+- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
+- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -629,7 +649,12 @@ exports[`claude transcript regressions > attachment manifest rides the prompt wi
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
 - Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
+- Commit or push only when the user asks. If on the default branch, branch first.
+
+# Long-running commands
+- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
+- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -769,7 +794,12 @@ exports[`claude transcript regressions > blocked call via permission_denials 1`]
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
 - Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
+- Commit or push only when the user asks. If on the default branch, branch first.
+
+# Long-running commands
+- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
+- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -939,7 +969,12 @@ exports[`claude transcript regressions > edit and write produce diff hunks 1`] =
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
 - Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
+- Commit or push only when the user asks. If on the default branch, branch first.
+
+# Long-running commands
+- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
+- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -1150,7 +1185,12 @@ exports[`claude transcript regressions > errored result event carries no in-stre
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
 - Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
+- Commit or push only when the user asks. If on the default branch, branch first.
+
+# Long-running commands
+- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
+- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -1274,7 +1314,12 @@ exports[`claude transcript regressions > legacy top-level session resumes withou
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
 - Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
+- Commit or push only when the user asks. If on the default branch, branch first.
+
+# Long-running commands
+- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
+- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -1409,7 +1454,12 @@ exports[`claude transcript regressions > manual cd hint when the recorded cwd di
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
 - Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
+- Commit or push only when the user asks. If on the default branch, branch first.
+
+# Long-running commands
+- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
+- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -1548,7 +1598,12 @@ exports[`claude transcript regressions > nonexistent filesDir still sets the env
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
 - Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
+- Commit or push only when the user asks. If on the default branch, branch first.
+
+# Long-running commands
+- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
+- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -1684,7 +1739,12 @@ exports[`claude transcript regressions > parallel batch in one inference 1`] = `
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
 - Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
+- Commit or push only when the user asks. If on the default branch, branch first.
+
+# Long-running commands
+- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
+- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -1880,7 +1940,12 @@ exports[`claude transcript regressions > plain text reply 1`] = `
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
 - Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
+- Commit or push only when the user asks. If on the default branch, branch first.
+
+# Long-running commands
+- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
+- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -2015,7 +2080,12 @@ exports[`claude transcript regressions > rejecting rate limit event 1`] = `
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
 - Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
+- Commit or push only when the user asks. If on the default branch, branch first.
+
+# Long-running commands
+- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
+- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -2187,7 +2257,12 @@ exports[`claude transcript regressions > resume of an existing session 1`] = `
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
 - Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
+- Commit or push only when the user asks. If on the default branch, branch first.
+
+# Long-running commands
+- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
+- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -2323,7 +2398,12 @@ exports[`claude transcript regressions > revival notice names a cleared schedule
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
 - Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
+- Commit or push only when the user asks. If on the default branch, branch first.
+
+# Long-running commands
+- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
+- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -2462,7 +2542,12 @@ exports[`claude transcript regressions > revival notice rides the prompt of the 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
 - Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
+- Commit or push only when the user asks. If on the default branch, branch first.
+
+# Long-running commands
+- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
+- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -2601,7 +2686,12 @@ exports[`claude transcript regressions > second ride seeded with a nonzero flowS
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
 - Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
+- Commit or push only when the user asks. If on the default branch, branch first.
+
+# Long-running commands
+- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
+- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -2737,7 +2827,12 @@ exports[`claude transcript regressions > single tool call and result in one chun
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
 - Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
+- Commit or push only when the user asks. If on the default branch, branch first.
+
+# Long-running commands
+- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
+- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -2903,7 +2998,12 @@ exports[`claude transcript regressions > subagent report closes its trace 1`] = 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
 - Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
+- Commit or push only when the user asks. If on the default branch, branch first.
+
+# Long-running commands
+- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
+- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -3132,7 +3232,12 @@ exports[`claude transcript regressions > subagent trace with sub-subagent nestin
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
 - Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
+- Commit or push only when the user asks. If on the default branch, branch first.
+
+# Long-running commands
+- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
+- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -3350,7 +3455,12 @@ exports[`claude transcript regressions > task allow rules extend allowedTools 1`
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
 - Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
+- Commit or push only when the user asks. If on the default branch, branch first.
+
+# Long-running commands
+- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
+- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -3489,7 +3599,12 @@ exports[`claude transcript regressions > unchanged turn context is not re-sent 1
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
 - Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
+- Commit or push only when the user asks. If on the default branch, branch first.
+
+# Long-running commands
+- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
+- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -3623,7 +3738,12 @@ exports[`claude transcript regressions > usage across inferences with cache miss
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
 - Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
-- Commit or push only when the user asks. If on the default branch, branch first.",
+- Commit or push only when the user asks. If on the default branch, branch first.
+
+# Long-running commands
+- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
+- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",

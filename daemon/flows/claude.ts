@@ -50,6 +50,16 @@ const GIT_TIPS = [
   '- Commit or push only when the user asks. If on the default branch, branch first.',
 ].join('\n')
 
+// The CLI keeps the turn's process waiting on a background command and wakes
+// the agent when it ends, and the daemon's idle watchdog allows for the wait.
+// Without this note, an agent given an hour-long suite detached it instead.
+const LONG_COMMAND_TIPS = [
+  '# Long-running commands',
+  '- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash `run_in_background: true`, its output sent to a file, and a `timeout` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.',
+  "- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.",
+  '- Don\'t detach a command (`nohup`, `&`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.',
+].join('\n')
+
 export type ClaudeFlowDeps = {
   landerBin: string
   taskPromptTemplate: string
@@ -474,6 +484,7 @@ function buildClaudeArgs(
     [
       fillTaskPrompt(taskPromptTemplate, ctx.task.taskId),
       GIT_TIPS,
+      LONG_COMMAND_TIPS,
       ...(ctx.task.checkout ? [checkoutNote(ctx.task.checkout, ctx.task.root)] : []),
       ...(projectDoc ? [projectDocBlock(projectDoc)] : []),
     ].join('\n\n'),
