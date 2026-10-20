@@ -750,7 +750,8 @@ body {
   flex-shrink: 0;
 }
 
-.filter-menu-trigger {
+.filter-menu-trigger,
+.filter-chip {
   display: flex;
   align-items: center;
   gap: 4px;
@@ -762,14 +763,49 @@ body {
   font: inherit;
   font-size: 13px;
   white-space: nowrap;
+}
+
+.filter-menu-trigger {
   cursor: pointer;
+}
+
+/* A filter set off its default. It shares the trigger's padding, border, and
+   type, so the two stand the same height. */
+.filter-chip {
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--selected);
+}
+
+/* The × takes the chevron's 13px slot. The 19px hover circle overhangs that
+   slot into the chip's right padding, not toward the label, so the chip stays
+   the trigger's size. */
+.filter-chip-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 19px;
+  height: 19px;
+  margin: -3px -6px -3px 0;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.filter-chip-clear:hover {
+  background: var(--border);
+  color: var(--fg);
 }
 
 .filter-menu-trigger:hover {
   background: var(--selected);
 }
 
-.filter-menu-trigger:focus-visible {
+.filter-menu-trigger:focus-visible,
+.filter-chip-clear:focus-visible {
   outline: none;
   box-shadow: inset 0 0 0 2px var(--riding);
 }

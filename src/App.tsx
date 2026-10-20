@@ -6,7 +6,7 @@ import { DetailHeader } from './detailHeader'
 import { dataTransferHasFiles } from './fileDrop'
 import { usePersistentState, useSessionState } from './hooks'
 import { HooksPanel } from './hooksPanel'
-import { lastPathComponent } from './format'
+import { DEFAULT_TIME_FILTER, DEFAULT_VIEW, lastPathComponent } from './format'
 import { Navbar, pageTitle, type Panel } from './navbar'
 import { NewTaskForm } from './newTaskForm'
 import { tick } from './perf'
@@ -40,11 +40,11 @@ export function App() {
   tick('App.render')
   // The list's task-slice filter (see TaskView), session-scoped so it survives
   // a reload but can differ per tab.
-  const [view, setView] = useSessionState<TaskView>('lander:view', 'inbox')
+  const [view, setView] = useSessionState<TaskView>('lander:view', DEFAULT_VIEW)
   // The list's time-window filter (see TimeFilter), session-scoped alongside view.
   const [timeFilter, setTimeFilter] = useSessionState<TimeFilter>(
     'lander:timeFilter',
-    'any',
+    DEFAULT_TIME_FILTER,
   )
   // What an action failed with — a land the daemon refused, a message that
   // didn't send. Sticky on purpose: it reports something the user did, and it

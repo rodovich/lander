@@ -1,5 +1,11 @@
 import { memo } from 'react'
-import { TIME_FILTER_LABELS, VIEW_LABELS, lastPathComponent } from './format'
+import {
+  DEFAULT_TIME_FILTER,
+  DEFAULT_VIEW,
+  TIME_FILTER_LABELS,
+  VIEW_LABELS,
+  lastPathComponent,
+} from './format'
 import { SegmentedControl } from './segmentedControl'
 import type { Project, TaskView, TimeFilter } from './types'
 
@@ -12,8 +18,8 @@ export function pageTitle(
 ): string {
   const parts = [
     projectPath ? lastPathComponent(projectPath) : '',
-    timeFilter === 'any' ? '' : TIME_FILTER_LABELS[timeFilter],
-    view === 'inbox' ? '' : VIEW_LABELS[view],
+    timeFilter === DEFAULT_TIME_FILTER ? '' : TIME_FILTER_LABELS[timeFilter],
+    view === DEFAULT_VIEW ? '' : VIEW_LABELS[view],
   ].filter(Boolean)
   return parts.length ? parts.join(' • ') : 'lander'
 }

@@ -59,6 +59,9 @@ export const VIEW_LABELS: Record<TaskView, string> = {
   archived: 'Archived',
 }
 
+export const DEFAULT_TIME_FILTER: TimeFilter = 'any'
+export const DEFAULT_VIEW: TaskView = 'inbox'
+
 // "/Users/me/code/myapp" -> "myapp"; the leaf is enough to tell projects apart
 // in the task list without showing the whole path.
 export function lastPathComponent(p: string): string {

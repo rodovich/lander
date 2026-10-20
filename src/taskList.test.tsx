@@ -66,6 +66,23 @@ describe('TaskList empty states', () => {
   })
 })
 
+describe('TaskList filters', () => {
+  const triggers = (html: string) => html.split('filter-menu-trigger').length - 1
+
+  it('shows both filters as menus at their defaults', () => {
+    const html = render([task()])
+    expect(triggers(html)).toBe(2)
+    expect(html).not.toContain('filter-chip')
+  })
+
+  it('turns each filter off its default into a clearable chip', () => {
+    const html = render([task({ archived: true })], { timeFilter: 'week' }, 'archived')
+    expect(triggers(html)).toBe(0)
+    expect(html).toContain('aria-label="Clear Archived"')
+    expect(html).toContain('aria-label="Clear This week"')
+  })
+})
+
 describe('TaskList roving tabindex', () => {
   it('makes only the selected row Tab-reachable', () => {
     const html = render(

@@ -1,6 +1,12 @@
 import { Fragment, memo, useEffect, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
-import { DATE_CATEGORY_LABELS, TIME_FILTER_LABELS, VIEW_LABELS } from './format'
+import {
+  DATE_CATEGORY_LABELS,
+  DEFAULT_TIME_FILTER,
+  DEFAULT_VIEW,
+  TIME_FILTER_LABELS,
+  VIEW_LABELS,
+} from './format'
 import { HighlightedText } from './highlightedText'
 import { ListSubrow } from './listSubrow'
 import { FilterMenu, SectionActionsMenu } from './menus'
@@ -256,12 +262,14 @@ export const TaskList = memo(function TaskList({
           <FilterMenu
             label="View"
             value={view}
+            defaultValue={DEFAULT_VIEW}
             onChange={setView}
             options={TASK_VIEWS.map((v) => ({ value: v, label: VIEW_LABELS[v] }))}
           />
           <FilterMenu
             label="Time"
             value={timeFilter}
+            defaultValue={DEFAULT_TIME_FILTER}
             onChange={setTimeFilter}
             options={TIME_FILTERS.map((t) => ({
               value: t,

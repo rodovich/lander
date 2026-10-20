@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { CopyButton } from './copyButton'
 import { useAnchoredPopup } from './hooks'
 import type { TaskAction, TaskActionOption } from './taskActions'
@@ -65,6 +65,7 @@ function ActionsMenu({
   triggerLabel,
   trigger,
   items,
+  autoFocusTrigger,
 }: {
   className?: string
   triggerClassName: string
@@ -72,6 +73,7 @@ function ActionsMenu({
   triggerLabel: string
   trigger: React.ReactNode
   items: MenuItem[]
+  autoFocusTrigger?: boolean
 }) {
   const { open, setOpen, containerRef, triggerRef, popupRef, popupStyle } =
     useAnchoredPopup({ gap: 4 })
@@ -135,6 +137,7 @@ function ActionsMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={triggerLabel}
+        autoFocus={autoFocusTrigger}
         onClick={(e) => {
           e.stopPropagation()
           setOpen((o) => !o)
@@ -210,28 +213,64 @@ export function TaskActionsMenu({
   )
 }
 
-// A pick-one dropdown whose closed trigger reads the current pick, and whose
-// items check the pick off.
+// A pick-one filter. At its default it's a dropdown whose items check the pick
+// off; set to anything else it's a chip naming the pick, so the way back to the
+// default is one click on its × rather than a trip through the menu.
 export function FilterMenu<T extends string>({
   label,
   options,
   value,
+  defaultValue,
   onChange,
 }: {
   // Names the trigger for assistive tech.
   label: string
   options: { value: T; label: string }[]
   value: T
+  defaultValue: T
   onChange: (value: T) => void
 }) {
+  const picked = options.find((o) => o.value === value)?.label
+  // Clearing unmounts the × that had focus, so the dropdown that replaces the
+  // chip takes it. Only a click on the × earns that: a return to the default
+  // from elsewhere (routing to an inbox task) leaves focus where it is.
+  const [cleared, setCleared] = useState(false)
+  if (value !== defaultValue) {
+    if (cleared) setCleared(false)
+    return (
+      <div className="filter-chip">
+        {picked}
+        <button
+          type="button"
+          className="filter-chip-clear"
+          aria-label={`Clear ${picked}`}
+          title={`Clear ${picked}`}
+          onClick={() => {
+            setCleared(true)
+            onChange(defaultValue)
+          }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path
+              d="M7 7l10 10M17 7 7 17"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
+      </div>
+    )
+  }
   return (
     <ActionsMenu
       className="filter-menu"
       triggerClassName="filter-menu-trigger"
       triggerLabel={label}
+      autoFocusTrigger={cleared}
       trigger={
         <>
-          {options.find((o) => o.value === value)?.label}
+          {picked}
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
             <path
               d="m6 9 6 6 6-6"
