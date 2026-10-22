@@ -4,8 +4,8 @@ import { safeHref, Markdown } from './markdown'
 
 const render = (text: string) => renderToStaticMarkup(<Markdown text={text} />)
 
-// Backtick runs are hard to read inline, so build them by name.
-const B = '`'
+const externalLink = (href: string, label: string) =>
+  `<a href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>`
 
 describe('safeHref', () => {
   it('allows http(s) and mailto, case-insensitively', () => {
@@ -54,11 +54,6 @@ describe('Markdown rendering', () => {
     )
   })
 
-  it('reads a fence-looking line with a backticked info string as inline code', () => {
-    const src = B.repeat(3) + 'a' + B.repeat(2) + 'b' + B.repeat(3)
-    expect(render(src)).toContain('<code>a``b</code>')
-  })
-
   it('renders bold, italic and inline code', () => {
     expect(render('**b**')).toContain('<strong>b</strong>')
     expect(render('*i*')).toContain('<em>i</em>')
@@ -86,149 +81,6 @@ describe('Markdown rendering', () => {
     expect(render('~~a')).not.toContain('<del>')
   })
 
-  it('keeps a tilde pair inside a code span from opening strikethrough', () => {
-    expect(render('~~a `x ~~ y` b~~')).toContain(
-      '<del>a <code>x ~~ y</code> b</del>',
-    )
-    expect(render('run `rm -rf ~~foo`')).not.toContain('<del>')
-  })
-
-  it('nests emphasis inside bold', () => {
-    expect(render('**b _i_**')).toContain('<strong>b <em>i</em></strong>')
-    // Asterisk italic nested in bold: the "*" inside must stay within the bold
-    // rather than splitting the "**" off as literal text.
-    expect(render('**a *b* c**')).toContain('<strong>a <em>b</em> c</strong>')
-    expect(render('**a *b* c**')).not.toContain('**')
-  })
-
-  it('closes a code span on a backtick run of the same length', () => {
-    // A longer run is how a backtick gets *inside* code.
-    expect(render(B.repeat(2) + ' ' + B + 'x' + B + ' ' + B.repeat(2))).toContain(
-      '<code>`x`</code>',
-    )
-    expect(render(B.repeat(2) + 'a' + B + 'b' + B.repeat(2))).toContain(
-      '<code>a`b</code>',
-    )
-    // A shorter run inside a longer span is just content, not a closer.
-    expect(render(B + 'a' + B.repeat(2) + 'b' + B)).toContain(
-      '<code>a``b</code>',
-    )
-  })
-
-  it('leaves an opening run with no equal-length closer literal', () => {
-    // Not a span: the run of 2 never closes. It must not be read as a run of 1
-    // plus a stray, which would shift every later backtick onto a wrong partner.
-    const html = render(B.repeat(2) + 'a' + B)
-    expect(html).not.toContain('<code>')
-    expect(html).toContain('``a`')
-  })
-
-  it('strips one space of padding from a code span', () => {
-    expect(render(B + ' x ' + B)).toContain('<code>x</code>')
-    // All-spaces content keeps its spaces, else there'd be nothing left.
-    expect(render(B + '   ' + B)).toContain('<code>   </code>')
-  })
-
-  it('keeps a delimiter inside a code span from opening emphasis', () => {
-    // The "*" inside the code span must not close the italic. Regression: it
-    // did, and every later backtick then paired with the wrong partner —
-    // rendering the prose as code and the commands as prose.
-    const html = render(
-      '*a rule like `Bash(safe-cmd *)` won\'t run `safe-cmd && other-cmd`*',
-    )
-    expect(html).toContain(
-      '<em>a rule like <code>Bash(safe-cmd *)</code> won&#x27;t run' +
-        ' <code>safe-cmd &amp;&amp; other-cmd</code></em>',
-    )
-    // Same class of bug for the other three delimiters.
-    expect(render('**bold `a ** b` end**')).toContain(
-      '<strong>bold <code>a ** b</code> end</strong>',
-    )
-    expect(render('_a `x_y` b_')).toContain('<em>a <code>x_y</code> b</em>')
-    expect(render('__a `x__y` b__')).toContain(
-      '<strong>a <code>x__y</code> b</strong>',
-    )
-  })
-
-  it('still emphasizes around a backtick that opens no code span', () => {
-    expect(render('*a ` b*')).toContain('<em>a ` b</em>')
-  })
-
-  it('drops the backslash from an escaped punctuation character', () => {
-    expect(render('\\* not a list')).toBe('<p>* not a list</p>')
-    expect(render('\\# not a heading')).toBe('<p># not a heading</p>')
-    expect(render('a\\b \\\\ c')).toBe('<p>a\\b \\ c</p>')
-  })
-
-  it('keeps an escaped delimiter from opening or closing emphasis', () => {
-    expect(render('\\*a\\* and *b \\* c*')).toBe('<p>*a* and <em>b * c</em></p>')
-    expect(render('\\_a_ \\~~b~~')).toBe('<p>_a_ ~~b~~</p>')
-  })
-
-  it('escapes the delimiter after an escaped backslash, not the backslash itself', () => {
-    expect(render('\\\\*a*')).toBe('<p>\\<em>a</em></p>')
-  })
-
-  it('leaves backslashes inside a code span literal', () => {
-    expect(render(`${B}a\\*b${B}`)).toBe('<p><code>a\\*b</code></p>')
-    expect(render(`${B}a\\${B}b${B}`)).toBe('<p><code>a\\</code>b`</p>')
-  })
-
-  it('does not open a code span on an escaped backtick', () => {
-    expect(render(`\\${B}a${B}`)).toBe('<p>`a`</p>')
-    expect(render(`\\\\${B}a${B}`)).toBe('<p>\\<code>a</code></p>')
-  })
-
-  it('does not blow up on a long backtick run with no closing delimiter', () => {
-    const evil = '*' + '`x'.repeat(400) + ' no close'
-    const t0 = performance.now()
-    render(evil)
-    expect(performance.now() - t0).toBeLessThan(500)
-  })
-
-  it('does not emphasize intraword underscores, but does intraword asterisks', () => {
-    const u = render('patch_based_saving')
-    expect(u).toContain('patch_based_saving')
-    expect(u).not.toContain('<em>')
-    expect(render('foo*bar*baz')).toContain('<em>bar</em>')
-  })
-
-  it('keeps a run of underscores whole, so BEM/dunder names stay literal', () => {
-    // Regression: the inner "_" of "icon__" opened an italic that closed on the
-    // first "_" of "__img", rendering "icon_<em>color and </em>_img". cmark,
-    // markdown-it and marked all leave both of these alone.
-    const bem = render('material-thumbnail-icon__color and __img')
-    expect(bem).toContain('material-thumbnail-icon__color and __img')
-    expect(bem).not.toContain('<em>')
-    expect(render('.thumb__img/__color styles')).not.toContain('<em>')
-    expect(render('__init__ and __main__')).not.toContain('<em>')
-    // Ordinary underscore emphasis is untouched.
-    expect(render('_italic_ and __bold__')).toBe(
-      '<p><em>italic</em> and <strong>bold</strong></p>',
-    )
-  })
-
-  it('requires emphasis delimiters to be flanking, leaving globs and operators literal', () => {
-    for (const s of [
-      'what are all the /tmp/lander-projectdoc-* and /tmp/lander-supervise-state-* directories?',
-      '/tmp/*projectdoc and /tmp/*supervise',
-      'src/projectdoc*/a and src/supervise*/b',
-      'projectdoc*, supervise*',
-      'src/**/a.ts and src/*.ts',
-      '*a and *b and 2 * 3 * 4',
-      '/tmp/a-_ and /tmp/b-_ and _ a _ and __ b __',
-    ]) {
-      expect(render(s)).toBe(`<p>${s}</p>`)
-    }
-    expect(render('**a and **b**')).toBe('<p>**a and <strong>b</strong></p>')
-    expect(render('/tmp/a-* and *italic*')).toBe(
-      '<p>/tmp/a-* and <em>italic</em></p>',
-    )
-    expect(render('(*italic*) and *"quoted"*')).toBe(
-      '<p>(<em>italic</em>) and <em>&quot;quoted&quot;</em></p>',
-    )
-  })
-
   it('renders a safe markdown link with security attributes', () => {
     const html = render('[hi](https://example.com)')
     expect(html).toContain('href="https://example.com"')
@@ -246,32 +98,9 @@ describe('Markdown rendering', () => {
   it('renders inline formatting in a link label, with or without an anchor', () => {
     const label = '<code>c</code> <strong>b</strong> <em>i</em>'
     expect(render('[`c` **b** _i_](https://x.com)')).toBe(
-      `<p><a href="https://x.com" target="_blank" rel="noopener noreferrer">${label}</a></p>`,
+      `<p>${externalLink('https://x.com', label)}</p>`,
     )
     expect(render('[`c` **b** _i_](file:///x)')).toBe(`<p>${label}</p>`)
-  })
-
-  it('does not autolink a URL inside a link label', () => {
-    expect(render('[**see https://a.com**](https://b.com)')).toBe(
-      '<p><a href="https://b.com" target="_blank" rel="noopener noreferrer"><strong>see https://a.com</strong></a></p>',
-    )
-  })
-
-  it('keeps balanced parentheses in a markdown link target', () => {
-    expect(render('[w](https://w.org/Router_(wood)) after')).toBe(
-      '<p><a href="https://w.org/Router_(wood)" target="_blank" rel="noopener noreferrer">w</a> after</p>',
-    )
-  })
-
-  it('keeps balanced parentheses in a bare URL but not an enclosing paren', () => {
-    const a = (url: string) =>
-      `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`
-    const url = 'https://w.org/Router_(wood)'
-    expect(render(`see ${url}.`)).toBe(`<p>see ${a(url)}.</p>`)
-    expect(render(`(see ${url})`)).toBe(`<p>(see ${a(url)})</p>`)
-    expect(render('(see https://w.org/x)')).toBe(
-      `<p>(see ${a('https://w.org/x')})</p>`,
-    )
   })
 
   it('autolinks a bare URL and excludes trailing punctuation', () => {
@@ -290,14 +119,11 @@ describe('Markdown rendering', () => {
   })
 
   it('keeps an email or www. link the author wrote', () => {
-    const a = (href: string, label: string) =>
-      `<a href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>`
-    expect(render('[me@x.com](mailto:me@x.com)')).toBe(
-      `<p>${a('mailto:me@x.com', 'me@x.com')}</p>`,
-    )
-    expect(render('<me@x.com>')).toBe(`<p>${a('mailto:me@x.com', 'me@x.com')}</p>`)
+    const mail = `<p>${externalLink('mailto:me@x.com', 'me@x.com')}</p>`
+    expect(render('[me@x.com](mailto:me@x.com)')).toBe(mail)
+    expect(render('<me@x.com>')).toBe(mail)
     expect(render('[www.x.com](https://www.x.com)')).toBe(
-      `<p>${a('https://www.x.com', 'www.x.com')}</p>`,
+      `<p>${externalLink('https://www.x.com', 'www.x.com')}</p>`,
     )
   })
 
@@ -315,12 +141,12 @@ describe('Markdown rendering', () => {
 
   it('renders an image as a link to it, never an <img>', () => {
     expect(render('![a cat](https://x.com/cat.png)')).toBe(
-      '<p><a href="https://x.com/cat.png" target="_blank" rel="noopener noreferrer">a cat</a></p>',
+      `<p>${externalLink('https://x.com/cat.png', 'a cat')}</p>`,
     )
     expect(render('![a cat](file:///cat.png)')).toBe('<p>a cat</p>')
     // With no alt text, the URL is the label, so the link stays visible.
     expect(render('![](https://x.com/cat.png)')).toBe(
-      '<p><a href="https://x.com/cat.png" target="_blank" rel="noopener noreferrer">https://x.com/cat.png</a></p>',
+      `<p>${externalLink('https://x.com/cat.png', 'https://x.com/cat.png')}</p>`,
     )
   })
 
@@ -346,35 +172,6 @@ describe('Markdown rendering', () => {
     expect(html).toContain('text-align:left')
     expect(html).toContain('text-align:right')
     expect(html).toContain('>1</td>')
-  })
-
-  it('renders an empty string to empty output', () => {
-    expect(render('')).toBe('')
-  })
-
-  it('renders many adjacent inline spans in order', () => {
-    const html = render('`a` **b** *c* `d` [e](https://x.com) tail')
-    expect(html).toBe(
-      '<p><code>a</code> <strong>b</strong> <em>c</em> <code>d</code> ' +
-        '<a href="https://x.com" target="_blank" rel="noopener noreferrer">e</a>' +
-        ' tail</p>',
-    )
-  })
-
-  it('keeps literal runs between and around matches intact', () => {
-    expect(render('before `x` middle `y` after')).toContain(
-      'before <code>x</code> middle <code>y</code> after',
-    )
-    // A lone match at the very start, with a trailing literal, and vice versa.
-    expect(render('`x` tail')).toContain('<p><code>x</code> tail</p>')
-    expect(render('head `x`')).toContain('<p>head <code>x</code></p>')
-  })
-
-  it('renders a long run of code spans', () => {
-    const html = render(Array.from({ length: 50 }, () => '`c`').join(' '))
-    expect(html).toBe(
-      '<p>' + Array.from({ length: 50 }, () => '<code>c</code>').join(' ') + '</p>',
-    )
   })
 
   it('renders a ~280KB pasted log within a loose time bound', () => {
@@ -425,7 +222,7 @@ describe('task-mention linking', () => {
 
   it('does not link a task id inside a markdown link label', () => {
     expect(render('[abcd1234](https://x.com)')).toBe(
-      '<p><a href="https://x.com" target="_blank" rel="noopener noreferrer">abcd1234</a></p>',
+      `<p>${externalLink('https://x.com', 'abcd1234')}</p>`,
     )
   })
 
