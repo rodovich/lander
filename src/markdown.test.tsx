@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { safeHref, findCodeSpans, Markdown } from './markdown'
+import { safeHref, Markdown } from './markdown'
 
 const render = (text: string) => renderToStaticMarkup(<Markdown text={text} />)
 
@@ -43,32 +43,6 @@ describe('safeHref', () => {
   })
 })
 
-describe('findCodeSpans', () => {
-  it('finds single and multi-backtick spans', () => {
-    expect(findCodeSpans('a `x` b')).toEqual([
-      { start: 2, end: 5, content: 'x' },
-    ])
-    expect(findCodeSpans(B.repeat(2) + ' ' + B + 'x' + B + ' ' + B.repeat(2))).toEqual(
-      [{ start: 0, end: 9, content: '`x`' }],
-    )
-  })
-
-  it('ignores a run that never closes', () => {
-    expect(findCodeSpans(B.repeat(2) + 'a' + B)).toEqual([])
-    expect(findCodeSpans('no backticks here')).toEqual([])
-  })
-
-  it('never returns adjacent spans, which the NUL mapping relies on', () => {
-    // Two spans always have a non-backtick between them: touching spans would
-    // mean the first one's closing run wasn't maximal.
-    const spans = findCodeSpans('`a` `b` `c`')
-    expect(spans).toHaveLength(3)
-    for (let i = 1; i < spans.length; i++) {
-      expect(spans[i].start).toBeGreaterThan(spans[i - 1].end)
-    }
-  })
-})
-
 describe('Markdown rendering', () => {
   it('puts a copy button in the corner of a fenced code block', () => {
     expect(render('```\nnpm test\n```')).toBe(
@@ -80,8 +54,6 @@ describe('Markdown rendering', () => {
     )
   })
 
-  // The block layer declines to open a fence here (markdownBlocks.test.ts);
-  // what reaches the page has to be the inline code span that leaves behind.
   it('reads a fence-looking line with a backticked info string as inline code', () => {
     const src = B.repeat(3) + 'a' + B.repeat(2) + 'b' + B.repeat(3)
     expect(render(src)).toContain('<code>a``b</code>')
@@ -180,13 +152,6 @@ describe('Markdown rendering', () => {
 
   it('still emphasizes around a backtick that opens no code span', () => {
     expect(render('*a ` b*')).toContain('<em>a ` b</em>')
-  })
-
-  it('renders a NUL in the source as text, not as a code span', () => {
-    // Code spans are blanked with NUL before the other patterns scan, so a NUL
-    // already in the text must not be mistaken for one.
-    const html = render('a\0b')
-    expect(html).not.toContain('<code>')
   })
 
   it('drops the backslash from an escaped punctuation character', () => {
@@ -317,16 +282,62 @@ describe('Markdown rendering', () => {
     expect(html).not.toContain('href="https://ex.com."')
   })
 
-  it('autolinks www. with an https href but keeps the www. display text', () => {
-    const html = render('www.ex.com')
-    expect(html).toContain('href="https://www.ex.com"')
-    expect(html).toContain('>www.ex.com</a>')
+  it('leaves www. domains and email addresses as text', () => {
+    expect(render('www.ex.com')).toBe('<p>www.ex.com</p>')
+    expect(render('log in as fablab@example.com')).toBe(
+      '<p>log in as fablab@example.com</p>',
+    )
+  })
+
+  it('keeps an email or www. link the author wrote', () => {
+    const a = (href: string, label: string) =>
+      `<a href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>`
+    expect(render('[me@x.com](mailto:me@x.com)')).toBe(
+      `<p>${a('mailto:me@x.com', 'me@x.com')}</p>`,
+    )
+    expect(render('<me@x.com>')).toBe(`<p>${a('mailto:me@x.com', 'me@x.com')}</p>`)
+    expect(render('[www.x.com](https://www.x.com)')).toBe(
+      `<p>${a('https://www.x.com', 'www.x.com')}</p>`,
+    )
   })
 
   it('escapes raw HTML instead of emitting markup (XSS defense)', () => {
     const html = render('<script>alert(1)</script>')
     expect(html).not.toContain('<script>')
     expect(html).toContain('&lt;script&gt;')
+  })
+
+  it('keeps an unquoted placeholder that parses as an HTML tag', () => {
+    expect(render('lander artifact put <path> --name <name.png>')).toBe(
+      '<p>lander artifact put &lt;path&gt; --name &lt;name.png&gt;</p>',
+    )
+  })
+
+  it('renders an image as a link to it, never an <img>', () => {
+    expect(render('![a cat](https://x.com/cat.png)')).toBe(
+      '<p><a href="https://x.com/cat.png" target="_blank" rel="noopener noreferrer">a cat</a></p>',
+    )
+    expect(render('![a cat](file:///cat.png)')).toBe('<p>a cat</p>')
+    // With no alt text, the URL is the label, so the link stays visible.
+    expect(render('![](https://x.com/cat.png)')).toBe(
+      '<p><a href="https://x.com/cat.png" target="_blank" rel="noopener noreferrer">https://x.com/cat.png</a></p>',
+    )
+  })
+
+  it('renders block elements inside a blockquote', () => {
+    expect(render('> #### What\n>\n> one\n> two\n>\n> ----\n>\n> - a\n> - b')).toBe(
+      '<blockquote>\n<h4>What</h4>\n<p>one\ntwo</p>\n<hr/>\n<ul>\n<li>a</li>\n<li>b</li>\n</ul>\n</blockquote>',
+    )
+  })
+
+  it('does not strike out text between single tildes in prompts, amounts or file names', () => {
+    for (const s of [
+      'ubuntu@web2:~$ free -m\nubuntu@web2:~$ uptime',
+      'W is 6–12 runs (~$40–80); E is 6 runs (~$40)',
+      'bridge-cafe~wrenched and bridge-cafe~ending',
+    ]) {
+      expect(render(s)).not.toContain('<del>')
+    }
   })
 
   it('renders a table with per-column alignment styles', () => {
@@ -341,7 +352,7 @@ describe('Markdown rendering', () => {
     expect(render('')).toBe('')
   })
 
-  it('renders many adjacent inline spans in order (forward-scan cache)', () => {
+  it('renders many adjacent inline spans in order', () => {
     const html = render('`a` **b** *c* `d` [e](https://x.com) tail')
     expect(html).toBe(
       '<p><code>a</code> <strong>b</strong> <em>c</em> <code>d</code> ' +
@@ -359,26 +370,24 @@ describe('Markdown rendering', () => {
     expect(render('head `x`')).toContain('<p>head <code>x</code></p>')
   })
 
-  it('handles a long run of matches without altering output (perf-path)', () => {
-    // Exercises the per-pattern cache over many matches — the scenario that was
-    // O(n^2). Output must be identical to the naive per-token expansion.
+  it('renders a long run of code spans', () => {
     const html = render(Array.from({ length: 50 }, () => '`c`').join(' '))
     expect(html).toBe(
       '<p>' + Array.from({ length: 50 }, () => '<code>c</code>').join(' ') + '</p>',
     )
   })
 
-  it('renders a ~280KB message quickly (O(n) inline scan regression guard)', () => {
-    // A pasted log dump: many 8+ char tokens, each of which trips the
-    // task-mention pattern. Under the old O(n^2) tail-rescan this took seconds
-    // (~800ms of scheduler work per re-render in the UI); the forward scan makes
-    // it linear. A resolver is supplied so the task-mention pattern is active —
-    // the worst case. The bound is deliberately loose (linear render is single-
-    // digit ms here) so it flags only a genuine complexity regression.
+  it('renders a ~280KB pasted log within a loose time bound', () => {
+    // A resolver is supplied so the task-mention pass runs too. The bound is
+    // deliberately loose (a warm render takes about 200ms) so it flags only a
+    // blow-up like a quadratic scan's, which takes seconds. The short render
+    // first keeps the parser's first-use cost out of the timing when this test
+    // runs alone.
     const line =
       'at resolveBaseSync (file:///Users/x/node_modules/tsx/register.mjs:2:8745)'
     const text = Array.from({ length: 3500 }, () => line).join('\n')
     expect(text.length).toBeGreaterThan(250_000)
+    renderToStaticMarkup(<Markdown text={line} linkTask={() => undefined} />)
     const t0 = performance.now()
     renderToStaticMarkup(<Markdown text={text} linkTask={() => undefined} />)
     const ms = performance.now() - t0
@@ -445,16 +454,14 @@ describe('task-mention linking', () => {
   })
 
   it('links the one real id among many non-resolving candidates', () => {
-    // Every word here is an 8+ char id-shaped token that the resolver rejects,
-    // except the real short id — exercising the scan's skip-past-rejected path.
-    const html = render(
-      'resolveBaseSync moduleResolve defaultResolve abcd1234 finalizeResolution nextStep',
-    )
+    // Every word here is an 8–10 char id-shaped token that the resolver
+    // rejects, except the real short id.
+    const html = render('resolver modulepath defaults abcd1234 finalize nextStep')
     expect(html).toContain(`href="/proj/${FULL}"`)
     expect(html).toContain('>Fix the parser</a>')
     // The rejected tokens stay literal (no anchors for them).
-    expect(html).toContain('resolveBaseSync')
-    expect(html).toContain('finalizeResolution')
+    expect(html).toContain('<p>resolver modulepath defaults <a ')
+    expect(html).toContain('</a> finalize nextStep</p>')
     expect((html.match(/<a /g) ?? []).length).toBe(1)
   })
 })

@@ -1,14 +1,12 @@
-// A diagnostic benchmark for the conversation renderer's known sore spot: a
-// single very long user message (e.g. task AseVQXEokF, whose UI is sluggish).
+// A diagnostic benchmark for the conversation renderer on long messages, such
+// as the 287KB pasted log in task AseVQXEokF.
 //
-// It profiles the two halves of the markdown pipeline — parseBlocks (block
-// splitting) and the full Markdown render (blocks + inline spans → React
-// elements) — over the real messages of a chosen task, and then runs a synthetic
-// scaling sweep that doubles a prose message's length to reveal whether cost
-// grows linearly or super-linearly.
+// It profiles the Markdown render over the real messages of a chosen task, and
+// then runs a synthetic scaling sweep that doubles a prose message's length to
+// reveal whether cost grows linearly or super-linearly.
 //
-// Run it against the sluggish task:
-//   npm run bench:markdown -- data/Users-rodovich-code-lander/tasks/AseVQXEokF.json
+// Run it against a task with a long message:
+//   npm run bench:markdown -- data/Users-rodovich-code-lander/archived/AseVQXEokF.json
 // or with no arg to run only the synthetic scaling sweep.
 //
 // It is a standalone diagnostic, not part of `npm test`; it renders through
@@ -18,13 +16,11 @@
 import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { Markdown } from '../src/markdown'
-import { parseBlocks } from '../src/markdownBlocks'
 import type { TaskLinkResolver } from '../src/markdown'
 
 // A resolver that never matches (mirrors the common case: message text rarely
 // contains a real task id). Crucially it is still *present*, so the renderer
-// activates the task-mention regex and calls back for every 8–21 char token —
-// which is where a long prose message spends most of its time.
+// runs the task-mention pass and calls back for every 8–10 char token.
 const linkTask: TaskLinkResolver = () => undefined
 
 function ms(fn: () => void, iters = 1): number {
@@ -43,24 +39,20 @@ function timeMedian(fn: () => void, runs = 5): number {
 type Row = {
   label: string
   chars: number
-  parseMs: number
   renderNoLinkMs: number
   renderWithLinkMs: number
 }
 
 function profile(label: string, text: string): Row {
   const chars = text.length
-  // parseBlocks is pure (no React); render includes parse + inline + element
-  // construction. Rendering with vs. without the resolver isolates the
-  // task-mention regex's contribution.
-  const parseMs = timeMedian(() => void parseBlocks(text))
+  // Rendering with vs. without the resolver isolates the task-mention pass.
   const renderNoLinkMs = timeMedian(() =>
     void renderToStaticMarkup(<Markdown text={text} />),
   )
   const renderWithLinkMs = timeMedian(() =>
     void renderToStaticMarkup(<Markdown text={text} linkTask={linkTask} />),
   )
-  return { label, chars, parseMs, renderNoLinkMs, renderWithLinkMs }
+  return { label, chars, renderNoLinkMs, renderWithLinkMs }
 }
 
 function printTable(rows: Row[]) {
@@ -68,7 +60,6 @@ function printTable(rows: Row[]) {
     rows.map((r) => ({
       what: r.label,
       chars: r.chars,
-      'parse (ms)': +r.parseMs.toFixed(2),
       'render, no link (ms)': +r.renderNoLinkMs.toFixed(2),
       'render, +linkTask (ms)': +r.renderWithLinkMs.toFixed(2),
       'linkTask overhead ×':
@@ -85,12 +76,13 @@ const taskPath = process.argv[2]
 if (taskPath) {
   const task = JSON.parse(readFileSync(taskPath, 'utf8')) as {
     title?: string
-    messages: { role: string; text?: string }[]
+    items: { kind: string; role?: string; text?: string }[]
   }
+  const messages = task.items.filter((it) => it.kind === 'message')
   console.log(`\n=== ${task.title ?? taskPath} ===`)
-  console.log(`${task.messages.length} messages\n`)
+  console.log(`${messages.length} messages\n`)
   const rows: Row[] = []
-  task.messages.forEach((m, i) => {
+  messages.forEach((m, i) => {
     const text = m.text ?? ''
     // Skip trivial/empty messages; they're noise in the table.
     if (text.length < 200) return
@@ -99,29 +91,20 @@ if (taskPath) {
   if (rows.length) printTable(rows)
   else console.log('(no message text over 200 chars)')
 
-  // The 2s poll re-renders the whole open conversation from scratch. Sum the
-  // per-render cost of every message to see one full re-render's markdown cost.
   const totalRender = rows.reduce((n, r) => n + r.renderWithLinkMs, 0)
   console.log(
-    `\nOne full re-render of all long messages: ${totalRender.toFixed(1)} ms of markdown work.`,
-  )
-  console.log(
-    `At the 2s poll cadence that recurs ~${(totalRender / 2000 * 100).toFixed(1)}% of a frame budget every 2s,`,
-  )
-  console.log(
-    `and every scroll event (setAtBottom) / tab-focus change triggers the same full re-render.`,
+    `\nRendering every long message once, as opening the task does: ${totalRender.toFixed(1)} ms of markdown work.`,
   )
 }
 
 // ---- Synthetic scaling sweep ------------------------------------------------
 //
-// Build prose out of ordinary 8+ char words (the length that trips the
-// task-mention regex `[0-9A-Za-z_-]{8,21}`), then double the length repeatedly.
-// If render-with-linkTask time more than doubles per doubling, cost is
-// super-linear in message length — the signature of the per-token rescan in
-// renderInline.
+// Build prose out of ordinary 8–10 char words, each of which the task-mention
+// pass offers to the resolver, then double the length repeatedly. A growth
+// factor well above 2× per doubling means cost is super-linear in message
+// length.
 
-const WORD = 'diagnostics performance rendering conversation instrumentation '
+const WORD = 'rendering diagnosis notebooks timelines resolved '
 function prose(chars: number): string {
   let s = ''
   while (s.length < chars) s += WORD
