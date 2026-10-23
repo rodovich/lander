@@ -2,7 +2,7 @@ import { memo, useEffect, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { loadFlows, uiHeaders, uploadAttachments } from './api'
 import { ComposerPanel } from './composerPanel'
-import { agentDisplayName } from './agentDisplay'
+import { agentDisplayName } from '../shared/agentDisplay'
 import { useSessionState } from './hooks'
 import type { FlowMeta, Task, TaskWithProject } from './types'
 

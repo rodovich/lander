@@ -1,4 +1,4 @@
-import { agentDisplayName, formatAgentModelName } from './agentDisplay'
+import { agentDisplayName, formatAgentModelName } from '../shared/agentDisplay'
 import { formatCost, formatDuration } from './format'
 import { openRide } from '../shared/timeline'
 import type { Ride, Task, TelemetryItem, TokenUsage } from './types'
