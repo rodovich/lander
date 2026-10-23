@@ -423,11 +423,6 @@ type Task = {
   // resume there (Codex does), and Claude's manual-cd note compares against it.
   // Absent until the first turn completes.
   cwd?: string
-  // The absolute path to this session's transcript JSONL, from the same Stop
-  // hook payload. Stored alongside cwd so the session file can be located
-  // directly rather than re-deriving it from the launch directory. Absent until
-  // the first turn completes.
-  transcriptPath?: string
   // The worktree the daemon manages for this task (`worktrees: true` in the
   // lander config), as the last run that reported it left it. Absent on tasks
   // that never ran in one. Shown, never read back: the daemon derives the
@@ -3229,12 +3224,10 @@ function isUnderRoot(root: string, p: string): boolean {
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
 }
 
-// The session's working directory (and transcript path) at the end of a turn,
-// posted by the Stop hook via `lander record-cwd`. Persisted so the next turn
-// resumes here instead of the project root — see Task.cwd and runTurn. Only the
-// task itself (authenticating with its own token) or the UI may set it. A bare
-// cwd write isn't a turn boundary, so it doesn't bump updatedAt or emit an
-// event — it's invisible to the sort order and the timeline.
+// The session's working directory at the end of a turn, posted by Claude's Stop
+// hook via `lander record-cwd` — see Task.cwd for what reads it. A bare cwd
+// write isn't a turn boundary, so it doesn't bump updatedAt or emit an event —
+// it's invisible to the sort order and the timeline.
 app.post('/api/:project/tasks/:id/cwd', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
@@ -3252,7 +3245,7 @@ app.post('/api/:project/tasks/:id/cwd', async (c) => {
     )
       return c.json({ error: 'only the task itself may record its cwd' }, 403)
 
-    const body = await c.req.json<{ cwd?: unknown; transcriptPath?: unknown }>()
+    const body = await c.req.json<{ cwd?: unknown }>()
     if (typeof body.cwd !== 'string' || !body.cwd)
       return c.json({ error: 'cwd is required' }, 400)
     const cwd = body.cwd
@@ -3264,12 +3257,9 @@ app.post('/api/:project/tasks/:id/cwd', async (c) => {
     // Codex's resume-from-recorded-cwd (and its one cross-repo gitCommonDir edge).
     if (!isUnderRoot(project.path, cwd))
       return c.json({ error: 'cwd must be under the project root' }, 400)
-    const transcriptPath =
-      typeof body.transcriptPath === 'string' ? body.transcriptPath : undefined
 
     await mutateTask(file, (t) => {
       t.cwd = cwd
-      if (transcriptPath) t.transcriptPath = transcriptPath
     })
     const task = await readTask(project.dataDir, id)
     if (!task) return c.json({ error: 'task not found' }, 404)

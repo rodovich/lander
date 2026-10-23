@@ -1273,16 +1273,14 @@ async function bashGuard() {
 }
 
 // --- record-cwd (Stop hook) ------------------------------------------------
-// Wired in by the server as a Stop hook (see ClaudeAdapter). At the end of
-// each turn claude pipes the session state as JSON on stdin —
-// { cwd, transcript_path, session_id, ... } — and we persist cwd and
-// transcript_path onto the task, so the next turn can be told where the last
-// one ended (Claude's cd note) and a flow that resumes from it can. Strictly
-// best-effort: a Stop
-// hook's stdout is not surfaced and nothing here may keep the turn from ending,
-// so it swallows every error and never exits non-zero. It calls fetch directly
-// rather than going through call() — call() die()s on a non-ok response, which
-// would exit the hook non-zero for a transient server blip.
+// Wired in as a Stop hook by the Claude flow (daemon/flows/claude.ts). At the
+// end of each turn claude pipes the session state as JSON on stdin, and we
+// persist its cwd onto the task so the next turn can be told where the last one
+// ended (Claude's cd note). Strictly best-effort: a Stop hook's stdout is not
+// surfaced and nothing here may keep the turn from ending, so it swallows every
+// error and never exits non-zero. It calls fetch directly rather than going
+// through call() — call() die()s on a non-ok response, which would exit the hook
+// non-zero for a transient server blip.
 async function recordCwd() {
   try {
     const input = JSON.parse((await readStdin()) || '{}')
@@ -1294,7 +1292,7 @@ async function recordCwd() {
     await fetch(`${API}/api/${PROJECT}/tasks/${TASK}/cwd`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ cwd, transcriptPath: input.transcript_path }),
+      body: JSON.stringify({ cwd }),
     })
   } catch {
     // best-effort: never let a hook failure interfere with turn completion
