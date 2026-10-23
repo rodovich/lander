@@ -1527,60 +1527,12 @@ describe('rides', () => {
     const t: { rides?: Ride[] } = {}
     startRide(t, 'r1', AT)
     expect(openRide(t)).toMatchObject({ id: 'r1', startedAt: AT })
-    const usage = { input: 1, output: 2, cacheRead: 0, cacheCreation: 0 }
-    closeRide(t, 'done', END, usage)
-    expect(t.rides![0]).toEqual({ id: 'r1', startedAt: AT, endedAt: END, outcome: 'done', usage })
+    closeRide(t, 'done', END)
+    expect(t.rides![0]).toEqual({ id: 'r1', startedAt: AT, endedAt: END, outcome: 'done' })
     expect(openRide(t)).toBeUndefined()
   })
 
   it('closeRide no-ops when no ride is open', () => {
     expect(() => closeRide({}, 'interrupted', END)).not.toThrow()
-  })
-})
-
-describe('closeRide costing from the previous ride', () => {
-  const ride = (startedAt: string, costUsd?: number, sessionCostUsd?: number): Ride => ({
-    id: startedAt,
-    startedAt,
-    usage: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheCreation: 0,
-      ...(costUsd !== undefined ? { costUsd } : {}),
-      ...(sessionCostUsd !== undefined ? { sessionCostUsd } : {}),
-    },
-  })
-  const costs = (t: { rides?: Ride[] }) =>
-    t.rides!.map((r) => r.usage?.costUsd && Math.round(r.usage.costUsd * 100) / 100)
-  const close = (t: { rides?: Ride[] }, costUsd?: number, sessionCostUsd?: number) => {
-    startRide(t, 'r-new', '2026-09-25T16:12:00.000Z')
-    closeRide(t, 'done', '2026-09-25T16:20:00.000Z', ride('', costUsd, sessionCostUsd).usage)
-  }
-
-  it('costs an uncosted ride from the previous ride’s total', () => {
-    const t = {
-      rides: [ride('2026-09-25T15:07:00.000Z'), ride('2026-09-25T15:15:00.000Z', 2.02, 92.14)],
-    }
-    close(t, undefined, 95.96)
-    expect(costs(t)).toEqual([undefined, 2.02, 3.82])
-  })
-
-  it('leaves the cost the flow reported alone', () => {
-    const t = { rides: [ride('2026-09-25T15:15:00.000Z', 2.02, 92.14)] }
-    close(t, 1, 95.96)
-    expect(costs(t)).toEqual([2.02, 1])
-  })
-
-  it('leaves a ride uncosted when the previous costed ride kept no total', () => {
-    const t = { rides: [ride('2026-09-13T15:15:00.000Z', 2.02)] }
-    close(t, undefined, 95.96)
-    expect(costs(t)).toEqual([2.02, undefined])
-  })
-
-  it('leaves a ride uncosted when the total went down', () => {
-    const t = { rides: [ride('2026-09-25T15:15:00.000Z', 2.02, 92.14)] }
-    close(t, undefined, 1.5)
-    expect(costs(t)).toEqual([2.02, undefined])
   })
 })

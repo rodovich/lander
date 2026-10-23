@@ -458,42 +458,18 @@ export function startRide(task: { rides?: Ride[] }, id: string, at: string): voi
   ;(task.rides ??= []).push({ id, startedAt: at })
 }
 
-// Close the task's open ride, if any: stamp `endedAt`/`outcome` and (when given)
-// move the turn's final `usage` onto it, costing it from the previous ride when
-// the flow could not. A no-op when no ride is open — a run started before rides
-// existed has none, so callers needn't guard (see the missing-ride tolerance in
-// applyDone).
+// No-ops when no ride is open, so a caller tidying up after a run (the drainer's
+// stray-ride sweep, a late done) needn't check whether another path closed it.
 export function closeRide(
   task: { rides?: Ride[] },
   outcome: Ride['outcome'],
   at: string,
-  usage?: Usage,
 ): void {
   const ride = openRide(task)
   if (!ride) return
   ride.endedAt = at
   delete ride.compacting
   ride.outcome = outcome
-  if (usage) {
-    ride.usage = usage
-    costFromPreviousRide(task.rides!, ride)
-  }
-}
-
-// A flow that reports a session's running cost differences it against the
-// total it saved after the previous turn. A session it resumed before it ever
-// saved one has no such baseline, so the turn lands uncosted beside its total —
-// but the previous ride kept its own total, which is the same baseline.
-function costFromPreviousRide(rides: Ride[], ride: Ride): void {
-  const total = ride.usage?.sessionCostUsd
-  if (total === undefined || ride.usage!.costUsd !== undefined) return
-  for (let i = rides.indexOf(ride) - 1; i >= 0; i--) {
-    const u = rides[i].usage
-    if (u?.costUsd === undefined && u?.sessionCostUsd === undefined) continue
-    if (u.sessionCostUsd !== undefined && total >= u.sessionCostUsd)
-      ride.usage!.costUsd = total - u.sessionCostUsd
-    return
-  }
 }
 
 // One entry in the unified item log that replaces the parallel `messages[]`,
