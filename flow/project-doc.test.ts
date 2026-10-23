@@ -94,6 +94,9 @@ describe('projectDocBlock', () => {
     expect(block.endsWith('</project-instructions>')).toBe(true)
     expect(block).toContain('be careful')
     expect(block).toContain('written by the project, not by lander')
+    expect(block).toContain(
+      'copy the full `<project-instructions>` block verbatim into the summary',
+    )
   })
 
   // Framing forgery, not injection resistance: the danger is repo content ending

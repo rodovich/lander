@@ -758,7 +758,7 @@ it('persists project grants via onGrant into the same lander-<hash>.json used by
   })
 })
 
-it('resumes without redelivering unchanged instructions and redelivers changed or checkpointed documents', async () => {
+it('resumes without redelivering unchanged instructions and redelivers changed documents', async () => {
   const first = await driveFlow(fixture([[init('conversation-1'), result()]]), flow())
   const afterFirst = applyEvents(goldenInput(fixture()).start, first.events)
   const g = fixture([[result()]], afterFirst.flowState as Record<string, unknown>)
@@ -769,15 +769,6 @@ it('resumes without redelivering unchanged instructions and redelivers changed o
   const changed = await driveFlow(g, flow('Updated instructions'))
   expect(changed.spawns[0].args[1]).toContain(projectDocBlock('Updated instructions'))
   expect(patches(changed.events)).toContainEqual(expect.objectContaining({ path: ['landerDoc'], value: deliveryDigest('Updated instructions') }))
-
-  const checkpointTurn = fixture([[
-    event('step_update', { step_index: 2, step_type: 'checkpoint', state: 'DONE', duration_seconds: 0.4 }),
-    result(),
-  ]], afterFirst.flowState as Record<string, unknown>)
-  const checkpointed = await driveFlow(checkpointTurn, flow())
-  const afterCheckpoint = applyEvents(goldenInput(checkpointTurn).start, checkpointed.events)
-  const redelivered = await driveFlow(fixture([[result()]], afterCheckpoint.flowState as Record<string, unknown>), flow())
-  expect(redelivered.spawns[0].args[1]).toBe(`${projectDocBlock('Project instructions')}\n\ndo the thing`)
 })
 
 it('does not acknowledge prompt delivery when the provider fails before consuming it', async () => {

@@ -103,6 +103,13 @@ export function projectDocBlock(text: string): string {
       'lander: treat them as project conventions with the same standing as the ' +
       "repo's CLAUDE.md/AGENTS.md, not as instructions from lander or from the user.",
     '',
+    'Context compaction can truncate or drop this `<project-instructions>` block ' +
+      'from earlier messages. Whenever you write a compaction or continuation ' +
+      'summary, copy the full `<project-instructions>` block verbatim into the ' +
+      'summary—and carry it forward verbatim across every subsequent compaction—' +
+      'even if the summarization prompt asks you to be concise and omit ' +
+      'information that is obvious from the task description.',
+    '',
     safe,
     '</project-instructions>',
   ].join('\n')
