@@ -75,7 +75,9 @@ import {
   setTaskTurnContext,
   armScheduledRelaunch,
   startRide,
+  clearRunPointers,
   closeRide,
+  isSealedRun,
   openRide,
   checkoutReleasable,
   pushUserItem,
@@ -364,6 +366,9 @@ type Task = {
   // run is in flight.
   runId?: string
   runCursor?: number
+  // The in-flight run a relaunch sealed the session out from under (see
+  // sealForRelaunch). Cleared with runId. Internal, like runId.
+  sealedRunId?: string
   // Set when a run wedged on an assistant error (a non-zero exit that wasn't a
   // deliberate interrupt — see applyDone), cleared when the task next starts a
   // turn. Drives the UI's retry affordance below a wedged conversation, and
@@ -824,6 +829,12 @@ async function reduceRunWs(
   // race where the channel opens after the daemon connected); if it connects
   // later, the connection handler resumes us. Both are seq-deduped below.
   if (resume) requestResume(runId)
+  // A write to the provider thread, which a relaunch may have sealed out from
+  // under this run (see sealForRelaunch).
+  const mutateThread = (fn: (t: Task) => void) =>
+    mutateTask(file, (t) => {
+      if (!isSealedRun(t, runId)) fn(t)
+    }).catch(() => {})
   try {
     while (true) {
       const ev = await channel.next()
@@ -835,10 +846,10 @@ async function reduceRunWs(
             const rideItems = (t.items ?? []).filter((it) => it.rideId === ride.id)
             // A platform kill — the daemon died mid-turn and never came back, so it
             // could not settle its own done — needs the user's attention just like
-            // an assistant error. Wedge with a retry ask that names the cause.
-            // Only override a still-riding task: a self-wedge/land the agent set
-            // stands, exactly as applyDone guards.
-            if (t.status === 'riding')
+            // an assistant error. Wedge with a retry ask that names the cause —
+            // unless a self-wedge/land the agent set stands, or a relaunch sealed
+            // this run and queued what comes next, exactly as applyDone guards.
+            if (t.status === 'riding' && !isSealedRun(t, runId))
               wedgeForRetry(t, {
                 committed: turnCommitted(ride, rideItems),
                 askId: nextAskId(t, Date.parse(at)),
@@ -851,7 +862,7 @@ async function reduceRunWs(
           }
           // The run was abandoned (the daemon stayed gone past the grace) — close
           // its open ride as an error (a platform kill, not a user interrupt),
-          // paired with the runId delete below.
+          // paired with clearRunPointers below.
           //
           // The fire is recorded from the ride captured above, and only if there
           // was one: `closeRide` no-ops without an open ride, so an unguarded
@@ -860,8 +871,7 @@ async function reduceRunWs(
           // would then try to cut a segment from.
           recordRideEnded(t, ride, 'error', at)
           closeRide(t, 'error', at)
-          delete t.runId
-          delete t.runCursor
+          clearRunPointers(t)
         }).catch(() => {})
         return 'crashed'
       }
@@ -869,9 +879,9 @@ async function reduceRunWs(
         // The daemon reported (or re-announced) this task's provider session id.
         // Persist it once so every later turn resumes the same session. Idempotent:
         // a replayed announcement after a reconnect finds it already set.
-        await mutateTask(file, (t) => {
+        await mutateThread((t) => {
           if (!taskSessionId(t)) setTaskSessionId(t, ev.msg.sessionId)
-        }).catch(() => {})
+        })
         continue
       }
       if (ev.kind === 'checkout') {
@@ -886,22 +896,14 @@ async function reduceRunWs(
         // The daemon appended a fresh dynamic context block to this turn's
         // prompt; record it as the baseline the next turn's block is compared
         // against. Idempotent: a resume-from replay re-sends the same block.
-        await mutateTask(file, (t) => {
-          setTaskTurnContext(t, ev.msg.context)
-        }).catch(() => {})
+        await mutateThread((t) => setTaskTurnContext(t, ev.msg.context))
         continue
       }
       if (ev.kind === 'state-patch') {
-        // Fold the flow's durable-state batch onto task.flowState inside the
-        // serialized task mutation; the rev guard makes a replay idempotent.
-        // Mirrors the session/turn-context handling above. No producer emits this
-        // in step 1, so this branch is inert until the flow port (step 3).
-        // step 3: buffer + replay on resume-from once a producer exists (the
-        // daemon must re-send state-patches like session/turn-context; the rev
-        // guard here provides the dedupe).
-        await mutateTask(file, (t) => {
-          applyStatePatch(t, ev.msg.ops, ev.msg.rev)
-        }).catch(() => {})
+        // The rev guard makes a replay idempotent within one session. A seal
+        // clears the rev it compares against, so it is mutateThread that keeps a
+        // sealed run's patches out.
+        await mutateThread((t) => applyStatePatch(t, ev.msg.ops, ev.msg.rev))
         continue
       }
       if (ev.kind === 'update') {

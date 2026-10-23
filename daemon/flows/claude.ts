@@ -106,10 +106,6 @@ export function makeFlow({
       // ── Turn context ─────────────────────────────────────────────────────
       const block = buildContextBlock(ctx, gitContext)
       const baseline = ctx.state.get(['turnContext'])
-      // A fresh session gets the full block unconditionally. The server withholds
-      // the baseline when there is no session to resume, but flowState rides in
-      // ungated and a replayed patch can outlive a seal — so a stale baseline
-      // must never be able to suppress a new session's context.
       const sendContext = block !== '' && (!resuming || block !== baseline)
       if (sendContext) ctx.state.set(['turnContext'], block)
 

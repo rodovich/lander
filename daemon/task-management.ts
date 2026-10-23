@@ -30,12 +30,8 @@ export function deliveryDigest(text: string): string {
   return `sha256:${createHash('sha256').update(text).digest('hex')}`
 }
 
-// `!sessionId` is not belt-and-braces; it is the invariant. `sealForRelaunch`
-// deletes the whole flowState blob mid-turn, and the dying turn's flush can then
-// replay a buffered patch that restores the digest alone (server/tasks.ts,
-// daemon/run.ts) — leaving a task with a delivery record and no thread. Without
-// this disjunct the fresh thread inherits "delivered" and is sealed for life.
-// Claude carries the same guard for its context block, for the same reason.
+// A delivery record describes a thread, so with no thread to resume nothing has
+// been delivered, whatever the record says.
 export function shouldDeliver(
   sessionId: string | undefined,
   delivered: unknown,

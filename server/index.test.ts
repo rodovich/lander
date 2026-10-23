@@ -3819,6 +3819,59 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     await waitForRaw(id, (r) => !r.runId)
   })
 
+  // A relaunch usually seals the session while the run that asked for it is still
+  // streaming. What that run writes afterward — live, or replayed on a reconnect —
+  // belongs to the sealed session, and its failure is not the fresh session's to
+  // retry. Also runs on the beforeAll daemon.
+  it('ignores a sealed run’s session writes and failure', async () => {
+    const id = 'sealed-mid-run'
+    await seed(id, { status: 'idle' })
+    expect(
+      (await post(`/api/${slug}/tasks/${id}/messages`, { message: 'go' })).status,
+    ).toBe(200)
+    await waitFor(() => startRuns(id).length === 1)
+    const sealed = startRuns(id)[0].runId!
+
+    expect(
+      (await post(`/api/${slug}/tasks/${id}/relaunch`, { message: 'start over' })).status,
+    ).toBe(200)
+    for (const msg of [
+      { type: 'session', sessionId: 'sess-sealed' },
+      { type: 'turn-context', context: 'sealed context' },
+      {
+        type: 'state-patch',
+        ops: [{ op: 'set', path: ['sessionId'], value: 'sess-sealed' }],
+        rev: 1,
+      },
+      { type: 'done', exitCode: 1, interrupted: false, stderr: 'boom' },
+    ])
+      ws.send(JSON.stringify({ ...msg, runId: sealed }))
+
+    await waitFor(() => startRuns(id).length === 2)
+    const fresh = startRuns(id)[1] as unknown as {
+      runId: string
+      sessionId?: string
+      flowState?: unknown
+      prompt: string
+    }
+    expect(fresh.sessionId).toBeUndefined()
+    expect(fresh.flowState).toBeUndefined()
+    expect(fresh.prompt).toContain('start over')
+    const raw = await readRaw(id)
+    expect(asksOf(raw)).toEqual([])
+
+    ws.send(
+      JSON.stringify({
+        type: 'done',
+        runId: fresh.runId,
+        exitCode: 0,
+        interrupted: false,
+        stderr: '',
+      }),
+    )
+    await waitForRaw(id, (r) => !r.runId)
+  })
+
   // The human answering supersedes the time they or the task scheduled; an await
   // is a real dependency on sibling tasks that no message cancels.
   it('a human message clears a scheduled time, keeps the await, and says both', async () => {

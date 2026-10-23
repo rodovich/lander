@@ -1068,6 +1068,7 @@ export function publicTask<T extends object>(
   | 'token'
   | 'runId'
   | 'runCursor'
+  | 'sealedRunId'
   | 'queued'
   | 'retry'
   | 'flowState'
@@ -1084,6 +1085,7 @@ export function publicTask<T extends object>(
     token: _t,
     runId: _r,
     runCursor: _c,
+    sealedRunId: _sr,
     retry: _retry,
     // The flow's durable state is server-internal (like the run pointers) — it
     // rides back to the flow on start-run, never over HTTP. Absent today.
@@ -1109,6 +1111,7 @@ export function publicTask<T extends object>(
     token?: unknown
     runId?: unknown
     runCursor?: unknown
+    sealedRunId?: unknown
     retry?: unknown
     flowState?: unknown
     flowStateRev?: unknown
@@ -1170,6 +1173,7 @@ export function publicTask<T extends object>(
     | 'token'
   | 'runId'
   | 'runCursor'
+  | 'sealedRunId'
   | 'queued'
   | 'retry'
   | 'flowState'
@@ -1451,43 +1455,59 @@ export function clearTaskThread(task: ThreadStateTask): void {
 // Seal a task's assistant session so its next turn mints a fresh provider session,
 // and record the 'relaunched' divider event. This is the heart of `lander
 // relaunch`: the daemon starts a new provider session whenever it's handed a
-// turn with no `sessionId` (it resumes the same one otherwise), so deleting the
-// field is all it takes — the new session is minted lazily on the next turn that
-// drains a queued message, never pre-allocated. The old session's still-streaming
-// turn emits no session announcement, so nothing races this clear for the
-// top-level field (see reduceRunWs's set-once `if (!t.sessionId)`).
+// turn with no `sessionId` (it resumes the same one otherwise), so the new
+// session is minted lazily on the next turn that drains a queued message, never
+// pre-allocated.
 //
-// It does NOT follow that nothing races the flowState blob: a still-running turn
-// flushes its own state after this seal, and a buffered patch replayed on
-// reconnect can restore individual keys onto the blob just deleted. Anything a
-// flow keys off flowState must therefore tolerate a key outliving the thread it
-// described — which is why codex's deliver-once gate reads `!sessionId ||` and
-// not the delivery record alone (daemon/task-management.ts).
+// A seal usually lands mid-turn — a task relaunching itself — and that turn keeps
+// streaming afterward. Its later writes to the thread, and the ones the daemon
+// replays when the server reconnects, describe the session just sealed, so the
+// run is marked `sealedRunId`: reduceRunWs drops them, and its failure raises no
+// retry ask over the turn the relaunch queued.
 //
-// Touches only session + event state; the caller owns the message/queue/status
-// for the next turn, and links the returned divider to the message it appends
-// (pushEventPrompt).
+// The caller owns the message/queue/status for the next turn, and links the
+// returned divider to the message it appends (pushEventPrompt).
 export function sealForRelaunch(
   task: {
     sessionId?: string
     turnContext?: string
     flowState?: Record<string, unknown>
     flowStateRev?: number
+    runId?: string
+    sealedRunId?: string
     title: string
     items?: Item[]
   },
   at: string,
 ): EventItem {
+  if (task.runId) task.sealedRunId = task.runId
   // Clear the provider thread (session + the context baseline that belongs to it,
   // so the fresh session's first turn gets the full dynamic context block again)
   // through the accessor seam.
   clearTaskThread(task)
   // Relaunch = a fresh session with no memory, so clear the flow's durable state
   // too (flow-inversion.md: "relaunch seal = clear the blob"), generalizing the
-  // session/context clear above. Inert in step 1 — no flow writes flowState yet.
+  // session/context clear above.
   delete task.flowState
   delete task.flowStateRev
   return pushEventItem(task, { eventKind: 'relaunched', title: task.title }, at)
+}
+
+export function clearRunPointers(task: {
+  runId?: string
+  runCursor?: number
+  sealedRunId?: string
+}): void {
+  delete task.runId
+  delete task.runCursor
+  delete task.sealedRunId
+}
+
+export function isSealedRun(
+  task: { sealedRunId?: string },
+  runId: string | undefined,
+): boolean {
+  return runId !== undefined && task.sealedRunId === runId
 }
 
 // The immediate `lander relaunch <message>` mutation: seal the session, then

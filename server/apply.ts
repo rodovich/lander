@@ -20,7 +20,9 @@ import type { Step, Usage } from '../shared/stream'
 import type { UpdateMessage, DoneMessage } from './protocol'
 import {
   openRide,
+  clearRunPointers,
   closeRide,
+  isSealedRun,
   pushFlowItem,
   lastFlowItem,
   nextItemId,
@@ -50,6 +52,7 @@ export type ApplyTask = {
   updatedAt: string
   runId?: string
   runCursor?: number
+  sealedRunId?: string
   retry?: { committed: boolean; prompts: string[]; resetsAt?: string }
   pendingHooks?: PendingHook[]
   hookFireSeq?: number
@@ -345,10 +348,17 @@ export function applyDone(
   // An assistant error — a non-zero exit that isn't a deliberate interrupt — needs
   // the user's attention, so wedge the task with the platform retry ask (usage-limit
   // or generic error). Only override a still-riding task: a self-wedge/land the
-  // agent set stands. Name the failure when we can — the daemon's synthesized-done
-  // cause, or the first stderr line of a natural non-zero exit; a usage-limit
-  // wedge keeps its reset-time wording.
-  if (done.exitCode !== 0 && !done.interrupted && task.status === 'riding') {
+  // agent set stands, and so does a relaunch that sealed this run: it already
+  // queued the fresh session's first turn, which a retry would only duplicate or
+  // follow with a "try again" the session can't place. Name the failure when we
+  // can — the daemon's synthesized-done cause, or the first stderr line of a
+  // natural non-zero exit; a usage-limit wedge keeps its reset-time wording.
+  if (
+    done.exitCode !== 0 &&
+    !done.interrupted &&
+    task.status === 'riding' &&
+    !isSealedRun(task, task.runId)
+  ) {
     const prompt = rateLimitResetsAt ? undefined : failurePrompt(done)
     wedgeForRetry(task, {
       committed: turnCommitted(ride, rideItems),
@@ -411,8 +421,7 @@ export function applyDone(
   if (ride && done.durationMs !== undefined) ride.durationMs = done.durationMs
   closeRide(task, outcome, at)
   task.updatedAt = at
-  delete task.runId
-  delete task.runCursor
+  clearRunPointers(task)
 }
 
 // The one-line cause for a failed run's retry ask. A daemon-synthesized done
