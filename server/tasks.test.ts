@@ -13,6 +13,7 @@ import {
   turnAttachments,
   deliverQueuedBatch,
   applyRelaunch,
+  relaunchRetryBrief,
   applyDueMessages,
   armScheduledRelaunch,
   attributedPrompt,
@@ -1473,6 +1474,50 @@ describe('applyRelaunch', () => {
     const t = task()
     applyRelaunch(t, 'go', AT2, 'human', { repeat: { interval: 60 }, flow: 'codex' })
     expect(t.scheduledMessages?.[0]).toMatchObject({ relaunch: true, flow: 'codex' })
+  })
+})
+
+describe('relaunchRetryBrief', () => {
+  it('quotes the opening, the last finished reply, and the turn that failed', () => {
+    const t = {
+      id: 'tsk-old',
+      items: [
+        userItem('build the thing'),
+        flowItem('built it', 'r0'),
+        userItem('now test it'),
+        flowItem('error running assistant: exited 1', 'r1'),
+      ],
+      rides: [
+        { id: 'r0', startedAt: AT, outcome: 'done' },
+        { id: 'r1', startedAt: AT, outcome: 'error' },
+      ] as Ride[],
+      retry: { prompts: ['now test it'] },
+    }
+    const brief = relaunchRetryBrief(t)
+    expect(brief).toContain('`lander view tsk-old --messages all --expand`')
+    expect(brief).toContain('began with:\n\n> build the thing')
+    expect(brief).toContain('finished was:\n\n> built it')
+    expect(brief).toContain('could not answer:\n\n> now test it')
+    expect(brief).not.toContain('error running assistant')
+  })
+
+  it('names the opening once when it is the turn that failed', () => {
+    const t = { id: 't', items: [userItem('go')], retry: { prompts: ['go'] } }
+    expect(relaunchRetryBrief(t).match(/> go/g)).toHaveLength(1)
+  })
+
+  it('hands on a failed relaunch brief as it stands rather than quoting it', () => {
+    const t = { id: 't', items: [userItem('go')], retry: { prompts: ['go'] } }
+    const brief = relaunchRetryBrief(t)
+    const relaunched = {
+      id: 't',
+      items: [
+        userItem('go'),
+        { ...userItem(brief), from: { task: 't', via: 'relaunch' as const } },
+      ],
+      retry: { prompts: [brief] },
+    }
+    expect(relaunchRetryBrief(relaunched)).toBe(brief)
   })
 })
 

@@ -17,6 +17,7 @@ import { withdrawOpenAsks, type Ask, type AskForm } from './asks'
 import { LEGACY_FLOW, flowCaps, type FlowCaps } from './flows'
 import { isUnread, type ReadableTask } from '../shared/readMarker'
 import { openRide } from '../shared/timeline'
+import { blockquote } from '../shared/conversationText'
 
 export { openRide }
 
@@ -1853,6 +1854,46 @@ export function applyRetryRecovery(
   }
   task.updatedAt = now
   delete task.retry
+}
+
+// The message a relaunch-and-retry (the retry ask's menu) hands the fresh
+// session: what it can't know about the session it replaces, the task's opening
+// message, the task's last finished reply, and the turn that failed, each quoted
+// and capped. The rest is a `lander view` away. A failed turn that was itself a
+// relaunch brief is handed on as it stands.
+export function relaunchRetryBrief(task: {
+  id: string
+  items?: Item[]
+  rides?: Ride[]
+  retry?: { prompts: string[] }
+}): string {
+  const quote = (text: string) =>
+    blockquote(text.length > 4000 ? `${text.slice(0, 4000)}…` : text)
+  const failed = (task.retry?.prompts ?? []).filter((p) => p.trim()).join('\n\n')
+  const last = userItems(task).at(-1)
+  if (last?.from && 'via' in last.from && last.from.via === 'relaunch' && last.text === failed)
+    return failed
+  const first = userItems(task)[0]
+  const opening = first && attributedPrompt(first)
+  const reply = (task.rides ?? [])
+    .filter((r) => r.outcome === 'done')
+    .map((r) => lastFlowItem(task, r.id)?.text)
+    .filter(Boolean)
+    .at(-1)
+  const parts = [
+    "This task's previous session could not be continued, so this is a fresh one. " +
+      'You have none of its tool results or reasoning: check anything it concluded ' +
+      'before relying on it. Read the conversation so far with ' +
+      `\`lander view ${task.id} --messages all --expand\`.`,
+  ]
+  if (opening && opening !== failed) parts.push(`The task began with:\n\n${quote(opening)}`)
+  if (reply) parts.push(`The last reply the task finished was:\n\n${quote(reply)}`)
+  parts.push(
+    failed
+      ? `Then came this, which the session could not answer:\n\n${quote(failed)}`
+      : 'Its last turn failed; pick up where it left off.',
+  )
+  return parts.join('\n\n')
 }
 
 // The user messages that made up a task's most recent turn: the consecutive run

@@ -100,6 +100,8 @@ export type ApplyDoneOpts = {
   rateLimitResetsAt?: string
   at: string
   askId: string
+  // The flows besides the task's own that a retry ask may offer to relaunch in.
+  otherFlows?: string[]
 }
 
 // The tool_result outcome → the folded tool item status.
@@ -123,6 +125,7 @@ export function wedgeForRetry(
     at: string
     resetsAt?: string
     prompt?: string
+    otherFlows?: string[]
   },
 ): void {
   // Always `system`: every caller of this is an infrastructure wedge — an
@@ -142,6 +145,7 @@ export function wedgeForRetry(
     committed: opts.committed,
     ...(opts.resetsAt ? { resetsAt: opts.resetsAt } : {}),
     ...(opts.prompt ? { prompt: opts.prompt } : {}),
+    otherFlows: opts.otherFlows,
     at: opts.at,
   })
 }
@@ -324,7 +328,7 @@ export function applyDone(
   done: ApplyDone,
   opts: ApplyDoneOpts,
 ): void {
-  const { at, rateLimitResetsAt, askId } = opts
+  const { at, rateLimitResetsAt, askId, otherFlows } = opts
   const ride = openRide(task)
   const rideId = ride?.id
   // The ride's own items, snapshotted before we append any error line below.
@@ -366,6 +370,7 @@ export function applyDone(
       at,
       ...(rateLimitResetsAt ? { resetsAt: rateLimitResetsAt } : {}),
       ...(prompt ? { prompt } : {}),
+      otherFlows,
     })
   }
   // Close the ride: interrupted on a deliberate stop, error on a non-zero

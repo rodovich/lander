@@ -298,6 +298,12 @@ export function FilterMenu<T extends string>({
   )
 }
 
+export function KebabMenu({ label, items }: { label: string; items: MenuItem[] }) {
+  return (
+    <ActionsMenu triggerClassName="task-kebab" triggerLabel={label} trigger="⋮" items={items} />
+  )
+}
+
 // The kebab on a section header (a status, or a date subheader within a split
 // status). Its one action archives every task in that section at once. Shares
 // the row kebab's trigger and popup styling.

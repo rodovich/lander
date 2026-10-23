@@ -6,12 +6,15 @@
 // tasks.ts) so they unit-test without the server: the endpoints in index.ts own
 // the wedge/queue/schedule side-effects, these own the ask shape and routing.
 
+import { agentDisplayName } from '../shared/agentDisplay'
 import type { AskItem, Item } from './tasks'
 
 // One option in a `choice` form. `at` (only meaningful on a choice option) makes
 // answering schedule the delivery for that time via the task's `scheduledFor`
 // machinery (e.g. "retry when the limit resets"); `value` + `editable` prefill a
-// text the user can amend before answering (e.g. a permission rule).
+// text the user can amend before answering (e.g. a permission rule). `menu`
+// lists the option in a menu beside the buttons, for choices that are rarely
+// the one wanted.
 export type AskOption = {
   id: string
   label: string
@@ -20,6 +23,7 @@ export type AskOption = {
   at?: string
   value?: string
   editable?: boolean
+  menu?: true
 }
 
 // Only the choice form ships: wedge, ask, and the platform retry ask all raise a
@@ -55,6 +59,20 @@ export type Ask = {
 // origin:'retry' ask through applyRetryRecovery keyed on which was chosen.
 export const RETRY_NOW = 'retry-now'
 export const RETRY_AT_RESET = 'retry-at-reset'
+// Relaunch the task and retry in the fresh session: `relaunch-retry` on the
+// task's own flow, `relaunch-retry:<flow>` on another.
+const RELAUNCH_RETRY = 'relaunch-retry'
+
+// Which relaunch a retry ask's option asks for: undefined for any other option,
+// `{}` to stay on the task's flow, `{ flow }` to move to another.
+export function relaunchRetryOf(
+  optionId: string | undefined,
+): { flow?: string } | undefined {
+  if (optionId === RELAUNCH_RETRY) return {}
+  const prefix = `${RELAUNCH_RETRY}:`
+  if (optionId?.startsWith(prefix)) return { flow: optionId.slice(prefix.length) }
+  return undefined
+}
 
 // The task slice the ask helpers read and write: the unified item log, in which
 // asks live as `ask` items. index.ts's Task satisfies this structurally.
@@ -130,7 +148,7 @@ export function createAsk(
 
 // Build the platform ask a wedge raises alongside its retry stash (origin:
 // 'retry', task-blocking). A usage-limit wedge (resetsAt present) offers two
-// options — retry now, or retry when the limit resets (carrying `at` so
+// buttons — retry now, or retry when the limit resets (carrying `at` so
 // answering schedules the wakeup); a generic error offers one, labeled by
 // whether the failed turn committed ("Try again" vs "Resend"). The single place
 // the retry ask's shape is defined, so applyDone, the daemon-outage wedge, and
@@ -138,27 +156,43 @@ export function createAsk(
 // can name a specific cause (e.g. a platform kill); absent, it derives the
 // usage-limit / generic-error line. `id`/`at` are the caller's (kept
 // injection-friendly for pure tests).
+//
+// Either way the menu offers to relaunch and retry, for when the session itself
+// is what failed (e.g. its transcript expired): on each of `otherFlows`, and on
+// the task's own flow unless that flow's usage limit is what stopped it.
 export function createRetryAsk(
   task: AskTask,
-  opts: { id: string; committed: boolean; resetsAt?: string; prompt?: string; at: string },
+  opts: {
+    id: string
+    committed: boolean
+    resetsAt?: string
+    prompt?: string
+    otherFlows?: string[]
+    at: string
+  },
 ): AskItem {
-  const form: AskForm = opts.resetsAt
-    ? {
-        type: 'choice',
-        options: [
-          { id: RETRY_NOW, label: 'Retry now' },
-          {
-            id: RETRY_AT_RESET,
-            label: 'Retry when the limit resets',
-            at: opts.resetsAt,
-            style: 'primary',
-          },
-        ],
-      }
-    : {
-        type: 'choice',
-        options: [{ id: RETRY_NOW, label: opts.committed ? 'Try again' : 'Resend' }],
-      }
+  const retry: AskOption[] = opts.resetsAt
+    ? [
+        { id: RETRY_NOW, label: 'Retry now' },
+        {
+          id: RETRY_AT_RESET,
+          label: 'Retry when the limit resets',
+          at: opts.resetsAt,
+          style: 'primary',
+        },
+      ]
+    : [{ id: RETRY_NOW, label: opts.committed ? 'Try again' : 'Resend' }]
+  const relaunch: AskOption[] = [
+    ...(opts.resetsAt
+      ? []
+      : [{ id: RELAUNCH_RETRY, label: 'Relaunch and retry', menu: true as const }]),
+    ...(opts.otherFlows ?? []).map((flow) => ({
+      id: `${RELAUNCH_RETRY}:${flow}`,
+      label: `Relaunch in ${agentDisplayName(flow)} and retry`,
+      menu: true as const,
+    })),
+  ]
+  const form: AskForm = { type: 'choice', options: [...retry, ...relaunch] }
   return createAsk(task, {
     id: opts.id,
     prompt:

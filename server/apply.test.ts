@@ -310,6 +310,30 @@ describe('applyDone', () => {
     ])
   })
 
+  it('offers no same-flow relaunch when the flow’s usage limit stopped the run', () => {
+    const t = task()
+    applyDone(t, done({ exitCode: 1 }), {
+      at: AT,
+      askId: 'ask-x-0',
+      rateLimitResetsAt: '2026-01-01T01:00:00.000Z',
+      otherFlows: ['codex'],
+    })
+    const ask = t.items!.find((i) => i.kind === 'ask')!
+    expect(
+      ask.kind === 'ask' && ask.form.options.filter((o) => o.menu).map((o) => o.id),
+    ).toEqual(['relaunch-retry:codex'])
+  })
+
+  it('offers to relaunch the retry in the task’s flow and in each other one', () => {
+    const t = task()
+    applyDone(t, done({ exitCode: 1 }), { at: AT, askId: 'ask-x-0', otherFlows: ['codex'] })
+    const ask = t.items!.find((i) => i.kind === 'ask')!
+    expect(ask.kind === 'ask' && ask.form.options.filter((o) => o.menu)).toEqual([
+      { id: 'relaunch-retry', label: 'Relaunch and retry', menu: true },
+      { id: 'relaunch-retry:codex', label: 'Relaunch in Codex and retry', menu: true },
+    ])
+  })
+
   it('records the daemon-measured working time on the ride', () => {
     const t = task()
     applyDone(t, done({ durationMs: 92_000 }), {
@@ -352,9 +376,9 @@ describe('applyDone', () => {
     applyDone(t, done({ exitCode: 1 }), { at: AT, askId: 'ask-x-0' })
     expect(t.retry?.committed).toBe(true)
     const ask = t.items!.find((i) => i.kind === 'ask')!
-    expect(ask.kind === 'ask' && ask.form.options.map((o) => o.label)).toEqual([
-      'Try again',
-    ])
+    expect(
+      ask.kind === 'ask' && ask.form.options.filter((o) => !o.menu).map((o) => o.label),
+    ).toEqual(['Try again'])
   })
 
   it('keeps an interrupted run unwedged, recording the stop, and closes it interrupted', () => {

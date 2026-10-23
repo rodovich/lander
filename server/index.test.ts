@@ -3354,6 +3354,53 @@ describe('asks', () => {
     expect(texts.some((t) => t.startsWith('Answer to'))).toBe(false)
   })
 
+  const relaunchingRetryAsk = () =>
+    retryAsk({
+      form: {
+        type: 'choice',
+        options: [
+          { id: 'retry-now', label: 'Try again' },
+          { id: 'relaunch-retry', label: 'Relaunch and retry', menu: true },
+          { id: 'relaunch-retry:no-such-flow', label: 'Relaunch elsewhere', menu: true },
+        ],
+      },
+    })
+
+  it('answers relaunch-retry: hands the failed turn to a fresh session', async () => {
+    const id = 'ask-relaunch-retry'
+    await seedTask(id, {
+      status: 'wedged',
+      sessionId: 'sess-expired',
+      retry: { committed: true, prompts: ['do the thing'] },
+      asks: [relaunchingRetryAsk()],
+    })
+    const { res, writes } = await writesDuring(id, () =>
+      answer(id, 'ask-retry-0', { optionId: 'relaunch-retry' }),
+    )
+    expect(res.status).toBe(200)
+    const queued = writes.map((w) => w.queued as string[] | undefined).find((q) => q?.length)
+    expect(queued?.[0]).toContain('> do the thing')
+    const raw = await readRaw(id)
+    expect(raw.sessionId).toBeUndefined()
+    expect(raw.retry).toBeUndefined()
+    expect(asksOf(raw)[0].state).toBe('answered')
+  })
+
+  it('refuses a relaunch-retry into a flow no daemon provides, leaving the ask open', async () => {
+    const id = 'ask-relaunch-retry-gone'
+    await seedTask(id, {
+      status: 'wedged',
+      sessionId: 'sess-kept',
+      retry: { committed: true, prompts: ['do the thing'] },
+      asks: [relaunchingRetryAsk()],
+    })
+    const res = await answer(id, 'ask-retry-0', { optionId: 'relaunch-retry:no-such-flow' })
+    expect(res.status).toBe(400)
+    const raw = await readRaw(id)
+    expect(raw.sessionId).toBe('sess-kept')
+    expect(asksOf(raw)[0].state).toBe('open')
+  })
+
   it('answers retry-now on an uncommitted wedge: re-sends the un-received prompts', async () => {
     const id = 'ask-retry-resend'
     await seedTask(id, {

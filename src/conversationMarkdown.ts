@@ -20,7 +20,7 @@
 import { formatTimestamp } from './format'
 import { EVENT_VERB } from './lifecycleNote'
 import { toolDetail } from './toolStep'
-import { oneLine, REPROMPT_LABEL } from '../shared/conversationText'
+import { blockquote, oneLine, REPROMPT_LABEL } from '../shared/conversationText'
 import { contextLabel, contextSummary } from '../shared/context'
 import {
   foldSummary,
@@ -54,14 +54,6 @@ function fence(body: string, lang = ''): string {
   const ticks = '`'.repeat(Math.max(3, longestTickRun(body) + 1))
   return `${ticks}${lang}\n${body}\n${ticks}`
 }
-
-// A subagent's trace, set apart from its spawner the way the nested chip block
-// is on screen.
-const blockquote = (block: string) =>
-  block
-    .split('\n')
-    .map((line) => (line ? `> ${line}` : '>'))
-    .join('\n')
 
 const heading = (role: string, at: string) =>
   `## ${role} · ${formatTimestamp(at)}`
@@ -261,6 +253,8 @@ function rideBlocks(
           'diff',
         ),
       )
+    // A subagent's trace, set apart from its spawner the way the nested chip
+    // block is on screen.
     if (hasChildren) out.push(blockquote(renderIdxs(childIdxs).join('\n\n')))
     if (hasResult) out.push(fence(it.output!))
     return out

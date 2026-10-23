@@ -64,6 +64,7 @@ import {
   deliverQueuedBatch,
   applyRelaunch,
   applyRetryRecovery,
+  relaunchRetryBrief,
   applyDueMessages,
   attributedPrompt,
   wakeupNotification,
@@ -130,7 +131,9 @@ import {
   chosenOption,
   withdrawOpenAsks,
   validateAskForm,
+  askItems,
   nextAskId,
+  relaunchRetryOf,
   type Ask,
   type AskForm,
 } from './asks'
@@ -591,6 +594,13 @@ async function interruptRun(project: Project, id: string, runId: string): Promis
   }
 }
 
+// The flows a retry ask offers to relaunch a task in, besides its own.
+function otherDriverFlows(slug: string, task: { flow?: string; agent?: string }): string[] {
+  return flowRegistry(slug)
+    .filter((f) => f.driver && f.name !== taskFlow(task))
+    .map((f) => f.name)
+}
+
 // Run one agent turn on the host daemon and reduce its streamed updates onto the
 // task. The server hands a provider-neutral run intent to the daemon over the WS
 // (start-run); the daemon owns provider argv, the agent child, and the stream.
@@ -639,6 +649,7 @@ async function runTurn(
         askId: nextAskId(t, Date.parse(at)),
         at,
         prompt,
+        otherFlows: otherDriverFlows(project.slug, t),
       })
       t.updatedAt = at
     }).catch(() => {})
@@ -855,6 +866,7 @@ async function reduceRunWs(
                 prompt: resume
                   ? PLATFORM_KILL_PROMPT_RESTART
                   : PLATFORM_KILL_PROMPT_DAEMON_LOST,
+                otherFlows: otherDriverFlows(project.slug, t),
               })
             t.updatedAt = at
           }
@@ -932,6 +944,7 @@ async function reduceRunWs(
             rateLimitResetsAt,
             at,
             askId: nextAskId(t, Date.parse(at)),
+            otherFlows: otherDriverFlows(project.slug, t),
           })
           // Only a done that reports its checkout says anything about it; a
           // crash or a pre-spawn failure leaves the last report standing. A
@@ -3818,13 +3831,12 @@ app.post('/api/:project/tasks/:id/asks', async (c) => {
   }
 })
 
-// Answer an ask (UI principal only, like /retry — answering re-drives the
-// session). Stamps the answer and un-wedges: a chosen option carrying a future
+// Answer an ask (UI principal only — answering re-drives the session). Stamps the answer and un-wedges: a chosen option carrying a future
 // `at` stays wedged and schedules the delivery for then (via scheduledFor, drained
 // by launchTask — exactly the deferred-retry path); otherwise the task goes riding
 // now and the answer is delivered as a visible user message. An `origin: 'retry'`
-// ask delivers nothing of its own — the retry-recovery machinery composes the
-// turn (added in the wedge recast).
+// ask delivers nothing of its own — the retry recovery, or a relaunch, composes
+// the turn.
 app.post('/api/:project/tasks/:id/asks/:askId/answer', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
@@ -3849,6 +3861,21 @@ app.post('/api/:project/tasks/:id/asks/:askId/answer', async (c) => {
     let defer = false
     let claimed = false
     await mutateTask(file, (t) => {
+      // An open retry ask's relaunch option names a flow that has to still be
+      // provided now, not just when the ask was raised.
+      const target = askItems(t).find((a) => a.id === askId)
+      let relaunch =
+        target?.origin === 'retry' && target.state === 'open'
+          ? relaunchRetryOf(optionId)
+          : undefined
+      if (relaunch?.flow) {
+        const resolved = resolveNewTaskFlow(project.slug, relaunch.flow)
+        if ('error' in resolved) {
+          fail = { error: resolved.error, status: 400 }
+          return
+        }
+        relaunch = { flow: resolved.flow }
+      }
       const res = answerAsk(t, askId, { optionId, text, at: now })
       if (!res.ok) {
         fail = { error: res.error, status: res.status }
@@ -3862,12 +3889,15 @@ app.post('/api/:project/tasks/:id/asks/:askId/answer', async (c) => {
       const opt = chosenOption(ask)
       const scheduleAt = opt?.at
       defer = !!scheduleAt && Date.parse(scheduleAt) > Date.now()
-      // A platform retry ask routes through the retry-recovery machinery instead
-      // of a generic delivery: retry-now recovers immediately, retry-at-reset (a
-      // future option `at`) schedules the recovery for then. It composes its own
-      // turn (nudge or prompt re-send) from the `retry` stash.
+      // A platform retry ask drives its own turn instead of a generic delivery:
+      // retry-now recovers from the `retry` stash immediately (a nudge or the
+      // prompts re-sent), retry-at-reset (a future option `at`) schedules that
+      // for then, and a relaunch option hands the failed turn to a fresh session.
       if (ask.origin === 'retry') {
-        applyRetryRecovery(t, { defer, resetsAt: scheduleAt, now, by: 'human' })
+        if (relaunch) {
+          applyRelaunch(t, relaunchRetryBrief(t), now, 'human', relaunch)
+          withdrawOpenAsks(t)
+        } else applyRetryRecovery(t, { defer, resetsAt: scheduleAt, now, by: 'human' })
         return
       }
       // Deliver the answer as a visible user message so it appears in the

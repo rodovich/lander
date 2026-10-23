@@ -48,6 +48,8 @@ export type AskOption = {
   at?: string
   value?: string
   editable?: boolean
+  // Listed in a menu beside the buttons (see server/asks.ts).
+  menu?: true
 }
 
 // Only the choice form ships (confirm/free-text were dropped as producerless —

@@ -2,7 +2,7 @@
 // Rendered inline under the assistant message it belongs to (not as a separate
 // card). An agent wedge carries no prompt — its own message is the question — so
 // this usually renders just the buttons; a platform ask (the retry ask) carries a
-// prompt line above them.
+// prompt line above them, and a kebab beside them for its menu options.
 //
 // The two halves have different lifetimes. The buttons are live only while the
 // ask is open: answered or withdrawn, there's nothing left to press. The prompt
@@ -13,6 +13,7 @@
 import { useState } from 'react'
 import { retryResetTime } from './format'
 import { Markdown } from './markdown'
+import { KebabMenu } from './menus'
 import { useTaskLink } from './taskLinkContext'
 import type { AskItem, AskOption } from './types'
 
@@ -43,6 +44,8 @@ export function AskForm({
       ask.form.options.filter((o) => o.editable).map((o) => [o.id, o.value ?? '']),
     ),
   )
+  const buttons = ask.form.options.filter((o) => !o.menu)
+  const menu = ask.form.options.filter((o) => o.menu)
 
   return (
     <div className="ask" data-item-id={ask.id}>
@@ -53,7 +56,7 @@ export function AskForm({
       )}
       {ask.state === 'open' && (
         <div className="ask-form">
-          {ask.form.options.map((opt) =>
+          {buttons.map((opt) =>
             opt.editable ? (
               <div className="ask-editable" key={opt.id}>
                 <input
@@ -88,6 +91,16 @@ export function AskForm({
               </button>
             ),
           )}
+          <KebabMenu
+            label="More options"
+            items={menu.map((opt) => ({
+              key: opt.id,
+              label: askOptionLabel(opt),
+              onSelect: () => {
+                if (!disabled) onAnswer({ optionId: opt.id })
+              },
+            }))}
+          />
         </div>
       )}
     </div>

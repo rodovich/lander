@@ -32,6 +32,13 @@ export function oneLine(s: string): string {
   return s.replace(/\s*\n\s*/g, ' ').trim()
 }
 
+export function blockquote(block: string): string {
+  return block
+    .split('\n')
+    .map((line) => (line ? `> ${line}` : '>'))
+    .join('\n')
+}
+
 function entryBlock(entry: TimelineEntry, expand: boolean): ConversationBlock | null {
   switch (entry.kind) {
     case 'user':
