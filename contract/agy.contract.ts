@@ -193,6 +193,29 @@ describe.skipIf(!VERSION)(`agy contract (${VERSION})`, () => {
     expect(readFileSync(path.join(root, 'probe.txt'), 'utf8')).toBe('kept\n')
   })
 
+  it('still leaves a call after a refused one in its batch open (remove the stuck-call stop in agy.ts once this fails)', async () => {
+    const root = testRoot()
+    await onGrant(undefined, { projectPath: root, rule: 'command(git status)' })
+    const logFile = path.join(root, 'agy.log')
+    const run = runJsonl('agy', [
+      '-p', 'In a single response, issue these two run_command tool calls in parallel, in this order: first CommandLine "echo stuck-probe", then CommandLine "git status". Do not call any other tools.',
+      '--output-format', 'stream-json', '--print-timeout', '0s',
+      '--mode', 'accept-edits', '--project', agyProjectId(root), '--log-file', logFile,
+    ], { cwd: root, timeoutMs: 60_000 })
+
+    const steps = run.lines.filter((l) => l.event === 'step_update' && l.step_update?.step_type === 'tool')
+      .map((l) => l.step_update)
+    const stepOf = (command: string) =>
+      steps.find((s) => s.tool_info?.parameters?.CommandLine === command)?.step_index
+    const refused = stepOf('echo stuck-probe')
+    const sibling = stepOf('git status')
+    expect(refused).toBeDefined()
+    expect(sibling).toBeGreaterThan(refused)
+    expect(agyLogRefusals(readFileSync(logFile, 'utf8')).map((r) => r.step)).toEqual([refused])
+
+    expect(steps.some((s) => s.step_index === sibling && s.state !== 'ACTIVE')).toBe(false)
+  })
+
   it('logs each refused call with the conversation and step the stream reports', async () => {
     const root = testRoot()
     await onGrant(undefined, { projectPath: root, rule: 'command(lander)' })

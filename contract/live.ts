@@ -132,13 +132,17 @@ export type JsonlRun = { lines: Record<string, any>[]; exit: number | null; stde
 
 // Run a CLI to completion with stdin closed and parse its JSONL stdout, keeping
 // only the lines that parse.
-export function runJsonl(cmd: string, args: string[], opts: { cwd: string }): JsonlRun {
+export function runJsonl(
+  cmd: string,
+  args: string[],
+  opts: { cwd: string; timeoutMs?: number },
+): JsonlRun {
   const r = spawnSync(cmd, args, {
     cwd: opts.cwd,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     maxBuffer: 64 * 1024 * 1024,
-    timeout: 170_000,
+    timeout: opts.timeoutMs ?? 170_000,
   })
   const lines: Record<string, any>[] = []
   for (const line of (r.stdout ?? '').split('\n')) {
