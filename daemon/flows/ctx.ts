@@ -253,7 +253,7 @@ export type SpawnedChild = {
   // reads this cannot starve the daemon's idle watchdog.
   stderr: AsyncIterable<string>
   exit: Promise<number>
-  kill(): void
+  kill(signal?: 'SIGTERM' | 'SIGKILL'): void
 }
 
 export type CtxScratch = {
@@ -811,7 +811,7 @@ export function createCtxRuntime(
         }),
       stderr: stderrQ.drain(() => {}),
       exit,
-      kill: () => signal(child, 'SIGKILL'),
+      kill: (sig = 'SIGKILL') => signal(child, sig),
     }
   }
 

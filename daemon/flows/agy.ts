@@ -369,11 +369,13 @@ export function makeFlow({
   readProjectDoc,
   geminiConfigDir,
   readAgyLog = readFileIfPresent,
+  stuckPollMs = 1000,
 }: {
   taskPromptTemplate: string
   readProjectDoc: (dir: string) => string | undefined
   geminiConfigDir?: string
   readAgyLog?: (file: string) => string | undefined
+  stuckPollMs?: number
 }) {
   return {
     meta,
@@ -427,7 +429,7 @@ export function makeFlow({
           '--mode', 'accept-edits', '--project', projectId,
           ...(conversation ? ['--conversation', conversation] : []),
           ...[...dirs].flatMap((dir) => ['--add-dir', dir]),
-        ], { sessionId: conversation, priorTotal, liveUsage, readLog: readAgyLog })
+        ], { sessionId: conversation, priorTotal, liveUsage, readLog: readAgyLog, stuckPollMs })
         if (first && run.producedOutput) {
           if (sendTaskPrompt) ctx.state.set(['taskPrompt'], digest)
           if (sendDoc && docDigest !== undefined) ctx.state.set(['landerDoc'], docDigest)
@@ -489,7 +491,16 @@ type RunOpts = {
   sessionId: string | undefined
   priorTotal: Usage | undefined
   liveUsage: Usage | undefined
+  stuckPollMs: number
 }
+
+// agy 1.4.6 never finishes a headless turn when a call is refused and the model
+// issued later calls in the same batch: those stay ACTIVE and the process idles.
+// 1.4.2–1.4.5 close them within a fraction of a second, so a later call still
+// open this many polls after the log records the refusal is stuck. On SIGTERM,
+// agy ends the turn with an "interrupted" error result that still carries
+// denied_actions, so the refusal can be handled as if agy had ended the turn.
+const STUCK_POLLS = 3
 
 async function runAgy(
   ctx: Ctx,
@@ -512,7 +523,7 @@ async function runAgy(
 async function reduceAgy(
   ctx: Ctx,
   args: string[],
-  { sessionId, priorTotal, liveUsage: startUsage, readRunLog }: RunOpts & {
+  { sessionId, priorTotal, liveUsage: startUsage, readRunLog, stuckPollMs }: RunOpts & {
     readRunLog: () => string | undefined
   },
 ): Promise<AgyRun> {
@@ -533,6 +544,7 @@ async function reduceAgy(
       action?: string
       denied?: boolean
       blocked?: boolean
+      open: boolean
     }
   >()
   const texts = new Map<number, string>()
@@ -545,6 +557,24 @@ async function reduceAgy(
   let producedOutput = false
   let deniedActions: NonNullable<AgyEvent['denied_actions']> = []
   let terminalError: string | undefined
+  let unstuck = false
+  let stuckPolls = 0
+  const stuckPoll = setInterval(() => {
+    const open = [...tools].filter(([, t]) => t.open).map(([step]) => step)
+    const refused = open.length
+      ? agyLogRefusals(readRunLog() ?? '')
+        .filter((r) => r.conversation === conversationId)
+        .map((r) => r.step)
+      : []
+    const stuck = refused.length > 0 && open.some((step) => step > Math.min(...refused))
+    stuckPolls = stuck ? stuckPolls + 1 : 0
+    if (stuckPolls >= STUCK_POLLS) {
+      unstuck = true
+      clearInterval(stuckPoll)
+      child.kill('SIGTERM')
+    }
+  }, stuckPollMs)
+  void child.exit.then(() => clearInterval(stuckPoll))
   let stderr = ''
   const collectStderr = (async () => {
     for await (const line of child.stderr) stderr += `${line}\n`
@@ -631,12 +661,13 @@ async function reduceAgy(
             ...call,
             ...(ruleInfo ? { rule: ruleInfo.rule } : {}),
           })
-          entry = { handle, name, input: call.input, action: ruleInfo?.action }
+          entry = { handle, name, input: call.input, action: ruleInfo?.action, open: true }
           tools.set(event.step_index, entry)
         }
         if (event.state !== 'ACTIVE') {
           const rawOutput = info?.output ?? info?.error?.message
           const isError = event.state === 'ERROR' || !!info?.error
+          entry.open = false
           entry.denied = isError && isAgyDenial(info?.error?.message)
           entry.handle.result({
             ...(rawOutput !== undefined
@@ -675,6 +706,10 @@ async function reduceAgy(
   flushText()
   const exitCode = await child.exit
   await collectStderr
+  if (unstuck) {
+    for (const t of tools.values())
+      if (t.open) t.handle.result({ output: 'Tool execution was canceled', isError: true })
+  }
   const refusals: AgyRefusal[] = []
   if (deniedActions.length) {
     const logged = agyLogRefusals(readRunLog() ?? '')
@@ -707,6 +742,11 @@ async function reduceAgy(
         refusals.push({ in: 'unknown', action: name })
       }
     }
+  }
+  if (unstuck) {
+    terminalError = refusals.length
+      ? undefined
+      : 'Lander stopped Antigravity because a call after a refused one never finished.'
   }
   return {
     exitCode,
