@@ -471,6 +471,7 @@ export function createRunManager({
             usage: event.usage,
             usageChanged: event.usageChanged,
             drivingModel: event.drivingModel,
+            cliVersion: event.cliVersion,
             rateLimitResetsAt: event.rateLimitResetsAt,
             committed: event.committed,
           }

@@ -68,7 +68,7 @@ export type ApplyTask = {
 // distinction stays the caller's, this just stores whatever it's given.
 export type ApplyUpdate = Pick<
   UpdateMessage,
-  'steps' | 'finalText' | 'blockedIds' | 'drivingModel' | 'committed'
+  'steps' | 'finalText' | 'blockedIds' | 'drivingModel' | 'cliVersion' | 'committed'
 > & {
   // The resolved running usage to set on the ride (the caller's accumulated
   // `liveUsage`), applied only when `usageChanged`.
@@ -182,6 +182,7 @@ export function applyUpdate(task: ApplyTask, update: ApplyUpdate): void {
     usage,
     usageChanged,
     drivingModel,
+    cliVersion,
     committed,
     cursor,
   } = update
@@ -199,6 +200,7 @@ export function applyUpdate(task: ApplyTask, update: ApplyUpdate): void {
     if (ride) {
       const rideId = ride.id
       if (committed) ride.committed = true
+      if (cliVersion) ride.cliVersion = cliVersion
       const items = (task.items ??= [])
       // Bump updatedAt only on the batch that begins the ride's activity (adds its
       // first item), not on every streamed batch — streaming churn shouldn't keep

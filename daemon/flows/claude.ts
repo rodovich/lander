@@ -191,6 +191,7 @@ export function makeFlow({
         if (r.apiError) apiError = r.apiError
         ctx.emit.waiting(waitingUntil(r, Date.parse(ctx.now())))
         if (r.drivingModel) ctx.emit.meter({ drivingModel: r.drivingModel })
+        if (r.cliVersion) ctx.emit.meter({ cliVersion: r.cliVersion })
         // Claude reports a reliable reset time, so the scheduled-retry option is
         // safe to arm from it (meta.capabilities.rateLimitRetry). The retry ask
         // itself stays a platform ask, raised server-side.

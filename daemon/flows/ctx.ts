@@ -182,6 +182,7 @@ export type EmitToolOpts = {
 export type MeterOpts = {
   usage?: Usage
   drivingModel?: string
+  cliVersion?: string
   rateLimitResetsAt?: string
 }
 
@@ -202,7 +203,7 @@ export type CtxEmit = {
   // The accumulator outputs, merged onto the NEXT flushed update. The flow owns
   // the accumulation (addUsage + the per-inference dedupe) and reports the
   // running total; `usageChanged` is set on a flush iff `usage` was supplied
-  // since the last one. `drivingModel` and `rateLimitResetsAt` LATCH — once
+  // since the last one. `drivingModel`, `cliVersion` and `rateLimitResetsAt` LATCH — once
   // given they ride every later flush, because the server's resume seq-dedupe
   // skips already-applied updates and a one-shot value on a skipped seq would be
   // unrecoverable after a restart (losing, say, the scheduled-retry timestamp).
@@ -412,6 +413,7 @@ export function createCtxRuntime(
   let liveUsage: Usage | undefined
   // Latched for the lifetime of the run — see CtxEmit.meter.
   let drivingModel: string | undefined
+  let cliVersion: string | undefined
   let rateLimitResetsAt: string | undefined
   let committed = false
   let committedChanged = false
@@ -436,6 +438,7 @@ export function createCtxRuntime(
       usage: usageChanged ? liveUsage : undefined,
       usageChanged,
       drivingModel,
+      ...(cliVersion ? { cliVersion } : {}),
       rateLimitResetsAt,
       ...(committed ? { committed: true as const } : {}),
     })
@@ -717,12 +720,13 @@ export function createCtxRuntime(
     reply(text) {
       finalText = text
     },
-    meter({ usage, drivingModel: model, rateLimitResetsAt: resets }) {
+    meter({ usage, drivingModel: model, cliVersion: version, rateLimitResetsAt: resets }) {
       if (usage) {
         liveUsage = usage
         usageChanged = true
       }
       if (model) drivingModel = model
+      if (version) cliVersion = version
       if (resets) rateLimitResetsAt = resets
     },
     waiting(until) {

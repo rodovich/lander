@@ -67,6 +67,8 @@ export type CodexFlowDeps = {
   // The project's optional LANDER.md. REQUIRED, with no default — see the note
   // on ClaudeFlowDeps: a default makes the goldens green by accident.
   readProjectDoc: (dir: string) => string | undefined
+  // The installed codex's version, for the ride's record.
+  readCliVersion?: () => Promise<string | undefined>
 }
 
 export type CodexFlow = {
@@ -80,10 +82,12 @@ export function makeFlow({
   configOverrides = [],
   resolveGitDirs = resolveGitDirsWithGit,
   readProjectDoc,
+  readCliVersion,
 }: CodexFlowDeps): CodexFlow {
   return {
     meta,
     async onTurn(ctx: Ctx): Promise<TurnResult> {
+      const version = readCliVersion?.()
       // ── Session ──────────────────────────────────────────────────────────
       // Nothing is minted: codex names its own thread and reports it in-stream.
       // The seed falls back to the legacy top-level wire field for a task whose
@@ -152,6 +156,8 @@ export function makeFlow({
         gitDirs: resolveGitDirs(ctx.task.cwd),
       })
 
+      const cliVersion = version && await version
+      if (cliVersion) ctx.emit.meter({ cliVersion })
       const child = ctx.spawn('codex', args, {
         env: {
           ...ctx.task.env,

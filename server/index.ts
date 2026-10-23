@@ -932,6 +932,7 @@ async function reduceRunWs(
             usage: u.usage,
             usageChanged: u.usageChanged,
             drivingModel: u.drivingModel,
+            cliVersion: u.cliVersion,
             committed: u.committed,
             cursor: u.seq,
           })

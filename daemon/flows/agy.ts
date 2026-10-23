@@ -370,16 +370,20 @@ export function makeFlow({
   geminiConfigDir,
   readAgyLog = readFileIfPresent,
   stuckPollMs = 1000,
+  readCliVersion,
 }: {
   taskPromptTemplate: string
   readProjectDoc: (dir: string) => string | undefined
   geminiConfigDir?: string
   readAgyLog?: (file: string) => string | undefined
   stuckPollMs?: number
+  // The installed agy's version, for the ride's record.
+  readCliVersion?: () => Promise<string | undefined>
 }) {
   return {
     meta,
     async onTurn(ctx: Ctx): Promise<TurnResult> {
+      const version = readCliVersion?.()
       const known = ctx.state.get(['sessionId'])
       const sessionId = typeof known === 'string' && known ? known : undefined
       const taskPrompt = fillTaskPrompt(taskPromptTemplate, ctx.task.taskId)
@@ -423,6 +427,8 @@ export function makeFlow({
       let conversation = sessionId
       let message = prompt
       let liveUsage: Usage | undefined
+      const cliVersion = version && await version
+      if (cliVersion) ctx.emit.meter({ cliVersion })
       for (let first = true; ; first = false) {
         const run = await runAgy(ctx, [
           '-p', message, '--output-format', 'stream-json', '--print-timeout', '0s',

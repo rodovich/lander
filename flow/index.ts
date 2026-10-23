@@ -31,6 +31,8 @@ export {
   readThreadUsage,
 } from './codex-stream'
 
+export { cliVersion } from './cli-version'
+
 // ── Attachment manifest ─────────────────────────────────────────────────────
 export {
   buildManifestBlock,

@@ -928,10 +928,11 @@ describe('reduceStreamLine', () => {
 
   it('reports the driving model from a system/init event', () => {
     const r = reduceStreamLine(
-      JSON.stringify({ type: 'system', subtype: 'init', model: 'claude-opus-4-8' }),
+      JSON.stringify({ type: 'system', subtype: 'init', model: 'claude-opus-4-8', claude_code_version: '2.1.300' }),
       AT,
     )
     expect(r.drivingModel).toBe('claude-opus-4-8')
+    expect(r.cliVersion).toBe('2.1.300')
     expect(r.steps).toEqual([])
     expect(r.turnStarted).toBe(true)
   })

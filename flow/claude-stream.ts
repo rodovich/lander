@@ -74,6 +74,7 @@ export function reduceStreamLine(
   // session — not a tool-heavy subagent on a cheaper model that happened to emit
   // more output.
   drivingModel?: string
+  cliVersion?: string
   // Set on the `system`/`init` event. The one failure observed to precede the
   // session recording the user message (a missing --resume session) ends
   // before init, and an API failure records it — so a run that got this far
@@ -123,6 +124,7 @@ export function reduceStreamLine(
   let usageInferenceId: string | undefined
   let usageFinal: boolean | undefined
   let drivingModel: string | undefined
+  let cliVersion: string | undefined
   let turnStarted: true | undefined
   let apiError: string | undefined
   let rateLimitResetsAt: string | undefined
@@ -143,6 +145,8 @@ export function reduceStreamLine(
   } else if (ev.type === 'system' && ev.subtype === 'init') {
     turnStarted = true
     if (typeof ev.model === 'string') drivingModel = ev.model
+    if (typeof ev.claude_code_version === 'string' && ev.claude_code_version)
+      cliVersion = ev.claude_code_version
   } else if (ev.type === 'system' && ev.subtype === 'compact_boundary') {
     const metadata = ev.compact_metadata
     const context: ContextUpdate = { action: 'compaction', phase: 'completed' }
@@ -310,6 +314,7 @@ export function reduceStreamLine(
     usageInferenceId,
     usageFinal,
     drivingModel,
+    ...(cliVersion ? { cliVersion } : {}),
     ...(turnStarted ? { turnStarted } : {}),
     ...(apiError ? { apiError } : {}),
     rateLimitResetsAt,

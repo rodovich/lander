@@ -697,6 +697,15 @@ it('stops agy with SIGTERM when a refusal leaves a later call in its batch open,
   expect(earlier.calls).toHaveLength(1)
 })
 
+it('records the installed agy version on the ride', async () => {
+  const g = fixture([[init('conv-v'), result()]])
+  const driven = await driveFlow(g, makeFlow({
+    taskPromptTemplate: 'Task {{id}}.', readProjectDoc: () => undefined, geminiConfigDir,
+    readCliVersion: async () => '1.4.6',
+  }))
+  expect(applyEvents(goldenInput(g).start, driven.events).rides).toEqual([expect.objectContaining({ cliVersion: '1.4.6' })])
+})
+
 it('states each kind of refusal the agent can\'t place for itself, and nothing about ones it saw', () => {
   expect(agyRepromptMessage([
     { in: 'turn', tool: 'run_command', input: 'echo seen', seen: true },

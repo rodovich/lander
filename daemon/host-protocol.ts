@@ -31,6 +31,7 @@ export type HostEvent =
       usage?: Usage
       usageChanged: boolean
       drivingModel?: string
+      cliVersion?: string
       rateLimitResetsAt?: string
       committed?: true
     }

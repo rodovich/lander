@@ -253,6 +253,12 @@ describe('applyUpdate', () => {
     expect(t.rides![0].usage).toEqual({ ...usage, model: 'main-model' })
   })
 
+  it('records the agent CLI version on the ride', () => {
+    const t = task()
+    applyUpdate(t, update({ finalText: 'answer', cliVersion: '1.4.6', cursor: 1 }))
+    expect(t.rides![0].cliVersion).toBe('1.4.6')
+  })
+
   it('advances the cursor even when nothing else changed', () => {
     const t = task()
     applyUpdate(t, update({ cursor: 99 }))

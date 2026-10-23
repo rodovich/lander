@@ -104,6 +104,10 @@ export type Ride = {
   // task that has never switched (see switchTaskFlow), whose rides are all its
   // flow's.
   flow?: string
+  // The agent CLI's version for this turn, when its flow reports one. Claude
+  // Code and agy update themselves, so a behavior change can be matched to the
+  // release that brought it.
+  cliVersion?: string
   // Absent while the ride is open. Stamped by closeRide when the run finishes.
   endedAt?: string
   outcome?: 'done' | 'interrupted' | 'error'

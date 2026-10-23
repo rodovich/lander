@@ -779,7 +779,7 @@ describe('flow host', () => {
     )
   })
 
-  it('builds the bundled flows when none are injected', () => {
+  it('builds the bundled flows when none are injected', async () => {
     const events: HostEvent[] = []
     const spawns: SpawnCall[] = []
     runHost(makeInput({ agent: 'codex', prompt: 'x' }), {
@@ -792,6 +792,7 @@ describe('flow host', () => {
       now: () => '2026-01-01T00:00:00.000Z',
     })
 
+    await vi.waitFor(() => expect(spawns).toHaveLength(1))
     expect(spawns[0].command).toBe('codex')
     expect(spawns[0].args.slice(0, 2)).toEqual(['exec', '--json'])
   })

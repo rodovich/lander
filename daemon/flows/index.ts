@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { readProjectDoc } from 'lander/flow'
+import { cliVersion, readProjectDoc } from 'lander/flow'
 import type { FlowAnnouncement } from '../../server/protocol'
 import type { AgentLaunchDir, AgentLaunchDirInput } from '../agent'
 import * as agyFlowModule from './agy'
@@ -47,13 +47,18 @@ export const FLOW_MODULES: Record<string, BundledFlowModule> = {
       codexFlowModule.makeFlow({
         taskPromptTemplate,
         readProjectDoc,
+        readCliVersion: () => cliVersion('codex'),
         ...codexFlowModule.codexOptionsFromEnv(env),
       }),
   },
   agy: {
     ...agyFlowModule,
     create: ({ taskPromptTemplate }) =>
-      agyFlowModule.makeFlow({ taskPromptTemplate, readProjectDoc }),
+      agyFlowModule.makeFlow({
+        taskPromptTemplate,
+        readProjectDoc,
+        readCliVersion: () => cliVersion('agy'),
+      }),
   },
 }
 

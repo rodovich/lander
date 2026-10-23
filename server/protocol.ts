@@ -492,6 +492,8 @@ export type UpdateMessage = {
   // Whether this batch moved usage; the server stores `usage` only when set.
   usageChanged: boolean
   drivingModel?: string
+  // The agent CLI's version, as the flow learned it this run.
+  cliVersion?: string
   rateLimitResetsAt?: string
   // The provider has recorded the turn's user message in its session (see
   // CtxEmit.committed). Latched: once set, every later update carries it.

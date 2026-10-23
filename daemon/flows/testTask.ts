@@ -45,6 +45,7 @@ export function applyEvents(
           usage: event.usage,
           usageChanged: event.usageChanged,
           drivingModel: event.drivingModel,
+          cliVersion: event.cliVersion,
           cursor: ++seq,
         })
         break
