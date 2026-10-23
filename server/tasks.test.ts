@@ -1444,6 +1444,36 @@ describe('applyRelaunch', () => {
     applyRelaunch(t, 'go', AT2, 'human')
     expect('retry' in t).toBe(false)
   })
+
+  it('moves the task onto another flow, leaving what was its old flow’s behind', () => {
+    const t = {
+      ...task(),
+      agent: 'claude',
+      allow: ['Bash(git push:*)'],
+      flowConfig: { model: 'opus' },
+      cwd: '/repo/sub',
+      rides: [{ id: 'r0', startedAt: AT }] as Ride[],
+    }
+    applyRelaunch(t, 'go', AT2, 'human', { flow: 'agy' })
+    expect(taskFlow(t)).toBe('agy')
+    expect('agent' in t).toBe(false)
+    expect('allow' in t).toBe(false)
+    expect('flowConfig' in t).toBe(false)
+    expect('cwd' in t).toBe(false)
+    expect(t.rides[0].flow).toBe('claude')
+  })
+
+  it('keeps the rules of a relaunch that stays on the same flow', () => {
+    const t = { ...task(), flow: 'codex', allow: ['x'], flowConfig: { m: 1 } }
+    applyRelaunch(t, 'go', AT2, 'human', { flow: 'codex' })
+    expect(t).toMatchObject({ flow: 'codex', allow: ['x'], flowConfig: { m: 1 } })
+  })
+
+  it('carries the flow onto a repeating relaunch’s next occurrence', () => {
+    const t = task()
+    applyRelaunch(t, 'go', AT2, 'human', { repeat: { interval: 60 }, flow: 'codex' })
+    expect(t.scheduledMessages?.[0]).toMatchObject({ relaunch: true, flow: 'codex' })
+  })
 })
 
 describe('applyDueMessages', () => {
@@ -1474,6 +1504,12 @@ describe('applyDueMessages', () => {
       AT2,
     )
     expect(userItems(t).map((u) => u.notify)).toEqual([true, undefined])
+  })
+
+  it('moves the task onto the flow a due relaunch names', () => {
+    const t: ReturnType<typeof task> & { flow?: string } = task()
+    applyDueMessages(t, [{ text: 'fresh', relaunch: true, flow: 'codex' }], AT2)
+    expect(taskFlow(t)).toBe('codex')
   })
 
   it('seals and leads with the relaunch text when a relaunch is due', () => {
@@ -1528,7 +1564,13 @@ describe('rides', () => {
     startRide(t, 'r1', AT)
     expect(openRide(t)).toMatchObject({ id: 'r1', startedAt: AT })
     closeRide(t, 'done', END)
-    expect(t.rides![0]).toEqual({ id: 'r1', startedAt: AT, endedAt: END, outcome: 'done' })
+    expect(t.rides![0]).toEqual({
+      id: 'r1',
+      startedAt: AT,
+      flow: 'claude',
+      endedAt: END,
+      outcome: 'done',
+    })
     expect(openRide(t)).toBeUndefined()
   })
 

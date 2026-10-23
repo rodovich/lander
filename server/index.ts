@@ -201,11 +201,9 @@ type Task = {
   // keyed by — backfilled from the filename, see backfillIds). Always equals the
   // task's filename stem.
   id: string
-  // The provider used for this task. LEGACY: written only for the claude and
-  // codex flows, so an old daemon can still drive them (StartRunMessage.agent).
-  // Never written for a task created with any other flow, and never rewritten
-  // once `flow` is set — backfillAgents is gated on that. Read through
-  // taskFlow(), never directly.
+  // LEGACY: the provider field from before `flow`, still written at creation
+  // beside the claude and codex flows; a relaunch into another flow deletes it
+  // (switchTaskFlow). Every reader takes `flow` first.
   agent?: AgentKind
   // The driver flow for this task. Absent on every task created before step 4,
   // which is why taskFlow() is a permanent union-read over both fields rather
@@ -3132,6 +3130,7 @@ app.post('/api/:project/tasks/:id/relaunch', async (c) => {
       repeatCount?: unknown
       repeatUntil?: unknown
       clear?: unknown
+      flow?: unknown
     }>()
 
     // Drop a pending scheduled relaunch armed earlier — the analog of `ride
@@ -3176,6 +3175,14 @@ app.post('/api/:project/tasks/:id/relaunch', async (c) => {
     const deliverAt = sched.scheduledFor ?? undefined
     const waitFor = awaited.waitFor.length ? awaited.waitFor : undefined
     const repeat = rep.repeat ?? undefined
+    // `--flow` moves the fresh session onto another flow, checked as a new
+    // task's flow is.
+    let flow: string | undefined
+    if (body.flow != null) {
+      const resolved = resolveNewTaskFlow(project.slug, body.flow)
+      if ('error' in resolved) return c.json({ error: resolved.error }, 400)
+      flow = resolved.flow
+    }
 
     const at = new Date().toISOString()
 
@@ -3184,7 +3191,7 @@ app.post('/api/:project/tasks/:id/relaunch', async (c) => {
       // sealed by deliverScheduledMessages when the trigger fires, not now. A
       // repeat spec rides along and re-arms the next occurrence on each delivery.
       await mutateTask(file, (t) => {
-        armScheduledRelaunch(t, { text: rawMessage, deliverAt, waitFor, repeat }, at)
+        armScheduledRelaunch(t, { text: rawMessage, deliverAt, waitFor, repeat, flow }, at)
       })
       const armed = await readTask(project.dataDir, id)
       if (!armed) return c.json({ error: 'task not found' }, 404)
@@ -3195,7 +3202,10 @@ app.post('/api/:project/tasks/:id/relaunch', async (c) => {
     // repeat spec arms the first successor off this delivery.
     let relaunchClaimed = false
     await mutateTask(file, (t) => {
-      applyRelaunch(t, rawMessage, at, hookBy(principal, project.slug, id), repeat)
+      applyRelaunch(t, rawMessage, at, hookBy(principal, project.slug, id), {
+        repeat,
+        flow,
+      })
       noteHumanContact(t, principal, at)
       // Same as /messages: the crossing inside applyRelaunch covers a
       // wedged/landed task, and this covers the advisory ask on a task that was
@@ -3261,6 +3271,12 @@ app.post('/api/:project/tasks/:id/cwd', async (c) => {
       return c.json({ error: 'cwd must be under the project root' }, 400)
 
     await mutateTask(file, (t) => {
+      // A relaunch into another flow drops the old flow's cwd, and the run it
+      // sealed reports its own cwd once more as it finishes.
+      const sealed = isSealedRun(t, t.runId)
+        ? t.rides?.find((r) => r.id === t.runId)
+        : undefined
+      if (sealed?.flow && sealed.flow !== taskFlow(t)) return
       t.cwd = cwd
     })
     const task = await readTask(project.dataDir, id)

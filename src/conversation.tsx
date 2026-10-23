@@ -10,13 +10,20 @@ import { PendingRow, RideTurn } from './rideTurn'
 import type { TaskAction } from './taskActions'
 import { SentMessageNote } from './sentMessageNote'
 import { TaskActionNote } from './taskActionNote'
-import { openRide, taskAgentModelName } from './taskMeta'
+import {
+  openRide,
+  ranUnderCurrentFlow,
+  taskAgentModelName,
+  taskFlowName,
+} from './taskMeta'
 import { taskKeyOf } from './taskRef'
 import { findTextRanges, paintRanges } from './textRanges'
 import { buildTimeline, type TimelineEntry } from '../shared/timeline'
 import type { AskItem, TaskWithProject } from './types'
 import type { ReadUpTo } from './useReadMarker'
 import type { TimelineDisclosure } from './useTimelineDisclosure'
+
+const NO_GRANTS = { task: false, project: false }
 
 // A timeline entry's React key, stable across polls.
 function entryKey(entry: TimelineEntry): string {
@@ -355,15 +362,18 @@ export const Conversation = memo(function Conversation({
         </MessageBubble>
       )
     }
-    // A ride — one assistant turn, carrying all its items.
+    // A ride — one assistant turn, carrying all its items. A grant would go to
+    // the flow the task drives now, in whose permission syntax another flow's
+    // refused calls aren't written.
+    const sameFlow = ranUnderCurrentFlow(task, entry.ride)
     return (
       <RideTurn
         ride={entry.ride}
         items={entry.items}
         actions={entry.actions}
-        agent={task.flow ?? task.agent}
+        agent={entry.ride.flow ?? taskFlowName(task)}
         slug={task.projectSlug}
-        grants={task.grants}
+        grants={sameFlow ? task.grants : NO_GRANTS}
         disclosure={disclosure}
         openAsk={openAsk}
         answering={answering}
@@ -390,7 +400,7 @@ export const Conversation = memo(function Conversation({
       {task.status === 'riding' && !openRideHasItems && (
         <div className="message">
           <PendingRow onPace={pace}>
-            {openR?.compacting ? 'Compacting context…' : `${taskAgentModelName(task.flow ?? task.agent)} is starting…`}
+            {openR?.compacting ? 'Compacting context…' : `${taskAgentModelName(openR?.flow ?? taskFlowName(task))} is starting…`}
           </PendingRow>
         </div>
       )}

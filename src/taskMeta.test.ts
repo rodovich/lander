@@ -129,6 +129,18 @@ describe('taskUsageSummary', () => {
     expect(taskUsageSummary(free)?.map((i) => i.id)).toEqual(['model', 'time'])
   })
 
+  it('names no model from a turn another flow ran', () => {
+    // A task relaunched into Codex, before its first Codex turn reports usage.
+    const switched = {
+      ...withRides([
+        { id: 'r1', startedAt: '…', endedAt: '…', flow: 'claude', usage: usage({ model: 'claude-opus-5' }) },
+        { id: 'r2', startedAt: '…', flow: 'codex' },
+      ]),
+      flow: 'codex',
+    } as Task
+    expect(taskUsageSummary(switched)[0]).toMatchObject({ value: 'Codex' })
+  })
+
   it('names the flow before any turn has reported anything', () => {
     // What a codex task shows for its whole first turn, since its usage lands
     // only when the turn does: who is working, if not yet on what or for how

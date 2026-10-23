@@ -82,6 +82,8 @@ export type Ride = {
   compacting?: true
   id: string
   startedAt: string
+  // The flow this turn was for; see the server's Ride.
+  flow?: string
   endedAt?: string
   outcome?: 'done' | 'interrupted' | 'error'
   usage?: TokenUsage

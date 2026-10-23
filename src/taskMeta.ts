@@ -20,10 +20,6 @@ export function latestUsageRide(task: Task): Ride | undefined {
   return undefined
 }
 
-export function latestUsage(task: Task): TokenUsage | undefined {
-  return latestUsageRide(task)?.usage
-}
-
 // Working time summed across the task's rides. A ride that reported none
 // contributes nothing rather than voiding the sum — the same best effort
 // `totalUsage` makes of a turn that reported no cost — so the total reads as
@@ -46,11 +42,20 @@ export function totalRideMs(task: Task): number | undefined {
   return any ? total : undefined
 }
 
+// `agent` only for a server too old to serve `flow`.
+export function taskFlowName(task: Task): string | undefined {
+  return task.flow ?? task.agent
+}
+
+export function ranUnderCurrentFlow(task: Task, ride: Ride): boolean {
+  return !ride.flow || ride.flow === taskFlowName(task)
+}
+
 // Token usage summed across every ride of the task. The token counts and dollar
-// cost add up; the model is taken from the latest ride (the task's current
-// model), matching what the per-turn view shows. Cost stays undefined until some
-// ride reports one (a turn still streaming hasn't). Undefined when no ride has
-// reported usage at all.
+// cost add up; the model is the latest ride's, unless that ride was another
+// flow's — the footer pairs it with the current flow's name. Cost stays
+// undefined until some ride reports one (a turn still streaming hasn't).
+// Undefined when no ride has reported usage at all.
 export function totalUsage(task: Task): TokenUsage | undefined {
   const total = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 }
   let cost: number | undefined
@@ -66,7 +71,10 @@ export function totalUsage(task: Task): TokenUsage | undefined {
     if (u.costUsd !== undefined) cost = (cost ?? 0) + u.costUsd
   }
   if (!any) return undefined
-  return { ...total, model: latestUsage(task)?.model, costUsd: cost }
+  const latest = latestUsageRide(task)
+  const model =
+    latest && ranUnderCurrentFlow(task, latest) ? latest.usage?.model : undefined
+  return { ...total, model, costUsd: cost }
 }
 
 // The composer footer's summary as generic telemetry items: who did the work
@@ -91,7 +99,7 @@ export function taskUsageSummary(task: Task): TelemetryItem[] {
       type: 'text',
       // The flow name is the model-name display lookup only, never a behavior
       // branch.
-      value: taskAgentModelName(task.flow ?? task.agent, u?.model),
+      value: taskAgentModelName(taskFlowName(task), u?.model),
     },
     // Time leads cost: it is the shape of the work, where cost is its price.
     // Either is dropped from the line when it has no figure — whether none has

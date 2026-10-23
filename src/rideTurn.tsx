@@ -59,7 +59,7 @@ export const RideTurn = memo(function RideTurn({
   items: RideItem[]
   // What this turn did to other tasks, in record order.
   actions: TaskActionItem[]
-  // The flow name (task.flow ?? task.agent), for display only.
+  // The name of the flow the ride was for, for display only.
   agent: string | undefined
   slug: string
   grants: Task['grants']

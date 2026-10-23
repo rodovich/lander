@@ -2016,6 +2016,31 @@ describe('server task provider behavior', () => {
     expect(await readTaskField(task.id, 'cwd')).toBe(wt)
   })
 
+  it('keeps a cwd from the old flow out of a task relaunched into another', async () => {
+    const sealedAs = async (rideFlow: string) => {
+      const task = await createTask(`Sealed ${rideFlow} cwd task`)
+      const file = path.join(tasksDir, `${task.id}.json`)
+      const raw = JSON.parse(await readFile(file, 'utf8'))
+      await writeFile(
+        file,
+        JSON.stringify({
+          ...raw,
+          flow: 'claude',
+          runId: 'run-old',
+          sealedRunId: 'run-old',
+          rides: [{ id: 'run-old', startedAt: AT, flow: rideFlow }],
+        }),
+      )
+      const res = await post(`/api/${slug}/tasks/${task.id}/cwd`, {
+        cwd: path.join(projectDir, 'sub'),
+      })
+      expect(res.status).toBe(200)
+      return readTaskField(task.id, 'cwd')
+    }
+    expect(await sealedAs('codex')).toBeUndefined()
+    expect(await sealedAs('claude')).toBe(path.join(projectDir, 'sub'))
+  })
+
   it('treats legacy tasks without agent as Claude when delegating project grants', async () => {
     await mkdir(tasksDir, { recursive: true })
     await writeFile(
@@ -3281,6 +3306,17 @@ describe('asks', () => {
     const raw = await readRaw(id)
     expect(asksOf(raw)[0].state).toBe('withdrawn')
   })
+  it('refuses a relaunch into a flow no daemon provides, sealing nothing', async () => {
+    const id = 'relaunch-unknown-flow'
+    await seedTask(id, { status: 'wedged', sessionId: 'sess-kept' })
+    const res = await post(`/api/${slug}/tasks/${id}/relaunch`, {
+      message: 'start over',
+      flow: 'no-such-flow',
+    })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/unknown flow: no-such-flow/)
+    expect((await readRaw(id)).sessionId).toBe('sess-kept')
+  })
 
   // A platform retry ask (origin:'retry') routes the answer through the
   // retry-recovery machinery instead of a generic delivery.
@@ -3694,6 +3730,7 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
       phase: 'reviewing',
     })
     expect(started.flowStateRev).toBe(4)
+    expect(((await readRaw(id)).rides as Raw[])[0].flow).toBe('claude')
 
     // Settle it: this suite holds runs open by default, and an unfinished run
     // keeps the server's reduce loop alive past teardown.

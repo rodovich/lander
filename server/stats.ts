@@ -78,7 +78,7 @@ export function projectRecord(project: string, record: StatsRecord): Projection 
   }
   const turns: StatsTurn[] = (record.rides ?? []).map((ride) => ({
     project,
-    flow,
+    flow: ride.flow ?? flow,
     startedAt: ride.startedAt,
     ...(ride.usage?.model ? { model: ride.usage.model } : {}),
     ...(ride.durationMs != null ? { durationMs: ride.durationMs } : {}),

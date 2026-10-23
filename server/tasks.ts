@@ -98,6 +98,11 @@ export type Ride = {
   id: string
   compacting?: true
   startedAt: string
+  // The flow this turn was for. A task can change flows at a relaunch, so the
+  // task's current flow doesn't say whose an earlier ride was. Absent only on a
+  // task that has never switched (see switchTaskFlow), whose rides are all its
+  // flow's.
+  flow?: string
   // Absent while the ride is open. Stamped by closeRide when the run finishes.
   endedAt?: string
   outcome?: 'done' | 'interrupted' | 'error'
@@ -454,8 +459,12 @@ export function checkoutReleasable(
 // Open a ride for a run being handed to the daemon: push `{ id, startedAt }`. The
 // id is the daemon runId, so a reattach/close can find the ride by the run it
 // tracks. One ride per run.
-export function startRide(task: { rides?: Ride[] }, id: string, at: string): void {
-  ;(task.rides ??= []).push({ id, startedAt: at })
+export function startRide(
+  task: { rides?: Ride[]; flow?: string; agent?: string },
+  id: string,
+  at: string,
+): void {
+  ;(task.rides ??= []).push({ id, startedAt: at, flow: taskFlow(task) })
 }
 
 // No-ops when no ride is open, so a caller tidying up after a run (the drainer's
@@ -983,6 +992,8 @@ export type ScheduledMessage = {
   deliverAt?: string
   waitFor?: string[]
   relaunch?: boolean
+  // The flow a relaunch moves the task onto when it fires (`relaunch --flow`).
+  flow?: string
   repeat?: RepeatSpec
   // Attachment refs sent with a deferred `lander send --attach --date/--await`,
   // carried until delivery when they land on the appended user message (like an
@@ -1009,6 +1020,32 @@ export type ScheduledMessage = {
 // or both disagree.
 export function taskFlow(task: { flow?: string; agent?: string }): string {
   return task.flow ?? task.agent ?? LEGACY_FLOW
+}
+
+// Move a task onto another flow, as a relaunch into it does. Rides recorded
+// before rides carried their flow are stamped with the old one. What the task
+// holds for the old flow is dropped: its legacy `agent`, its allow rules (that
+// flow's permission syntax), its flowConfig (that flow's opaque config) and its
+// recorded cwd (Claude's shell, which Codex and agy would launch in).
+export function switchTaskFlow(
+  task: {
+    flow?: string
+    agent?: string
+    allow?: string[]
+    flowConfig?: Record<string, unknown>
+    cwd?: string
+    rides?: Ride[]
+  },
+  flow: string,
+): void {
+  const old = taskFlow(task)
+  if (flow === old) return
+  for (const ride of task.rides ?? []) ride.flow ??= old
+  task.flow = flow
+  delete task.agent
+  delete task.allow
+  delete task.flowConfig
+  delete task.cwd
 }
 
 // Grant-capability flags served on the public task so the UI stops branching on
@@ -1465,6 +1502,8 @@ export function clearTaskThread(task: ThreadStateTask): void {
 // run is marked `sealedRunId`: reduceRunWs drops them, and its failure raises no
 // retry ask over the turn the relaunch queued.
 //
+// `flow`, when given, is the flow the fresh session runs under.
+//
 // The caller owns the message/queue/status for the next turn, and links the
 // returned divider to the message it appends (pushEventPrompt).
 export function sealForRelaunch(
@@ -1475,12 +1514,20 @@ export function sealForRelaunch(
     flowStateRev?: number
     runId?: string
     sealedRunId?: string
+    flow?: string
+    agent?: string
+    allow?: string[]
+    flowConfig?: Record<string, unknown>
+    cwd?: string
+    rides?: Ride[]
     title: string
     items?: Item[]
   },
   at: string,
+  flow?: string,
 ): EventItem {
   if (task.runId) task.sealedRunId = task.runId
+  if (flow) switchTaskFlow(task, flow)
   // Clear the provider thread (session + the context baseline that belongs to it,
   // so the fresh session's first turn gets the full dynamic context block again)
   // through the accessor seam.
@@ -1535,7 +1582,7 @@ export function applyRelaunch(
   message: string,
   at: string,
   by: string,
-  repeat?: RepeatSpec,
+  { repeat, flow }: { repeat?: RepeatSpec; flow?: string } = {},
 ): void {
   recordStatusTransition(
     task,
@@ -1543,7 +1590,7 @@ export function applyRelaunch(
     new Date(Date.parse(at) - 1).toISOString(),
     by,
   )
-  const divider = sealForRelaunch(task, at)
+  const divider = sealForRelaunch(task, at, flow)
   const item = pushEventPrompt(task, divider, message, at, {
     task: task.id,
     via: 'relaunch',
@@ -1556,7 +1603,7 @@ export function applyRelaunch(
   // (immediate) delivery; each later occurrence re-arms itself in applyDueMessages
   // when it in turn delivers. Nothing is armed once the series' bound is reached.
   if (repeat) {
-    const next = nextRepeatMessage({ text: message, repeat }, at)
+    const next = nextRepeatMessage({ text: message, repeat, flow }, at)
     if (next) (task.scheduledMessages ??= []).push(next)
   }
 }
@@ -1568,7 +1615,7 @@ export function applyRelaunch(
 // (applyRelaunch) and scheduled (applyDueMessages) delivery paths, so every
 // occurrence — the first and each re-arm — advances the series the same way.
 export function nextRepeatMessage(
-  entry: { text: string; repeat?: RepeatSpec },
+  entry: { text: string; repeat?: RepeatSpec; flow?: string },
   at: string,
 ): ScheduledMessage | null {
   const r = entry.repeat
@@ -1582,6 +1629,7 @@ export function nextRepeatMessage(
     text: entry.text,
     deliverAt: nextAt,
     relaunch: true,
+    flow: entry.flow,
     repeat: {
       interval: r.interval,
       ...(r.remaining != null ? { remaining: r.remaining - 1 } : {}),
@@ -1614,7 +1662,7 @@ export function applyDueMessages(
   // Each relaunch brief gets its own divider to be told under. Several due in
   // one sweep seal an already-sealed session, which is harmless.
   for (const m of relaunch) {
-    const item = pushEventPrompt(task, sealForRelaunch(task, at), m.text, at, {
+    const item = pushEventPrompt(task, sealForRelaunch(task, at, m.flow), m.text, at, {
       task: task.id,
       via: 'relaunch',
     })
@@ -1734,7 +1782,13 @@ export function armScheduledRelaunch(
     items?: Item[]
     scheduledMessages?: ScheduledMessage[]
   },
-  entry: { text: string; deliverAt?: string; waitFor?: string[]; repeat?: RepeatSpec },
+  entry: {
+    text: string
+    deliverAt?: string
+    waitFor?: string[]
+    repeat?: RepeatSpec
+    flow?: string
+  },
   at: string,
 ): void {
   ;(task.scheduledMessages ??= []).push({ ...entry, relaunch: true })

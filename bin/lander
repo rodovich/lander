@@ -481,7 +481,8 @@ function validateRepeat(o) {
 // and the old session stays live until the trigger fires.
 //
 // --interval <minutes> makes it repeat, bounded by --repeat-count/--repeat-until
-// (see validateRepeat). --clear drops a pending scheduled relaunch — including a
+// (see validateRepeat). --flow <name> runs the fresh session under another flow
+// (e.g. codex). --clear drops a pending scheduled relaunch — including a
 // repeating one's armed next occurrence — (the inverse, like `ride --clear`),
 // taking no trigger of its own; idempotent.
 async function relaunchTask(args) {
@@ -496,9 +497,11 @@ async function relaunchTask(args) {
     else if (a === '--interval') o.interval = Number(args[++i])
     else if (a === '--repeat-count') o.repeatCount = Number(args[++i])
     else if (a === '--repeat-until') o.repeatUntil = args[++i]
+    else if (a === '--flow') o.flow = args[++i]
     else if (a === '--clear') o.clear = true
     else pos.push(a)
   }
+  if ('flow' in o && !o.flow) die('--flow requires a flow name')
   if (o.clear) {
     if (
       o.date != null ||
@@ -506,9 +509,10 @@ async function relaunchTask(args) {
       o.await != null ||
       o.interval != null ||
       o.repeatCount != null ||
-      o.repeatUntil != null
+      o.repeatUntil != null ||
+      o.flow != null
     )
-      die('relaunch --clear takes no trigger (--date/--time/--await/--interval)')
+      die('relaunch --clear takes no trigger (--date/--time/--await/--interval) or --flow')
     const res = await call(PROJECT, `/tasks/${TASK}/relaunch`, {
       method: 'POST',
       body: JSON.stringify({ clear: true }),
@@ -530,10 +534,12 @@ async function relaunchTask(args) {
       interval: o.interval,
       repeatCount: o.repeatCount,
       repeatUntil: o.repeatUntil,
+      flow: o.flow,
     }),
   })
   const scheduled = o.date != null || o.time != null || o.await != null
   let line = scheduled ? 'relaunch scheduled' : 'relaunching'
+  if (o.flow != null) line += ` under ${o.flow}`
   if (o.interval != null) line += ` (repeating every ${o.interval}m)`
   console.log(line)
 }
@@ -1185,6 +1191,7 @@ function makeLander(inputs) {
           interval: o.interval,
           repeatCount: o.repeatCount,
           repeatUntil: o.repeatUntil,
+          flow: opts.flow,
         }),
       })
     },
@@ -1315,7 +1322,7 @@ const USAGE = {
   send: 'send <id> <message|-> [--date <when>|--time <min>] [--await <ids>] [--notify] [--attach <paths…>]',
   ride: 'ride (--date <when> | --time <min> | --await <ids> | --clear)',
   relaunch:
-    'relaunch <message|-> [--date <when>|--time <min>|--await <ids>] [--interval <min> [--repeat-count <n>|--repeat-until <when>]] [--clear]',
+    'relaunch <message|-> [--date <when>|--time <min>|--await <ids>] [--interval <min> [--repeat-count <n>|--repeat-until <when>]] [--flow <name>] [--clear]',
   wedge: 'wedge [--option <id:label> …]',
   ask: 'ask --option <id:label> [--option …]',
   archive: 'archive <id…> [--restore]',

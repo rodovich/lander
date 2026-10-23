@@ -15,9 +15,11 @@ an explicit flow.
 Lander resolves a task's driver from `flow`, falling back to the legacy
 `agent: "claude" | "codex"` field, then to `claude` when neither is present.
 The legacy field does not enumerate all supported drivers: Antigravity tasks
-use `flow: "agy"`. A task keeps using the flow it was created with; switching
-flows requires creating a new task. Relaunching a task resets its provider
-session while keeping the same flow.
+use `flow: "agy"`. A task keeps using the flow it was created with until a
+relaunch names another (`lander relaunch --flow codex`). Relaunching resets the
+provider session, and a relaunch into another flow also drops the task's allow
+rules, `flowConfig` and recorded cwd, which were written for the old flow. Each
+ride records the flow it was for.
 
 The API server owns task JSON, scheduling, queues, status changes, permission
 metadata, and UI-facing state. It does not spawn the agent CLI directly. For each
@@ -84,9 +86,10 @@ was asked a question about.
 
 ## Current Codex coverage
 
-Codex tasks can be created from the new-task form or launched with
-`lander launch --flow codex`. The server persists that provider choice on the task
-and uses it for follow-up turns.
+Codex tasks can be created from the new-task form, launched with
+`lander launch --flow codex`, or moved onto Codex with
+`lander relaunch --flow codex`. The server persists that provider choice on the
+task and uses it for follow-up turns.
 
 The Codex flow supports first turns and resumed turns, including explicit
 `--cd` handling so resumed Codex turns launch from the daemon-resolved cwd. It

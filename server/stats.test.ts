@@ -32,6 +32,17 @@ describe('projectRecord', () => {
       { project: 'proj', flow: 'codex', startedAt: 'S2' },
     ])
   })
+
+  it('credits each ride to the flow that ran it', () => {
+    const p = projectRecord('proj', {
+      flow: 'codex',
+      rides: [
+        { id: 'r1', startedAt: 'S1', flow: 'claude' },
+        { id: 'r2', startedAt: 'S2', flow: 'codex' },
+      ],
+    })
+    expect(p.turns.map((t) => t.flow)).toEqual(['claude', 'codex'])
+  })
 })
 
 describe('readStats', () => {
