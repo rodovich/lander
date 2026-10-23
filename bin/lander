@@ -1265,10 +1265,10 @@ async function bashGuard() {
     return
   const context =
     'Heads-up: once this job is running, end your turn rather than waiting on ' +
-    'it; you are woken when it finishes or reaches its `timeout`. To wait on ' +
-    'something outside this task, use `lander ride --time <minutes>` / ' +
-    '`--date <when>` / `--await <ids>`. For parallel agentic work, spawn a ' +
-    'sibling task with `lander launch <message>`.'
+    'it; you are woken when it finishes or reaches its `timeout`. Don\'t ' +
+    'schedule a `lander ride` to check on it: a ride can\'t fire until the job ' +
+    'has ended. For parallel agentic work, spawn a sibling task with ' +
+    '`lander launch <message>`.'
   process.stdout.write(
     JSON.stringify({
       hookSpecificOutput: {
