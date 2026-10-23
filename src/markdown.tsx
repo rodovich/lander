@@ -100,6 +100,39 @@ function remarkUnlinkEmailAndWww() {
   }
 }
 
+// In CommonMark, a line without `>` after `> quote` is a "lazy continuation"
+// of the quoted paragraph, which pulls a reply written on the next line into
+// the quote (and fuses alternating `> quote` / `reply` lines into one quote).
+// Micromark only keeps an uncontinued container open when the inner paragraph
+// continues onto the lazy line; succeeding during `effects.interrupt` ends the
+// paragraph instead, so micromark closes the container before the new line.
+const noLazyContinuation = {
+  flow: {
+    null: [
+      {
+        tokenize(
+          this: {
+            interrupt?: boolean
+            parser: { lazy: Record<number, boolean> }
+            now: () => { line: number }
+          },
+          _effects: unknown,
+          ok: (code: number | null) => unknown,
+          nok: (code: number | null) => unknown,
+        ) {
+          return (code: number | null) =>
+            this.interrupt && this.parser.lazy[this.now().line] ? ok(code) : nok(code)
+        },
+      },
+    ],
+  },
+}
+
+function remarkNoLazyContinuation(this: { data: () => object }) {
+  const data = this.data() as { micromarkExtensions?: unknown[] }
+  ;(data.micromarkExtensions ??= []).push(noLazyContinuation)
+}
+
 function textContent(node: ElementContent | Element): string {
   if (node.type === 'text') return node.value
   return 'children' in node ? node.children.map(textContent).join('') : ''
@@ -163,6 +196,7 @@ export const Markdown = memo(function Markdown({
         children: text,
         remarkPlugins: [
           [remarkGfm, { singleTilde: false }],
+          remarkNoLazyContinuation,
           remarkUnlinkEmailAndWww,
           [remarkTaskMentions, { linkTask }],
         ],

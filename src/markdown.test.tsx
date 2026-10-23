@@ -156,6 +156,21 @@ describe('Markdown rendering', () => {
     )
   })
 
+  it('ends a blockquote when the next line lacks a matching > marker', () => {
+    expect(render('> a quoted line\nfollowed by a reply')).toBe(
+      '<blockquote>\n<p>a quoted line</p>\n</blockquote>\n<p>followed by a reply</p>',
+    )
+    expect(render('> q1\nr1\n> q2\nr2')).toBe(
+      '<blockquote>\n<p>q1</p>\n</blockquote>\n<p>r1</p>\n<blockquote>\n<p>q2</p>\n</blockquote>\n<p>r2</p>',
+    )
+    expect(render('>> a\n> b\nc')).toBe(
+      '<blockquote>\n<blockquote>\n<p>a</p>\n</blockquote>\n<p>b</p>\n</blockquote>\n<p>c</p>',
+    )
+    expect(render('- > quoted\n  reply')).toBe(
+      '<ul>\n<li>\n<blockquote>\n<p>quoted</p>\n</blockquote>\nreply</li>\n</ul>',
+    )
+  })
+
   it('does not strike out text between single tildes in prompts, amounts or file names', () => {
     for (const s of [
       'ubuntu@web2:~$ free -m\nubuntu@web2:~$ uptime',
