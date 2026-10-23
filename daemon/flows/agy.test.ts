@@ -591,7 +591,7 @@ it('marks refused tool calls blocked from their denial error or agy\'s log, pres
   }
 })
 
-it('prompts the agent again with only what it can\'t see, and wedges once agy keeps refusing', async () => {
+it('prompts the agent again with only what it can\'t see, for as long as agy keeps refusing', async () => {
   const calls: { url: string; method: string }[] = []
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     calls.push({ url, method: init?.method ?? 'GET' })
@@ -630,12 +630,15 @@ it('prompts the agent again with only what it can\'t see, and wedges once agy ke
     expect(task).toMatchObject({ rides: [expect.objectContaining({ usage: expect.objectContaining({ input: 250, output: 30 }) })] })
     expect(calls).toEqual([])
 
-    const stubborn = fixture([denied(1, 'git push', {})])
-    stubborn.start = g.start
-    stubborn.later = [2, 3, 4].map((n) => ({ chunks: [denied(n * 2, 'git push', {})] }))
-    const drivenStubborn = await driveFlow(stubborn, flow(undefined, refusalLine('conv-r', 1)))
-    expect(drivenStubborn.spawns).toHaveLength(4)
-    expect(calls).toEqual([{ url: 'http://api.test/api/proj/tasks/task-1', method: 'PATCH' }])
+    const persistent = fixture([denied(1, 'git push', {})])
+    persistent.start = g.start
+    persistent.later = [
+      ...[2, 3, 4, 5].map((n) => ({ chunks: [denied(n * 2, 'git push', {})] })),
+      { chunks: [[result({ response: 'I need permission to push.', usage: {} })]] },
+    ]
+    const drivenPersistent = await driveFlow(persistent, flow(undefined, refusalLine('conv-r', 1)))
+    expect(drivenPersistent.spawns).toHaveLength(6)
+    expect(calls).toEqual([])
   } finally {
     vi.unstubAllGlobals()
   }

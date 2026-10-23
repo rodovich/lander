@@ -421,28 +421,26 @@ export function makeFlow({
       let conversation = sessionId
       let message = prompt
       let liveUsage: Usage | undefined
-      for (let reprompts = 0; ; reprompts++) {
+      for (let first = true; ; first = false) {
         const run = await runAgy(ctx, [
           '-p', message, '--output-format', 'stream-json', '--print-timeout', '0s',
           '--mode', 'accept-edits', '--project', projectId,
           ...(conversation ? ['--conversation', conversation] : []),
           ...[...dirs].flatMap((dir) => ['--add-dir', dir]),
         ], { sessionId: conversation, priorTotal, liveUsage, readLog: readAgyLog })
-        if (reprompts === 0 && run.producedOutput) {
+        if (first && run.producedOutput) {
           if (sendTaskPrompt) ctx.state.set(['taskPrompt'], digest)
           if (sendDoc && docDigest !== undefined) ctx.state.set(['landerDoc'], docDigest)
         }
         // agy ends the turn at a call no rule covers instead of letting the
         // agent carry on without it, so tell the agent and let it choose.
-        const aborted = run.refusals.length > 0 && !run.terminalError
-        if (aborted && !ctx.signal.aborted && run.conversationId && reprompts < MAX_REPROMPTS) {
+        if (run.refusals.length > 0 && !run.terminalError && !ctx.signal.aborted && run.conversationId) {
           conversation = run.conversationId
           message = agyRepromptMessage(run.refusals)
           liveUsage = run.liveUsage
           ctx.emit.reprompt(message)
           continue
         }
-        if (aborted && !ctx.signal.aborted && ctx.task.env.LANDER_API) await ctx.wedge()
         return {
           exitCode: run.exitCode === 0 && run.terminalError ? 1 : run.exitCode,
           stderr: [run.stderr.trim(), run.terminalError].filter(Boolean).join('\n'),
@@ -451,8 +449,6 @@ export function makeFlow({
     },
   }
 }
-
-const MAX_REPROMPTS = 3
 
 // One refused call, as far as lander can identify it. `seen` is set when the
 // call's own result already told the agent it was refused.
