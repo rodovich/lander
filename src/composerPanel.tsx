@@ -177,14 +177,19 @@ export function ComposerPanel({
             addFiles(images, true)
             return
           }
+          if (!convertText) return
           const text = e.clipboardData.getData('text/plain')
-          if (convertText && shouldAttachPastedText(text)) {
+          if (shouldAttachPastedText(text)) {
             e.preventDefault()
             const number = files.length + 1
             addFiles([new File([text], number === 1 ? 'paste.txt' : `paste-${number}.txt`, {
               type: 'text/plain',
             })], true)
+            return
           }
+          // Left to the browser, a paste this handler has read sometimes inserts
+          // nothing: the browser's own insert arrives with the text missing.
+          if (text && document.execCommand('insertText', false, text)) e.preventDefault()
         }}
       />
       <div className="composer-actions">
