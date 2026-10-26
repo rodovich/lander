@@ -211,7 +211,7 @@ export type CtxEmit = {
   // The agent's turn has ended but its process is waiting on background work,
   // which the flow expects the CLI to stop by `until` (epoch ms); null when
   // nothing with a known limit is pending. Unlike the batched outputs, it goes
-  // only to the supervisor's idle watchdog, not on to the server.
+  // out at once, and the server is told only whether there is a deadline.
   waiting(until: number | null): void
   // The provider has recorded this turn's user message in its session, so a
   // retry after a failure should nudge the session rather than send the message

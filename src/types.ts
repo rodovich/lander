@@ -82,6 +82,8 @@ export type Ask = {
 // the turn's `usage`.
 export type Ride = {
   compacting?: true
+  // See the server's Ride.
+  waiting?: true
   id: string
   startedAt: string
   // The flow this turn was for; see the server's Ride.

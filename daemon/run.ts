@@ -11,6 +11,7 @@ import type {
   StatePatchMessage,
   TurnContextMessage,
   UpdateMessage,
+  WaitingMessage,
 } from '../server/protocol'
 import type { MaterializedFiles } from './attachments'
 import { checkoutReport as readCheckoutReport, gitWithin } from './checkout'
@@ -36,6 +37,7 @@ export type RunManagerMessage =
   | UpdateMessage
   | DoneMessage
   | CheckoutMessage
+  | WaitingMessage
   | SessionMessage
   | TurnContextMessage
   | StatePatchMessage
@@ -79,6 +81,8 @@ type Run = {
   statePatches: StatePatchMessage[]
   // The latest checkout message, re-sent on resume-from.
   checkout?: CheckoutMessage
+  // The latest waiting message, re-sent on resume-from.
+  waiting?: WaitingMessage
   done?: DoneMessage
   dropTimer?: ReturnType<typeof setTimeout>
 }
@@ -497,10 +501,15 @@ export function createRunManager({
           send(patch)
           break
         }
-        case 'waiting':
+        case 'waiting': {
           waitingUntil = event.until
           if (!stopReason) arm()
+          const waiting = event.until !== null
+          if (waiting === (rec.waiting?.waiting ?? false)) break
+          rec.waiting = { type: 'waiting', runId: msg.runId, waiting }
+          send(rec.waiting)
           break
+        }
         case 'done':
           // A stopped run settles from the stop, not from the done its flow
           // reports while it winds down.
@@ -613,6 +622,7 @@ export function createRunManager({
     for (const patch of run.statePatches) send(patch)
     for (const update of run.buffer) if (update.seq > seq) send(update)
     if (run.checkout) send(run.checkout)
+    if (run.waiting) send(run.waiting)
     if (run.done) send(run.done)
   }
 

@@ -98,6 +98,9 @@ export type TaskEvent = {
 export type Ride = {
   id: string
   compacting?: true
+  // Set while the agent's turn has ended but its run is held open by background
+  // work it started that its CLI will stop by a known time (WaitingMessage).
+  waiting?: true
   startedAt: string
   // The flow this turn was for. A task can change flows at a relaunch, so the
   // task's current flow doesn't say whose an earlier ride was. Absent only on a
@@ -483,6 +486,7 @@ export function closeRide(
   if (!ride) return
   ride.endedAt = at
   delete ride.compacting
+  delete ride.waiting
   ride.outcome = outcome
 }
 

@@ -902,6 +902,15 @@ async function reduceRunWs(
         }).catch(() => {})
         continue
       }
+      if (ev.kind === 'waiting') {
+        await mutateTask(file, (t) => {
+          const ride = openRide(t)
+          if (ride?.id !== runId) return
+          if (ev.msg.waiting) ride.waiting = true
+          else delete ride.waiting
+        }).catch(() => {})
+        continue
+      }
       if (ev.kind === 'turn-context') {
         // The daemon appended a fresh dynamic context block to this turn's
         // prompt; record it as the baseline the next turn's block is compared

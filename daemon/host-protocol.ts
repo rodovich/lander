@@ -35,8 +35,8 @@ export type HostEvent =
       rateLimitResetsAt?: string
       committed?: true
     }
-  // See CtxEmit.waiting. Only the supervisor's idle watchdog reads it; it isn't
-  // relayed to the server.
+  // See CtxEmit.waiting. The supervisor's idle watchdog reads the deadline; the
+  // server is sent only whether there is one (WaitingMessage).
   | { kind: 'waiting'; until: number | null }
   // A NATURAL done — the agent completed, errored, or its stream folded a
   // terminalError. Interrupt and idle-kill dones are synthesized by the supervisor,

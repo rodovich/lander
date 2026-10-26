@@ -551,6 +551,15 @@ export type CheckoutMessage = {
   checkout: CheckoutReport
 }
 
+// The agent has ended its turn but the run stays open, waiting on background
+// work the agent started that its CLI will stop by a known time, or has stopped
+// waiting. Sent on each change and re-sent on resume-from.
+export type WaitingMessage = {
+  type: 'waiting'
+  runId: string
+  waiting: boolean
+}
+
 export type CheckoutReport = {
   path: string
   // Absent while HEAD is detached.
@@ -649,6 +658,7 @@ export type DaemonToServer =
   | UpdateMessage
   | DoneMessage
   | CheckoutMessage
+  | WaitingMessage
   | SessionMessage
   | TurnContextMessage
   | StatePatchMessage

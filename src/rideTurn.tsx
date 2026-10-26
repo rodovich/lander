@@ -11,8 +11,9 @@ import type { RideItem } from '../shared/timeline'
 import type { AskItem, Ride, TaskActionItem, Task } from './types'
 import type { TimelineDisclosure } from './useTimelineDisclosure'
 
-// The riding task's spinner row — "working…" in its open turn, or "starting…"
-// before the turn has streamed anything — with a Pace button that interrupts
+// The riding task's spinner row — "working…" in its open turn, "starting…"
+// before the turn has streamed anything, or "waiting…" once the agent's turn has
+// ended but its background work keeps the run open — with a Pace button that interrupts
 // the turn, the same as the kebab menu's Pace.
 export function PendingRow({
   onPace,
@@ -111,7 +112,11 @@ export const RideTurn = memo(function RideTurn({
           open ride (no endedAt) is streaming. */}
       {!settled && (
         <PendingRow onPace={onPace}>
-          {ride.compacting ? 'Compacting context…' : `${taskAgentModelName(agent, ride.usage?.model)} is working…`}
+          {ride.compacting
+            ? 'Compacting context…'
+            : ride.waiting
+              ? 'Waiting for background work…'
+              : `${taskAgentModelName(agent, ride.usage?.model)} is working…`}
         </PendingRow>
       )}
       {files.length > 0 && (

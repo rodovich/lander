@@ -3956,6 +3956,32 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     await waitForRaw(id, (r) => !r.runId)
   })
 
+  it('marks the open ride while its run waits on background work', async () => {
+    const id = 'waiting-ride'
+    await seed(id, { status: 'idle' })
+    expect(
+      (await post(`/api/${slug}/tasks/${id}/messages`, { message: 'go' })).status,
+    ).toBe(200)
+    await waitFor(() => startRuns(id).length === 1)
+    const runId = startRuns(id)[0].runId!
+    const rideOf = (r: Record<string, any>) =>
+      (r.rides as Record<string, any>[]).find((ride) => ride.id === runId)
+
+    ws.send(JSON.stringify({ type: 'waiting', runId, waiting: true }))
+    await waitForRaw(id, (r) => rideOf(r)?.waiting === true)
+    ws.send(JSON.stringify({ type: 'waiting', runId, waiting: false }))
+    await waitForRaw(id, (r) => rideOf(r)?.waiting === undefined)
+
+    // A run stopped mid-wait closes its ride without a last waiting message.
+    ws.send(JSON.stringify({ type: 'waiting', runId, waiting: true }))
+    await waitForRaw(id, (r) => rideOf(r)?.waiting === true)
+    ws.send(
+      JSON.stringify({ type: 'done', runId, exitCode: 0, interrupted: true, stderr: '' }),
+    )
+    await waitForRaw(id, (r) => !r.runId)
+    expect(rideOf(await readRaw(id))).not.toHaveProperty('waiting')
+  })
+
   // The human answering supersedes the time they or the task scheduled; an await
   // is a real dependency on sibling tasks that no message cancels.
   it('a human message clears a scheduled time, keeps the await, and says both', async () => {

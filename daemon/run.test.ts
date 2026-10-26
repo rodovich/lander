@@ -287,6 +287,32 @@ describe('daemon run manager', () => {
         vi.useRealTimers()
       }
     })
+
+    it('tells the server when the run starts and stops waiting, not each new deadline', () => {
+      const h = harness()
+      h.manager.startRun(makeStart())
+      const host = h.hosts[0]
+      wait(host, 10 * MINUTE)
+      wait(host, 20 * MINUTE)
+      wait(host, null)
+
+      expect(h.messages).toEqual([
+        { type: 'waiting', runId: 'run-1', waiting: true },
+        { type: 'waiting', runId: 'run-1', waiting: false },
+      ])
+    })
+
+    it('re-sends whether the run is waiting on resume-from', () => {
+      const h = harness()
+      h.manager.startRun(makeStart())
+      const host = h.hosts[0]
+      wait(host, 10 * MINUTE)
+      h.messages.length = 0
+
+      h.manager.resumeFrom('run-1', 0)
+
+      expect(h.messages).toEqual([{ type: 'waiting', runId: 'run-1', waiting: true }])
+    })
   })
 
   // The run's working time (DoneMessage.durationMs). Measured around the flow
