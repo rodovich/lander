@@ -164,12 +164,9 @@ export type PendingHook = {
   // the fire.
   rideId?: string
   outcome?: string
-  // Dispatch attempts, per hook path, attributable to the fire itself. A hold —
-  // no daemon, a draining daemon, a timeout — is deliberately not one of these.
-  attempts?: Record<string, number>
-  // Hook paths that have reported terminally. The unit of work is (fire, hook),
-  // not the entry: with two hooks declared for one trigger and one failing, a
-  // per-entry retry would re-run the healthy body too.
+  // Hook paths that have finished for this fire. The unit of work is (fire,
+  // hook), not the entry: with two hooks declared for one trigger and one held,
+  // a per-entry re-dispatch would re-run the finished body too.
   done?: string[]
   // The path of the hook whose own action caused this fire, when one did.
   // Dispatch skips that hook for this entry and no other, which is what lets a
@@ -198,12 +195,6 @@ type HookFireTask = {
   items?: Item[]
 }
 
-// Record a fire, returning it along with any entries the cap displaced.
-//
-// A displaced entry says so on the timeline. The other two ceilings (attempts,
-// age) report from the dispatcher; this one has to report here, and it is the
-// worst of the three to lose silently — the cap drops OLDEST first, so during a
-// daemon outage the entry it discards is the longest-unsupervised one.
 export function recordHookFire(
   task: HookFireTask,
   fire: Omit<PendingHook, 'id'>,

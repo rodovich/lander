@@ -387,7 +387,7 @@ export type HookRunReport = {
   // `refused` is the T7 case — approval withdrawn between dispatch and
   // materialization. `credential-unknown` is deliberately separate: the server
   // restarts on every `server/**` edit and no longer holds the token, which is
-  // nobody's fault and must neither read as a revocation nor burn a retry.
+  // nobody's fault and must neither read as a revocation nor finish the fire.
   outcome:
     | 'ran'
     | 'refused'

@@ -100,7 +100,7 @@ export function releaseHookCredential(token: string): void {
 // The credential a request presents, or undefined when the token is unknown or
 // expired. Unknown is a distinct answer from "not approved": the server restarts
 // on every `server/**` edit, taking this map with it, and a host mid-run then
-// gets a token miss that is nobody's fault and must not burn a retry attempt.
+// gets a token miss that is nobody's fault and must not finish the fire.
 export function readHookCredential(
   token: string | undefined,
   now = Date.now(),

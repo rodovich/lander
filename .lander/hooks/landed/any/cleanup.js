@@ -326,9 +326,9 @@ async function log(ctx, row) {
     await mkdir(ctx.stateDir, { recursive: true })
     const file = path.join(ctx.stateDir, `cleanup-${ctx.trigger.at.slice(0, 10)}.jsonl`)
     const tail = await readFile(file, 'utf8').catch(() => '')
-    // A row is a direct body effect, which the platform's retry guarantee
-    // excludes — and `error` and `timeout` retry up to five times, so left alone
-    // the log would over-count exactly the fires that had trouble.
+    // A row is a direct body effect, which the platform's dedupe excludes —
+    // and a run cut off by a server restart runs again, so left alone the log
+    // would over-count exactly the fires that had trouble.
     if (tail.includes(`"fireId":"${ctx.hook.fireId}"`)) return
     await appendFile(file, JSON.stringify(row) + '\n')
   } catch {

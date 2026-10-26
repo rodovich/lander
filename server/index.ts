@@ -1448,8 +1448,8 @@ async function sweepOnce(): Promise<void> {
       // for the same reason scheduled-message delivery is: `running` holds every
       // task with a live driveTask, including one working through a chain of
       // queued turns, which is the common shape here. Below it, a busy task's
-      // fires would sit until its whole chain ended and then age out — and the
-      // symptom would be "hooks mostly work".
+      // fires would sit until its whole chain ended — and the symptom would be
+      // "hooks run late".
       //
       // Not awaited: a body may run for minutes, and the sweep also delivers
       // every project's scheduled messages. dispatchPendingHooks has its own
@@ -1896,8 +1896,8 @@ app.post('/api/:project/hooks/approve', async (c) => {
 // the server's and the daemon holds no approval knowledge — the split increment
 // A established. Three distinct answers, and the distinction between the first
 // two matters: `credential-unknown` means this server restarted and no longer
-// holds the token (it happens on every `server/**` edit, and must not burn a
-// retry attempt or read as a revocation), while `not-approved` is the real T7
+// holds the token (it happens on every `server/**` edit, and must neither finish
+// the fire nor read as a revocation), while `not-approved` is the real T7
 // case.
 app.post('/api/:project/hooks/materialize', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
@@ -3355,6 +3355,12 @@ app.post('/api/:project/tasks/:id/archive', async (c) => {
       ) {
         riding = true
         return
+      }
+      // Neither sweep reads archived/, so pending hook fires could never run
+      // there, and restoring the task would deliver them long after the event.
+      if (archived && task.pendingHooks?.length) {
+        delete task.pendingHooks
+        await writeTask(path.join(fromDir, `${id}.json`), task)
       }
       await rename(
         path.join(fromDir, `${id}.json`),

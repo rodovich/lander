@@ -8,14 +8,14 @@
 //
 // The bookkeeping unit is **(fire, hook)**, not the fire. "Many hooks per
 // trigger" is one of the design's headline properties, and with two declared and
-// one erroring, a per-fire retry would re-run the healthy body too — whose direct
-// effects are explicitly not deduped.
+// one held, a per-fire re-dispatch would re-run the finished body too — whose
+// direct effects are explicitly not deduped.
 //
-// Failures are classified as **attempts** or **holds**, from an allowlist of the
-// former. That inversion is load-bearing rather than tidy: the boot sweep runs
-// before the daemon reconnects, so every `tsx watch` reload sweeps with no daemon
-// at all, and counting that as an attempt would mean five `server/**` edits
-// silently discarded every pending fire in the instance.
+// Every outcome but a hold finishes the hook for the fire, failures included: an
+// error or timeout is recorded, not repeated. A **hold** — no daemon, no answer,
+// no free run slot, a run already in flight, a token lost to a restart — leaves
+// the hook for the next sweep. The boot sweep runs before the daemon reconnects,
+// so treating a hold as final would discard every pending fire on each reload.
 
 import path from 'node:path'
 import type { Project } from './projects'
@@ -39,24 +39,6 @@ import {
   HOOK_KILL_BUDGET_MS,
   MAX_CONCURRENT_HOOK_RUNS,
 } from './hook-runs'
-import type { HookRunReport } from './protocol'
-
-// How many times a fire may fail in a way that is its OWN fault before its hook
-// is given up on. Everything else is a hold and costs nothing.
-export const MAX_HOOK_DISPATCH_ATTEMPTS = 5
-// A fire nothing can resolve eventually stops being interesting. Long enough
-// that an overnight daemon outage does not lose supervision.
-const MAX_FIRE_AGE_MS = 24 * 60 * 60_000
-
-// Outcomes that count against a fire's attempt budget: the run happened and went
-// wrong in a way retrying is unlikely to fix. Everything NOT listed here is a
-// hold — including a daemon that is absent, draining, slow, or throwing, and a
-// credential this server no longer holds because it restarted.
-const ATTEMPT_WORTHY = new Set<HookRunReport['outcome']>(['error', 'timeout'])
-// Outcomes that finish a hook for this fire. `refused` is terminal because a
-// human withdrew the approval — retrying past that is precisely what the revoke
-// button says not to do.
-const TERMINAL = new Set<HookRunReport['outcome']>(['ran', 'refused'])
 
 // One dispatch loop per task at a time. A body may run for minutes, and a second
 // sweep must not start the same task's fires underneath the first.
@@ -187,15 +169,6 @@ async function dispatchTask(
   if (!task?.pendingHooks?.length) return
 
   for (const entry of [...task.pendingHooks]) {
-    const at = now()
-    if (Date.parse(at) - Date.parse(entry.at) > MAX_FIRE_AGE_MS) {
-      await report(file, lockKey, entry, { path: '', name: entry.trigger }, 'dispatch-failed', at, {
-        error: 'gave up: nothing could resolve this fire within 24 hours',
-      })
-      await clearFire(file, lockKey, entry.id)
-      continue
-    }
-
     // The tree that matters is the one the target is working in, so this reads
     // the task's own checkout hints. AWAITED: spreading the promise would yield
     // no properties, silently resolve every fire at the project root, and
@@ -251,18 +224,17 @@ async function dispatchTask(
         run,
         now,
       })
-      if (outcome === 'hold') continue
       if (outcome === 'done') done.add(hook.path)
     }
 
     await updateFire(file, lockKey, entry.id, (e) => {
       if (done.size) e.done = [...done]
     })
-    // Every applicable hook has reported terminally (or there were none to
+    // Every applicable hook is finished for this fire (or there were none to
     // begin with, which is the common case in a project with no hooks). This
     // must apply the SAME eligibility as the dispatch loop above: an exempt hook
     // never reports, so counting it here would leave the entry unclearable —
-    // re-resolved every sweep until the 24-hour ceiling gave up on it.
+    // re-resolved every sweep until the task is archived.
     const remaining = resolved.hooks.hooks.filter(
       (h) => eligible(h) && !done.has(h.path),
     )
@@ -271,7 +243,7 @@ async function dispatchTask(
 }
 
 // Run one hook for one fire. Returns whether that hook is finished for this fire
-// ('done'), should be retried later ('hold'), or has used up its budget.
+// ('done') or should be dispatched again on the next sweep ('hold').
 async function dispatchOne(
   project: Project,
   id: string,
@@ -359,15 +331,14 @@ async function dispatchOne(
     releaseHookRun(project.slug, entry.id)
 
   const at = deps.now()
-  // The daemon could not be asked, or could not answer. A hold: no attempt, no
-  // timeline item, retried on the next sweep.
+  // The daemon could not be asked, or could not answer.
   if (!response.ok || !response.report) return 'hold'
 
   const outcome = response.report.outcome
   // The daemon already holds this fire (a re-dispatch racing a live body).
   if (outcome === 'already-running') return 'hold'
   // This server restarted and no longer holds the token. Not the fire's fault,
-  // and distinct from a revocation, so neither reported nor counted.
+  // and distinct from a revocation, so not reported.
   if (outcome === 'credential-unknown') return 'hold'
 
   const { reports, output, error, durationMs } = response.report
@@ -381,22 +352,5 @@ async function dispatchOne(
       ...(error ? { error } : {}),
       ...(durationMs ? { durationMs } : {}),
     })
-
-  if (TERMINAL.has(outcome)) return 'done'
-
-  if (ATTEMPT_WORTHY.has(outcome)) {
-    let exhausted = false
-    await updateFire(file, lockKey, entry.id, (e) => {
-      const attempts = (e.attempts ??= {})
-      attempts[hook.path] = (attempts[hook.path] ?? 0) + 1
-      exhausted = attempts[hook.path] >= MAX_HOOK_DISPATCH_ATTEMPTS
-    })
-    if (exhausted) {
-      await report(file, lockKey, entry, hook, 'dispatch-failed', deps.now(), {
-        error: `gave up after ${MAX_HOOK_DISPATCH_ATTEMPTS} failed runs`,
-      })
-      return 'done'
-    }
-  }
-  return 'hold'
+  return 'done'
 }

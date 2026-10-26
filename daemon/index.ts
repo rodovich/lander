@@ -531,10 +531,10 @@ function runHookFire(msg: HookRunMessage): void {
   const run = async (): Promise<ReplyBody<'hook-run-result'>> => {
     // Refused while draining, unlike hooks-resolve: this one spawns a host that
     // may run for minutes, and a daemon on its way out must not accept work it
-    // would have to abandon. The server treats the refusal as a hold — no
-    // attempt counted, no report item — and retries on whichever daemon is
-    // primary by then. One can still reach us in the moment between the drain
-    // starting and our draining `register` reaching the server.
+    // would have to abandon. The server treats the refusal as a hold, with no
+    // report item, and retries on whichever daemon is primary by then. One can
+    // still reach us in the moment between the drain starting and our draining
+    // `register` reaching the server.
     if (drain.draining() || exiting)
       return {
         ok: false,

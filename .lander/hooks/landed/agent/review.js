@@ -194,9 +194,9 @@ async function log(ctx, row) {
     await mkdir(ctx.stateDir, { recursive: true })
     const file = path.join(ctx.stateDir, `review-${ctx.trigger.at.slice(0, 10)}.jsonl`)
     const tail = await readFile(file, 'utf8').catch(() => '')
-    // A row is a direct body effect, which the platform's retry guarantee
-    // excludes — and the two attempt-worthy outcomes retry up to five times, so
-    // left alone the log would over-count exactly the fires that had trouble.
+    // A row is a direct body effect, which the platform's dedupe excludes —
+    // and a run cut off by a server restart runs again, so left alone the log
+    // would over-count exactly the fires that had trouble.
     if (tail.includes(`"fireId":"${ctx.hook.fireId}"`)) return
     await appendFile(file, JSON.stringify(row) + '\n')
   } catch {
@@ -204,9 +204,9 @@ async function log(ctx, row) {
   }
 }
 
-// A verdict already reached for this fire, so a retry re-reads rather than
-// re-judges. Without it, a fire that fails after judging pays for the model
-// again on every one of up to five attempts.
+// A verdict already reached for this fire, so a rerun re-reads rather than
+// re-judges. Without it, a run cut off by a server restart after judging pays
+// for the model again.
 async function cached(ctx) {
   try {
     return JSON.parse(
@@ -222,7 +222,7 @@ async function cache(ctx, verdict) {
     await mkdir(ctx.stateDir, { recursive: true })
     // writeFile, not appendFile: two writes for one fire would concatenate into
     // unparseable JSON and the cache would silently miss, re-paying for the
-    // model on every retry — the one thing it exists to prevent.
+    // model on every rerun — the one thing it exists to prevent.
     await writeFile(
       path.join(ctx.stateDir, `verdict-${ctx.hook.fireId}.json`),
       JSON.stringify(verdict),

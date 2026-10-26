@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { dispatchPendingHooks, MAX_HOOK_DISPATCH_ATTEMPTS } from './hook-dispatch'
+import { dispatchPendingHooks } from './hook-dispatch'
 import { clearHookRunState } from './hook-runs'
 import type { Project } from './projects'
 import type { HookRunReport } from './protocol'
@@ -10,8 +10,8 @@ import type { HookItem, Item, PendingHook } from './tasks'
 
 // The dispatcher, driven against real task files with the daemon round trip and
 // the git resolution both injected. What is being tested is the bookkeeping —
-// which failures retry, which give up, what lands on the timeline, and what is
-// left pending — because that is where a mistake is silent.
+// which failures hold, what lands on the timeline, and what is left pending —
+// because that is where a mistake is silent.
 
 let root: string
 let project: Project
@@ -195,7 +195,7 @@ describe('dispatchPendingHooks', () => {
   // The first hook a project commits has no approved ancestor by definition, so
   // this state holds for every fire until a human clicks approve. An item here
   // would be the flood the design refuses elsewhere — and NOT marking it done
-  // would hold the fire forever, re-resolving every sweep until the age ceiling.
+  // would hold the fire forever, re-resolving it every sweep.
   it('finishes a fire silently when no version is approved', async () => {
     await writeTask('t1')
     const run = running({ outcome: 'ran', reports: [] })
@@ -219,8 +219,6 @@ describe('dispatchPendingHooks', () => {
     expect(hookItems(t.items)).toHaveLength(0)
   })
 
-  // Holds. Each of these leaves the fire exactly as it was — no attempt, no
-  // item — because none of them is the fire's fault and all of them pass.
   it.each([
     ['no daemon connected', { ok: false, status: 503 }],
     ['a dispatch timeout', { ok: false, status: 504 }],
@@ -235,13 +233,13 @@ describe('dispatchPendingHooks', () => {
     })
     const t = await read('t1')
     expect(t.pendingHooks).toHaveLength(1)
-    expect(t.pendingHooks![0].attempts ?? {}).toEqual({})
+    expect(t.pendingHooks![0].done).toBeUndefined()
     expect(hookItems(t.items)).toHaveLength(0)
   })
 
   // The boot sweep runs before the daemon reconnects, so this is the state of
-  // EVERY `server/**` reload. Counting it would discard the instance's pending
-  // fires after five edits.
+  // EVERY `server/**` reload. Finishing the fire here would discard every
+  // pending fire in the instance on each edit.
   it('holds every fire when resolution itself fails', async () => {
     await writeTask('t1')
     const run = running(null)
@@ -251,38 +249,18 @@ describe('dispatchPendingHooks', () => {
     expect(t.pendingHooks).toHaveLength(1)
   })
 
-  // A body that threw or hung is the fire's own fault: reported, counted, and
-  // eventually given up on rather than retried forever.
-  it.each(['error', 'timeout'] as const)('counts %s as an attempt', async (o) => {
+  it.each(['error', 'timeout'] as const)('reports %s and finishes the fire', async (o) => {
     await writeTask('t1')
     await dispatch('t1', {
       resolve: resolving([outcome()]),
       run: running({ outcome: o, reports: [], error: 'boom' }),
     })
     const t = await read('t1')
-    expect(t.pendingHooks![0].attempts).toEqual({ [SUPERVISE]: 1 })
+    expect(t.pendingHooks).toBeUndefined()
     expect(hookItems(t.items)[0]).toMatchObject({ outcome: o, error: 'boom' })
   })
 
-  it('gives up after the attempt ceiling, saying so', async () => {
-    await writeTask('t1', {
-      pendingHooks: [fire({ attempts: { [SUPERVISE]: MAX_HOOK_DISPATCH_ATTEMPTS - 1 } })],
-    })
-    await dispatch('t1', {
-      resolve: resolving([outcome()]),
-      run: running({ outcome: 'error', reports: [], error: 'boom' }),
-    })
-    const t = await read('t1')
-    expect(t.pendingHooks).toBeUndefined()
-    expect(hookItems(t.items).map((i) => i.outcome)).toEqual([
-      'error',
-      'dispatch-failed',
-    ])
-  })
-
-  // A human revoked the approval between dispatch and materialization. Terminal
-  // rather than retried: retrying past a revocation is what the button says not
-  // to do.
+  // A human revoked the approval between dispatch and materialization.
   it('treats a refusal as final', async () => {
     await writeTask('t1')
     await dispatch('t1', {
@@ -294,15 +272,15 @@ describe('dispatchPendingHooks', () => {
     expect(hookItems(t.items)[0]).toMatchObject({ outcome: 'refused' })
   })
 
-  // "Many hooks per trigger" is a headline property, so the unit of retry has to
-  // be (fire, hook): a per-fire retry would re-run the healthy body every time
-  // the broken one failed, and a body's own effects are not deduped.
-  it('retries only the hook that failed, not its healthy sibling', async () => {
+  // "Many hooks per trigger" is a headline property, so the unit of dispatch has
+  // to be (fire, hook): a per-fire re-dispatch would re-run the finished body
+  // every time its sibling was held, and a body's own effects are not deduped.
+  it('re-dispatches only the hook that was held, not its finished sibling', async () => {
     await writeTask('t1')
     const CLEANUP = '.lander/hooks/ride-ended/any/cleanup.js'
     const run = vi.fn(async (msg: { hook: { path: string } }) =>
       msg.hook.path === CLEANUP
-        ? { ok: true, report: { outcome: 'error', reports: [], error: 'boom' } }
+        ? { ok: true, report: { outcome: 'credential-unknown', reports: [] } }
         : { ok: true, report: { outcome: 'ran', reports: [] } },
     )
     const resolve = resolving([
@@ -312,7 +290,7 @@ describe('dispatchPendingHooks', () => {
     await dispatch('t1', { resolve, run })
     expect(run).toHaveBeenCalledTimes(2)
 
-    // Second pass: only the failing one goes again.
+    // Second pass: only the held one goes again.
     run.mockClear()
     await dispatch('t1', { resolve, run })
     expect(run).toHaveBeenCalledTimes(1)
@@ -359,18 +337,6 @@ describe('dispatchPendingHooks', () => {
         run: running(null),
       }),
     ).resolves.toBe(true)
-  })
-
-  it('drops a fire nothing could resolve within a day', async () => {
-    await writeTask('t1', {
-      pendingHooks: [fire({ at: '2025-01-01T00:00:00.000Z' })],
-    })
-    const run = running(null)
-    await dispatch('t1', { resolve: resolving([outcome()]), run })
-    const t = await read('t1')
-    expect(run).not.toHaveBeenCalled()
-    expect(t.pendingHooks).toBeUndefined()
-    expect(hookItems(t.items)[0]).toMatchObject({ outcome: 'dispatch-failed' })
   })
 
   it('runs one dispatch per task at a time', async () => {

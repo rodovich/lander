@@ -417,10 +417,10 @@ describe('the supervision hook', () => {
     expect(rows[0].verdict).toBe('finished')
   })
 
-  // An assist is a direct body effect, which the platform's retry dedupe does
-  // not cover: without the cache a fire that failed after judging would pay for
-  // the model again on each of up to five attempts.
-  it('reuses its verdict rather than re-judging when a fire is retried', async () => {
+  // An assist is a direct body effect, which the platform's dedupe does not
+  // cover: without the cache a run cut off by a server restart after judging
+  // would pay for the model again.
+  it('reuses its verdict rather than re-judging when a fire is rerun', async () => {
     target = {
       id: 'tsk-1',
       status: 'paced',

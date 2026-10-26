@@ -1894,6 +1894,29 @@ describe('server task provider behavior', () => {
     expect(await res.json()).toMatchObject({ id: task.id, archived: true })
   })
 
+  it('drops pending hook fires when a task is archived', async () => {
+    const id = 'tsk-archived-with-fires'
+    await writeFile(
+      path.join(tasksDir, `${id}.json`),
+      JSON.stringify({
+        id,
+        title: 'Archived with fires',
+        status: 'landed',
+        createdAt: AT,
+        updatedAt: AT,
+        shape: 2,
+        rides: [],
+        items: [],
+        pendingHooks: [{ id: 'fire-1-abc', trigger: 'landed', by: 'agent', at: AT }],
+      }),
+    )
+    expect((await post(`/api/${slug}/tasks/${id}/archive`, {})).status).toBe(200)
+
+    expect(
+      await readTaskField(id, 'pendingHooks', path.join(dataRoot, 'archived')),
+    ).toBeUndefined()
+  })
+
   it('serves a cache-validated global task-link projection', async () => {
     const active = await createTask('Link feed active')
     const archived = await createTask('Link feed archived')

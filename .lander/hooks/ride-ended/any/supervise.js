@@ -135,10 +135,10 @@ async function log(ctx, row) {
   }
 }
 
-// A verdict already reached for this fire, so a retry re-reads rather than
+// A verdict already reached for this fire, so a rerun re-reads rather than
 // re-judges. An assist is a direct body effect, which hooks.md §8 excludes from
-// the platform's retry guarantee — without this, a fire that failed after
-// judging pays for the model again on every one of up to five attempts.
+// the platform's dedupe — without this, a run cut off by a server restart after
+// judging pays for the model again.
 async function cachedVerdict(ctx) {
   try {
     const raw = await readFile(
@@ -156,7 +156,7 @@ async function cacheVerdict(ctx, verdict) {
     await mkdir(ctx.stateDir, { recursive: true })
     // writeFile, not appendFile: two writes for one fire would concatenate into
     // unparseable JSON, the read would throw, and the cache would silently miss
-    // — re-paying for the model on every retry, which is the one thing it exists
+    // — re-paying for the model on every rerun, which is the one thing it exists
     // to prevent.
     await writeFile(
       path.join(ctx.stateDir, `verdict-${ctx.hook.fireId}.json`),

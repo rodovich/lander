@@ -122,10 +122,10 @@ item to the task's conversation with the reports, the tail of the body's own
 stdout and stderr (not `ctx.spawn` output), and any error. A run that succeeds
 without reporting leaves no trace.
 
-A body can run more than once for one fire: lander retries a run that throws or
-times out, up to five failed runs, and reruns one cut off by a server restart.
-Make side effects safe to repeat; `ctx.hook.fireId` is the same across reruns of
-one fire.
+A run that throws or times out is reported, not retried. A body can still run
+more than once for one fire: lander reruns one cut off by a server restart. Make
+side effects safe to repeat; `ctx.hook.fireId` is the same across reruns of one
+fire.
 
 ## Example
 
