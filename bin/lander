@@ -1323,8 +1323,9 @@ const USAGE = {
   ride: 'ride (--date <when> | --time <min> | --await <ids> | --clear)',
   relaunch:
     'relaunch <message|-> [--date <when>|--time <min>|--await <ids>] [--interval <min> [--repeat-count <n>|--repeat-until <when>]] [--flow <name>] [--clear]',
-  wedge: 'wedge [--option <id:label> …]',
-  ask: 'ask --option <id:label> [--option …]',
+  wedge:
+    'wedge [--option <id:label> …]  (--option is for flows and skills; conversation-driven agents should converse instead)',
+  ask: 'ask --option <id:label> [--option …]  (for flows and skills; conversation-driven agents should converse instead)',
   archive: 'archive <id…> [--restore]',
   assist: 'assist <prompt> [text …]',
   attachment:
