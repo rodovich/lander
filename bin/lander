@@ -1334,12 +1334,25 @@ const USAGE = {
 }
 const dieUsage = (verb) => die(`usage: lander ${USAGE[verb]}`)
 
-// Print one command's usage, or the full command index when no (known) command
-// is named. Help output goes to stdout and never mutates anything.
+// `lander help <topic>` prints docs/<topic>.md whole. Agents in other projects
+// can't open lander's checkout with their file tools, but this process can.
+const HELP_TOPICS = {
+  hooks: 'writing a project hook, when the user wants something run as tasks land, wedge, or end a ride',
+}
+
+// Print one command's usage or one topic, or the full index for anything else.
+// Help output goes to stdout and never mutates anything.
 function printUsage(cmd) {
   if (cmd && USAGE[cmd]) return void console.log(`usage: lander ${USAGE[cmd]}`)
+  if (cmd && HELP_TOPICS[cmd])
+    return void process.stdout.write(
+      readFileSync(new URL(`../docs/${cmd}.md`, import.meta.url), 'utf8'),
+    )
   console.log('usage: lander <command> [args]\n\ncommands:')
   for (const u of Object.values(USAGE)) console.log(`  lander ${u}`)
+  console.log('\ntopics:')
+  for (const [name, summary] of Object.entries(HELP_TOPICS))
+    console.log(`  lander help ${name}  (${summary})`)
   console.log('\nrun `lander help <command>` or `lander <command> --help` for one command.')
 }
 

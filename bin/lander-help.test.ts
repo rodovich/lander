@@ -99,6 +99,13 @@ describe('lander help', () => {
     expect(requests).toBe(0)
   })
 
+  it('`help hooks` prints the hooks doc', async () => {
+    const { stdout, code } = await execLander(['help', 'hooks'])
+    expect(code).toBe(0)
+    expect(stdout).toContain('.lander/hooks/<trigger>/<by>/<name>.js')
+    expect(requests).toBe(0)
+  })
+
   it('an unknown command prints the index and exits non-zero', async () => {
     const { stdout, stderr, code } = await execLander(['frobnicate'])
     expect(code).toBe(1)

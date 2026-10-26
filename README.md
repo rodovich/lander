@@ -65,6 +65,10 @@ Everything else — git, package managers, anything you'd run in a shell — fol
 
 A project may put a `LANDER.md` at its root for conventions that apply to lander tasks specifically. Lander delivers it to assistants in that project, alongside the repo's `CLAUDE.md`/`AGENTS.md`.
 
+### Task hooks
+
+A project may commit JavaScript modules under `.lander/hooks/` that lander runs when its tasks land, wedge, or end a ride, once you approve them in the **Hooks** panel. [docs/hooks.md](docs/hooks.md) covers writing one; agents in any project can read it with `lander help hooks`.
+
 ### Restart & hot reload
 
 Because turns run in the separate host daemon, restarting the API doesn't interrupt in-flight work: the API hot-reloads on server edits, an in-flight turn keeps streaming, and a fresh server reattaches to it without re-running the agent. See [docs/architecture.md](docs/architecture.md) for the graceful-shutdown and reattach mechanics.
@@ -87,7 +91,7 @@ A task's agent can call back into lander to manage itself. When the daemon launc
 | `lander archive <id> [--restore]` | Archive a task (or `--restore` it) — move it out of the list into `archived/`, or back. |
 | `lander attachment ls` / `lander attachment cat <id>` | List **this** task's files (id/name/mime/size) — both the ones sent to it and the ones it attached — or stream one's raw bytes to stdout. See [Attachments](#attachments). |
 | `lander attachment put <path>… [--name <n>] [--mime <m>]` | Attach files to the turn **this** task is riding, so they render on the reply (name defaults to the basename; `--name` takes a single path) — see [Outputs](#outputs). |
-| `lander help [command]` / `lander <command> --help` | Print usage — the full command index, or one command's flags. Print-only: `--help`/`-h`/`help` are intercepted before dispatch, so they never launch or send anything. |
+| `lander help [command]` / `lander <command> --help` | Print usage — the full command index, or one command's flags. `lander help hooks` prints [docs/hooks.md](docs/hooks.md). Print-only: `--help`/`-h`/`help` are intercepted before dispatch, so they never launch or send anything. |
 
 **Choice options are suggested replies, not a control surface.** Write each `--option` label as a potential instruction to the agent that the user could have typed and that the agent could execute without asking anything back. These commands are deliberately absent from the task prompt: they're for flow- and skill-directed use, where a script decides the fork points — conversation-driven agents should just converse.
 
