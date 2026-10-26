@@ -87,21 +87,26 @@ export function parseProjects(
   const seen = new Set<string>()
   const projects: Project[] = []
   for (const p of paths.length ? paths : [cwd]) {
-    const resolved = path.resolve(p)
-    const slug = projectSlug(resolved)
-    if (seen.has(slug)) continue
-    seen.add(slug)
-    const norm = normalizeProjectPath(resolved)
-    projects.push({
-      path: resolved,
-      slug,
-      dataDir: path.join(dataRoot, norm, 'tasks'),
-      runsDir: path.join(dataRoot, norm, 'runs'),
-      archiveDir: path.join(dataRoot, norm, 'archived'),
-      flowsDir: path.join(dataRoot, norm, 'flows'),
-      attachmentsDir: path.join(dataRoot, norm, 'attachments'),
-      hooksFile: path.join(dataRoot, norm, 'hooks.json'),
-    })
+    const project = projectAt(dataRoot, p)
+    if (seen.has(project.slug)) continue
+    seen.add(project.slug)
+    projects.push(project)
   }
   return projects
+}
+
+// parseProjects for a single path, without its cwd fallback or dedupe.
+export function projectAt(dataRoot: string, p: string): Project {
+  const resolved = path.resolve(p)
+  const norm = normalizeProjectPath(resolved)
+  return {
+    path: resolved,
+    slug: projectSlug(resolved),
+    dataDir: path.join(dataRoot, norm, 'tasks'),
+    runsDir: path.join(dataRoot, norm, 'runs'),
+    archiveDir: path.join(dataRoot, norm, 'archived'),
+    flowsDir: path.join(dataRoot, norm, 'flows'),
+    attachmentsDir: path.join(dataRoot, norm, 'attachments'),
+    hooksFile: path.join(dataRoot, norm, 'hooks.json'),
+  }
 }

@@ -3,7 +3,9 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, renameSync, watch, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { configPath, devProjectPaths } from './daemon/config.ts'
+import { projectAt } from './server/projects.ts'
 import { SCRUBBED_ENV_KEYS } from './server/secrets.ts'
+import { readTasks } from './server/store.ts'
 
 const errorText = (e) => (e instanceof Error ? e.message : String(e))
 
@@ -41,27 +43,68 @@ const writeProjects = () => {
 writeProjects()
 process.env.LANDER_PROJECTS_FILE = projectsFile
 
+// The given projects that have a task mid-turn (a run the server is tracking).
+const projectsMidTurn = async (paths) => {
+  const busy = []
+  for (const p of paths)
+    if ((await readTasks(projectAt(dataRoot, p).dataDir)).some((t) => t.runId))
+      busy.push(p)
+  return busy
+}
+
 // Follow edits to the config's project list. A save that doesn't parse, or
 // lists no projects, leaves the last good list serving. Debounced, as editors
 // often save in more than one write.
+//
+// A removed project keeps being served until none of its tasks is mid-turn,
+// rechecked every few seconds: the restarted server would stop tracking the
+// turn, so its result would never be recorded.
 if (!args.length) {
   const file = configPath()
+  let configured = projects
+  let held = ''
+  let recheck
+  let settling = Promise.resolve()
+  const settle = async () => {
+    clearTimeout(recheck)
+    const cfg = configured
+    const busy = await projectsMidTurn(projects.filter((p) => !cfg.includes(p)))
+    if (busy.join('\n') !== held) {
+      held = busy.join('\n')
+      if (busy.length)
+        console.log(
+          `still serving until their tasks finish their turns (new turns there extend this): ${busy.join(', ')}`,
+        )
+    }
+    if (busy.length) recheck = setTimeout(reconcile, 5000)
+    // While a project is held, keep the served order, so holding one restarts
+    // nothing by itself.
+    const next = busy.length
+      ? [
+          ...projects.filter((p) => cfg.includes(p) || busy.includes(p)),
+          ...cfg.filter((p) => !projects.includes(p)),
+        ]
+      : cfg
+    if (next.join('\n') === projects.join('\n')) return
+    projects = next
+    printProjects()
+    writeProjects()
+  }
+  const reconcile = () => {
+    settling = settling.then(settle).catch((e) => console.error(errorText(e)))
+  }
   let debounce
   watch(path.dirname(file), (_event, filename) => {
     if (filename !== path.basename(file)) return
     clearTimeout(debounce)
     debounce = setTimeout(() => {
-      let next
       try {
-        next = devProjectPaths([], file)
+        configured = devProjectPaths([], file)
       } catch (e) {
         console.error(`${errorText(e)}; still serving the last good list`)
         return
       }
-      if (next.join('\n') === projects.join('\n')) return
-      projects = next
-      printProjects()
-      writeProjects()
+      reconcile()
     }, 200)
   })
 }
