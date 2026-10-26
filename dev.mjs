@@ -1,25 +1,70 @@
 import { concurrently } from 'concurrently'
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, watch, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { devProjectPaths } from './daemon/config.ts'
+import { configPath, devProjectPaths } from './daemon/config.ts'
 import { SCRUBBED_ENV_KEYS } from './server/secrets.ts'
+
+const errorText = (e) => (e instanceof Error ? e.message : String(e))
 
 // The projects come from ~/.lander/config.json, or from argv for a one-off run
 // (argv wins). Per-project options are the daemon's to read from the same file.
+const args = process.argv.slice(2)
 let projects
 try {
-  projects = devProjectPaths(process.argv.slice(2))
+  projects = devProjectPaths(args)
 } catch (e) {
-  console.error(e instanceof Error ? e.message : String(e))
+  console.error(errorText(e))
   process.exit(1)
 }
-console.log('projects:')
-for (const p of projects) console.log(`  ${p}`)
+const printProjects = () => {
+  console.log('projects:')
+  for (const p of projects) console.log(`  ${p}`)
+}
+printProjects()
 
-// Inherited by the child processes; the api server and the daemon both read it.
-// Newline-separated so it survives a single env var (paths never contain newlines).
-process.env.PROJECT_DIRS = projects.join('\n')
+const dataRoot = path.resolve(process.env.LANDER_DATA_ROOT ?? 'data')
+
+// The api server and the daemon read the list from a file rather than an env
+// var so that it can change under them: each restarts when the file is
+// rewritten, and reads it as it boots (see projectDirs). It lives under the
+// data root rather than being the config itself because `tsx watch` ignores
+// every path with a dot-segment, ~/.lander included, and because only a valid,
+// changed list should restart anything. Replaced by rename so a booting reader
+// never sees half a list.
+const projectsFile = path.join(dataRoot, 'served-projects.txt')
+const writeProjects = () => {
+  mkdirSync(dataRoot, { recursive: true })
+  writeFileSync(`${projectsFile}.tmp`, projects.join('\n') + '\n')
+  renameSync(`${projectsFile}.tmp`, projectsFile)
+}
+writeProjects()
+process.env.LANDER_PROJECTS_FILE = projectsFile
+
+// Follow edits to the config's project list. A save that doesn't parse, or
+// lists no projects, leaves the last good list serving. Debounced, as editors
+// often save in more than one write.
+if (!args.length) {
+  const file = configPath()
+  let debounce
+  watch(path.dirname(file), (_event, filename) => {
+    if (filename !== path.basename(file)) return
+    clearTimeout(debounce)
+    debounce = setTimeout(() => {
+      let next
+      try {
+        next = devProjectPaths([], file)
+      } catch (e) {
+        console.error(`${errorText(e)}; still serving the last good list`)
+        return
+      }
+      if (next.join('\n') === projects.join('\n')) return
+      projects = next
+      printProjects()
+      writeProjects()
+    }, 200)
+  })
+}
 
 // A shared secret that lets the browser prove its requests are the human's, so
 // the API can refuse a task trying to grant itself (or a task it spawns) more
@@ -29,7 +74,7 @@ process.env.PROJECT_DIRS = projects.join('\n')
 // keeps the value the running browser already holds; mode 0600. Resolved the
 // same way as DATA_ROOT in server/index.ts, so an overridden data root doesn't
 // leave the two disagreeing about where the token is.
-const tokenFile = path.resolve(process.env.LANDER_DATA_ROOT ?? 'data', '.ui-token')
+const tokenFile = path.join(dataRoot, '.ui-token')
 let uiToken
 try {
   uiToken = readFileSync(tokenFile, 'utf8').trim()
@@ -93,16 +138,17 @@ concurrently(
     // server/index.ts). So a restart — including when claude edits
     // server/index.ts while lander runs on its own repo — no longer loses a run.
     {
-      command: 'tsx watch server/index.ts',
+      command: `tsx watch --include '${projectsFile.replaceAll("'", `'\\''`)}' server/index.ts`,
       name: 'api',
       prefixColor: 'green',
       env: apiEnv,
     },
     // The host daemon owns claude process management + stream reduction + usage.
-    // It reads PROJECT_DIRS from the env above. daemon-watch.mjs supervises it: on
-    // a daemon source edit it drains the running daemon (finish riding turns, take
-    // no new ones, exit when empty) and hands off to a fresh one, so an edit no
-    // longer aborts in-flight turns — it takes effect at the next turn boundary.
+    // It reads the projects file named above. daemon-watch.mjs
+    // supervises it: on a daemon source edit, or a rewrite of that file, it
+    // drains the running daemon (finish riding turns, take no new ones, exit
+    // when empty) and hands off to a fresh one, so an edit no longer aborts
+    // in-flight turns — it takes effect at the next turn boundary.
     {
       command: 'node daemon-watch.mjs',
       name: 'daemon',

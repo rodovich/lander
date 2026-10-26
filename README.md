@@ -28,7 +28,9 @@ npm install
 npm run dev
 ```
 
-`npm run dev /path/to/project [/path/to/another ...]` serves those paths instead, for a one-off run. Either way, each path is resolved and the list is exported as `PROJECT_DIRS` (newline-separated); these are the working directories where agent subprocesses run. Then open the web UI on port 41414.
+`npm run dev /path/to/project [/path/to/another ...]` serves those paths instead, for a one-off run. Either way, each path is resolved and the list is written to `data/served-projects.txt` (newline-separated), which the API server and daemon read; these are the working directories where agent subprocesses run. Then open the web UI on port 41414.
+
+Editing the project list in the config file takes effect without restarting `npm run dev`: the API server restarts, the daemon hands off to a fresh one at turn boundaries, and the web UI picks up the new list within 30 seconds, or at once on reload. A save that won't parse, or lists no projects, is ignored, and lander keeps serving the last good list. Passing paths on the command line turns this off.
 
 A project entry with `"worktrees": true` gives each of its tasks a git worktree of its own at `<project>/.worktrees/<task id>`. The daemon creates it when a ride starts and finds none — detached at whatever the main checkout has checked out — and launches the agent inside it; it removes it, leaving branches alone, once the task is landed (and its hooks have run) or archived. Lander does nothing project-specific in either step: no dependency installs, no database setup or teardown. Add `.worktrees` to the project's `.gitignore`. The flag is re-read whenever the file changes, so turning it on or off applies from each task's next ride.
 

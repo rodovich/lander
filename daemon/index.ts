@@ -12,7 +12,7 @@
 
 import path from 'node:path'
 import { ROOT } from './paths'
-import { projectSlug } from '../server/projects'
+import { projectDirs, projectSlug } from '../server/projects'
 import {
   FLOW_MODULES,
   announcedFlows,
@@ -58,18 +58,13 @@ import {
 } from './attachments'
 import type { AttachmentRef } from '../server/protocol'
 
-// Project host paths come from argv, or PROJECT_DIRS (newline-separated, as
-// dev.mjs sets for the server) when argv is empty — so `npm run dev` can launch
-// the daemon with the same env the server gets.
+// Project host paths come from argv when the daemon is launched by hand, else
+// from the same source as the server's (see projectDirs).
 const fromArgv = process.argv.slice(2)
-const fromEnv = (process.env.PROJECT_DIRS ?? '')
-  .split('\n')
-  .map((s) => s.trim())
-  .filter(Boolean)
-const projectDirs = (fromArgv.length ? fromArgv : fromEnv).map((p) =>
+const servedDirs = (fromArgv.length ? fromArgv : projectDirs(process.env)).map((p) =>
   path.resolve(p),
 )
-if (!projectDirs.length) {
+if (!servedDirs.length) {
   console.error(
     'usage: node daemon/index.ts /path/to/project [more ...]  (or set PROJECT_DIRS)',
   )
@@ -78,7 +73,7 @@ if (!projectDirs.length) {
 // Map each served slug to its host path; the server keys runs by slug and the
 // daemon resolves the actual directory (decision 8).
 const pathBySlug = new Map<string, string>()
-for (const p of projectDirs) pathBySlug.set(projectSlug(p), p)
+for (const p of servedDirs) pathBySlug.set(projectSlug(p), p)
 
 const WS_URL = process.env.LANDER_WS?.trim() || 'ws://localhost:6181/daemon'
 const TOKEN = process.env.LANDER_DAEMON_TOKEN?.trim() || ''

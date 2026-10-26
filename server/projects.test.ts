@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { normalizeProjectPath, projectSlug, parseProjects } from './projects'
 
@@ -70,6 +72,20 @@ describe('parseProjects', () => {
       ['/b'],
     )
     expect(parseProjects(root, {}, '/cwd').map((p) => p.path)).toEqual(['/cwd'])
+  })
+
+  it('reads the LANDER_PROJECTS_FILE list when PROJECT_DIRS is unset', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'lander-projects-'))
+    try {
+      const file = path.join(dir, 'served-projects.txt')
+      writeFileSync(file, '/x\n/y\n')
+      const paths = (env: Record<string, string>) =>
+        parseProjects(root, env, '/cwd').map((p) => p.path)
+      expect(paths({ LANDER_PROJECTS_FILE: file, PROJECT_DIR: '/b' })).toEqual(['/x', '/y'])
+      expect(paths({ LANDER_PROJECTS_FILE: file, PROJECT_DIRS: '/a' })).toEqual(['/a'])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it('builds the sibling dirs under <dataRoot>/<normalized>/', () => {

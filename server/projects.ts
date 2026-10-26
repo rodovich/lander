@@ -1,8 +1,11 @@
-// Project-path helpers: turn each configured project directory into the two
-// identifiers the rest of the server keys off — a case-preserving on-disk dir
-// name and a lowercased URL slug — and assemble the per-project data dirs.
-// Pure given (dataRoot, env, cwd), so it can be unit-tested without the server.
+// Project-path helpers: find the served project directories, turn each into
+// the two identifiers the rest of the server keys off — a case-preserving
+// on-disk dir name and a lowercased URL slug — and assemble the per-project
+// data dirs.
+// A function of (dataRoot, env, cwd) and the projects file env may name, so it
+// can be unit-tested without the server.
 
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 
 export type Project = {
@@ -53,21 +56,34 @@ export function projectSlug(p: string): string {
   return normalizeProjectPath(p).toLowerCase()
 }
 
-// Projects come in newline-separated via PROJECT_DIRS (set by dev.mjs from the
-// command-line args), falling back to the legacy single PROJECT_DIR, then cwd.
-// Duplicate paths are dropped (keyed on slug); the first survivor is the default.
-// `dataRoot` is the directory the per-project data dirs live under — ./data in
-// the repo normally, a temp dir under test (see DATA_ROOT in index.ts).
+// The project dirs the server and daemon serve. Under `npm run dev` they come
+// from the file LANDER_PROJECTS_FILE names, which dev.mjs rewrites when the
+// config's project list changes; a rewrite restarts the server and hands the
+// daemon off, so each reads the list as it boots. An explicit PROJECT_DIRS wins
+// over the file, which every task inherits, so a test that boots the server
+// from a task serves the projects it sets.
+export function projectDirs(env: Record<string, string | undefined>): string[] {
+  const raw =
+    env.PROJECT_DIRS ??
+    (env.LANDER_PROJECTS_FILE
+      ? readFileSync(env.LANDER_PROJECTS_FILE, 'utf8')
+      : (env.PROJECT_DIR ?? ''))
+  return raw
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+// The served projects (see projectDirs), falling back to cwd when none are
+// listed. Duplicate paths are dropped (keyed on slug); the first survivor is the
+// default. `dataRoot` is the directory the per-project data dirs live under —
+// ./data in the repo normally, a temp dir under test (see DATA_ROOT in index.ts).
 export function parseProjects(
   dataRoot: string,
   env: Record<string, string | undefined>,
   cwd: string,
 ): Project[] {
-  const raw = env.PROJECT_DIRS ?? env.PROJECT_DIR ?? cwd
-  const paths = raw
-    .split('\n')
-    .map((s) => s.trim())
-    .filter(Boolean)
+  const paths = projectDirs(env)
   const seen = new Set<string>()
   const projects: Project[] = []
   for (const p of paths.length ? paths : [cwd]) {

@@ -123,7 +123,7 @@ earned its place:
 - **Swallow per-file errors.** One unreadable or hand-corrupted file must not stop
   the boot; skip it and carry on.
 - **Only walk `PROJECTS`.** A data directory whose project has left
-  `PROJECT_DIRS` is never visited, so its tasks stay un-migrated indefinitely.
+  the served list is never visited, so its tasks stay un-migrated indefinitely.
   That is usually fine — nothing reads them either — but it means "the migration
   has run everywhere" is only ever true of the *configured* projects.
 

@@ -82,16 +82,19 @@ try {
   // a missing dir just isn't watched
 }
 
-// Watch the specific server files the daemon imports, by parent dir + basename
-// (robust to editors that replace a file's inode on save).
-const serverByDir = new Map()
-for (const rel of WATCHED_SERVER_FILES) {
-  const abs = path.join(ROOT, rel)
+// Watch the specific server files the daemon imports, plus the project list
+// dev.mjs rewrites when the config's list changes (see projectDirs), by parent
+// dir + basename (robust to editors that replace a file's inode on save, and to
+// dev.mjs's own rename).
+const watchedFiles = WATCHED_SERVER_FILES.map((rel) => path.join(ROOT, rel))
+if (process.env.LANDER_PROJECTS_FILE) watchedFiles.push(process.env.LANDER_PROJECTS_FILE)
+const filesByDir = new Map()
+for (const abs of watchedFiles) {
   const dir = path.dirname(abs)
-  if (!serverByDir.has(dir)) serverByDir.set(dir, new Set())
-  serverByDir.get(dir).add(path.basename(abs))
+  if (!filesByDir.has(dir)) filesByDir.set(dir, new Set())
+  filesByDir.get(dir).add(path.basename(abs))
 }
-for (const [dir, bases] of serverByDir) {
+for (const [dir, bases] of filesByDir) {
   try {
     watch(dir, (_event, filename) => {
       if (filename && bases.has(path.basename(filename))) scheduleReload()

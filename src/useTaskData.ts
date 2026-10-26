@@ -25,6 +25,9 @@ import type { Project, TaskLink, TaskView, TaskWithProject } from './types'
 // from the answer (see startPoll), so this is the cadence at rest and the
 // floor under load — never a schedule that keeps firing into a backlog.
 const POLL_GAP_MS = 2000
+// The project list changes only when someone edits the config, and a reload
+// picks it up at once, so it is polled far less often.
+const PROJECTS_POLL_GAP_MS = 30_000
 
 // The client's task data: the displayed task list and its polling, the
 // installation-wide compact index used for link resolution, per-flow telemetry, and the
@@ -108,24 +111,34 @@ export function useTaskData(
     },
     [],
   )
-  // Load the project list once. Reconcile the open project against it: the
-  // routed task's project wins, then the session-restored pick if it still
-  // exists, then the first project.
+  // Poll the project list, which changes when the server restarts onto an
+  // edited config. Reconcile the open project against each new list: on the
+  // first load the routed task's project wins, then the session-restored pick
+  // if it still exists, then the first project.
   useEffect(() => {
-    fetch('/api/projects')
-      .then((r) => r.json())
-      .then((list: Project[]) => {
-        setProjects(list)
-        const all = list.map((p) => p.slug)
-        setProject((prev) =>
-          all.includes(initialProjectSlug)
-            ? initialProjectSlug
-            : all.includes(prev)
-              ? prev
-              : (all[0] ?? ''),
-        )
-      })
-      .catch(() => {})
+    let routed = initialProjectSlug
+    let last = ''
+    const loadProjects = () =>
+      fetch('/api/projects')
+        .then((r) => r.json())
+        .then((list: Project[]) => {
+          const sig = JSON.stringify(list)
+          if (sig === last) return
+          last = sig
+          setProjects(list)
+          const all = list.map((p) => p.slug)
+          const preferred = routed
+          routed = ''
+          setProject((prev) =>
+            all.includes(preferred)
+              ? preferred
+              : all.includes(prev)
+                ? prev
+                : (all[0] ?? ''),
+          )
+        })
+        .catch(() => {})
+    return startPoll(loadProjects, PROJECTS_POLL_GAP_MS)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
