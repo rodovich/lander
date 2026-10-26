@@ -80,6 +80,21 @@ describe.skipIf(!VERSION)(`agy contract (${VERSION})`, () => {
     expect(landerCall?.output).toContain('lander-contract-ok')
   })
 
+  it('fails a command that exits non-zero, with its exit code and output', async () => {
+    const root = testRoot()
+    await onGrant(undefined, { projectPath: root, rule: 'command(sh)' })
+    const turn = await driveLive(flow, {
+      root,
+      prompt: 'Call run_command once with CommandLine "sh -c \'echo exit-probe; exit 3\'", then reply "done". Do not call any other tools.',
+    })
+
+    const items = (turn.task.items ?? []) as (BlockedItem & { output?: string })[]
+    const call = items.find((it) => it.kind === 'tool' && it.name === 'run_command')
+    expect(call).toMatchObject({ status: 'failed' })
+    expect(call?.output).toContain('exit-probe')
+    expect(call?.output).not.toContain('Command exited')
+  })
+
   it('marks an unlisted command blocked and allows it on resume after onGrant', async () => {
     const root = testRoot()
     const refused = await driveLive(flow, {
