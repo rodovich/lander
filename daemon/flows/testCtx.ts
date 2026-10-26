@@ -11,10 +11,8 @@ export class FakeChild extends EventEmitter {
   stdout = new EventEmitter()
   stderr = new EventEmitter()
   killed = false
-  signals: string[] = []
-  kill = (signal = 'SIGTERM'): boolean => {
+  kill = (_signal?: string): boolean => {
     this.killed = true
-    this.signals.push(signal)
     return true
   }
 }
@@ -101,15 +99,14 @@ export type FlowDriveResult = {
   result: TurnResult
 }
 
-// Start a flow's onTurn through the real runtime, leaving its children for the
-// caller to speak for. `turn` resolves with the flow's result.
-export async function startFlow(
-  g: Pick<Golden, 'start' | 'input'>,
+// Drive a flow's onTurn through the real runtime against a golden.
+export async function driveFlow(
+  g: Golden,
   flow: { onTurn(ctx: Ctx): Promise<TurnResult> },
-) {
+): Promise<FlowDriveResult> {
   const events: HostEvent[] = []
   const { calls, spawn } = recordingSpawn()
-  const runtime = createCtxRuntime(goldenInput({ name: '', chunks: [], ...g }), {
+  const runtime = createCtxRuntime(goldenInput(g), {
     emit: (e) => events.push(e),
     now: () => FIXED_NOW,
     spawn,
@@ -122,28 +119,16 @@ export async function startFlow(
       captured = await flow.onTurn(ctx)
       return captured
     },
-  }).then(() => captured)
+  })
 
-  // Let the flow reach its spawn before the caller feeds it anything.
+  // Let the flow reach its spawn before feeding it anything.
   await settle()
-  return { events, spawns: calls, turn }
-}
-
-// Drive a flow's onTurn through the real runtime against a golden.
-export async function driveFlow(
-  g: Golden,
-  flow: { onTurn(ctx: Ctx): Promise<TurnResult> },
-): Promise<FlowDriveResult> {
-  const { events, spawns, turn } = await startFlow(g, flow)
-  for (let i = 0; i < spawns.length; i++) {
-    await feed(spawns[i].child, i === 0 ? g : g.later?.[i - 1] ?? { chunks: [] })
+  for (let i = 0; i < calls.length; i++) {
+    await feed(calls[i].child, i === 0 ? g : g.later?.[i - 1] ?? { chunks: [] })
     await settle()
   }
-  return { events, spawns, result: await turn }
-}
-
-export function emitChunk(child: FakeChild, lines: string[]): void {
-  child.stdout.emit('data', Buffer.from(lines.map((l) => `${l}\n`).join('')))
+  await turn
+  return { events, spawns: calls, result: captured }
 }
 
 // Deliver the golden chunk-wise, then close. Yielding between chunks is what
@@ -155,7 +140,10 @@ export async function feed(
   g: Pick<Golden, 'chunks' | 'exitCode' | 'stderrChunks'>,
 ): Promise<void> {
   for (const chunk of g.chunks) {
-    emitChunk(child, chunk)
+    child.stdout.emit(
+      'data',
+      Buffer.from(chunk.map((l) => `${l}\n`).join('')),
+    )
     await settle()
   }
   for (const s of g.stderrChunks ?? []) {

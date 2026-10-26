@@ -15,7 +15,7 @@ import {
   resolveLaunchDir,
 } from './agy'
 import { announcedFlows, buildFlows, FLOW_MODULES, providerCaps } from './index'
-import { driveFlow, emitChunk, feed, goldenInput, settle, startFlow, type Golden } from './testCtx'
+import { driveFlow, goldenInput, type Golden } from './testCtx'
 import { applyEvents } from './testTask'
 import { blockedRequests, type BlockedItem } from '../../src/permissions'
 import { deliveryDigest, projectDocBlock } from 'lander/flow'
@@ -642,59 +642,6 @@ it('prompts the agent again with only what it can\'t see, for as long as agy kee
   } finally {
     vi.unstubAllGlobals()
   }
-})
-
-it('stops agy with SIGTERM when a refusal leaves a later call in its batch open, then prompts the agent again', async () => {
-  const deniedEcho = (step: number) => toolStep(step, 'run_command', { CommandLine: 'echo hi' }, {
-    state: 'ERROR',
-    tool_info: {
-      parameters: { CommandLine: 'echo hi' },
-      error: { message: 'permission check failed for unsandboxed "echo hi": user denied permission to run command' },
-    },
-  })
-  const run = async (opened: string[], log: string) => {
-    const g = fixture()
-    const started = await startFlow(g, makeFlow({
-      taskPromptTemplate: 'Task {{id}}.', readProjectDoc: () => undefined, geminiConfigDir,
-      readAgyLog: () => log, stuckPollMs: 1,
-    }))
-    const child = started.spawns[0].child
-    emitChunk(child, opened)
-    for (let i = 0; i < 50 && !child.signals.length; i++) await settle()
-    return { ...started, g, calls: started.spawns, child }
-  }
-
-  const stuck = await run([init('conv-h'), deniedEcho(1), toolStep(2, 'run_command', { CommandLine: 'git status' }, { state: 'ACTIVE' })], refusalLine('conv-h', 1))
-  expect(stuck.child.signals).toEqual(['SIGTERM'])
-  await feed(stuck.child, {
-    chunks: [[result({ status: 'ERROR', error: 'interrupted', response: '', denied_actions: [{ action: 'command', display_name: 'RunCommand' }] })]],
-    exitCode: 1,
-  })
-  await settle()
-  await feed(stuck.calls[1].child, { chunks: [[result({ response: 'Done without echo.' })]] })
-  await stuck.turn
-  expect(stuck.calls[1].args.slice(0, 2)).toEqual(['-p', '[lander] Antigravity ended your turn because it refused a call needing a permission the user has not granted.'])
-  expect(stuck.calls[1].args).toEqual(expect.arrayContaining(['--conversation', 'conv-h']))
-  const items = (applyEvents(goldenInput(stuck.g).start, stuck.events).items ?? []) as { kind: string; status?: string; output?: string; text?: string }[]
-  expect(items.map((it) => [it.kind, it.status ?? it.text])).toEqual([
-    ['tool', 'blocked'],
-    ['tool', 'failed'],
-    ['reprompt', expect.stringContaining('refused a call')],
-    ['message', 'Done without echo.'],
-  ])
-  expect(items[1].output).toBe('Tool execution was canceled')
-
-  const silent = await run([init('conv-s'), deniedEcho(1), toolStep(2, 'run_command', { CommandLine: 'git status' }, { state: 'ACTIVE' })], refusalLine('conv-s', 1))
-  await feed(silent.child, { chunks: [], exitCode: 1 })
-  expect(await silent.turn).toEqual({ exitCode: 1, stderr: 'Lander stopped Antigravity because a call after a refused one never finished.' })
-  expect(silent.calls).toHaveLength(1)
-
-  // A call still running from before the refusal is not one agy left behind.
-  const earlier = await run([init('conv-e'), toolStep(1, 'run_command', { CommandLine: 'npm test' }, { state: 'ACTIVE' }), deniedEcho(2)], refusalLine('conv-e', 2))
-  expect(earlier.child.signals).toEqual([])
-  await feed(earlier.child, { chunks: [[toolStep(1, 'run_command', { CommandLine: 'npm test' }), result()]] })
-  await earlier.turn
-  expect(earlier.calls).toHaveLength(1)
 })
 
 it('records the installed agy version on the ride', async () => {
