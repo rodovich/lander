@@ -2,7 +2,7 @@ import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node
 import path from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { runAssist } from '../daemon/assist'
-import { agyLogRefusals, agyProjectFile, agyProjectId, isAgyDenial, makeFlow, onGrant } from '../daemon/flows/agy'
+import { agyLogRefusals, agyProjectFile, agyProjectId, makeFlow, onGrant } from '../daemon/flows/agy'
 import { blockedRequests, type BlockedItem } from '../src/permissions'
 import {
   TASK_PROMPT,
@@ -239,7 +239,7 @@ describe.skipIf(!VERSION)(`agy contract (${VERSION})`, () => {
     ])
   })
 
-  it('fails a killed background command with an error that is not a denial', async () => {
+  it('finishes a command when it moves to the background, and reports its kill on manage_task', async () => {
     const root = testRoot()
     await onGrant(undefined, { projectPath: root, rule: 'command(sleep)' })
     const turn = await driveLive(flow, {
@@ -252,14 +252,17 @@ describe.skipIf(!VERSION)(`agy contract (${VERSION})`, () => {
     })
 
     const items = (turn.task.items ?? []) as (BlockedItem & {
+      name?: string
       input?: string
       output?: string
     })[]
     expect(blockedRequests(items)).toEqual([])
     const sleep = items.find((it) => it.kind === 'tool' && it.input === 'sleep 120')
-    expect(sleep).toMatchObject({ status: 'failed' })
-    expect(sleep?.output).toContain('context canceled')
-    expect(isAgyDenial(sleep?.output)).toBe(false)
+    expect(sleep).toMatchObject({ status: 'ok' })
+    expect(sleep?.output).toBeUndefined()
+    const kill = items.find((it) => it.kind === 'tool' && it.name === 'manage_task')
+    expect(kill).toMatchObject({ status: 'ok' })
+    expect(kill?.output).toContain('cancelled')
   })
 
   it('clamps runAssist so an agy one-shot cannot modify the target checkout', async () => {

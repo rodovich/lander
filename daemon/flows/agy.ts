@@ -184,7 +184,7 @@ const READ_FILE_TOOLS = new Set([
 // "Action denied by user." or "permission check failed for unsandboxed …: user
 // denied permission to run command …". A call stopped mid-run fails with
 // "context canceled".
-export function isAgyDenial(message: string | undefined): boolean {
+function isAgyDenial(message: string | undefined): boolean {
   return /user denied permission|action denied/i.test(message ?? '')
 }
 
@@ -194,6 +194,16 @@ export function isAgyDenial(message: string | undefined): boolean {
 export function agyLogRefusals(log: string): { conversation: string; step: number }[] {
   return [...log.matchAll(/Tool confirmation for conversation (\S+) step (\d+) \([^)]*approved=false\)/g)]
     .map((m) => ({ conversation: m[1], step: Number(m[2]) }))
+}
+
+// agy streams a command's result only as the text it gives the model, so the
+// exit code has to be read out of it.
+const COMMAND_RESULT =
+  /^(?:The tool's output was truncated[^\n]*\n\nHere is a preview[^\n]*\n)?Command exited with code (\d+)\.\n\n(?:No output from the command\.|Command output:\n([\s\S]*))$/
+
+function agyCommandResult(text: string): { exitCode: number; output: string } | undefined {
+  const m = COMMAND_RESULT.exec(text)
+  return m ? { exitCode: Number(m[1]), output: m[2] ?? '' } : undefined
 }
 
 function readFileIfPresent(file: string): string | undefined {
@@ -639,8 +649,13 @@ async function reduceAgy(
           tools.set(event.step_index, entry)
         }
         if (event.state !== 'ACTIVE') {
-          const rawOutput = info?.output ?? info?.error?.message
-          const isError = event.state === 'ERROR' || !!info?.error
+          const command = entry.name === 'run_command' && info?.output !== undefined
+            ? agyCommandResult(info.output)
+            : undefined
+          const rawOutput = command
+            ? (command.exitCode ? `Exit code ${command.exitCode}\n${command.output}` : command.output) || undefined
+            : info?.output ?? info?.error?.message
+          const isError = event.state === 'ERROR' || !!info?.error || !!command?.exitCode
           entry.denied = isError && isAgyDenial(info?.error?.message)
           entry.handle.result({
             ...(rawOutput !== undefined

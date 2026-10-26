@@ -163,10 +163,32 @@ it('reduces the recorded Antigravity stream into a session, tool lifecycle, usag
   expect(driven.result.exitCode).toBe(0)
 })
 
+it('shows a command\'s output without agy\'s exit-code header, and fails it on a non-zero exit', async () => {
+  const done = (step: number, output: string) =>
+    toolStep(step, 'run_command', undefined, { tool_info: { output } })
+  const g = fixture([[
+    done(1, 'Command exited with code 0.\n\nCommand output:\nlander-ok\r\n'),
+    done(2, 'Command exited with code 3.\n\nCommand output:\nout\r\nerr\r\n'),
+    done(3, 'Command exited with code 0.\n\nNo output from the command.'),
+    done(4, 'The tool\'s output was truncated due to being too long. You can find the full output in a file at file:///brain/c/.system_generated/steps/6/output.txt.\n\nHere is a preview with the middle of the output truncated:\nCommand exited with code 0.\n\nCommand output:\n1\r\n2\r\n3\r\n4\r\n\n<truncated 19049 of 28939 bytes from the middle of the output>\n\n5000\r\n'),
+    result(),
+  ]])
+  const driven = await driveFlow(g, flow())
+  const items = (applyEvents(goldenInput(g).start, driven.events).items ?? []) as { kind: string; status?: string; output?: string }[]
+  const tools = items.filter((it) => it.kind === 'tool')
+  expect(tools.slice(0, 3).map((it) => [it.status, it.output])).toEqual([
+    ['ok', 'lander-ok'],
+    ['failed', 'Exit code 3\nout\r\nerr'],
+    ['ok', undefined],
+  ])
+  expect(tools[3].status).toBe('ok')
+  expect(tools[3].output).toMatch(/^1\r\n2\r\n/)
+})
+
 it('formats tool inputs, permission rules, file-edit diffs, subagent summaries, and truncated outputs', async () => {
   const g = fixture([[
     toolStep(1, 'run_command', { CommandLine: 'npm test\nnpm run typecheck' }, { state: 'ACTIVE' }),
-    toolStep(1, 'run_command', undefined, { tool_info: { output: 'line 1\nline 2\nline 3\nline 4' } }),
+    toolStep(1, 'run_command', undefined, { tool_info: { output: 'Command exited with code 0.\n\nCommand output:\nline 1\nline 2\nline 3\nline 4' } }),
     toolStep(2, 'view_file', { AbsolutePath: '/repo/src/app.ts', StartLine: 1, EndLine: 20 }),
     toolStep(3, 'list_dir', { DirectoryPath: '/repo/src' }),
     toolStep(4, 'grep_search', { Query: 'makeFlow', SearchPath: '/repo/daemon' }),
