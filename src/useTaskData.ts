@@ -9,7 +9,7 @@ import {
 } from './api'
 import { useDebounced, useSessionState } from './hooks'
 import type { TaskLinkResolver } from './markdown'
-import { startPoll } from './poll'
+import { startPoll, type Poll } from './poll'
 import { MonotonicRequestGate } from './requestOrder'
 import { taskHref, taskKey, taskKeyOf, type TaskRef } from './taskRef'
 import {
@@ -154,7 +154,7 @@ export function useTaskData(
           )
         })
         .catch(() => {})
-    return startPoll(loadProjects, PROJECTS_POLL_GAP_MS)
+    return startPoll(loadProjects, PROJECTS_POLL_GAP_MS).stop
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -231,20 +231,32 @@ export function useTaskData(
   // ride along), with the watched task whole in place of its summary, and
   // commit them. Shared by the 2s poll and the action paths that reconcile
   // after a mutation — so every part of the payload lands everywhere. The epoch
-  // guard drops a stale in-flight load once the scope it was issued under
-  // (open project, archived flag, search, watched task) has changed: the moral
-  // equivalent of the old poll effect's `canceled` flag, extended to the
-  // action-path refreshes. Resolves with the open task's fetch failure, if any,
+  // guard drops a stale in-flight load once the scope it was issued under (open
+  // project, archived flag) has changed: the moral equivalent of the old poll
+  // effect's `canceled` flag, extended to the action-path refreshes. A change
+  // of search or watched task doesn't drop the poll's load in flight: that load
+  // commits under the old values, and the next one starts as it settles, so the
+  // two never overlap. Resolves with the open task's fetch failure, if any,
   // for the poll to report; the actions' `refresh` drops it, since thrown it
   // would make an action whose own write succeeded look like it had failed.
   const epochRef = useRef(0)
   const refreshOrderRef = useRef(new MonotonicRequestGate())
+  const searchRequestRef = useRef(searchRequest)
+  searchRequestRef.current = searchRequest
+  const watchedRef = useRef(watched)
+  watchedRef.current = watched
+  const pollRef = useRef<Poll | null>(null)
+  useEffect(() => {
+    pollRef.current?.runNow()
+  }, [searchRequest, watched])
   const load = useCallback(async (): Promise<unknown> => {
     const epoch = epochRef.current
     const requestOrder = refreshOrderRef.current
     const request = requestOrder.begin()
     const mutationFence = taskMutationFenceRef.current
     const issuedAt = mutationFence.clock
+    const searchRequest = searchRequestRef.current
+    const watched = watchedRef.current
     const watchedKey = watched && taskKey(watched.projectSlug, watched.id)
     try {
       const [{ tasks, telemetry, search }, detail] = await Promise.all([
@@ -290,7 +302,7 @@ export function useTaskData(
       throw error
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project, archived, searchRequest, watched])
+  }, [project, archived])
   const refresh = useCallback(async () => {
     await load()
   }, [load])
@@ -307,7 +319,7 @@ export function useTaskData(
     // the API server, which self-heals in about two seconds. A failure that
     // isn't transient keeps being re-reported by every cycle that follows it, so
     // nothing here hides a server that is actually down.
-    const stop = startPoll(
+    const poll = startPoll(
       () =>
         load().then(
           (detailError) => onPollError(detailError ? errorMessage(detailError) : null),
@@ -315,10 +327,12 @@ export function useTaskData(
         ),
       POLL_GAP_MS,
     )
+    pollRef.current = poll
     return () => {
       epochRef.current++
       refreshOrderRef.current.invalidate()
-      stop()
+      pollRef.current = null
+      poll.stop()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load])
@@ -343,7 +357,7 @@ export function useTaskData(
         // Link resolution is presentational; keep the last good projection.
       }
     }
-    const stop = startPoll(refreshLinks, POLL_GAP_MS)
+    const { stop } = startPoll(refreshLinks, POLL_GAP_MS)
     return () => {
       canceled = true
       requestOrder.invalidate()

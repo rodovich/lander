@@ -10,23 +10,37 @@
 // Runs `job` at once, then `delayMs` after it resolves OR rejects — the job owns
 // its own error reporting, and a failure must not end the loop. stop() cancels
 // the pending timer and refuses to rearm on a settlement that lands afterwards.
-export function startPoll(
-  job: () => Promise<unknown>,
-  delayMs: number,
-): () => void {
+// runNow() skips the rest of the gap; asked while the job is running, it runs
+// the job again as soon as that one settles, never alongside it.
+export type Poll = { stop: () => void; runNow: () => void }
+
+export function startPoll(job: () => Promise<unknown>, delayMs: number): Poll {
   let stopped = false
+  let running = false
+  let again = false
   let timer: ReturnType<typeof setTimeout> | undefined
-  const arm = () => {
+  const settled = () => {
+    running = false
     if (stopped) return
-    timer = setTimeout(run, delayMs)
+    if (again) run()
+    else timer = setTimeout(run, delayMs)
   }
   const run = () => {
-    timer = undefined
-    void Promise.resolve().then(job).then(arm, arm)
+    clearTimeout(timer)
+    running = true
+    again = false
+    void Promise.resolve().then(job).then(settled, settled)
   }
   run()
-  return () => {
-    stopped = true
-    if (timer) clearTimeout(timer)
+  return {
+    stop: () => {
+      stopped = true
+      clearTimeout(timer)
+    },
+    runNow: () => {
+      if (stopped) return
+      if (running) again = true
+      else run()
+    },
   }
 }
