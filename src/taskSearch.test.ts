@@ -159,6 +159,10 @@ describe('conversation match listing', () => {
     expect(match.snippet).toContain('the Permissioning step')
   })
 
+  it('matches nothing for an empty query', () => {
+    expect(ids([task('a', [user('u1', 'anything')])], '')).toEqual([])
+  })
+
   it('starts the excerpt without an ellipsis when the match is near the start', () => {
     const t = task('b', [user('u1', 'needs permission first')])
     expect(matchesOf(t, 'permission')!.list(1)[0].snippet).toBe(
