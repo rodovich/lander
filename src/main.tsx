@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
+import { ErrorBoundary } from './errorBoundary'
 import './styles.css'
 
 if (import.meta.env.DEV) {
@@ -11,6 +12,8 @@ if (import.meta.env.DEV) {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary label="lander">
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 )

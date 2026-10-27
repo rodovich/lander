@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react'
 import { AskForm } from './asks'
 import { MessageAttachments } from './attachments'
+import { ErrorBoundary } from './errorBoundary'
 import { LifecycleNote } from './lifecycleNote'
 import { MessageBubble } from './messageBubble'
 import { MessageText } from './messageText'
@@ -393,7 +394,7 @@ export const Conversation = memo(function Conversation({
           open-at-first-unread scroll can find it by its index. */}
       {timeline.map((entry) => (
         <div key={entryKey(entry)} className="timeline-entry">
-          {renderEntry(entry)}
+          <ErrorBoundary label="this entry">{() => renderEntry(entry)}</ErrorBoundary>
         </div>
       ))}
       {/* No ride output yet but the task is riding: the assistant has been

@@ -3,6 +3,7 @@ import { Composer } from './composer'
 import { Conversation, type ConversationReveal } from './conversation'
 import { conversationMarkdown } from './conversationMarkdown'
 import { DetailHeader } from './detailHeader'
+import { ErrorBoundary } from './errorBoundary'
 import { dataTransferHasFiles } from './fileDrop'
 import { usePersistentState, useSessionState } from './hooks'
 import { HooksPanel } from './hooksPanel'
@@ -298,24 +299,26 @@ export function App() {
       />
       <div className="layout">
         <div className="sidebar">
-          <TaskList
-            shape={listShape}
-            tasksEmpty={tasks.length === 0}
-            hasProjects={projects.length > 0}
-            view={view}
-            setView={setView}
-            timeFilter={timeFilter}
-            setTimeFilter={setTimeFilter}
-            filter={filter}
-            setFilter={setFilter}
-            selected={selected}
-            onSelect={selectTask}
-            onFocusChange={setListFocused}
-            onTaskAction={runTaskAction}
-            onArchiveSection={archiveSection}
-            onOpenMatch={openMatch}
-            onRequestMatches={requestMatches}
-          />
+          <ErrorBoundary label="the task list">
+            <TaskList
+              shape={listShape}
+              tasksEmpty={tasks.length === 0}
+              hasProjects={projects.length > 0}
+              view={view}
+              setView={setView}
+              timeFilter={timeFilter}
+              setTimeFilter={setTimeFilter}
+              filter={filter}
+              setFilter={setFilter}
+              selected={selected}
+              onSelect={selectTask}
+              onFocusChange={setListFocused}
+              onTaskAction={runTaskAction}
+              onArchiveSection={archiveSection}
+              onOpenMatch={openMatch}
+              onRequestMatches={requestMatches}
+            />
+          </ErrorBoundary>
 
           <ResizeHandle
             height={newTaskHeight}
@@ -324,57 +327,67 @@ export function App() {
             reserveTop={160}
             label="Resize new task area"
           />
-          <NewTaskForm
-            targetSlug={project}
-            flow={newTaskFlow}
-            setFlow={setNewTaskFlow}
-            height={newTaskHeight}
-            setError={setError}
-            admit={admitTask}
-            onCreated={onTaskCreated}
-          />
+          <ErrorBoundary label="the new task form">
+            <NewTaskForm
+              targetSlug={project}
+              flow={newTaskFlow}
+              setFlow={setNewTaskFlow}
+              height={newTaskHeight}
+              setError={setError}
+              admit={admitTask}
+              onCreated={onTaskCreated}
+            />
+          </ErrorBoundary>
 
-          <TelemetryPanel
-            // Keyed by flow name — the telemetry cache is keyed that way
-            // server-side now.
-            items={telemetry[(current && taskFlowName(current)) ?? newTaskFlow] ?? []}
-          />
+          <ErrorBoundary label="telemetry">
+            <TelemetryPanel
+              // Keyed by flow name — the telemetry cache is keyed that way
+              // server-side now.
+              items={telemetry[(current && taskFlowName(current)) ?? newTaskFlow] ?? []}
+            />
+          </ErrorBoundary>
         </div>
 
         <div className="detail">
           {panel === 'stats' && project ? (
-            <StatsPanel
-              slug={project}
-              projectName={lastPathComponent(pathBySlug.get(project) ?? project)}
-              onClose={leavePanel}
-            />
+            <ErrorBoundary key="stats" label="stats" resetKey={project}>
+              <StatsPanel
+                slug={project}
+                projectName={lastPathComponent(pathBySlug.get(project) ?? project)}
+                onClose={leavePanel}
+              />
+            </ErrorBoundary>
           ) : panel === 'hooks' && project ? (
-            <HooksPanel slug={project} onClose={leavePanel} />
+            <ErrorBoundary key="hooks" label="hooks" resetKey={project}>
+              <HooksPanel slug={project} onClose={leavePanel} />
+            </ErrorBoundary>
           ) : current ? (
             <TaskLinkProvider value={resolveTaskLink}>
-              <DetailHeader
-                task={current}
-                grants={grants}
-                retitling={retitling}
-                copyMarkdown={copyMarkdown}
-                onTaskAction={runTaskAction}
-                saveTitle={saveTitle}
-                generateTitle={generateTitle}
-                allowTool={allowTool}
-                onRetry={tryAgain}
-              />
-              <Conversation
-                task={current}
-                grants={grants}
-                disclosure={disclosure}
-                reveal={reveal}
-                answering={answeringBy[taskKeyOf(current)] ?? false}
-                onReadUpTo={setReadUpTo}
-                allowTool={allowTool}
-                answerAsk={answerAsk}
-                onTaskAction={runTaskAction}
-                onRetry={tryAgain}
-              />
+              <ErrorBoundary label="this task" resetKey={taskKeyOf(current)}>
+                <DetailHeader
+                  task={current}
+                  grants={grants}
+                  retitling={retitling}
+                  copyMarkdown={copyMarkdown}
+                  onTaskAction={runTaskAction}
+                  saveTitle={saveTitle}
+                  generateTitle={generateTitle}
+                  allowTool={allowTool}
+                  onRetry={tryAgain}
+                />
+                <Conversation
+                  task={current}
+                  grants={grants}
+                  disclosure={disclosure}
+                  reveal={reveal}
+                  answering={answeringBy[taskKeyOf(current)] ?? false}
+                  onReadUpTo={setReadUpTo}
+                  allowTool={allowTool}
+                  answerAsk={answerAsk}
+                  onTaskAction={runTaskAction}
+                  onRetry={tryAgain}
+                />
+              </ErrorBoundary>
               <ResizeHandle
                 height={composerHeight}
                 setHeight={setComposerHeight}
@@ -383,7 +396,9 @@ export function App() {
                 label="Resize reply area"
               />
               {draft && (
-                <Composer task={current} height={composerHeight} draft={draft} />
+                <ErrorBoundary label="the reply box" resetKey={taskKeyOf(current)}>
+                  <Composer task={current} height={composerHeight} draft={draft} />
+                </ErrorBoundary>
               )}
             </TaskLinkProvider>
           ) : (
