@@ -178,40 +178,4 @@ describe('task mutation fence', () => {
     const again = task('new', 'riding', { title: 'again' })
     expect(insertTask(insertTask([], first), again)).toEqual([again])
   })
-
-  it('preserves a hydrated conversation across summary refreshes until updatedAt changes', () => {
-    const fence = createTaskMutationFence()
-    const full = task('a', 'landed', {
-      updatedAt: '2026-01-01T00:00:00.000Z',
-      items: [
-        {
-          id: 'i1',
-          at: '2026-01-01T00:00:00.000Z',
-          kind: 'message',
-          role: 'user',
-          text: 'hello',
-        },
-      ],
-      rides: [{ id: 'r1', startedAt: '2026-01-01T00:00:00.000Z', endedAt: '2026-01-01T00:00:00.000Z' }],
-    })
-
-    const refreshed = mergeTaskRefresh(fence, fence.clock, [full], [
-      task('a', 'landed', {
-        items: undefined,
-        updatedAt: '2026-01-01T00:00:00.000Z',
-        readThrough: '2026-01-01T00:01:00.000Z',
-      }),
-    ])
-    expect(refreshed[0].items).toEqual(full.items)
-    expect(refreshed[0].rides).toEqual(full.rides)
-    expect(refreshed[0].readThrough).toBe('2026-01-01T00:01:00.000Z')
-
-    const invalidated = mergeTaskRefresh(fence, fence.clock, refreshed, [
-      task('a', 'landed', {
-        items: undefined,
-        updatedAt: '2026-01-01T00:02:00.000Z',
-      }),
-    ])
-    expect(invalidated[0].items).toBeUndefined()
-  })
 })

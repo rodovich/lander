@@ -49,9 +49,6 @@ function conversationParts(task: { items?: Item[]; rides?: Ride[] }): Part[] {
   return parts
 }
 
-// How many of a task's matches a search lists until asked for more.
-export const MATCHES_SHOWN = 3
-
 // One place a query matched: the item it's in, which of that item's matches it
 // is (0-based), and a one-line excerpt of the text around it.
 export type ConversationMatch = {
@@ -62,6 +59,9 @@ export type ConversationMatch = {
 
 // A task's matches for one query: how many there are, and the first few.
 export type TaskMatches = { count: number; list: ConversationMatch[] }
+
+// The `search` field of a task-list response, its matches keyed by task id.
+export type TaskSearch = { query: string; matches: Record<string, TaskMatches> }
 
 // How much text an excerpt keeps on either side of the match. The list row
 // ends in an ellipsis, so the lead is short enough to keep the match in view.

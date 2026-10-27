@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { loadShownTasks, loadTask, loadTaskLinks, type FlowTelemetry } from './api'
-import { useSessionState } from './hooks'
+import {
+  loadShownTasks,
+  loadTask,
+  loadTaskLinks,
+  type FlowTelemetry,
+  type TaskSearchRequest,
+  type TaskSearchResult,
+} from './api'
+import { useDebounced, useSessionState } from './hooks'
 import type { TaskLinkResolver } from './markdown'
 import { startPoll } from './poll'
 import { MonotonicRequestGate } from './requestOrder'
-import { taskHref, taskKeyOf } from './taskRef'
+import { taskHref, taskKey, taskKeyOf, type TaskRef } from './taskRef'
 import {
   admitTask as admitToFence,
   beginTaskPatch,
@@ -28,15 +35,24 @@ const POLL_GAP_MS = 2000
 // The project list changes only when someone edits the config, and a reload
 // picks it up at once, so it is polled far less often.
 const PROJECTS_POLL_GAP_MS = 30_000
+// How long the search box must sit still before its query goes to the server.
+const SEARCH_SETTLE_MS = 150
 
-// The client's task data: the displayed task list and its polling, the
-// installation-wide compact index used for link resolution, per-flow telemetry, and the
-// project list with the session's open project. Owns no view state beyond
-// `project` — the view/time/search filters stay with the caller.
+const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
+// The client's task data: the displayed task list and its polling, the open
+// task's conversation, the server's search of the listed conversations, the
+// installation-wide compact index used for link resolution, per-flow
+// telemetry, and the project list with the session's open project. Of the view
+// state it holds only what the requests carry: `project`, which task is open
+// (as the caller reports it through watchTask), and how many of a task's
+// matches the list asked for. The view/time filters and the search box stay
+// with the caller, which passes in the box's query (trimmed and lowercased).
 export function useTaskData(
   view: TaskView,
   onPollError: (message: string | null) => void,
   initialProjectSlug = '',
+  query = '',
 ) {
   const [tasks, setTasks] = useState<TaskWithProject[]>([])
   // Active + archived links across every configured project, independent of
@@ -163,36 +179,106 @@ export function useTaskData(
     [project, archived],
   )
 
-  // Load the shown tasks (and the telemetry snapshot that rides along) and
+  // The task whose conversation is on screen. The list arrives as summaries,
+  // so this one task is fetched whole alongside each list load.
+  const [watched, setWatched] = useState<TaskRef | null>(null)
+  const watchTask = useCallback((task: TaskWithProject | null) => {
+    setWatched((prev) =>
+      !task
+        ? null
+        : prev?.projectSlug === task.projectSlug && prev.id === task.id
+          ? prev
+          : { projectSlug: task.projectSlug, id: task.id },
+    )
+  }, [])
+
+  // The search the list load runs, and what it last found. A task's match list
+  // runs past the server's default only once the list asks for more of it
+  // (requestMatches), and only for the query it asked under.
+  const searchQuery = useDebounced(query, SEARCH_SETTLE_MS)
+  const [matchLimits, setMatchLimits] = useState<{
+    query: string
+    byKey: Map<string, TaskSearchRequest['limits'][number]>
+  }>({ query: '', byKey: new Map() })
+  const searchRequest = useMemo<TaskSearchRequest | undefined>(
+    () =>
+      searchQuery
+        ? {
+            query: searchQuery,
+            limits:
+              matchLimits.query === searchQuery ? [...matchLimits.byKey.values()] : [],
+          }
+        : undefined,
+    [searchQuery, matchLimits],
+  )
+  const requestMatches = useCallback(
+    (task: TaskWithProject, limit: number) => {
+      setMatchLimits((prev) => {
+        const byKey = new Map(prev.query === searchQuery ? prev.byKey : [])
+        byKey.set(taskKeyOf(task), {
+          projectSlug: task.projectSlug,
+          id: task.id,
+          limit,
+        })
+        return { query: searchQuery, byKey }
+      })
+    },
+    [searchQuery],
+  )
+  const [search, setSearch] = useState<TaskSearchResult | null>(null)
+
+  // Load the shown tasks (and the telemetry snapshot and search results that
+  // ride along), with the watched task whole in place of its summary, and
   // commit them. Shared by the 2s poll and the action paths that reconcile
-  // after a mutation — so both halves of the payload land everywhere. The epoch
+  // after a mutation — so every part of the payload lands everywhere. The epoch
   // guard drops a stale in-flight load once the scope it was issued under
-  // (open project, archived flag) has changed: the moral equivalent of the old
-  // poll effect's `canceled` flag, extended to the action-path refreshes.
+  // (open project, archived flag, search, watched task) has changed: the moral
+  // equivalent of the old poll effect's `canceled` flag, extended to the
+  // action-path refreshes. Resolves with the open task's fetch failure, if any,
+  // for the poll to report; the actions' `refresh` drops it, since thrown it
+  // would make an action whose own write succeeded look like it had failed.
   const epochRef = useRef(0)
   const refreshOrderRef = useRef(new MonotonicRequestGate())
-  const loadingDetailsRef = useRef(new Set<string>())
-  const refresh = useCallback(async () => {
+  const load = useCallback(async (): Promise<unknown> => {
     const epoch = epochRef.current
     const requestOrder = refreshOrderRef.current
     const request = requestOrder.begin()
     const mutationFence = taskMutationFenceRef.current
     const issuedAt = mutationFence.clock
+    const watchedKey = watched && taskKey(watched.projectSlug, watched.id)
     try {
-      const { tasks, telemetry } = await loadShownTasks([project], archived, {
-        summary: archived,
-      })
+      const [{ tasks, telemetry, search }, detail] = await Promise.all([
+        loadShownTasks([project], archived, searchRequest),
+        watched
+          ? loadTask(watched.projectSlug, watched.id).then(
+              (task) => ({ task }),
+              (error: unknown) => ({ error }),
+            )
+          : null,
+      ])
       if (
         refreshScope !== refreshScopeRef.current ||
         epoch !== epochRef.current ||
         !requestOrder.settle(request)
       )
-        return
-      setTasks((current) =>
-        mergeTaskRefresh(mutationFence, issuedAt, current, tasks),
-      )
+        return null
+      setTasks((current) => {
+        // A failed detail keeps the conversation already on screen under the
+        // fresh summary, rather than blanking the open task for a cycle.
+        const prev = current.find((c) => taskKeyOf(c) === watchedKey)
+        const shown = tasks.map((t) =>
+          !detail || taskKeyOf(t) !== watchedKey
+            ? t
+            : 'task' in detail
+              ? detail.task
+              : { ...t, items: prev?.items, rides: prev?.rides },
+        )
+        return mergeTaskRefresh(mutationFence, issuedAt, current, shown)
+      })
       setTelemetry(telemetry)
+      setSearch(search)
       hasLoadedRef.current = true
+      return detail && 'error' in detail ? detail.error : null
     } catch (error) {
       // A stale failure must not paint an error over a newer successful poll.
       if (
@@ -200,38 +286,14 @@ export function useTaskData(
         epoch !== epochRef.current ||
         !requestOrder.settle(request)
       )
-        return
+        return null
       throw error
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project, archived])
-
-  const loadTaskDetail = useCallback(
-    (task: TaskWithProject | null) => {
-      if (!task || task.items !== undefined) return
-      const key = taskKeyOf(task)
-      if (loadingDetailsRef.current.has(key)) return
-      loadingDetailsRef.current.add(key)
-      const epoch = epochRef.current
-      void loadTask(task.projectSlug, task.id).then(
-        (loaded) => {
-          loadingDetailsRef.current.delete(key)
-          if (epoch !== epochRef.current) return
-          setTasks((current) => {
-            const prev = current.find((t) => taskKeyOf(t) === key)
-            if (!prev || prev.items !== undefined) return current
-            return replaceTask(current, key, loaded)
-          })
-        },
-        (e) => {
-          loadingDetailsRef.current.delete(key)
-          if (epoch !== epochRef.current) return
-          onPollError(e.message ?? String(e))
-        },
-      )
-    },
-    [onPollError],
-  )
+  }, [project, archived, searchRequest, watched])
+  const refresh = useCallback(async () => {
+    await load()
+  }, [load])
 
   useEffect(() => {
     if (project === '') return
@@ -247,20 +309,19 @@ export function useTaskData(
     // nothing here hides a server that is actually down.
     const stop = startPoll(
       () =>
-        refresh().then(
-          () => onPollError(null),
-          (e) => onPollError(e.message ?? String(e)),
+        load().then(
+          (detailError) => onPollError(detailError ? errorMessage(detailError) : null),
+          (e) => onPollError(errorMessage(e)),
         ),
       POLL_GAP_MS,
     )
     return () => {
       epochRef.current++
       refreshOrderRef.current.invalidate()
-      loadingDetailsRef.current.clear()
       stop()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refresh])
+  }, [load])
 
   // Maintain the installation-wide compact projection for task references.
   // The ETag makes unchanged 2s polls bodyless, while polling at the displayed
@@ -368,7 +429,9 @@ export function useTaskData(
     project,
     setProject,
     refresh,
-    loadTaskDetail,
+    watchTask,
+    search,
+    requestMatches,
     beginTaskMutation,
     finishTaskMutation,
     beginTaskRemoval,

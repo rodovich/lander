@@ -1,4 +1,4 @@
-import { Fragment, memo, useEffect, useRef, useState } from 'react'
+import { Fragment, memo, useEffect, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import {
   DATE_CATEGORY_LABELS,
@@ -15,9 +15,8 @@ import { tick } from './perf'
 import { taskKeyOf } from './taskRef'
 import { TaskRow } from './taskRow'
 import type { TaskListShape, TaskRow as ListRow } from './taskRows'
-import type { ConversationMatch } from './taskSearch'
 import type { TaskView, TaskWithProject, TimeFilter } from './types'
-import { MATCHES_SHOWN } from '../shared/conversationSearch'
+import type { ConversationMatch } from '../shared/conversationSearch'
 
 const TASK_VIEWS: TaskView[] = ['inbox', 'unread', 'archived']
 const TIME_FILTERS: TimeFilter[] = ['today', 'week', 'older', 'any']
@@ -113,6 +112,7 @@ export const TaskList = memo(function TaskList({
   onTaskAction,
   onArchiveSection,
   onOpenMatch,
+  onRequestMatches,
 }: {
   shape: TaskListShape
   // Whether the unfiltered task list is empty (distinguishes "No tasks yet"
@@ -133,6 +133,8 @@ export const TaskList = memo(function TaskList({
   onArchiveSection: (targets: TaskWithProject[]) => void
   // Opens a task at one of its search matches.
   onOpenMatch: (task: TaskWithProject, match: ConversationMatch) => void
+  // Asks the search to list up to `limit` of a task's matches.
+  onRequestMatches: (task: TaskWithProject, limit: number) => void
 }) {
   // Opt-in profiling (see perf.ts): count re-renders of the list pane
   // separately from App's own churn.
@@ -161,31 +163,21 @@ export const TaskList = memo(function TaskList({
   // numbered during render.
   const stopRefs = useRef<(HTMLLIElement | null)[]>([])
   const stopCountRef = useRef(0)
-  // A stop to focus once the next render lands: where "Show N more" stood,
-  // which the first of the newly shown matches takes over.
-  const pendingFocusRef = useRef<number | null>(null)
+  // After "Show N more", the task whose newly listed matches should take focus
+  // once they arrive: the first of them, at index `from` in its match list.
+  const pendingFocusRef = useRef<{
+    key: string
+    query: string
+    from: number
+  } | null>(null)
+  let arrivedStop: number | null = null
   useEffect(() => {
-    if (pendingFocusRef.current == null) return
-    stopRefs.current[pendingFocusRef.current]?.focus()
+    if (arrivedStop == null) return
+    stopRefs.current[arrivedStop]?.focus()
     pendingFocusRef.current = null
   })
   const taskListRef = useRef<HTMLUListElement>(null)
 
-  // How many matches each task shows, by task key, for the query they were
-  // shown under — a new query starts every task back at the default.
-  const [matchLimits, setMatchLimits] = useState<{
-    query: string
-    byTask: Map<string, number>
-  }>({ query: '', byTask: new Map() })
-  const matchLimit = (key: string) =>
-    (matchLimits.query === query ? matchLimits.byTask.get(key) : undefined) ??
-    MATCHES_SHOWN
-  function showMoreMatches(key: string, stop: number) {
-    const byTask = new Map(matchLimits.query === query ? matchLimits.byTask : [])
-    byTask.set(key, matchLimit(key) + MATCHES_MORE)
-    setMatchLimits({ query, byTask })
-    pendingFocusRef.current = stop
-  }
   // A zero-height, non-sticky anchor sits just before each status header, keyed
   // by status, so the count chips can scroll its section to the top. We can't
   // measure the header itself: the headers all share top:0, so a header you've
@@ -342,10 +334,13 @@ export const TaskList = memo(function TaskList({
           const stop = stops++
           // While searching, the task's conversation matches follow it as
           // subrows: the first few, then a link to show more.
-          const shown = matches?.list(matchLimit(row.key)) ?? []
+          const shown = matches?.list ?? []
           const more = matches
             ? Math.min(matches.count - shown.length, MATCHES_MORE)
             : 0
+          const pending = pendingFocusRef.current
+          const pendingFocus =
+            pending?.key === row.key && pending.query === query ? pending : null
           return (
             <Fragment key={row.key}>
               <TaskRow
@@ -363,6 +358,7 @@ export const TaskList = memo(function TaskList({
               />
               {shown.map((match, mi) => {
                 const matchStop = stops++
+                if (pendingFocus?.from === mi) arrivedStop = matchStop
                 const open = () => onOpenMatch(task, match)
                 return (
                   <ListSubrow
@@ -380,7 +376,14 @@ export const TaskList = memo(function TaskList({
               {more > 0 &&
                 (() => {
                   const moreStop = stops++
-                  const showMore = () => showMoreMatches(row.key, moreStop)
+                  const showMore = () => {
+                    pendingFocusRef.current = {
+                      key: row.key,
+                      query,
+                      from: shown.length,
+                    }
+                    onRequestMatches(task, shown.length + MATCHES_MORE)
+                  }
                   return (
                     <ListSubrow
                       link

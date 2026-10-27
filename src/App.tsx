@@ -15,8 +15,8 @@ import { StatsPanel } from './statsPanel'
 import { TaskList } from './taskList'
 import { TaskLinkProvider } from './taskLinkContext'
 import { buildTaskRows } from './taskRows'
-import type { ConversationMatch } from './taskSearch'
 import { TelemetryPanel } from './telemetry'
+import type { ConversationMatch } from '../shared/conversationSearch'
 import { buildTimeline } from '../shared/timeline'
 import { useReadMarker, useViewingState } from './useReadMarker'
 import { useTaskActions } from './useTaskActions'
@@ -56,8 +56,12 @@ export function App() {
   // gap, which is faster than it can be read.
   const [pollError, setPollError] = useState<string | null>(null)
   const initialTaskRef = useRef<TaskRef | null>(taskRefFromPath())
-  // The task data proper: the displayed list and its polls, per-flow telemetry,
-  // projects and the session's open project, and mention-link resolution.
+  // The list search box, session-scoped alongside the other list filters.
+  const [filter, setFilter] = useSessionState('lander:filter', '')
+  const query = filter.trim().toLowerCase()
+  // The task data proper: the displayed list and its polls, the open task's
+  // conversation, the server's search, per-flow telemetry, projects and the
+  // session's open project, and mention-link resolution.
   const {
     tasks,
     tasksRef,
@@ -66,7 +70,9 @@ export function App() {
     project,
     setProject,
     refresh,
-    loadTaskDetail,
+    watchTask,
+    search,
+    requestMatches,
     beginTaskMutation,
     finishTaskMutation,
     beginTaskRemoval,
@@ -76,7 +82,7 @@ export function App() {
     resolveTaskLink,
     taskLinks,
     taskLinksLoaded,
-  } = useTaskData(view, setPollError, initialTaskRef.current?.projectSlug)
+  } = useTaskData(view, setPollError, initialTaskRef.current?.projectSlug, query)
   // The open task, readable by the actions at call time. Assigned below, once
   // the effective selection is derived from the shaped list.
   const currentRef = useRef<TaskWithProject | null>(null)
@@ -101,8 +107,6 @@ export function App() {
     finishTaskRemoval,
     setError,
   })
-  // The list search box, session-scoped alongside the other list filters.
-  const [filter, setFilter] = useSessionState('lander:filter', '')
   // Which navbar panel (stats, or the open project's hook settings) fills the
   // detail pane in place of the conversation, if any. Not persisted: it is a
   // place you go, not a mode the app should still be in tomorrow.
@@ -162,17 +166,17 @@ export function App() {
   // every 2s), so the time bucketing still tracks the wall clock while
   // unrelated renders — scroll flips, menu state — reuse the shape and let the
   // memoized TaskList hold still.
-  const query = filter.trim().toLowerCase()
   const listShape = useMemo(
     () =>
       buildTaskRows(tasks, {
         view,
         timeFilter,
         query,
+        matches: search?.matches ?? null,
         stickyUnread,
         now: new Date(),
       }),
-    [tasks, view, timeFilter, query, stickyUnread],
+    [tasks, view, timeFilter, query, search, stickyUnread],
   )
   const { orderedTasks } = listShape
 
@@ -196,8 +200,8 @@ export function App() {
   })
   currentRef.current = current
   useEffect(() => {
-    loadTaskDetail(current)
-  }, [current, loadTaskDetail])
+    watchTask(current)
+  }, [current, watchTask])
 
   // The search match last opened from the list, which the conversation brings
   // into view while that task stays open and the query stands.
@@ -207,13 +211,21 @@ export function App() {
   } | null>(null)
   const openMatch = useCallback(
     (task: TaskWithProject, match: ConversationMatch) => {
+      // The query the match was found under. It can trail the search box, and
+      // then the reveal below doesn't apply: the match's occurrence counts that
+      // query's hits, not the box's.
+      const foundUnder = search?.query ?? query
       setOpenedMatch({
         key: taskKeyOf(task),
-        reveal: { itemId: match.itemId, occurrence: match.occurrence, query },
+        reveal: {
+          itemId: match.itemId,
+          occurrence: match.occurrence,
+          query: foundUnder,
+        },
       })
       selectTask(task.id, task.projectSlug)
     },
-    [query, selectTask],
+    [search, query, selectTask],
   )
   const reveal =
     openedMatch &&
@@ -299,6 +311,7 @@ export function App() {
             onTaskAction={runTaskAction}
             onArchiveSection={archiveSection}
             onOpenMatch={openMatch}
+            onRequestMatches={requestMatches}
           />
 
           <ResizeHandle

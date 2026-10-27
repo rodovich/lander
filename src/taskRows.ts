@@ -1,8 +1,7 @@
 import { dateCategory } from './format'
 import { isUnread } from './readMarker'
 import { taskKeyOf } from './taskRef'
-import { conversationMatches } from './taskSearch'
-import type { ConversationMatches } from './taskSearch'
+import type { TaskMatches } from '../shared/conversationSearch'
 import type {
   DateCategory,
   TaskView,
@@ -43,7 +42,7 @@ export type TaskRow =
       task: TaskWithProject
       index: number
       // Where the search query matched the task's conversation, if it did.
-      matches?: ConversationMatches
+      matches?: TaskMatches
     }
 
 // Everything the list rendering needs, derived in one pass from the raw task
@@ -59,7 +58,8 @@ export type TaskListShape = {
   statusCounts: [string, number][]
   // Start of today in local-time ms, for formatting each row's time.
   todayStart: number
-  // The search query the tasks were matched against ('' when not searching).
+  // The search box's query, which titles and match excerpts are highlighted
+  // against ('' when not searching).
   query: string
 }
 
@@ -90,6 +90,10 @@ export function buildTaskRows(
     timeFilter: TimeFilter
     // The search box's query, already trimmed and lowercased.
     query: string
+    // The tasks whose conversations the server's search matched, by task key.
+    // These can trail `query` until the server has answered for it, so for a
+    // moment the list can hold the last query's matches.
+    matches: Map<string, TaskMatches> | null
     // Tasks to keep in the Unread view even though they've been read (see the
     // sticky-unread set in App).
     stickyUnread: Set<string>
@@ -97,6 +101,7 @@ export function buildTaskRows(
   },
 ): TaskListShape {
   const { view, timeFilter, query, stickyUnread, now } = opts
+  const conversationHits = query ? opts.matches : null
 
   // The update-time bound the time filter imposes, in ms (local time), or null
   // for 'any'. 'today'/'week' keep tasks at or after the start of today / this
@@ -108,11 +113,6 @@ export function buildTaskRows(
       start.setDate(now.getDate() - now.getDay())
     return { ms: start.getTime(), before: timeFilter === 'older' }
   })()
-
-  // The tasks whose visible conversation matches (see taskSearch.ts). Run over
-  // every task, not just those the other filters keep, so switching a filter
-  // doesn't evict the rest from its cache.
-  const conversationHits = query ? conversationMatches(tasks, query) : null
 
   // Filter by time window, then by title and conversation (case-insensitive),
   // before grouping.
@@ -126,8 +126,11 @@ export function buildTaskRows(
     }
     if (view === 'unread' && !isUnread(t) && !stickyUnread.has(taskKeyOf(t)))
       return false
-    if (!conversationHits) return true
-    return t.title.toLowerCase().includes(query) || conversationHits.has(t)
+    if (!query) return true
+    return (
+      t.title.toLowerCase().includes(query) ||
+      conversationHits?.has(taskKeyOf(t)) === true
+    )
   })
 
   // Sort into status groups, most recent first within each. The order is
@@ -205,7 +208,7 @@ export function buildTaskRows(
       key: taskKeyOf(task),
       task,
       index,
-      matches: conversationHits?.get(task),
+      matches: conversationHits?.get(taskKeyOf(task)),
     })
   })
 

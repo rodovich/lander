@@ -113,7 +113,7 @@ import { actionText, recordTaskAction } from './task-actions'
 import { TASK_ID, taskKey } from './task-identity'
 import { TaskLinkIndex, etagMatches } from './task-links'
 import { searchTasks } from './task-search'
-import { MATCHES_SHOWN } from '../shared/conversationSearch'
+import type { TaskSearch } from '../shared/conversationSearch'
 import {
   saveAttachment,
   readAttachmentMeta,
@@ -1722,12 +1722,8 @@ app.get('/api/:project/tasks', async (c) => {
           ? {
               search: {
                 query,
-                matches: searchTasks(
-                  tasks,
-                  query,
-                  (id) => limits.get(id) ?? MATCHES_SHOWN,
-                ),
-              },
+                matches: searchTasks(tasks, query, limits),
+              } satisfies TaskSearch,
             }
           : {}),
       })

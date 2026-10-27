@@ -1,4 +1,6 @@
+import type { TaskMatches, TaskSearch } from '../shared/conversationSearch'
 import type { StatsFacts } from './stats'
+import { taskKey, type TaskRef } from './taskRef'
 import type {
   FlowMeta,
   Item,
@@ -233,28 +235,60 @@ export async function loadTask(
   }
 }
 
+// A conversation search to run alongside a list load: the query, and the tasks
+// whose match lists should run longer than the server's default.
+export type TaskSearchRequest = {
+  query: string
+  limits: (TaskRef & { limit: number })[]
+}
+
+// What a search found: the query it ran (which can trail the one being typed),
+// and each matching task's matches, by task key.
+export type TaskSearchResult = {
+  query: string
+  matches: Map<string, TaskMatches>
+}
+
 // Fetch and merge tasks across every shown project, tagging each with its
-// project slug and sorting the combined list by recency.
-// `summary` asks the server for the metadata-only projection (see taskSummary):
-// the tasks come back without `items`/`rides`, which is the whole conversation
-// and ~99% of the bytes.
+// project slug and sorting the combined list by recency. The tasks come back as
+// the metadata-only projection (see taskSummary), without `items`/`rides`,
+// which is the whole conversation and ~99% of the bytes; `search` has the
+// server search those conversations.
 export async function loadShownTasks(
   slugs: string[],
   includeArchived: boolean,
-  opts?: { summary?: boolean },
-): Promise<{ tasks: TaskWithProject[]; telemetry: FlowTelemetry }> {
-  const query = [includeArchived ? 'archived=1' : '', opts?.summary ? 'view=summary' : '']
-    .filter(Boolean)
-    .join('&')
+  search?: TaskSearchRequest,
+): Promise<{
+  tasks: TaskWithProject[]
+  telemetry: FlowTelemetry
+  search: TaskSearchResult | null
+}> {
   const lists = await Promise.all(
     slugs.map(async (slug) => {
-      const url = `/api/${slug}/tasks${query ? `?${query}` : ''}`
+      const params = new URLSearchParams()
+      if (includeArchived) params.set('archived', '1')
+      params.set('view', 'summary')
+      if (search) {
+        params.set('q', search.query)
+        const expand = search.limits
+          .filter((l) => l.projectSlug === slug)
+          .map((l) => `${l.id}:${l.limit}`)
+        if (expand.length > 0) params.set('expand', expand.join(','))
+      }
+      const url = `/api/${slug}/tasks?${params}`
       // A parsed body still owes us the list. Without this the truncated-200
       // case reaches `.map` and reads as "Cannot read properties of undefined".
       const body = await readJson(url, (b) => Array.isArray(b.tasks))
+      const found = body.search as TaskSearch | undefined
       return {
         tasks: (body.tasks as Task[]).map((t) => ({ ...t, projectSlug: slug })),
         telemetry: (body.telemetry ?? {}) as FlowTelemetry,
+        found: found && {
+          query: found.query,
+          matches: Object.entries(found.matches).map(
+            ([id, m]) => [taskKey(slug, id), m] as const,
+          ),
+        },
       }
     }),
   )
@@ -266,5 +300,13 @@ export async function loadShownTasks(
   // the first one that has any items.
   const telemetry =
     lists.map((l) => l.telemetry).find((t) => Object.keys(t).length > 0) ?? {}
-  return { tasks: merged, telemetry }
+  const found = lists.flatMap((l) => (l.found ? [l.found] : []))
+  return {
+    tasks: merged,
+    telemetry,
+    search:
+      found.length > 0
+        ? { query: found[0].query, matches: new Map(found.flatMap((f) => f.matches)) }
+        : null,
+  }
 }

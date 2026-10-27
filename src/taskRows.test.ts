@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { buildTaskRows } from './taskRows'
 import type { TaskWithProject, TaskView, TimeFilter } from './types'
+import type { TaskMatches } from '../shared/conversationSearch'
 
 // A fixed "now" mid-week (Wednesday June 24, 2026, local time) so today/week/
 // older bucketing is deterministic. Task times are built relative to it.
@@ -27,6 +28,7 @@ const build = (
     view: TaskView
     timeFilter: TimeFilter
     query: string
+    matches: Map<string, TaskMatches> | null
     stickyUnread: Set<string>
   }> = {},
 ) =>
@@ -34,6 +36,7 @@ const build = (
     view: 'inbox',
     timeFilter: 'any',
     query: '',
+    matches: null,
     stickyUnread: new Set(),
     now: NOW,
     ...over,
@@ -158,27 +161,29 @@ describe('buildTaskRows', () => {
       .toEqual(['hit'])
   })
 
-  it('matches the query against the conversation too', () => {
-    const msgs = (...texts: string[]) =>
-      texts.map((text, i) => ({
-        id: `m${i}`,
-        at: at(0),
-        kind: 'message' as const,
-        role: 'user' as const,
-        text,
-      }))
+  it('keeps the tasks the conversation search matched, with their matches', () => {
+    const found = { count: 1, list: [{ itemId: 'm0', occurrence: 0, snippet: 'parser' }] }
     const tasks = [
-      task({ id: 'hit', title: 'Untitled', items: msgs('Rewrite the PARSER') }),
-      task({ id: 'miss', title: 'Untitled', items: msgs('Deploy the docs') }),
-      task({
-        id: 'reply',
-        title: 'Untitled',
-        items: msgs('Deploy the docs', 'and the parser too'),
-      }),
-      task({ id: 'empty', title: 'Untitled' }),
+      task({ id: 'hit', title: 'Untitled' }),
+      task({ id: 'miss', title: 'Untitled' }),
     ]
-    expect(build(tasks, { query: 'parser' }).orderedTasks.map((t) => t.id))
-      .toEqual(['hit', 'reply'])
+    const shape = build(tasks, {
+      query: 'parser',
+      matches: new Map([['proj/hit', found]]),
+    })
+    expect(shape.orderedTasks.map((t) => t.id)).toEqual(['hit'])
+    expect(shape.taskRows.find((r) => r.kind === 'task')).toMatchObject({
+      matches: found,
+    })
+  })
+
+  it('ignores conversation matches once the search box is cleared', () => {
+    const found = { count: 1, list: [] }
+    const shape = build([task({ id: 'a' }), task({ id: 'b' })], {
+      matches: new Map([['proj/a', found]]),
+    })
+    expect(shape.orderedTasks).toHaveLength(2)
+    expect(shape.taskRows.some((r) => r.kind === 'task' && r.matches)).toBe(false)
   })
 
   it('unread view keeps unread tasks and sticky-held read ones', () => {

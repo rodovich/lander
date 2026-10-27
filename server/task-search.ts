@@ -23,19 +23,24 @@ function cachedIndex(task: { items?: Item[]; rides?: Ride[] }): ConversationInde
   return index
 }
 
+// How many of a task's matches a search lists by default.
+const MATCHES_SHOWN = 3
+
 // The tasks whose conversation contains `query` (already trimmed and
-// lowercased), by id, each listing up to `limitFor(id)` matches.
+// lowercased), by id.
 export function searchTasks(
   tasks: { id: string; items?: Item[]; rides?: Ride[] }[],
   query: string,
-  limitFor: (id: string) => number,
+  limits: Map<string, number>,
 ): Record<string, TaskMatches> {
   const hits: Record<string, TaskMatches> = {}
   for (const task of tasks) {
     const index = cachedIndex(task)
     const count = countMatches(index, query)
-    if (count > 0)
-      hits[task.id] = { count, list: listMatches(index, query, limitFor(task.id)) }
+    if (count > 0) {
+      const limit = limits.get(task.id) ?? MATCHES_SHOWN
+      hits[task.id] = { count, list: listMatches(index, query, limit) }
+    }
   }
   return hits
 }

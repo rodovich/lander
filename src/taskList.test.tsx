@@ -4,6 +4,7 @@ import type { ComponentProps } from 'react'
 import { TaskList } from './taskList'
 import { buildTaskRows } from './taskRows'
 import type { TaskWithProject } from './types'
+import type { TaskMatches } from '../shared/conversationSearch'
 
 // A fixed "now" (Wednesday June 24, 2026, local time) keeps date bucketing
 // deterministic, matching taskRows.test.ts.
@@ -27,11 +28,13 @@ const render = (
   over: Partial<ComponentProps<typeof TaskList>> = {},
   view: 'inbox' | 'unread' | 'archived' = 'inbox',
   query = '',
+  matches: Map<string, TaskMatches> | null = null,
 ) => {
   const shape = buildTaskRows(tasks, {
     view,
     timeFilter: 'any',
     query,
+    matches,
     stickyUnread: new Set(),
     now: NOW,
   })
@@ -52,6 +55,7 @@ const render = (
       onTaskAction={() => {}}
       onArchiveSection={() => {}}
       onOpenMatch={() => {}}
+      onRequestMatches={() => {}}
       {...over}
     />,
   )
@@ -149,23 +153,18 @@ describe('TaskList row badges', () => {
 })
 
 describe('TaskList search matches', () => {
-  const said = (id: string, text: string) => ({
-    id,
-    at: at(0),
-    kind: 'message' as const,
-    role: 'user' as const,
-    text,
+  const found = (count: number, ...snippets: string[]): TaskMatches => ({
+    count,
+    list: snippets.map((snippet, i) => ({ itemId: `m${i}`, occurrence: 0, snippet })),
   })
 
   it('marks the query in the title and lists conversation matches under the row', () => {
     const html = render(
-      [
-        task({ title: 'Permission audit' }),
-        task({ title: 'Other', items: [said('m1', 'needs permissioning first')] }),
-      ],
+      [task({ id: 'a', title: 'Permission audit' }), task({ id: 'b', title: 'Other' })],
       {},
       'inbox',
       'permission',
+      new Map([['proj/b', found(1, 'needs permissioning first')]]),
     )
     expect(html).toContain('<mark class="text-highlight">Permission</mark> audit')
     expect(html).toContain('needs <mark class="text-highlight">permission</mark>ing first')
@@ -174,16 +173,27 @@ describe('TaskList search matches', () => {
     expect(html).toContain('list-subrow-end')
   })
 
-  it('shows the first three matches, then a link to the rest', () => {
-    const items = Array.from({ length: 5 }, (_, i) => said(`m${i}`, `hit ${i}`))
-    const html = render([task({ items })], {}, 'inbox', 'hit')
+  it('shows the matches listed, then a link to the rest', () => {
+    const html = render(
+      [task({ id: 'a' })],
+      {},
+      'inbox',
+      'hit',
+      new Map([['proj/a', found(5, 'hit 0', 'hit 1', 'hit 2')]]),
+    )
     expect(html.split('class="list-subrow"').length - 1).toBe(3)
     expect(html).toContain('class="list-subrow link"')
     expect(html).toContain('Show 2 more')
   })
 
   it('lists nothing under the rows when not searching', () => {
-    const html = render([task({ items: [said('m1', 'anything')] })])
+    const html = render(
+      [task({ id: 'a' })],
+      {},
+      'inbox',
+      '',
+      new Map([['proj/a', found(1, 'anything')]]),
+    )
     expect(html).not.toContain('list-subrow')
     expect(html).not.toContain('text-highlight')
   })

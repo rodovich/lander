@@ -45,6 +45,17 @@ export function useSessionState<T>(
   return usePersistentState(key, initial, sessionStorage)
 }
 
+// `value` as it stood once it last went `delayMs` without changing. Starts at
+// the first value given, without waiting.
+export function useDebounced<T>(value: T, delayMs: number): T {
+  const [settled, setSettled] = useState(value)
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(value), delayMs)
+    return () => clearTimeout(timer)
+  }, [value, delayMs])
+  return settled
+}
+
 // Make an element a file-only drop target without swallowing ordinary dragged
 // text. The depth counter keeps the highlight steady while a drag crosses child
 // elements (the paperclip's SVG, for example), which fire their own enter/leave
