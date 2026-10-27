@@ -298,8 +298,8 @@ async function attachmentCommand(args) {
 // --date (a date/time the server parses) and --time (minutes from now) both set
 // a wakeup time; they're mutually exclusive, and --time must be a positive
 // number. Shared by `launch` (where a wakeup is optional), `ride`, and `send`.
-// --await (a wakeup *condition* — other tasks landing) is orthogonal and may
-// combine with either, so it isn't checked here; see resolveAwait.
+// --after (a wakeup *condition* — other tasks landing) is orthogonal and may
+// combine with either, so it isn't checked here; see resolveAfter.
 function validateSchedule(o) {
   if (o.date != null && o.time != null)
     die('--date and --time are mutually exclusive')
@@ -307,19 +307,17 @@ function validateSchedule(o) {
     die('--time expects a positive number of minutes')
 }
 
-// Split a comma-separated --await value into task ids. `self` rejects a task
-// awaiting itself (a deadlock) before the round trip; the server independently
-// validates that every id names a real task in this project, and rejects an
-// await edge that would close a cycle. Returns the ids, or undefined when no
-// --await was passed.
-function resolveAwait(value, { self } = {}) {
+// `self` catches a task waiting on itself (a deadlock) before the round trip.
+// The server checks the rest: that every id is a task in this project, and, for
+// `ride`, that the new edges close no cycle.
+function resolveAfter(value, { self } = {}) {
   if (value == null) return undefined
   const ids = value
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
-  if (!ids.length) die('--await expects one or more task ids')
-  if (self && ids.includes(self)) die('a task cannot await itself')
+  if (!ids.length) die('--after expects one or more task ids')
+  if (self && ids.includes(self)) die('a task cannot wait on itself')
   return ids
 }
 
@@ -360,7 +358,7 @@ async function launchTask(rest) {
     else if (a === '--title') o.title = rest[++i]
     else if (a === '--date') o.date = rest[++i]
     else if (a === '--time') o.time = Number(rest[++i])
-    else if (a === '--await') o.await = rest[++i]
+    else if (a === '--after') o.after = rest[++i]
     // --notify takes no target: the server arms it against the calling task, so
     // there is no id to mistype and no way to point a notification at a stranger.
     else if (a === '--notify') o.notify = true
@@ -380,10 +378,10 @@ async function launchTask(rest) {
   }
   o.message = await readMessage('launch', pos)
   validateSchedule(o)
-  // --await defers the launch until the named tasks land (resolved to full ids
+  // --after defers the launch until the named tasks land (resolved to full ids
   // here); combinable with --date/--time, in which case launch fires on
   // whichever trigger comes first.
-  o.await = resolveAwait(o.await)
+  o.after = resolveAfter(o.after)
   // Upload any --attach paths first so the opening message references them.
   if (o.files.length) o.attachments = await uploadAttachments(o.project, o.files)
   // --title sets the name directly; without it the server asks haiku. --date or
@@ -397,7 +395,7 @@ async function launchTask(rest) {
 }
 
 // Schedule a ride so the current task rides again when a trigger fires: the same
-// --date/--time/--await flags as `launch`, but one is required (a scheduled ride
+// --date/--time/--after flags as `launch`, but one is required (a scheduled ride
 // needs a trigger). The server records a `scheduled` or `awaiting` event, and
 // once the turn ends the scheduler wakes the task with a generated message
 // naming the trigger that fired.
@@ -413,13 +411,13 @@ async function rideTask(args) {
     const a = args[i]
     if (a === '--date') o.date = args[++i]
     else if (a === '--time') o.time = Number(args[++i])
-    else if (a === '--await') o.await = args[++i]
+    else if (a === '--after') o.after = args[++i]
     else if (a === '--clear') o.clear = true
     else die(`ride: unexpected argument ${a}`)
   }
   if (o.clear) {
-    if (o.date != null || o.time != null || o.await != null)
-      die('ride --clear takes no trigger (--date/--time/--await)')
+    if (o.date != null || o.time != null || o.after != null)
+      die('ride --clear takes no trigger (--date/--time/--after)')
     const res = await call(PROJECT, `/tasks/${TASK}/ride`, {
       method: 'POST',
       body: JSON.stringify({ clear: true }),
@@ -427,10 +425,10 @@ async function rideTask(args) {
     console.log(res.cleared ? 'scheduled ride cleared' : 'nothing to clear')
     return
   }
-  if (o.date == null && o.time == null && o.await == null)
+  if (o.date == null && o.time == null && o.after == null)
     dieUsage('ride')
   validateSchedule(o)
-  o.await = resolveAwait(o.await, { self: TASK })
+  o.after = resolveAfter(o.after, { self: TASK })
   const armed = await call(PROJECT, `/tasks/${TASK}/ride`, {
     method: 'POST',
     body: JSON.stringify(o),
@@ -454,7 +452,7 @@ async function rideTask(args) {
 // --interval (minutes) makes a relaunch repeat: each occurrence arms the next one
 // that many minutes later, off its actual delivery time (no drift compensation).
 // It pairs with the trigger flags — the first occurrence fires now (or at
-// --date/--time/--await), and the cadence follows. --repeat-count N (total
+// --date/--time/--after), and the cadence follows. --repeat-count N (total
 // relaunches, including the first) or --repeat-until <when> bounds the series;
 // they need --interval and are mutually exclusive with each other. Shared by
 // `relaunch` and its flow method.
@@ -474,7 +472,7 @@ function validateRepeat(o) {
 }
 
 // Relaunch the current task under a fresh provider session, keeping the
-// same task id. Takes the same trigger flags as `launch` (--date/--time/--await)
+// same task id. Takes the same trigger flags as `launch` (--date/--time/--after)
 // plus a positional message (or `-` for stdin); operates on the current TASK env
 // like `ride`, with no target id. Without a trigger the seal happens now and the
 // in-flight turn drains the message into the new session; with one it's deferred,
@@ -493,7 +491,7 @@ async function relaunchTask(args) {
     const a = args[i]
     if (a === '--date') o.date = args[++i]
     else if (a === '--time') o.time = Number(args[++i])
-    else if (a === '--await') o.await = args[++i]
+    else if (a === '--after') o.after = args[++i]
     else if (a === '--interval') o.interval = Number(args[++i])
     else if (a === '--repeat-count') o.repeatCount = Number(args[++i])
     else if (a === '--repeat-until') o.repeatUntil = args[++i]
@@ -506,13 +504,13 @@ async function relaunchTask(args) {
     if (
       o.date != null ||
       o.time != null ||
-      o.await != null ||
+      o.after != null ||
       o.interval != null ||
       o.repeatCount != null ||
       o.repeatUntil != null ||
       o.flow != null
     )
-      die('relaunch --clear takes no trigger (--date/--time/--await/--interval) or --flow')
+      die('relaunch --clear takes no trigger (--date/--time/--after/--interval) or --flow')
     const res = await call(PROJECT, `/tasks/${TASK}/relaunch`, {
       method: 'POST',
       body: JSON.stringify({ clear: true }),
@@ -523,21 +521,21 @@ async function relaunchTask(args) {
   const message = await readMessage('relaunch', pos)
   validateSchedule(o)
   validateRepeat(o)
-  o.await = resolveAwait(o.await, { self: TASK })
+  o.after = resolveAfter(o.after, { self: TASK })
   await call(PROJECT, `/tasks/${TASK}/relaunch`, {
     method: 'POST',
     body: JSON.stringify({
       message,
       date: o.date,
       time: o.time,
-      await: o.await,
+      after: o.after,
       interval: o.interval,
       repeatCount: o.repeatCount,
       repeatUntil: o.repeatUntil,
       flow: o.flow,
     }),
   })
-  const scheduled = o.date != null || o.time != null || o.await != null
+  const scheduled = o.date != null || o.time != null || o.after != null
   let line = scheduled ? 'relaunch scheduled' : 'relaunching'
   if (o.flow != null) line += ` under ${o.flow}`
   if (o.interval != null) line += ` (repeating every ${o.interval}m)`
@@ -782,10 +780,10 @@ async function viewTask(args) {
   }
 }
 
-// `lander send <id> <message|-> [--date <when> | --time <minutes>] [--await <ids>]
+// `lander send <id> <message|-> [--date <when> | --time <minutes>] [--after <ids>]
 // [--notify]` — message another task in this project. Without a schedule the
 // message is delivered now (queued behind any in-flight turn); --date/--time/
-// --await defer delivery until that trigger fires (whichever comes first when
+// --after defer delivery until that trigger fires (whichever comes first when
 // several are set).
 async function sendTask(args) {
   const o = { files: [] }
@@ -794,7 +792,7 @@ async function sendTask(args) {
     const a = args[i]
     if (a === '--date') o.date = args[++i]
     else if (a === '--time') o.time = Number(args[++i])
-    else if (a === '--await') o.await = args[++i]
+    else if (a === '--after') o.after = args[++i]
     // Takes no target, as on `launch`: the server wakes the sending task.
     else if (a === '--notify') o.notify = true
     // --attach is variadic: consume following args up to the next --flag.
@@ -807,7 +805,7 @@ async function sendTask(args) {
   if (!target) dieUsage('send')
   const message = await readMessage('send', pos)
   validateSchedule(o)
-  const awaitIds = resolveAwait(o.await)
+  const after = resolveAfter(o.after)
   const attachments = o.files.length
     ? await uploadAttachments(PROJECT, o.files)
     : undefined
@@ -817,13 +815,13 @@ async function sendTask(args) {
       message,
       date: o.date,
       time: o.time,
-      await: awaitIds,
+      after,
       attachments,
       notify: o.notify,
     }),
   })
   const verb =
-    o.date != null || o.time != null || o.await != null ? 'scheduled' : 'sent'
+    o.date != null || o.time != null || o.after != null ? 'scheduled' : 'sent'
   console.log(`${verb} → ${target}`)
 }
 
@@ -1086,7 +1084,7 @@ function makeLander(inputs) {
         ...(opts.config ? { flowConfig: opts.config } : {}),
       }
       validateSchedule(o)
-      o.await = resolveAwait(opts.await)
+      o.after = resolveAfter(opts.after)
       if (opts.files?.length)
         o.attachments = await uploadAttachments(o.project, opts.files)
       const task = await call(o.project, '/tasks', {
@@ -1098,7 +1096,7 @@ function makeLander(inputs) {
     async send(target, message, opts = {}) {
       if (!message?.trim()) die('lander.send: a message is required')
       validateSchedule(opts)
-      const awaitIds = resolveAwait(opts.await)
+      const after = resolveAfter(opts.after)
       const attachments = opts.files?.length
         ? await uploadAttachments(PROJECT, opts.files)
         : undefined
@@ -1108,7 +1106,7 @@ function makeLander(inputs) {
           message,
           date: opts.date,
           time: opts.time,
-          await: awaitIds,
+          after,
           attachments,
         }),
       })
@@ -1150,9 +1148,9 @@ function makeLander(inputs) {
       }
       const o = { date: opts.date, time: opts.time }
       validateSchedule(o)
-      o.await = resolveAwait(opts.await, { self: TASK })
-      if (o.date == null && o.time == null && o.await == null)
-        die('lander.ride: pass date, time, await, or clear')
+      o.after = resolveAfter(opts.after, { self: TASK })
+      if (o.date == null && o.time == null && o.after == null)
+        die('lander.ride: pass date, time, after, or clear')
       await call(PROJECT, `/tasks/${TASK}/ride`, {
         method: 'POST',
         body: JSON.stringify(o),
@@ -1180,14 +1178,14 @@ function makeLander(inputs) {
       }
       validateSchedule(o)
       validateRepeat(o)
-      o.await = resolveAwait(opts.await, { self: TASK })
+      o.after = resolveAfter(opts.after, { self: TASK })
       await call(PROJECT, `/tasks/${TASK}/relaunch`, {
         method: 'POST',
         body: JSON.stringify({
           message,
           date: o.date,
           time: o.time,
-          await: o.await,
+          after: o.after,
           interval: o.interval,
           repeatCount: o.repeatCount,
           repeatUntil: o.repeatUntil,
@@ -1316,13 +1314,13 @@ async function recordCwd() {
 const USAGE = {
   land: 'land [id…]',
   launch:
-    'launch <message|-> [--title <t>] [--project <slug>] [--date <when>|--time <min>] [--await <ids>] [--notify] [--flow <name>] [--key <k> <v>]… [--attach <paths…>]',
+    'launch <message|-> [--title <t>] [--project <slug>] [--date <when>|--time <min>] [--after <ids>] [--notify] [--flow <name>] [--key <k> <v>]… [--attach <paths…>]',
   list: 'list [--status <s>] [--since <when>] [--until <when>] [--text <terms>] [--archived] [--json]',
   view: 'view <id> [--expand] [--messages <N|all>] [--clip <N|all>] [--json]',
-  send: 'send <id> <message|-> [--date <when>|--time <min>] [--await <ids>] [--notify] [--attach <paths…>]',
-  ride: 'ride (--date <when> | --time <min> | --await <ids> | --clear)',
+  send: 'send <id> <message|-> [--date <when>|--time <min>] [--after <ids>] [--notify] [--attach <paths…>]',
+  ride: 'ride (--date <when> | --time <min> | --after <ids> | --clear)',
   relaunch:
-    'relaunch <message|-> [--date <when>|--time <min>|--await <ids>] [--interval <min> [--repeat-count <n>|--repeat-until <when>]] [--flow <name>] [--clear]',
+    'relaunch <message|-> [--date <when>|--time <min>|--after <ids>] [--interval <min> [--repeat-count <n>|--repeat-until <when>]] [--flow <name>] [--clear]',
   wedge:
     'wedge [--option <id:label> …]  (--option is for flows and skills; conversation-driven agents should converse instead)',
   ask: 'ask --option <id:label> [--option …]  (for flows and skills; conversation-driven agents should converse instead)',

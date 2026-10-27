@@ -19,7 +19,7 @@ export function taskMetadata(t) {
   }
 }
 
-// A pending scheduled relaunch (`lander relaunch --date/--time/--await`) armed
+// A pending scheduled relaunch (`lander relaunch --date/--time/--after`) armed
 // on the task, if any — a deferred message flagged `relaunch`. Its `deliverAt`
 // (when present) drives `scheduledFor` above so a task waiting only on a
 // relaunch still shows the ⏰ in `lander list`, same as a scheduled launch/rest.

@@ -983,7 +983,7 @@ export type RepeatSpec = {
 }
 
 // A message addressed to a task with a deferred delivery (`lander send/relaunch
-// --date/--time/--await`). Fires when its trigger is met — a time (`deliverAt`)
+// --date/--time/--after`). Fires when its trigger is met — a time (`deliverAt`)
 // and/or a condition (`waitFor`, ids that must all land), whichever comes first.
 // `relaunch` marks a `lander relaunch` deferral (seals the session on delivery);
 // `repeat` rides a repeating relaunch and arms the next on delivery.
@@ -995,7 +995,7 @@ export type ScheduledMessage = {
   // The flow a relaunch moves the task onto when it fires (`relaunch --flow`).
   flow?: string
   repeat?: RepeatSpec
-  // Attachment refs sent with a deferred `lander send --attach --date/--await`,
+  // Attachment refs sent with a deferred `lander send --attach --date/--after`,
   // carried until delivery when they land on the appended user message (like an
   // immediate send). Absent when the deferred message had none.
   attachments?: Attachment[]
@@ -1640,7 +1640,7 @@ export function nextRepeatMessage(
 
 // Append a batch of now-due scheduled messages and queue them for the session —
 // the shared tail of an immediate and a scheduled delivery. If any due entry is
-// a relaunch (`lander relaunch --date/--time/--await`), seal the session and lead
+// a relaunch (`lander relaunch --date/--time/--after`), seal the session and lead
 // with the relaunch text so the fresh session reads it first; ordinary due
 // messages keep their order and follow. The caller has already split due from
 // not-yet-due and recorded the riding transition; this only mutates the

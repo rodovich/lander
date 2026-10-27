@@ -16,7 +16,7 @@ vi.mock('./title', async (importOriginal) => ({
 // trigger check the sweep launches every deferred task in every project on every
 // restart — bypassing launchTask, which is what clears the trigger and records the
 // `launched` event. The await arm was missing from that check from the day
-// `--await` shipped (63ed0f5), and this repo restarts its server on every
+// the landing trigger shipped (63ed0f5), and this repo restarts its server on every
 // `server/**` edit. Observed three times in the live data, most recently on
 // 2026-08-26: a task awaiting a stalled sibling rode 2.1s after a server boot.
 // The compounding half is why the skip has to be a skip and not a clear: because

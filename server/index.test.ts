@@ -2167,7 +2167,7 @@ describe('acting task coordination history', () => {
     const awaiting = await launchAs(actor.id, slug, {
       title: 'Awaiting child',
       message: 'Acknowledge and land.',
-      await: [waiter.id],
+      after: [waiter.id],
     })
     const titleOnly = await launchAs(actor.id, slug, {
       title: 'Title-only child',
@@ -2296,7 +2296,7 @@ describe('acting task coordination history', () => {
           actor.id,
           `/api/${slug}/tasks/${awaiting.id}/messages`,
           'POST',
-          { message: 'Awaiting secret body', await: [waiter.id] },
+          { message: 'Awaiting secret body', after: [waiter.id] },
         )
       ).status,
     ).toBe(200)
@@ -2458,7 +2458,7 @@ describe('acting task coordination history', () => {
     const forbiddenLaunch = await launchAs(actor.id, secondSlug, {
       title: 'Explicit remote title',
       message: 'Acknowledge and land.',
-      await: [waiter.id],
+      after: [waiter.id],
     })
     expect(forbiddenLaunch.status).toBe(403)
 
@@ -4016,7 +4016,7 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
         id,
         title: 'Paced task',
         // Stored `riding` with no open ride IS paced — the collapsed
-        // vocabulary. Both triggers armed at once, which `lander ride --await
+        // vocabulary. Both triggers armed at once, which `lander ride --after
         // --time` produces and which is the only way to watch the split.
         status: 'riding',
         scheduledFor: until,

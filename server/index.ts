@@ -303,13 +303,13 @@ type Task = {
   // Absent on tasks saved before this field existed — treat undefined as empty.
   queued?: string[]
   // Messages addressed to this task with a deferred delivery, sent by another
-  // task via `lander send --date/--time/--await`. Each fires when its trigger is
+  // task via `lander send --date/--time/--after`. Each fires when its trigger is
   // met — a time (`deliverAt`) and/or a condition (`waitFor`, ids that must all
   // land), whichever comes first when both are set. The scheduler then appends
   // it as a user message, queues it, and drives the task, exactly as an immediate
   // send would, then drops it. The text already carries its sender backlink.
   // Absent when none are pending.
-  // `relaunch` marks a `lander relaunch --date/--time/--await` deferral: on
+  // `relaunch` marks a `lander relaunch --date/--time/--after` deferral: on
   // delivery the scheduler seals task.sessionId and records a 'relaunched' event
   // before appending this message, so the delivering turn mints a fresh assistant
   // session — the deferred analog of the immediate /relaunch endpoint. The seal
@@ -328,7 +328,7 @@ type Task = {
   // timer to come back to, and by some of the messages that wake the task early
   // (see the /messages handler). Absent on un-scheduled tasks.
   scheduledFor?: string
-  // Task ids this task is waiting on (`lander launch/ride --await`). The scheduler
+  // Task ids this task is waiting on (`lander launch/ride --after`). The scheduler
   // launches the task once every one has reached terminal "landed" — a missing
   // id (archived/deleted) counts as satisfied so a vanished dependency can't
   // strand the waiter. Coexists with `scheduledFor` as an OR fallback. Cleared
@@ -2204,24 +2204,23 @@ function resolveRepeat(body: {
   return { repeat }
 }
 
-// Validate a `--await` body field — the ids a task (or a scheduled message) is
-// to wait on. Each must be a real task in this project, so a typo can't either
-// strand the waiter or (since a missing id reads as satisfied) wake it at once.
-// `selfId` rejects a task awaiting itself. Returns the ids (empty when absent).
-async function resolveAwait(
+// Validate an `after` body field (`--after`): the ids a task or a scheduled
+// message waits on. Each must be a real task in this project, because a missing
+// id counts as landed, so a typo would wake the waiter at once.
+async function resolveAfter(
   project: Project,
   value: unknown,
   selfId?: string,
 ): Promise<{ waitFor: string[] } | { error: string }> {
   if (value === undefined || value === null) return { waitFor: [] }
   if (!Array.isArray(value) || !value.every((x) => typeof x === 'string'))
-    return { error: '--await expects a list of task ids' }
+    return { error: '--after expects a list of task ids' }
   const ids = value as string[]
   for (const id of ids) {
-    if (!TASK_ID.test(id)) return { error: `invalid await task id: ${id}` }
-    if (selfId && id === selfId) return { error: 'a task cannot await itself' }
+    if (!TASK_ID.test(id)) return { error: `invalid --after task id: ${id}` }
+    if (selfId && id === selfId) return { error: 'a task cannot wait on itself' }
     if (!(await readTask(project.dataDir, id)))
-      return { error: `await task not found: ${id}` }
+      return { error: `--after task not found: ${id}` }
   }
   // Guard against a deadlock cycle: if any awaited task already waits (directly
   // or transitively) on the awaiter, these edges would close a loop in which
@@ -2229,7 +2228,7 @@ async function resolveAwait(
   // awaiter already exists (`ride`, which passes selfId) — a freshly minted
   // `new` id is unreferenced, so its await edges can never close a cycle.
   if (selfId && (await awaitReaches(project, ids, selfId)))
-    return { error: 'await would create a cycle' }
+    return { error: '--after would create a cycle' }
   return { waitFor: ids }
 }
 
@@ -2255,7 +2254,7 @@ async function resolveAttachments(
 }
 
 // Whether `target` is reachable from `ids` along the waitingFor graph — i.e.
-// some awaited task already (transitively) waits on it. Used by resolveAwait to
+// some awaited task already (transitively) waits on it. Used by resolveAfter to
 // reject an await edge that would close a deadlock cycle. The visited set bounds
 // the walk and keeps it terminating even over already-cyclic data.
 async function awaitReaches(
@@ -2278,7 +2277,7 @@ async function awaitReaches(
 
 // Snapshot the awaited tasks (id + current title) for an `awaiting` event, so
 // the UI can render them as links without a second lookup. A vanished task falls
-// back to its short id. Ids are assumed pre-validated by resolveAwait.
+// back to its short id. Ids are assumed pre-validated by resolveAfter.
 async function describeAwaited(
   project: Project,
   ids: string[],
@@ -2349,7 +2348,7 @@ app.post('/api/:project/tasks', async (c) => {
       message?: unknown
       date?: unknown
       time?: unknown
-      await?: unknown
+      after?: unknown
       notify?: unknown
       flow?: unknown
       flowConfig?: unknown
@@ -2450,7 +2449,7 @@ app.post('/api/:project/tasks', async (c) => {
     const sched = resolveSchedule(body)
     if ('error' in sched) return c.json({ error: sched.error }, 400)
     const scheduledFor = sched.scheduledFor ?? undefined
-    const awaited = await resolveAwait(project, body.await)
+    const awaited = await resolveAfter(project, body.after)
     if ('error' in awaited) return c.json({ error: awaited.error }, 400)
     const waitingFor = awaited.waitFor.length ? awaited.waitFor : undefined
     // Resolve any attachment refs up front so an unknown id fails the request
@@ -3024,14 +3023,14 @@ app.post('/api/:project/tasks/:id/ride', async (c) => {
     const body = await c.req.json<{
       date?: unknown
       time?: unknown
-      await?: unknown
+      after?: unknown
       clear?: unknown
     }>()
 
     if (body.clear) {
-      if (body.date != null || body.time != null || body.await != null)
+      if (body.date != null || body.time != null || body.after != null)
         return c.json(
-          { error: 'clear takes no trigger (--date/--time/--await)' },
+          { error: 'clear takes no trigger (--date/--time/--after)' },
           400,
         )
       let cleared = false
@@ -3049,13 +3048,13 @@ app.post('/api/:project/tasks/:id/ride', async (c) => {
 
     const sched = resolveSchedule(body)
     if ('error' in sched) return c.json({ error: sched.error }, 400)
-    const awaited = await resolveAwait(project, body.await, id)
+    const awaited = await resolveAfter(project, body.after, id)
     if ('error' in awaited) return c.json({ error: awaited.error }, 400)
     const scheduledFor = sched.scheduledFor ?? undefined
     const waitingFor = awaited.waitFor.length ? awaited.waitFor : undefined
     if (!scheduledFor && !waitingFor)
       return c.json(
-        { error: 'a time (--date/--time) or condition (--await) is required' },
+        { error: 'a time (--date/--time) or condition (--after) is required' },
         400,
       )
     // Snapshot the awaited tasks for the event's links before entering the
@@ -3116,7 +3115,7 @@ app.post('/api/:project/tasks/:id/ride', async (c) => {
 // `done`, the 'relaunched' event renders as the divider, and the queued message
 // is dimmed until the new session reads it.
 //
-// Scheduled (`--date`/`--time`/`--await`): seal AT the trigger, not now. Stash a
+// Scheduled (`--date`/`--time`/`--after`): seal AT the trigger, not now. Stash a
 // relaunch-flagged scheduled message (armScheduledRelaunch); the old session
 // stays live until the trigger, so pre-trigger interim messages resume it, and
 // deliverScheduledMessages seals + drives when it fires. We don't set task-level
@@ -3148,7 +3147,7 @@ app.post('/api/:project/tasks/:id/relaunch', async (c) => {
       message?: unknown
       date?: unknown
       time?: unknown
-      await?: unknown
+      after?: unknown
       interval?: unknown
       repeatCount?: unknown
       repeatUntil?: unknown
@@ -3161,9 +3160,9 @@ app.post('/api/:project/tasks/:id/relaunch', async (c) => {
     // `lander send` deferral is untouched); idempotent, reporting whether anything
     // was disarmed.
     if (body.clear) {
-      if (body.date != null || body.time != null || body.await != null)
+      if (body.date != null || body.time != null || body.after != null)
         return c.json(
-          { error: 'clear takes no trigger (--date/--time/--await)' },
+          { error: 'clear takes no trigger (--date/--time/--after)' },
           400,
         )
       let cleared = false
@@ -3184,11 +3183,11 @@ app.post('/api/:project/tasks/:id/relaunch', async (c) => {
     const rawMessage = typeof body.message === 'string' ? body.message : ''
     if (!rawMessage.trim()) return c.json({ error: 'message is required' }, 400)
 
-    // A `--date`/`--time` and/or `--await` relaunch defers the seal to the
+    // A `--date`/`--time` and/or `--after` relaunch defers the seal to the
     // trigger; absent all, seal now. Mirror `lander send`'s trigger resolution.
     const sched = resolveSchedule(body)
     if ('error' in sched) return c.json({ error: sched.error }, 400)
-    const awaited = await resolveAwait(project, body.await)
+    const awaited = await resolveAfter(project, body.after)
     if ('error' in awaited) return c.json({ error: awaited.error }, 400)
     // `--interval` (with an optional `--repeat-count`/`--repeat-until` bound) makes
     // the relaunch repeat: each occurrence arms the next one `interval` minutes
@@ -3568,7 +3567,7 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
       message?: unknown
       date?: unknown
       time?: unknown
-      await?: unknown
+      after?: unknown
       attachments?: unknown
       key?: unknown
       notify?: unknown
@@ -3613,11 +3612,11 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
     // actor's timeline already knows who it is.
     const sentText = actionText(rawMessage)
 
-    // A `--date`/`--time` and/or `--await` send defers delivery; absent all,
+    // A `--date`/`--time` and/or `--after` send defers delivery; absent all,
     // deliver now.
     const sched = resolveSchedule(body)
     if ('error' in sched) return c.json({ error: sched.error }, 400)
-    const awaited = await resolveAwait(project, body.await)
+    const awaited = await resolveAfter(project, body.after)
     if ('error' in awaited) return c.json({ error: awaited.error }, 400)
     const attached = await resolveAttachments(project, body.attachments)
     if ('error' in attached) return c.json({ error: attached.error }, 400)

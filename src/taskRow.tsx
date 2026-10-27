@@ -83,7 +83,7 @@ export const TaskRow = forwardRef<
 ) {
   const unseen = isUnread(task)
   // Any armed scheduled message — a deferred relaunch, a plain deferred send
-  // (`lander send --date/--time/--await`), or a repeating relaunch — shows the
+  // (`lander send --date/--time/--after`), or a repeating relaunch — shows the
   // clock. Earlier this keyed only off relaunch-flagged messages, so a plain
   // deferred send (deliverAt/waitFor, no relaunch flag) armed no indicator at all.
   const pendingScheduled = task.scheduledMessages?.[0]

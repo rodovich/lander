@@ -69,12 +69,12 @@ describe('lander ride', () => {
 
   it('names the awaited tasks, and a time fallback', async () => {
     reply = { waitingFor: ['tsk-a', 'tsk-b'] }
-    expect((await execLander(['ride', '--await', 'tsk-a,tsk-b'])).stdout.trim()).toBe(
+    expect((await execLander(['ride', '--after', 'tsk-a,tsk-b'])).stdout.trim()).toBe(
       'ride scheduled for when tsk-a, tsk-b have all landed',
     )
     reply = { waitingFor: ['tsk-a'], scheduledFor: AT }
     expect(
-      (await execLander(['ride', '--await', 'tsk-a', '--time', '30'])).stdout.trim(),
+      (await execLander(['ride', '--after', 'tsk-a', '--time', '30'])).stdout.trim(),
     ).toBe(`ride scheduled for ${local} or when tsk-a lands, whichever comes first`)
   })
 })

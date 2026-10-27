@@ -322,11 +322,11 @@ export type Task = {
   // ISO timestamp a scheduled task is set to launch; present only while the
   // task is paced and waiting for the server's scheduler (or a manual launch).
   scheduledFor?: string
-  // Task ids this task is waiting on (`--await`); the scheduler launches it once
+  // Task ids this task is waiting on (`--after`); the scheduler launches it once
   // all have landed. Present only while awaiting; may coexist with scheduledFor.
   waitingFor?: string[]
   // Deferred messages armed on this task (`lander send/relaunch --date/--time/
-  // --await`), each firing on its own trigger. We read `relaunch` (a pending
+  // --after`), each firing on its own trigger. We read `relaunch` (a pending
   // scheduled relaunch, shown as the scheduled clock alongside scheduledFor/
   // waitingFor) and `repeat` (a `--interval` relaunch, shown as the clockwise
   // arrow beside it).

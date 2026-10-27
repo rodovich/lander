@@ -340,7 +340,7 @@ export type LaunchOpts = {
 export type RideOpts = {
   date?: string
   time?: number
-  await?: string
+  after?: string
   clear?: boolean
 }
 
@@ -1039,7 +1039,7 @@ export function createCtxRuntime(
         body: {
           ...(opts?.date ? { date: opts.date } : {}),
           ...(opts?.time !== undefined ? { time: opts.time } : {}),
-          ...(opts?.await ? { await: opts.await } : {}),
+          ...(opts?.after ? { after: opts.after } : {}),
           ...(opts?.clear ? { clear: true } : {}),
         },
       }),

@@ -75,7 +75,7 @@ describe('taskMetadata', () => {
     expect(both.scheduledFor).toBe('2026-07-02T00:00:00.000Z')
     expect(both).not.toHaveProperty('relaunching')
 
-    // A relaunch armed purely on --await (no deliverAt) has nothing to show yet.
+    // A relaunch armed purely on --after (no deliverAt) has nothing to show yet.
     const awaitOnly = taskMetadata({
       id: 'pqr',
       title: 'Awaiting only',

@@ -113,7 +113,7 @@ export type RevivedMarker = {
 
 // The ride a task has scheduled at the start of a turn, which a turn woken by
 // anything else rides alongside: the display time of its time trigger
-// (preformatted, as `waitingUntil` is) and the ids its `--await` names.
+// (preformatted, as `waitingUntil` is) and the ids its `--after` names.
 export type ScheduledRide = {
   at?: string
   awaiting?: string[]

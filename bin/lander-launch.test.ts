@@ -135,8 +135,8 @@ describe('lander launch --notify', () => {
     expect('notify' in lastBody!).toBe(false)
   })
 
-  it('combines with --await, which still takes its own value', async () => {
-    await execLander(['launch', '--notify', '--await', 'abc123', 'go'])
-    expect(lastBody).toMatchObject({ notify: true, await: ['abc123'], message: 'go' })
+  it('combines with --after, which still takes its own value', async () => {
+    await execLander(['launch', '--notify', '--after', 'abc123', 'go'])
+    expect(lastBody).toMatchObject({ notify: true, after: ['abc123'], message: 'go' })
   })
 })
