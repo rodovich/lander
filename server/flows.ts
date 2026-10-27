@@ -25,25 +25,23 @@ import type { FlowAnnouncement, FlowMeta } from './protocol'
 // The flow a task falls back to when it names none — the legacy agent default.
 export const LEGACY_FLOW = 'claude'
 
-// The capability subset the server itself acts on, derived from a flow's
-// announced meta. Everything else in FlowMeta is pass-through to the client.
+// The capability subset the server acts on and the UI reads, derived from a
+// flow's announced meta.
 export type FlowCaps = {
   grants: { task: boolean; project: boolean }
-  reportsCost: boolean
 }
 
 // A flow the server has never heard of degrades to the conservative floor —
-// no grant controls, cost "n/a" — rather than falsely advertising a capability
-// the flow may not honor.
+// no grant controls — rather than falsely advertising a capability the flow
+// may not honor.
 const UNKNOWN_FLOW_CAPS: FlowCaps = {
   grants: { task: false, project: false },
-  reportsCost: false,
 }
 
 // The legacy flows, frozen as an inline literal, for exactly one window: between
 // server boot (or a primary disconnect) and the first register, when the UI must
-// still render a picker and publicTask must still derive capabilities for the
-// claude and codex tasks that already exist.
+// still render a picker and the claude and codex tasks that already exist must
+// still have capabilities.
 //
 // Deliberately NOT imported from daemon/flows. No file under server/ imports
 // from daemon/ today, and the API server runs as `tsx watch server/index.ts` — so
@@ -144,8 +142,12 @@ export function flowMeta(name: string): FlowMeta | undefined {
 export function flowCaps(name: string): FlowCaps {
   const meta = flowMeta(name)
   if (!meta) return UNKNOWN_FLOW_CAPS
-  return {
-    grants: meta.capabilities.grants,
-    reportsCost: meta.capabilities.reportsCost,
-  }
+  return { grants: meta.capabilities.grants }
+}
+
+// The list response carries this so the UI can look a task's flow up in it. A
+// flow missing here is one flowCaps would give the floor.
+export function flowCapsByName(): Record<string, FlowCaps> {
+  const names = [...announced.map((f) => f.meta.name), ...BOOTSTRAP_FLOWS.map((m) => m.name)]
+  return Object.fromEntries(names.map((name) => [name, flowCaps(name)]))
 }

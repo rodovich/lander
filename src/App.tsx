@@ -14,6 +14,7 @@ import { ResizeHandle } from './resizeHandle'
 import { StatsPanel } from './statsPanel'
 import { TaskList } from './taskList'
 import { TaskLinkProvider } from './taskLinkContext'
+import { NO_GRANTS, taskFlowName, taskGrants } from './taskMeta'
 import { buildTaskRows } from './taskRows'
 import { TelemetryPanel } from './telemetry'
 import type { ConversationMatch } from '../shared/conversationSearch'
@@ -66,6 +67,7 @@ export function App() {
     tasks,
     tasksRef,
     telemetry,
+    flowCaps,
     projects,
     project,
     setProject,
@@ -199,6 +201,7 @@ export function App() {
     onNavigate: leavePanel,
   })
   currentRef.current = current
+  const grants = current ? taskGrants(flowCaps, current) : NO_GRANTS
   useEffect(() => {
     watchTask(current)
   }, [current, watchTask])
@@ -333,9 +336,8 @@ export function App() {
 
           <TelemetryPanel
             // Keyed by flow name — the telemetry cache is keyed that way
-            // server-side now. `agent` stays as the fallback for a payload from
-            // a server that predates `flow`.
-            items={telemetry[current?.flow ?? current?.agent ?? newTaskFlow] ?? []}
+            // server-side now.
+            items={telemetry[(current && taskFlowName(current)) ?? newTaskFlow] ?? []}
           />
         </div>
 
@@ -352,6 +354,7 @@ export function App() {
             <TaskLinkProvider value={resolveTaskLink}>
               <DetailHeader
                 task={current}
+                grants={grants}
                 retitling={retitling}
                 copyMarkdown={copyMarkdown}
                 onTaskAction={runTaskAction}
@@ -362,6 +365,7 @@ export function App() {
               />
               <Conversation
                 task={current}
+                grants={grants}
                 disclosure={disclosure}
                 reveal={reveal}
                 answering={answeringBy[taskKeyOf(current)] ?? false}

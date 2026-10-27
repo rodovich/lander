@@ -38,15 +38,15 @@ export type TelemetryItem =
 // What a driver flow announces about itself. Lives here rather than under
 // daemon/ because both sides read it now: the daemon builds it from its bundled
 // flow modules, and the server caches it, serves it to the picker, and derives
-// per-task capability flags from it. Mirrors the client copy in src/types.ts
+// each flow's capabilities from it. Mirrors the client copy in src/types.ts
 // (kept in sync by hand, like TelemetryItem above).
 //
 // `capabilities` is the announced replacement for the compiled-in adapter
-// booleans. One of them is advisory at step 4 and deliberately has no consumer
-// — see docs/flow-inversion.md's step-4 as-built notes: `rateLimitRetry`
-// documents whether a flow can supply a reset timestamp, but the
-// scheduled-retry option already gates on the *datum* (`resetsAt` present),
-// which only such a flow can produce.
+// booleans. Two of them are advisory and deliberately have no consumer, because
+// something already gates on the datum itself. `rateLimitRetry` documents
+// whether a flow can supply a reset timestamp, but the scheduled-retry option
+// gates on `resetsAt` being present. `reportsCost` documents whether turns
+// carry a dollar cost, and the footer shows whatever cost a turn reported.
 export type FlowMeta = {
   api: number
   name: string
@@ -56,8 +56,6 @@ export type FlowMeta = {
     grants: { task: boolean; project: boolean }
     usageSnapshot: boolean
     rateLimitRetry: boolean
-    // Whether this flow reports a per-turn dollar cost. The task footer reads
-    // this instead of branching on the agent name.
     reportsCost: boolean
   }
   inputs?: Record<string, unknown>

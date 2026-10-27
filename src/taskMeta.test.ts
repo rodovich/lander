@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   latestUsageRide,
+  taskGrants,
   taskUsageSummary,
   totalRideMs,
   usageBreakdown,
@@ -25,6 +26,22 @@ const withRides = (rides: Ride[]): Task =>
     items: [],
     rides,
   }) as Task
+
+describe('taskGrants', () => {
+  const flows = { claude: { grants: { task: true, project: true } } }
+  it("reads the task's flow, or its legacy agent", () => {
+    const task = (over: Partial<Task>) => ({ ...withRides([]), ...over }) as Task
+    expect(taskGrants(flows, task({ flow: 'claude' }))).toEqual({ task: true, project: true })
+    expect(taskGrants(flows, task({ agent: 'claude' }))).toEqual({ task: true, project: true })
+  })
+
+  it('grants nothing for a flow the list did not carry', () => {
+    expect(taskGrants(flows, { ...withRides([]), flow: 'who-dis' } as Task)).toEqual({
+      task: false,
+      project: false,
+    })
+  })
+})
 
 describe('totalRideMs', () => {
   it('sums the rides it can time and skips the ones it cannot', () => {
@@ -120,12 +137,9 @@ describe('taskUsageSummary', () => {
   })
 
   it('drops the cost for a flow that reports none, like any other absence', () => {
-    const free = {
-      ...withRides([
-        { id: 'r1', startedAt: '…', endedAt: '…', durationMs: 1_000, usage: usage() },
-      ]),
-      reportsCost: false,
-    } as Task
+    const free = withRides([
+      { id: 'r1', startedAt: '…', endedAt: '…', durationMs: 1_000, usage: usage() },
+    ])
     expect(taskUsageSummary(free)?.map((i) => i.id)).toEqual(['model', 'time'])
   })
 
@@ -212,11 +226,6 @@ describe('usageBreakdown', () => {
     // in-flight turn's time takes.
     const riding = withRides([{ id: 'r1', startedAt: '…', usage: usage() }])
     expect(cell(usageBreakdown(riding).groups, 'cost')).toMatchObject({
-      turn: '—',
-      total: '—',
-    })
-    const free = { ...riding, reportsCost: false } as Task
-    expect(cell(usageBreakdown(free).groups, 'cost')).toMatchObject({
       turn: '—',
       total: '—',
     })

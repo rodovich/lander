@@ -12,6 +12,7 @@ import { SentMessageNote } from './sentMessageNote'
 import { TaskActionNote } from './taskActionNote'
 import {
   openRide,
+  NO_GRANTS,
   ranUnderCurrentFlow,
   taskAgentModelName,
   taskFlowName,
@@ -19,11 +20,9 @@ import {
 import { taskKeyOf } from './taskRef'
 import { findTextRanges, paintRanges } from './textRanges'
 import { buildTimeline, type TimelineEntry } from '../shared/timeline'
-import type { AskItem, TaskWithProject } from './types'
+import type { AskItem, FlowCaps, TaskWithProject } from './types'
 import type { ReadUpTo } from './useReadMarker'
 import type { TimelineDisclosure } from './useTimelineDisclosure'
-
-const NO_GRANTS = { task: false, project: false }
 
 // A timeline entry's React key, stable across polls.
 function entryKey(entry: TimelineEntry): string {
@@ -64,6 +63,7 @@ export type ConversationReveal = {
 // the disclosure, or one of the stable callbacks' rare identities changes.
 export const Conversation = memo(function Conversation({
   task,
+  grants,
   disclosure,
   reveal,
   answering,
@@ -74,6 +74,8 @@ export const Conversation = memo(function Conversation({
   onRetry,
 }: {
   task: TaskWithProject
+  // What the task's flow lets a refused call's grant controls offer.
+  grants: FlowCaps['grants']
   disclosure: TimelineDisclosure
   // A search match on this task to bring into view, if one was just opened.
   reveal: ConversationReveal | null
@@ -373,7 +375,7 @@ export const Conversation = memo(function Conversation({
         actions={entry.actions}
         agent={entry.ride.flow ?? taskFlowName(task)}
         slug={task.projectSlug}
-        grants={sameFlow ? task.grants : NO_GRANTS}
+        grants={sameFlow ? grants : NO_GRANTS}
         disclosure={disclosure}
         openAsk={openAsk}
         answering={answering}

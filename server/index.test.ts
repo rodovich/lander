@@ -1739,23 +1739,14 @@ describe('server task provider behavior', () => {
     })
   })
 
-  it('carries capability flags and items on GET /tasks/:id', async () => {
-    // A test rather than a UI check on purpose: the UI polls only the LIST
-    // endpoint (src/useTaskData.ts), so a visual pass would look fine while the
-    // single-task endpoint dropped these. That endpoint is also what a flow's
-    // own ctx.view() reads, and the ask-reading path depends on `items` passing
-    // through publicTask untouched — so both are pinned here.
-    const task = await createTask('Caps on the single-task endpoint')
+  it('carries items on GET /tasks/:id', async () => {
+    // The ask-reading path, and a flow's own ctx.view(), depend on `items`
+    // passing through publicTask untouched on the single-task endpoint.
+    const task = await createTask('Items on the single-task endpoint')
     await post(`/api/${slug}/tasks/${task.id}/messages`, { message: 'hello' })
 
     const res = await app.request(`/api/${slug}/tasks/${task.id}`)
-    const body = (await res.json()) as {
-      grants?: unknown
-      reportsCost?: unknown
-      items?: { kind: string }[]
-    }
-    expect(body.grants).toEqual({ task: false, project: false }) // codex
-    expect(body.reportsCost).toBe(false)
+    const body = (await res.json()) as { items?: { kind: string }[] }
     expect(body.items?.some((i) => i.kind === 'message')).toBe(true)
   })
 
@@ -1809,7 +1800,6 @@ describe('server task provider behavior', () => {
       'agent',
       'createdAt',
       'flow',
-      'grants',
       'id',
       'items',
       // Task hooks: the fires recorded and not yet dispatched. Deliberately
@@ -1818,7 +1808,6 @@ describe('server task provider behavior', () => {
       // projection below, which exists to be small.
       'pendingHooks',
       'readThrough',
-      'reportsCost',
       'revived',
       'rides',
       'scheduledMessages',
@@ -4729,23 +4718,17 @@ describe('flow dispatch gate', () => {
     await waitFor(() => !daemonConnected())
   }, 20_000)
 
-  it("serves a listed task's capabilities as announced now, though its file is unchanged", async () => {
-    const id = 'caps-follow-announce'
-    await seed(id, { agent: 'claude' })
-    const row = async () =>
+  it('serves the flows’ capabilities with the list, as announced now', async () => {
+    const flows = async () =>
       ((await (await app.request(`/api/${slug}/tasks?view=summary`)).json()) as {
-        tasks: { id: string; grants: unknown; reportsCost: unknown }[]
-      }).tasks.find((t) => t.id === id)
-    expect(await row()).toMatchObject({
-      grants: { task: true, project: true },
-      reportsCost: true,
-    })
+        flows: Record<string, { grants: unknown }>
+      }).flows
+    expect((await flows()).claude).toEqual({ grants: { task: true, project: true } })
 
-    await connect(['claude', 'codex'])
-    expect(await row()).toMatchObject({
-      grants: { task: false, project: false },
-      reportsCost: false,
-    })
+    await connect(['claude', 'codex', 'example-flow'])
+    const announced = await flows()
+    expect(announced.claude).toEqual({ grants: { task: false, project: false } })
+    expect(announced['example-flow']).toEqual({ grants: { task: false, project: false } })
     ws.close()
     await waitFor(() => !daemonConnected())
   }, 20_000)

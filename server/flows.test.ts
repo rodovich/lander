@@ -13,6 +13,7 @@ import {
   BOOTSTRAP_FLOWS,
   clearAnnouncedFlows,
   flowCaps,
+  flowCapsByName,
   flowMeta,
   flowRegistry,
   isAnnouncedFlow,
@@ -47,14 +48,8 @@ describe('flow registry', () => {
     // register. The picker must still render and existing claude/codex tasks
     // must still derive capabilities.
     expect(flowRegistry('proj').map((f) => f.name)).toEqual(['claude', 'codex'])
-    expect(flowCaps('claude')).toEqual({
-      grants: { task: true, project: true },
-      reportsCost: true,
-    })
-    expect(flowCaps('codex')).toEqual({
-      grants: { task: false, project: false },
-      reportsCost: false,
-    })
+    expect(flowCaps('claude')).toEqual({ grants: { task: true, project: true } })
+    expect(flowCaps('codex')).toEqual({ grants: { task: false, project: false } })
   })
 
   it('prefers an announced meta over the bootstrap entry of the same name', () => {
@@ -62,12 +57,9 @@ describe('flow registry', () => {
     // frozen literal. The announcement is the live truth — the literal is only
     // a floor for the window before one arrives.
     setAnnouncedFlows([
-      bundled(meta('claude', { grants: { task: true, project: false }, reportsCost: false })),
+      bundled(meta('claude', { grants: { task: true, project: false } })),
     ])
-    expect(flowCaps('claude')).toEqual({
-      grants: { task: true, project: false },
-      reportsCost: false,
-    })
+    expect(flowCaps('claude')).toEqual({ grants: { task: true, project: false } })
     expect(flowMeta('claude')?.description).toBe('the claude flow')
     // Codex was not announced, so it still falls back.
     expect(flowCaps('codex').grants).toEqual({ task: false, project: false })
@@ -112,9 +104,20 @@ describe('flow registry', () => {
     // advertised as honoring a grant scope it may ignore.
     expect(flowCaps('never-heard-of-it')).toEqual({
       grants: { task: false, project: false },
-      reportsCost: false,
     })
     expect(flowMeta('never-heard-of-it')).toBeUndefined()
+  })
+
+  it('maps every announced and legacy flow to its capabilities, the announcement winning', () => {
+    setAnnouncedFlows([
+      bundled(meta('example-flow', { grants: { task: true, project: false } })),
+      bundled(meta('claude')),
+    ])
+    expect(flowCapsByName()).toEqual({
+      'example-flow': { grants: { task: true, project: false } },
+      claude: { grants: { task: false, project: false } },
+      codex: { grants: { task: false, project: false } },
+    })
   })
 
   it('gates dispatch on the announcement, not on the bootstrap union', () => {

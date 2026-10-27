@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAnchoredPopup, useAnchoredPosition } from './hooks'
 import type { BlockedRequest } from './permissions'
-import type { Task } from './types'
+import type { FlowCaps, Task } from './types'
 
 // The no-smoking-style prohibition mark — a circle with a diagonal slash, no
 // cigarette — that leads the "N permissions blocked this turn" summary.
@@ -48,7 +48,7 @@ export function RuleRow({
   placeholder,
 }: {
   rule: string
-  grants: Task['grants']
+  grants: FlowCaps['grants']
   menuOpen: boolean
   onToggleMenu: () => void
   // Null shows the kebab; a grant shows the checkmark and the rule it covered.
@@ -69,9 +69,8 @@ export function RuleRow({
     popupRef: menuRef,
     popupStyle: menuStyle,
   } = useAnchoredPosition(menuOpen, 2)
-  // Absent capabilities (legacy payloads) default to fully capable.
-  const canGrantTask = grants?.task ?? true
-  const canGrantProject = grants?.project ?? true
+  const canGrantTask = grants.task
+  const canGrantProject = grants.project
 
   useEffect(() => {
     if (editing) {
@@ -213,7 +212,7 @@ function RulePopup({
   // An empty row, in edit mode, for writing a rule from scratch.
   authoring?: { placeholder: string }
   forgetOnClose?: boolean
-  grants: Task['grants']
+  grants: FlowCaps['grants']
   onAllow: (rule: string, scope: GrantScope) => Promise<boolean>
   onRetry?: () => Promise<boolean>
 }) {
@@ -323,7 +322,7 @@ export function BlockedSummary({
   onRetry,
 }: {
   requests: BlockedRequest[]
-  grants: Task['grants']
+  grants: FlowCaps['grants']
   onAllow: (rule: string, scope: GrantScope) => Promise<boolean>
   onRetry?: () => Promise<boolean>
 }) {
@@ -402,15 +401,15 @@ export function GrantControl({
   onAllow,
   onRetry,
 }: {
-  grants: Task['grants']
+  grants: FlowCaps['grants']
   // The task's own granted rules, listed above the authoring row. Absent on a
   // task that has never been granted one (and on a pre-`allow` payload).
   allow: Task['allow']
   onAllow: (rule: string, scope: GrantScope) => Promise<boolean>
   onRetry?: () => Promise<boolean>
 }) {
-  const canGrantTask = grants?.task ?? true
-  const canGrantProject = grants?.project ?? true
+  const canGrantTask = grants.task
+  const canGrantProject = grants.project
   if (!canGrantTask && !canGrantProject) return null
 
   return (

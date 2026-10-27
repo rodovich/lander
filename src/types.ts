@@ -288,24 +288,11 @@ export type Task = {
   // Optional on the wire only because a response from a pre-step-4 server
   // wouldn't carry it; the current server always does.
   flow?: string
-  // Grant-capability flags, resolved server-side from the FLOW's announced
-  // meta.capabilities (publicTask → flowCaps): `task` = task-scope allow rules
-  // are honored, `project` = project grants are supported. The grant UI reads
-  // these instead of branching on the provider name, so a flow that doesn't
-  // honor a scope degrades from data. The current server always sends them; the
-  // field stays optional for a payload from one that predates it, which
-  // src/grants.tsx reads as fully capable.
-  grants?: { task: boolean; project: boolean }
   // Permission rules granted on this task itself ("allow in task"), which the
   // header's grant popup lists. Absent until the first task-scope grant — and on
   // a payload from a server that predates the field — so read undefined as none.
   // Project-scope grants aren't here: they live in the project's settings file.
   allow?: string[]
-  // Whether this task's flow reports a per-turn dollar cost (claude does, codex
-  // doesn't), from the same announced meta. Nothing on this side reads it: the
-  // readouts state the cost they were given and say nothing when they were given
-  // none, which needs no forecast of whether one is coming.
-  reportsCost?: boolean
   title: string
   status: string
   createdAt: string
@@ -413,11 +400,15 @@ export type TelemetryItem =
       note?: string
     }
 
+// What a flow can do, as every task-list response serves it by flow name
+// (server/flows.ts's FlowCaps). `grants.task` = task-scope allow rules are
+// honored, `grants.project` = project grants are supported.
+export type FlowCaps = Pick<FlowMeta['capabilities'], 'grants'>
+
 // What a driver flow announces about itself, as GET /api/:project/flows serves
 // it. Mirrors server/protocol.ts's FlowMeta by hand, like TelemetryItem above.
-// The picker renders `name`/`description`; the capability flags reach the client
-// per-task via publicTask's `grants`/`reportsCost` rather than being read off
-// this directly.
+// The picker renders `name`/`description`; the grant UI reads its flow's
+// grants from the list response's FlowCaps instead.
 export type FlowMeta = {
   api: number
   name: string

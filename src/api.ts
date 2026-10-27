@@ -2,6 +2,7 @@ import type { TaskMatches, TaskSearch } from '../shared/conversationSearch'
 import type { StatsFacts } from './stats'
 import { taskKey, type TaskRef } from './taskRef'
 import type {
+  FlowCaps,
   FlowMeta,
   Item,
   ProjectHooks,
@@ -261,6 +262,7 @@ export async function loadShownTasks(
 ): Promise<{
   tasks: TaskWithProject[]
   telemetry: FlowTelemetry
+  flows: Record<string, FlowCaps>
   search: TaskSearchResult | null
 }> {
   const lists = await Promise.all(
@@ -283,6 +285,7 @@ export async function loadShownTasks(
       return {
         tasks: (body.tasks as Task[]).map((t) => ({ ...t, projectSlug: slug })),
         telemetry: (body.telemetry ?? {}) as FlowTelemetry,
+        flows: (body.flows ?? {}) as Record<string, FlowCaps>,
         found: found && {
           query: found.query,
           matches: Object.entries(found.matches).map(
@@ -304,6 +307,8 @@ export async function loadShownTasks(
   return {
     tasks: merged,
     telemetry,
+    // Global like telemetry: every project's response carries the same map.
+    flows: lists.map((l) => l.flows).find((f) => Object.keys(f).length > 0) ?? {},
     search:
       found.length > 0
         ? { query: found[0].query, matches: new Map(found.flatMap((f) => f.matches)) }

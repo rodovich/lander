@@ -6,7 +6,7 @@ import { CopyConversationButton, CopyIdButton, TaskActionsMenu } from './menus'
 import { availableTaskActions } from './taskActions'
 import type { TaskAction } from './taskActions'
 import { taskKeyOf } from './taskRef'
-import type { TaskWithProject } from './types'
+import type { FlowCaps, TaskWithProject } from './types'
 
 // The naming sparkle, shown while haiku is picking a title for the task.
 function SparkleIcon() {
@@ -33,6 +33,7 @@ function SparkleIcon() {
 // beside it, since App re-renders on every poll and scroll flip.
 export const DetailHeader = memo(function DetailHeader({
   task,
+  grants,
   retitling,
   copyMarkdown,
   onTaskAction,
@@ -42,6 +43,8 @@ export const DetailHeader = memo(function DetailHeader({
   onRetry,
 }: {
   task: TaskWithProject
+  // What the task's flow lets the grant control offer.
+  grants: FlowCaps['grants']
   retitling: string | null
   // The whole conversation as markdown, built on the click rather than on every
   // render of the header.
@@ -118,7 +121,7 @@ export const DetailHeader = memo(function DetailHeader({
           {!task.archived && (
             <GrantControl
               key={taskKeyOf(task)}
-              grants={task.grants}
+              grants={grants}
               allow={task.allow}
               onAllow={allowTool}
               onRetry={task.status === 'wedged' || task.status === 'paced' ? onRetry : undefined}

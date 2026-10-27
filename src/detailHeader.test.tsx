@@ -25,6 +25,7 @@ const render = (
   renderToStaticMarkup(
     <DetailHeader
       task={task}
+      grants={{ task: true, project: true }}
       retitling={null}
       copyMarkdown={() => ''}
       onTaskAction={() => {}}

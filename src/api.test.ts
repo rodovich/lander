@@ -44,6 +44,15 @@ describe('loadShownTasks request composition', () => {
     ])
   })
 
+  it("returns the flows' capabilities the response carries", async () => {
+    const flows = { claude: { grants: { task: true, project: false } } }
+    vi.stubGlobal('fetch', async () => ({
+      ok: true,
+      json: async () => ({ tasks: [], telemetry: {}, flows }),
+    }))
+    expect((await loadShownTasks(['p'], false)).flows).toEqual(flows)
+  })
+
   it("returns a search's matches keyed by task, or null without one", async () => {
     const match = { count: 1, list: [{ itemId: 'u1', occurrence: 0, snippet: 'x' }] }
     vi.stubGlobal('fetch', async () => ({

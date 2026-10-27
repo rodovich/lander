@@ -301,42 +301,10 @@ describe('publicTask', () => {
     expect((publicTask({ id: 's', status: 'landed', items: [] }) as { status?: string }).status).toBe('landed')
   })
 
-  it('derives grant capabilities from the flow’s announced meta', () => {
-    expect(publicTask({ id: 's', status: 'riding', items: [], agent: 'claude' }).grants).toEqual({ task: true, project: true })
-    expect(publicTask({ id: 's', status: 'riding', items: [], agent: 'codex' }).grants).toEqual({ task: false, project: false })
-    expect(publicTask({ id: 's', status: 'riding', items: [], flow: 'codex' }).grants).toEqual({ task: false, project: false })
-  })
-
-  it('derives the cost-reporting capability from the flow’s announced meta', () => {
-    expect(publicTask({ id: 's', status: 'riding', items: [], agent: 'claude' }).reportsCost).toBe(true)
-    expect(publicTask({ id: 's', status: 'riding', items: [], agent: 'codex' }).reportsCost).toBe(false)
-  })
-
-  it('gives a provider-less fixture the legacy flow’s capabilities', () => {
-    // Deliberate change from the agentGrantCaps era, where caps attached only
-    // `if (agent)` so a structural fixture received none. taskFlow() always
-    // resolves to at least LEGACY_FLOW, so they now attach here too.
-    const out = publicTask({ id: 's', status: 'riding', items: [] })
-    expect(out.flow).toBe('claude')
-    expect(out.grants).toEqual({ task: true, project: true })
-    expect(out.reportsCost).toBe(true)
-  })
-
-  it('degrades an unknown flow to the conservative floor', () => {
-    // Not "fully capable": a flow the server has never heard of must not be
-    // advertised as honoring a grant scope it may ignore.
-    const out = publicTask({ id: 's', status: 'riding', items: [], flow: 'who-dis' })
-    expect(out.grants).toEqual({ task: false, project: false })
-    expect(out.reportsCost).toBe(false)
-  })
-
-  it('lets a caller pin caps explicitly', () => {
-    const out = publicTask(
-      { id: 's', status: 'riding', items: [], agent: 'claude' },
-      { caps: { grants: { task: false, project: true }, reportsCost: false } },
-    )
-    expect(out.grants).toEqual({ task: false, project: true })
-    expect(out.reportsCost).toBe(false)
+  it('serves the flow a task names, its legacy agent, or the legacy default', () => {
+    expect(publicTask({ id: 's', status: 'riding', items: [], flow: 'codex' }).flow).toBe('codex')
+    expect(publicTask({ id: 's', status: 'riding', items: [], agent: 'codex' }).flow).toBe('codex')
+    expect(publicTask({ id: 's', status: 'riding', items: [] }).flow).toBe('claude')
   })
 })
 
@@ -376,13 +344,8 @@ describe('taskSummary', () => {
     expect('retry' in out).toBe(false)
     expect('flowState' in out).toBe(false)
     expect('flowStateRev' in out).toBe(false)
-    // Everything else the list reads survives, capability flags included.
-    expect(out).toMatchObject({
-      id: 's',
-      title: 't',
-      flow: 'claude',
-      grants: { task: true, project: true },
-    })
+    // Everything else the list reads survives.
+    expect(out).toMatchObject({ id: 's', title: 't', flow: 'claude' })
   })
 
   it('projects scheduledMessages to the schedule, keeping the index and dropping the text', () => {

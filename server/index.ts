@@ -53,7 +53,6 @@ import {
 import { parseProjects, type Project } from './projects'
 import { conversationText } from '../shared/conversationText'
 import {
-  announcedCaps,
   publicTask,
   taskSummary,
   taskFlow,
@@ -146,7 +145,7 @@ import {
   type Ask,
   type AskForm,
 } from './asks'
-import { flowCaps, flowRegistry, isAnnouncedFlow } from './flows'
+import { flowCaps, flowCapsByName, flowRegistry, isAnnouncedFlow } from './flows'
 import {
   approveHookPairs,
   effectiveApprovals,
@@ -466,14 +465,10 @@ const readTasks = async (dataDir: string) =>
   (await readTaskEntries<Task>(dataDir))
     .filter(({ id, record }) => isListable(id, record))
     .map(({ id, record }) => ({ ...record, id }))
-// What the summary list keeps of each task between polls. Not the
-// announcedCaps fields: they follow the daemon's announcements, not the file,
-// so the route adds them per request.
 const readListed = retainedProjection((record, id) => {
   const task = record as Task
   if (!isListable(id, task)) return null
-  const { grants: _g, reportsCost: _r, ...summary } = taskSummary({ ...task, id })
-  return { summary, index: conversationIndex(task) }
+  return { summary: taskSummary({ ...task, id }), index: conversationIndex(task) }
 })
 const readTask = (dataDir: string, id: string) => readTaskStore<Task>(dataDir, id)
 const writeTask = (file: string, task: Task) => writeTaskStore(file, task)
@@ -1710,6 +1705,9 @@ app.get('/api/:project/tasks', async (c) => {
     // — decision 6). It's global, not per-project — the same { agent: items } map
     // on every project's response.
     const telemetry = Object.fromEntries(telemetryCache)
+    // So do the flows' capabilities, for the same reason: a daemon's
+    // announcement changes them without changing any task.
+    const flows = flowCapsByName()
     // `?view=summary` serves each task without its conversation (see
     // taskSummary). Opt-in: with no param the response is what it always was,
     // so the running client and any third-party caller are unaffected.
@@ -1735,20 +1733,17 @@ app.get('/api/:project/tasks', async (c) => {
       const listed = (await readListed(pool)).flatMap(({ id, value }) =>
         value ? [{ id, ...value }] : [],
       )
-      tasks = listed
-        .map(({ summary: s }) => tag({ ...s, ...announcedCaps(s.flow) }))
-        .sort(newestFirst)
+      tasks = listed.map(({ summary: s }) => tag(s)).sort(newestFirst)
       indexed = listed
     } else {
       const full = await readTasks(pool)
-      // Arrow-wrapped: a bare `.map(publicTask)` binds the array index to the
-      // options parameter.
       tasks = full.map((t) => publicTask(tag(t)))
       indexed = query ? full.map((t) => ({ id: t.id, index: conversationIndex(t) })) : []
     }
     return c.json({
       tasks,
       telemetry,
+      flows,
       ...(query
         ? {
             search: {

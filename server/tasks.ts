@@ -14,7 +14,7 @@ import type { ContextAction, ContextDetails } from '../shared/context'
 // recordStatusTransition settles open asks on the crossing. asks.ts imports only
 // types from here, so the runtime edge stays one-way — this module → asks.ts.
 import { withdrawOpenAsks, type Ask, type AskForm } from './asks'
-import { LEGACY_FLOW, flowCaps, type FlowCaps } from './flows'
+import { LEGACY_FLOW } from './flows'
 import { isUnread, type ReadableTask } from '../shared/readMarker'
 import { openRide } from '../shared/timeline'
 import { blockquote } from '../shared/conversationText'
@@ -1048,14 +1048,6 @@ export function switchTaskFlow(
   delete task.cwd
 }
 
-// Grant-capability flags served on the public task so the UI stops branching on
-// the provider: `task` = task-scope allow rules are honored, `project` =
-// project-scope grants are supported. Now sourced from the flow's ANNOUNCED
-// meta.capabilities (see server/flows.ts) rather than a compiled switch on the
-// agent kind — which is what lets a flow the server has never been compiled
-// against describe its own capabilities.
-export type GrantCaps = { task: boolean; project: boolean }
-
 export function publicTaskStatus(task: {
   status?: string
   rides?: Ride[]
@@ -1093,13 +1085,11 @@ function flagQueued<M extends { role: 'user' | 'flow' | 'assistant' | 'hook' }>(
 // before sending a task over HTTP, so the UI — and any task scraping the API —
 // can't read another task's token and impersonate it. `retry` is internal
 // bookkeeping the wedge's retry ask supersedes on the wire, so it's stripped too.
-// Serves the v2 item log natively (`items`/`rides`); the client and CLI read it
-// directly now (the legacy `messages`/`events`/`asks` projection is gone — see
-// docs/rides-plan.md step 6). Also derives the served `status` and attaches the
-// `grants` flags.
+// Serves the v2 item log natively (`items`/`rides`), which the client and CLI
+// read directly. Also derives the served `status` and `flow`. A pure function
+// of the task.
 export function publicTask<T extends object>(
   task: T,
-  opts?: { caps?: FlowCaps },
 ): Omit<
   T,
   | 'token'
@@ -1113,11 +1103,7 @@ export function publicTask<T extends object>(
   | 'hookFireSeq'
   | 'hookActionsResetAt'
   | 'hookActions'
-> & {
-  flow: string
-  grants: GrantCaps
-  reportsCost: boolean
-} {
+> & { flow: string } {
   const {
     token: _t,
     runId: _r,
@@ -1178,30 +1164,12 @@ export function publicTask<T extends object>(
   })
   if (status !== undefined) restT.status = status
 
-  // Attach the capability flags from the flow's ANNOUNCED meta, so the client
-  // reads capabilities and never the agent name.
-  //
-  // The default resolves here rather than being injected at the route layer.
-  // Injection was tried and reverted: publicTask has ~25 call sites, all of
-  // which attach these today, and a no-default options object would silently
-  // drop both fields from the ~23 that didn't opt in — including
-  // GET /tasks/:id, which is what a flow's own ctx.view() reads. Worse, the
-  // regression would be invisible to a UI check, since the UI polls only the
-  // list endpoint. The purity cost of reading process-global registry state
-  // from a serializer is real and accepted; the registry is already global and
-  // already read on this request path.
-  //
-  // The options object stays because it is arity-immune (a bare
-  // `.map(publicTask)` would otherwise bind the array index to it) and gives
-  // tests a way to pin caps.
-  const flow = taskFlow(task as { flow?: string; agent?: string })
   const out = {
     ...rest,
     // The task's driver flow, derived. Served additively alongside `agent`
     // until the client stops reading the latter — a pre-step-4 task has no
     // stored `flow`, so this is where its `agent` becomes one.
-    flow,
-    ...announcedCaps(flow, opts?.caps),
+    flow: taskFlow(task as { flow?: string; agent?: string }),
   }
   return out as Omit<
     T,
@@ -1216,17 +1184,7 @@ export function publicTask<T extends object>(
   | 'hookFireSeq'
   | 'hookActionsResetAt'
   | 'hookActions'
-  > & {
-    flow: string
-    grants: GrantCaps
-    reportsCost: boolean
-  }
-}
-
-// The fields publicTask serves from the flow's announced capabilities, which
-// change when a daemon announces, not when the task's file does.
-export function announcedCaps(flow: string, caps: FlowCaps = flowCaps(flow)) {
-  return { grants: caps.grants, reportsCost: caps.reportsCost }
+  > & { flow: string }
 }
 
 // The public task without its conversation: everything `publicTask` serves,
@@ -1245,8 +1203,8 @@ export function announcedCaps(flow: string, caps: FlowCaps = flowCaps(flow)) {
 // consumers read (`bin/task-metadata.js`). The `.map` is index-preserving —
 // entry `[0]` is read positionally — so a message with none of these fields
 // still occupies its slot.
-export function taskSummary<T extends object>(task: T, opts?: { caps?: FlowCaps }) {
-  const full = publicTask(task, opts)
+export function taskSummary<T extends object>(task: T) {
+  const full = publicTask(task)
   const unread = isUnread(full as ReadableTask)
   const {
     items: _items,

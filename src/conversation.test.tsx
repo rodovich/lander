@@ -85,6 +85,7 @@ const render = (
   renderToStaticMarkup(
     <Conversation
       task={task}
+      grants={{ task: true, project: true }}
       disclosure={{
         openDetails: new Set(),
         expandedTurns: new Set(),

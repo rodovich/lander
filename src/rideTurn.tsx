@@ -8,7 +8,7 @@ import { splitNotices } from '../shared/turnCollapse'
 import { taskAgentModelName } from './taskMeta'
 import { TurnTrace } from './turnTrace'
 import type { RideItem } from '../shared/timeline'
-import type { AskItem, Ride, TaskActionItem, Task } from './types'
+import type { AskItem, FlowCaps, Ride, TaskActionItem, Task } from './types'
 import type { TimelineDisclosure } from './useTimelineDisclosure'
 
 // The riding task's spinner row — "working…" in its open turn, "starting…"
@@ -63,7 +63,7 @@ export const RideTurn = memo(function RideTurn({
   // The name of the flow the ride was for, for display only.
   agent: string | undefined
   slug: string
-  grants: Task['grants']
+  grants: FlowCaps['grants']
   disclosure: TimelineDisclosure
   // The task's open ask; rendered as this turn's footer only when this ride
   // raised it.

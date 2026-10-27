@@ -26,7 +26,7 @@ import {
   type TaskMutationHandle,
   type TaskPatch,
 } from './taskMutationFence'
-import type { Project, TaskLink, TaskView, TaskWithProject } from './types'
+import type { FlowCaps, Project, TaskLink, TaskView, TaskWithProject } from './types'
 
 // The gap between one poll's answer and the next poll's question. Measured
 // from the answer (see startPoll), so this is the cadence at rest and the
@@ -63,6 +63,8 @@ export function useTaskData(
   // producing flow decides when to refresh; the client just renders the latest
   // snapshot it was handed for whichever flow is in view.
   const [telemetry, setTelemetry] = useState<FlowTelemetry>({})
+  // Each flow's capabilities by name, carried on every tasks poll the same way.
+  const [flowCaps, setFlowCaps] = useState<Record<string, FlowCaps>>({})
   const [projects, setProjects] = useState<Project[]>([])
   // The project the navbar has open, whose tasks the list shows. Session-scoped
   // so it survives a reload but stays per-tab; reconciled against the live
@@ -259,7 +261,7 @@ export function useTaskData(
     const watched = watchedRef.current
     const watchedKey = watched && taskKey(watched.projectSlug, watched.id)
     try {
-      const [{ tasks, telemetry, search }, detail] = await Promise.all([
+      const [{ tasks, telemetry, flows, search }, detail] = await Promise.all([
         loadShownTasks([project], archived, searchRequest),
         watched
           ? loadTask(watched.projectSlug, watched.id).then(
@@ -288,6 +290,7 @@ export function useTaskData(
         return mergeTaskRefresh(mutationFence, issuedAt, current, shown)
       })
       setTelemetry(telemetry)
+      setFlowCaps(flows)
       setSearch(search)
       hasLoadedRef.current = true
       return detail && 'error' in detail ? detail.error : null
@@ -439,6 +442,7 @@ export function useTaskData(
     tasks,
     tasksRef,
     telemetry,
+    flowCaps,
     projects,
     project,
     setProject,
