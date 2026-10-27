@@ -337,8 +337,8 @@ type Task = {
   // Absent when not awaiting.
   waitingFor?: string[]
   // The tasks to wake once, when THIS task next finishes a turn cleanly: the
-  // launcher, armed at creation by `lander launch --notify`, and any task whose
-  // `lander send --notify` this task has read (deliverQueuedBatch). Each names
+  // launcher, armed at creation by `lander launch --await`, and any task whose
+  // `lander send --await` this task has read (deliverQueuedBatch). Each names
   // the task that asked, so a notification is always "tell the task that asked
   // me", never an arbitrary target a caller could point at a stranger. Consumed
   // by applyDone, which moves it to `pendingNotify`; absent when nobody waits.
@@ -1279,8 +1279,8 @@ async function deliverScheduledMessages(
 // courtesy note, not a transcript; the launcher can always `lander view`.
 const NOTIFY_TEXT_MAX_CHARS = 2000
 
-// Deliver a task's fired `--notify`s: wake each task that asked (its launcher, or
-// a task that sent it a `send --notify`) with the closing message of the turn
+// Deliver a task's fired `--await`s: wake each task that asked (its launcher, or
+// a task that sent it a `send --await`) with the closing message of the turn
 // that fired it. Clears `pendingNotify` whatever the outcome — a notification is
 // a courtesy, and one that cannot be delivered (target landed, archived, or gone)
 // must not be retried on every sweep for the life of the instance.
@@ -2349,7 +2349,7 @@ app.post('/api/:project/tasks', async (c) => {
       date?: unknown
       time?: unknown
       after?: unknown
-      notify?: unknown
+      await?: unknown
       flow?: unknown
       flowConfig?: unknown
       attachments?: unknown
@@ -2524,13 +2524,13 @@ app.post('/api/:project/tasks', async (c) => {
       ...(principal.kind === 'task'
         ? { spawnedBy: principal.id, spawnedByProject: principal.slug }
         : {}),
-      // `--notify`: wake the spawner once, when this task first finishes a turn
+      // `--await`: wake the spawner once, when this task first finishes a turn
       // cleanly. Gated on a task principal because the target IS the principal —
       // there is nobody to wake when a human launches from the UI, and a hook's
       // launch has no spawning task at all (see hookOrigin below). Silently
       // ignored rather than rejected in those cases: the flag is a request for a
       // courtesy that does not apply, not a malformed launch.
-      ...(body.notify === true && principal.kind === 'task'
+      ...(body.await === true && principal.kind === 'task'
         ? { notify: [principal.id] }
         : {}),
       // The hook that caused this task, or the one inherited from the task that
@@ -3570,7 +3570,7 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
       after?: unknown
       attachments?: unknown
       key?: unknown
-      notify?: unknown
+      await?: unknown
     }>()
     const rawMessage = typeof body.message === 'string' ? body.message : ''
     if (!rawMessage.trim()) return c.json({ error: 'message is required' }, 400)
@@ -3602,10 +3602,10 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
       principal.kind === 'task' && principal.id !== id
         ? { task: principal.id, via: 'send' as const }
         : undefined
-    // `--notify` wakes the sender, so it applies only where there is a sending
-    // task to wake — ignored, like `launch --notify`, for the human and for a
+    // `--await` wakes the sender, so it applies only where there is a sending
+    // task to wake — ignored, like `launch --await`, for the human and for a
     // task messaging itself.
-    const notify = body.notify === true && !!from
+    const notify = body.await === true && !!from
     const message = rawMessage
 
     // What an action record echoes back on the sender: their own words — the

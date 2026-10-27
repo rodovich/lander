@@ -119,24 +119,24 @@ describe('lander launch --flow', () => {
   })
 })
 
-// `--notify` is a bare flag with no target — the server arms it against the
+// `--await` is a bare flag with no target — the server arms it against the
 // calling task. Covered here because bin/ is outside tsconfig's `include`, so
 // nothing else would catch it consuming the next argv token as a value.
-describe('lander launch --notify', () => {
-  it('posts notify:true without swallowing the message', async () => {
-    const { stdout, code } = await execLander(['launch', '--notify', 'say hi'])
+describe('lander launch --await', () => {
+  it('posts await:true without swallowing the message', async () => {
+    const { stdout, code } = await execLander(['launch', '--await', 'say hi'])
     expect(code).toBe(0)
     expect(stdout.trim()).toBe('new-task')
-    expect(lastBody).toMatchObject({ notify: true, message: 'say hi' })
+    expect(lastBody).toMatchObject({ await: true, message: 'say hi' })
   })
 
-  it('omits notify entirely when the flag is absent', async () => {
+  it('omits await entirely when the flag is absent', async () => {
     await execLander(['launch', 'say hi'])
-    expect('notify' in lastBody!).toBe(false)
+    expect('await' in lastBody!).toBe(false)
   })
 
   it('combines with --after, which still takes its own value', async () => {
-    await execLander(['launch', '--notify', '--after', 'abc123', 'go'])
-    expect(lastBody).toMatchObject({ notify: true, after: ['abc123'], message: 'go' })
+    await execLander(['launch', '--await', '--after', 'abc123', 'go'])
+    expect(lastBody).toMatchObject({ await: true, after: ['abc123'], message: 'go' })
   })
 })

@@ -399,7 +399,7 @@ export function applyDone(
   // late done for a ride some other path already closed emits nothing rather
   // than naming a ride that ended for another reason at another time.
   recordRideEnded(task, ride, outcome, at)
-  // Arm the one-shot `--notify` delivery on the same signal the `ride-ended`
+  // Arm the one-shot `--await` delivery on the same signal the `ride-ended`
   // trigger uses, and for the same reason: a clean end is the agent finishing
   // its own turn, while `interrupted` is a human or a sibling stopping it and
   // `error` is the platform's doing. Notifying on either of those would report

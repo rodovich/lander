@@ -821,7 +821,7 @@ describe('deliverQueuedBatch', () => {
     expect(ids(t)).toEqual(['f-a1', 'f-a2', 'u-F1', 'u-F2'])
   })
 
-  it('arms the sender of a `--notify` message alongside the launcher', () => {
+  it('arms the sender of a `--await` message alongside the launcher', () => {
     const t: { items: Item[]; notify?: NotifyArming } = {
       items: [
         userItem('ask', AT, { from: { task: 'sender-1', via: 'send' }, notify: true }),
@@ -1541,7 +1541,7 @@ describe('applyDueMessages', () => {
     expect(t.queued).toEqual(['From tsk-s:\n\na', 'b'])
   })
 
-  it('carries a deferred `send --notify` onto the delivered item', () => {
+  it('carries a deferred `send --await` onto the delivered item', () => {
     const t = task()
     applyDueMessages(
       t,

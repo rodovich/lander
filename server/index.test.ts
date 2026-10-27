@@ -2214,16 +2214,16 @@ describe('acting task coordination history', () => {
     expect((await rawTask(actor.id)).updatedAt).toBe(before.updatedAt)
   })
 
-  // `--notify` arms the child against its LAUNCHER, never against an id the
+  // `--await` arms the child against its LAUNCHER, never against an id the
   // caller supplied — so the flag carries no target and cannot be pointed at a
   // task the caller has nothing to do with.
-  it('arms --notify against the launching task, and nobody else', async () => {
+  it('arms --await against the launching task, and nobody else', async () => {
     const actor = await createTask('Notify launcher')
 
     const child = await launchAs(actor.id, slug, {
       title: 'Notified child',
       message: 'Acknowledge and land.',
-      notify: true,
+      await: true,
     })
     expect(child.status).toBe(201)
     const childId = ((await child.json()) as { id: string }).id
@@ -2241,7 +2241,7 @@ describe('acting task coordination history', () => {
   // A human launching from the UI is not a task, so there is nobody to wake.
   // The flag is ignored rather than refused: it asks for a courtesy that does
   // not apply here, which is not a malformed launch.
-  it('ignores --notify on a launch with no spawning task', async () => {
+  it('ignores --await on a launch with no spawning task', async () => {
     const res = await app.request(`/api/${slug}/tasks`, {
       method: 'POST',
       headers: {
@@ -2252,7 +2252,7 @@ describe('acting task coordination history', () => {
         title: 'UI child',
         flow: 'codex',
         message: 'Acknowledge and land.',
-        notify: true,
+        await: true,
       }),
     })
     expect(res.status).toBe(201)
@@ -2331,7 +2331,7 @@ describe('acting task coordination history', () => {
     expect((await rawTask(actor.id)).updatedAt).toBe(before.updatedAt)
   })
 
-  it('records `send --notify` on the message, and only for a sending task', async () => {
+  it('records `send --await` on the message, and only for a sending task', async () => {
     const actor = await createTask('Notify sender')
     const immediate = await createTask('Notify immediate recipient')
     const deferred = await createTask('Notify deferred recipient')
@@ -2340,16 +2340,16 @@ describe('acting task coordination history', () => {
     const sends = [
       asTask(actor.id, `/api/${slug}/tasks/${immediate.id}/messages`, 'POST', {
         message: 'Answer me',
-        notify: true,
+        await: true,
       }),
       asTask(actor.id, `/api/${slug}/tasks/${deferred.id}/messages`, 'POST', {
         message: 'Answer me later',
         time: 60,
-        notify: true,
+        await: true,
       }),
       post(`/api/${slug}/tasks/${human.id}/messages`, {
         message: 'From the human',
-        notify: true,
+        await: true,
       }),
     ]
     for (const res of await Promise.all(sends)) expect(res.status).toBe(200)
@@ -4188,9 +4188,9 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     await waitForRaw(id, (r) => !r.runId)
   })
 
-  // A `send --notify` that arrives mid-turn must not fire when that turn ends:
+  // A `send --await` that arrives mid-turn must not fire when that turn ends:
   // the turn that reads the message is the one that answers it.
-  it('fires `send --notify` on the turn that reads the message', async () => {
+  it('fires `send --await` on the turn that reads the message', async () => {
     const sender = 'notify-sender'
     const id = 'notify-recipient'
     await seed(sender)
@@ -4199,7 +4199,7 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     expect((await sendAs(sender, id, { message: 'first' })).status).toBe(200)
     await waitFor(() => startRuns(id).length === 1)
     expect(
-      (await sendAs(sender, id, { message: 'answer me', notify: true })).status,
+      (await sendAs(sender, id, { message: 'answer me', await: true })).status,
     ).toBe(200)
 
     // The turn already running ends without the message: nobody is notified.

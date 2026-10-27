@@ -527,7 +527,7 @@ describe('applyDone records the ride-ended fire', () => {
   })
 })
 
-// `--notify` rides the same signal as the ride-ended fire, so the cases that
+// `--await` rides the same signal as the ride-ended fire, so the cases that
 // decide the fire's principal decide whether the launcher is woken.
 describe('applyDone arms the one-shot notify', () => {
   const done = (t: ApplyTask, exitCode = 0, interrupted = false) =>

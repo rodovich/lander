@@ -248,7 +248,7 @@ describe('a deferred message to a task with a ride scheduled', () => {
   })
 })
 
-// A `--notify` delivery is a message, not a scheduled ride firing — it never
+// A `--await` delivery is a message, not a scheduled ride firing — it never
 // drives the synthetic prompt — and like a message from another task it leaves
 // the ride the woken task scheduled.
 describe('a notify delivery', () => {

@@ -359,9 +359,9 @@ async function launchTask(rest) {
     else if (a === '--date') o.date = rest[++i]
     else if (a === '--time') o.time = Number(rest[++i])
     else if (a === '--after') o.after = rest[++i]
-    // --notify takes no target: the server arms it against the calling task, so
+    // --await takes no target: the server arms it against the calling task, so
     // there is no id to mistype and no way to point a notification at a stranger.
-    else if (a === '--notify') o.notify = true
+    else if (a === '--await') o.await = true
     else if (a === '--flow') o.flow = rest[++i]
     // --key <name> <value> pairs accumulate into the flow's config. Values are
     // coerced at this boundary so a flow receives real booleans/numbers.
@@ -781,7 +781,7 @@ async function viewTask(args) {
 }
 
 // `lander send <id> <message|-> [--date <when> | --time <minutes>] [--after <ids>]
-// [--notify]` — message another task in this project. Without a schedule the
+// [--await]` — message another task in this project. Without a schedule the
 // message is delivered now (queued behind any in-flight turn); --date/--time/
 // --after defer delivery until that trigger fires (whichever comes first when
 // several are set).
@@ -794,7 +794,7 @@ async function sendTask(args) {
     else if (a === '--time') o.time = Number(args[++i])
     else if (a === '--after') o.after = args[++i]
     // Takes no target, as on `launch`: the server wakes the sending task.
-    else if (a === '--notify') o.notify = true
+    else if (a === '--await') o.await = true
     // --attach is variadic: consume following args up to the next --flag.
     else if (a === '--attach')
       while (i + 1 < args.length && !args[i + 1].startsWith('--'))
@@ -817,7 +817,7 @@ async function sendTask(args) {
       time: o.time,
       after,
       attachments,
-      notify: o.notify,
+      await: o.await,
     }),
   })
   const verb =
@@ -1314,10 +1314,10 @@ async function recordCwd() {
 const USAGE = {
   land: 'land [id…]',
   launch:
-    'launch <message|-> [--title <t>] [--project <slug>] [--date <when>|--time <min>] [--after <ids>] [--notify] [--flow <name>] [--key <k> <v>]… [--attach <paths…>]',
+    'launch <message|-> [--title <t>] [--project <slug>] [--date <when>|--time <min>] [--after <ids>] [--await] [--flow <name>] [--key <k> <v>]… [--attach <paths…>]',
   list: 'list [--status <s>] [--since <when>] [--until <when>] [--text <terms>] [--archived] [--json]',
   view: 'view <id> [--expand] [--messages <N|all>] [--clip <N|all>] [--json]',
-  send: 'send <id> <message|-> [--date <when>|--time <min>] [--after <ids>] [--notify] [--attach <paths…>]',
+  send: 'send <id> <message|-> [--date <when>|--time <min>] [--after <ids>] [--await] [--attach <paths…>]',
   ride: 'ride (--date <when> | --time <min> | --after <ids> | --clear)',
   relaunch:
     'relaunch <message|-> [--date <when>|--time <min>|--after <ids>] [--interval <min> [--repeat-count <n>|--repeat-until <when>]] [--flow <name>] [--clear]',

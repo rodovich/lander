@@ -507,7 +507,7 @@ type ItemCommon = {
 export type HookSender = { hook: string; path: string; fireId: string }
 
 // A task that put a message in a task's conversation, and how: its `lander
-// launch` opening message, a `lander send`, or the `--notify` wake carrying its
+// launch` opening message, a `lander send`, or the `--await` wake carrying its
 // closing message to another task — or its `lander relaunch` brief to its own
 // next session. Named by id alone, because none of them may cross a project.
 export type TaskSender = {
@@ -536,7 +536,7 @@ export function attributedPrompt(m: {
   // A relaunch brief is the task's own words to its next session, which knows
   // from its prompt that a relaunch is how it starts; there is no one to name.
   if (via === 'relaunch') return m.text
-  // A `--notify` wake says "finished a turn" rather than "is done": a clean
+  // A `--await` wake says "finished a turn" rather than "is done": a clean
   // turn-end is not a claim that the work is complete, and the launcher has to
   // decide that for itself.
   return m.text ? `${task} finished a turn:\n\n${m.text}` : `${task} finished a turn.`
@@ -562,7 +562,7 @@ export type MessageItem = ItemCommon & {
   // Set on a user message once a queued batch delivers it: the ride that consumed
   // it, making the batching visible. Absent on converted history.
   deliveredIn?: string
-  // Set on a message another task sent with `lander send --notify`: wake that
+  // Set on a message another task sent with `lander send --await`: wake that
   // task (`from`) with this task's closing message once a turn this message
   // reached ends cleanly. Armed on delivery rather than on send
   // (deliverQueuedBatch), so a message queued behind a turn already in progress
@@ -1003,7 +1003,7 @@ export type ScheduledMessage = {
   // agent ahead of `text` (attributedPrompt). Absent for the human's own sends
   // and a task's relaunch of itself.
   from?: TaskSender
-  // `lander send --notify`, carried onto the delivered message (see
+  // `lander send --await`, carried onto the delivered message (see
   // MessageItem.notify).
   notify?: true
 }
@@ -1971,7 +1971,7 @@ export function turnAttachments(
 // re-queue an already-delivered item), leaving them in their correct historical slot.
 // `moving` MUST be computed before the stamp loop — stamping first would empty it.
 //
-// A `send --notify` message arms its sender on its first delivery only: arming
+// A `send --await` message arms its sender on its first delivery only: arming
 // is consumed when it fires, so arming again on a re-delivery would wake the
 // sender a second time.
 export function deliverQueuedBatch(
@@ -1992,8 +1992,8 @@ export function deliverQueuedBatch(
 }
 
 // The tasks waiting to be woken once, when a task next finishes a turn cleanly:
-// its launcher (`launch --notify`) and any task whose `send --notify` it has read.
-// A bare id is the shape from before `send --notify`, when only the launcher
+// its launcher (`launch --await`) and any task whose `send --await` it has read.
+// A bare id is the shape from before `send` could arm a wake, when only the launcher
 // could wait; a task armed then can still be on disk unfired.
 export type NotifyArming = string | string[]
 

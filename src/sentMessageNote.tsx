@@ -4,7 +4,7 @@ import { TaskChip } from './timelineNote'
 import type { MessageItem } from './types'
 
 // A message another task put in this one's conversation — its launch brief, a
-// `lander send`, or the `--notify` wake carrying its closing words — told as
+// `lander send`, or the `--await` wake carrying its closing words — told as
 // something that happened to this task, in the voice its other notes use
 // ("launched", "wedged"), rather than in the user's: who sent it, with what it
 // said behind the disclosure. One wording for all three: the agent is told

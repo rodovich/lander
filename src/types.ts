@@ -130,7 +130,7 @@ export type MessageItem = ItemCommon & {
   role: 'user' | 'flow' | 'hook'
   text: string
   // Who spoke, when it was not the task's human: the hook on a `hook` message,
-  // or on a `user` message the task that launched, messaged, or `--notify`-woke
+  // or on a `user` message the task that launched, messaged, or `--await`-woke
   // this one — or this task itself, briefing its next session in a relaunch —
   // or lander, notifying the task why it woke.
   from?:

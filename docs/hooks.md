@@ -33,7 +33,7 @@ never fires.
 | `human` | the user, in lander's UI |
 | `agent` | the task itself, e.g. `lander land` with no id |
 | `task` | another task, e.g. a parent landing its child |
-| `system` | lander itself or an unidentified caller: wedges from failed turns, usage limits and outages; scheduled deliveries, including the user's own `lander send --date`; `--notify` wakes |
+| `system` | lander itself or an unidentified caller: wedges from failed turns, usage limits and outages; scheduled deliveries, including the user's own `lander send --date`; `--await` wakes |
 | `hook` | another hook's `ctx.land` or `ctx.nudge` |
 | `any` | all of the above |
 
