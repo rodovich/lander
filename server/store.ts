@@ -6,101 +6,120 @@
 import { mkdir, readdir, readFile, writeFile, rename, stat } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
+import { mapLimit } from '../shared/mapLimit'
 
 // The minimal shape readTasks needs to order a project's records newest-first.
 export type StoredRecord = { createdAt: string; updatedAt?: string }
 export type StoredEntry<T> = { id: string; record: T }
 
-// A parse retained from an earlier readTasks, with the stat it was valid for.
-type Cached = { mtimeMs: number; size: number; task: unknown }
+// Newest first, by updatedAt, falling back to createdAt for records saved
+// before that field existed.
+export function newestFirst(a: StoredRecord, b: StoredRecord): number {
+  return (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt)
+}
 
-// Retained parses, per directory, keyed by absolute file path. Keyed by path
-// rather than basename because archiving is a rename between tasks/ and
-// archived/ that preserves both mtime and size, so basenames would collide
-// across the two pools by construction.
-//
-// Each call rebuilds its directory's map from that call's readdir, so entries
-// for files that have been archived or removed are simply not carried forward:
-// the retained set is always exactly the directory's current contents. That is
-// why there is no cap and no eviction policy — a cap below a pool's file count
-// would evict precisely what the next request needs, turning the cache into a
-// slowdown, and every entry is revalidated on every call so "least recently
-// used" would have no meaning here.
-const retained = new Map<string, Map<string, Cached>>()
+// One record's projection, by the id its filename carries.
+export type Projected<P> = { id: string; value: P }
 
-// Read and parse every *.json record in a project's data dir, newest first
-// (by updatedAt, falling back to createdAt for records saved before that field
-// existed). A missing dir yields []; unreadable or invalid files are skipped
-// rather than aborting the listing — and non-.json entries (e.g. the
-// <id>.json.<uuid>.tmp files that briefly exist mid-write) are ignored.
+// A projection retained from an earlier read, with the stat it was valid for.
+type Cached<P> = { mtimeMs: number; size: number; value: P }
+
+// Enough reads in flight to overlap the disk with parsing, without starting a
+// read of every file in an archive of hundreds at once.
+const READ_CONCURRENCY = 32
+
+const isMissing = (error: unknown) =>
+  (error as NodeJS.ErrnoException).code === 'ENOENT'
+
+// Every *.json record in a pool, projected, in filename order; writeTask's .tmp
+// files are not records. A dir or file that fails is left out, except when
+// `strict`: then only one that no longer exists is (a file can move to the
+// other pool mid-scan), and any other failure rejects the read.
+async function readPool<P>(
+  dir: string,
+  project: (record: unknown, id: string) => P,
+  opts: { strict?: boolean },
+  prior?: Map<string, Cached<P>>,
+): Promise<{ entries: Projected<P>[]; next: Map<string, Cached<P>> }> {
+  const next = new Map<string, Cached<P>>()
+  let names: string[]
+  try {
+    names = await readdir(dir)
+  } catch (error) {
+    if (opts.strict && !isMissing(error)) throw error
+    return { entries: [], next }
+  }
+  const skip = (error: unknown) => {
+    if (opts.strict && !isMissing(error)) throw error
+    return null
+  }
+  const entries = await mapLimit(
+    names.filter((name) => name.endsWith('.json')).sort(),
+    READ_CONCURRENCY,
+    async (name): Promise<Projected<P> | null> => {
+      const file = path.join(dir, name)
+      const id = path.basename(name, '.json')
+      try {
+        const s = await stat(file)
+        const hit = prior?.get(file)
+        const value =
+          hit && hit.mtimeMs === s.mtimeMs && hit.size === s.size
+            ? hit.value
+            : project(JSON.parse(await readFile(file, 'utf8')), id)
+        next.set(file, { mtimeMs: s.mtimeMs, size: s.size, value })
+        return { id, value }
+      } catch (error) {
+        return skip(error)
+      }
+    },
+  )
+  return { entries: entries.filter((e) => e !== null), next }
+}
+
+// A reader of a pool (readPool) that keeps each file's projection between
+// reads and reparses only files whose mtime or size changed. A pool polled
+// every 2s is nearly all byte-identical from one read to the next, since at
+// most a handful of its tasks are riding. A projection of just the fields a
+// caller reads also keeps the rest of each record, mostly conversation, out of
+// memory.
 //
-// Reparsing is skipped for files whose mtime and size are unchanged since the
-// last call. The list endpoint runs this on every 2s poll over a corpus where
-// at most a handful of tasks are riding, so nearly every file is byte-identical
-// to the one parsed two seconds earlier; validating against the stat the
-// filesystem already maintains turns "parse everything" into "parse what moved".
+// Each read rebuilds its directory's map from that read's readdir, so a file
+// archived or removed is not carried forward; there is no cap, because a cap
+// below a pool's file count would evict precisely what the next read needs.
 //
-// This stays a pure function of what is on disk — no write-through, no
-// invalidation protocol, and an edit made outside the server is still picked up.
-// The one case it cannot see is a write that lands an identical mtime AND an
-// identical size (`cp -p`, `touch -r`), or a filesystem whose stat is
-// attribute-cached (NFS) rather than local.
+// This stays a function of what is on disk — no write-through, no invalidation
+// protocol, and an edit made outside the server is still picked up. The one
+// case it cannot see is a write that lands an identical mtime AND an identical
+// size (`cp -p`, `touch -r`), or a filesystem whose stat is attribute-cached
+// (NFS) rather than local. Projections are shared between reads, so callers
+// must not mutate them.
+export function retainedProjection<P>(
+  project: (record: unknown, id: string) => P,
+  opts: { strict?: boolean } = {},
+): (dir: string) => Promise<Projected<P>[]> {
+  const retained = new Map<string, Map<string, Cached<P>>>()
+  return async (dir) => {
+    const { entries, next } = await readPool(dir, project, opts, retained.get(dir))
+    retained.set(dir, next)
+    return entries
+  }
+}
+
+const readRecords = retainedProjection((record) => record)
+
+// Every record in a project's data dir, newest first. Unreadable or invalid
+// files are skipped rather than aborting the listing.
 //
-// IMPORTANT: the returned records are shared with the cache, not freshly parsed
-// per call. Callers must treat them as read-only — both of today's copy before
+// IMPORTANT: the returned records are the retained parses, shared between
+// calls. Callers must treat them as read-only — both of today's copy before
 // serving (publicTask spreads; the archived branch spreads to add `archived`).
 // A caller that mutates one in place would corrupt every later response.
 export async function readTaskEntries<T extends StoredRecord>(
   dataDir: string,
 ): Promise<StoredEntry<T>[]> {
-  let names: string[]
-  try {
-    names = await readdir(dataDir)
-  } catch {
-    retained.delete(dataDir)
-    return []
-  }
-  const prior = retained.get(dataDir)
-  const next = new Map<string, Cached>()
-  // Concurrently: a sequential await per file would cost more than the parses
-  // this exists to avoid.
-  const stats = await Promise.all(
-    names
-      .filter((name) => name.endsWith('.json'))
-      .map(async (name) => {
-        const file = path.join(dataDir, name)
-        try {
-          const s = await stat(file)
-          return { file, mtimeMs: s.mtimeMs, size: s.size }
-        } catch {
-          return null
-        }
-      }),
-  )
-  const tasks: StoredEntry<T>[] = []
-  for (const s of stats) {
-    if (!s) continue
-    const hit = prior?.get(s.file)
-    if (hit && hit.mtimeMs === s.mtimeMs && hit.size === s.size) {
-      next.set(s.file, hit)
-      tasks.push({ id: path.basename(s.file, '.json'), record: hit.task as T })
-      continue
-    }
-    try {
-      const task = JSON.parse(await readFile(s.file, 'utf8')) as T
-      next.set(s.file, { mtimeMs: s.mtimeMs, size: s.size, task })
-      tasks.push({ id: path.basename(s.file, '.json'), record: task })
-    } catch {
-      // skip unreadable/invalid files
-    }
-  }
-  retained.set(dataDir, next)
-  tasks.sort((a, b) =>
-    (b.record.updatedAt ?? b.record.createdAt).localeCompare(
-      a.record.updatedAt ?? a.record.createdAt,
-    ),
-  )
-  return tasks
+  return (await readRecords(dataDir))
+    .map(({ id, value }) => ({ id, record: value as T }))
+    .sort((a, b) => newestFirst(a.record, b.record))
 }
 
 export async function readTasks<T extends StoredRecord>(

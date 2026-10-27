@@ -19,6 +19,7 @@
 
 import { execFile } from 'node:child_process'
 import { endStdin } from './processes'
+import { mapLimit } from '../shared/mapLimit'
 import type {
   HookDeclaration,
   HookPair,
@@ -284,22 +285,6 @@ async function headCommit(
 // over a project with many hooks would put hundreds of children against it at
 // once, and increment B moves this onto the 15-second scheduler sweep.
 const WALK_CONCURRENCY = 4
-
-async function mapLimit<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const out = new Array<R>(items.length)
-  let next = 0
-  const worker = async (): Promise<void> => {
-    for (let i = next++; i < items.length; i = next++) out[i] = await fn(items[i])
-  }
-  await Promise.all(
-    Array.from({ length: Math.min(limit, items.length) }, () => worker()),
-  )
-  return out
-}
 
 // Whether two directories are the same repository, by the object store they
 // share. A linked worktree answers with its parent's common dir, which is exactly

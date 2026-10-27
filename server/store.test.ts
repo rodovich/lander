@@ -13,6 +13,7 @@ import path from 'node:path'
 import {
   readTasks,
   readTask,
+  retainedProjection,
   writeTask,
   mutateTask,
   observeWrites,
@@ -162,6 +163,43 @@ describe('readTasks caching', () => {
 
     await writeFile(file('a'), JSON.stringify(rec({ id: 'a', title: 'ok again' })))
     expect((await readTasks<Rec>(dir))[0].title).toBe('ok again')
+  })
+})
+
+describe('retainedProjection', () => {
+  it('projects each file once until it changes, in filename order', async () => {
+    let calls = 0
+    const read = retainedProjection((record, id) => {
+      calls++
+      return `${id}:${(record as Rec).title}`
+    })
+    await writeFile(file('b'), JSON.stringify(rec({ id: 'b', title: 'bee' })))
+    await writeFile(file('a'), JSON.stringify(rec({ id: 'a', title: 'ay' })))
+    expect((await read(dir)).map((e) => e.value)).toEqual(['a:ay', 'b:bee'])
+    expect((await read(dir)).map((e) => e.value)).toEqual(['a:ay', 'b:bee'])
+    expect(calls).toBe(2)
+
+    await writeFile(file('a'), JSON.stringify(rec({ id: 'a', title: 'ay, changed' })))
+    expect((await read(dir)).map((e) => e.value)).toEqual(['a:ay, changed', 'b:bee'])
+    expect(calls).toBe(3)
+  })
+
+  it('skips a file the projection throws on, or that is invalid', async () => {
+    const read = retainedProjection((record) => {
+      if ((record as Rec).title === 'bad') throw new Error('no')
+      return (record as Rec).id
+    })
+    await writeFile(file('a'), JSON.stringify(rec({ id: 'a' })))
+    await writeFile(file('b'), JSON.stringify(rec({ id: 'b', title: 'bad' })))
+    await writeFile(file('c'), 'not json {')
+    expect((await read(dir)).map((e) => e.value)).toEqual(['a'])
+  })
+
+  it('when strict, rejects on what it would skip, but not on a missing dir', async () => {
+    const read = retainedProjection((record) => record, { strict: true })
+    expect(await read(path.join(dir, 'nope'))).toEqual([])
+    await writeFile(file('c'), 'not json {')
+    await expect(read(dir)).rejects.toThrow()
   })
 })
 

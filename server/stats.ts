@@ -3,14 +3,12 @@
 // projects; bucketing by day, week, or month happens in the browser, which is
 // the one place that knows the viewer's time zone.
 //
-// A projection is kept per file, revalidated against its stat on every call the
-// way readTaskEntries does, but it holds only the handful of fields a chart
-// reads rather than the whole parse: the archive runs to hundreds of megabytes
-// of conversations, and nothing else keeps it resident.
+// A projection is kept per file (retainedProjection), holding only the handful
+// of fields a chart reads rather than the whole parse: the archive runs to
+// hundreds of megabytes of conversations.
 
-import { readdir, readFile, stat } from 'node:fs/promises'
-import path from 'node:path'
 import type { Project } from './projects'
+import { retainedProjection, type Projected } from './store'
 import { taskFlow, type Item, type Ride } from './tasks'
 
 export type StatsTask = {
@@ -57,7 +55,6 @@ export type StatsFacts = {
 }
 
 type Projection = { task: StatsTask; turns: StatsTurn[] }
-type Cached = { mtimeMs: number; size: number; projection: Projection }
 
 type StatsRecord = {
   flow?: string
@@ -90,57 +87,25 @@ export function projectRecord(project: string, record: StatsRecord): Projection 
   }
 }
 
-// Keyed by absolute path: archiving renames a file between the two pools while
-// preserving its stat, so a basename key would collide by construction.
-const retained = new Map<string, Cached>()
+// One reader per project, since each projection carries its project's slug.
+const readers = new Map<string, (dir: string) => Promise<Projected<Projection>[]>>()
 
-async function readPool(
-  slug: string,
-  dir: string,
-  next: Map<string, Cached>,
-  out: Projection[],
-): Promise<void> {
-  let names: string[]
-  try {
-    names = await readdir(dir)
-  } catch {
-    return
+function readerFor(slug: string) {
+  let reader = readers.get(slug)
+  if (!reader) {
+    reader = retainedProjection((record) => projectRecord(slug, record as StatsRecord))
+    readers.set(slug, reader)
   }
-  await Promise.all(
-    names
-      .filter((name) => name.endsWith('.json'))
-      .map(async (name) => {
-        const file = path.join(dir, name)
-        try {
-          const s = await stat(file)
-          const hit = retained.get(file)
-          const projection =
-            hit && hit.mtimeMs === s.mtimeMs && hit.size === s.size
-              ? hit.projection
-              : projectRecord(
-                  slug,
-                  JSON.parse(await readFile(file, 'utf8')) as StatsRecord,
-                )
-          next.set(file, { mtimeMs: s.mtimeMs, size: s.size, projection })
-          out.push(projection)
-        } catch {
-          // Moved mid-scan, or unreadable: skipped, as the list skips it.
-        }
-      }),
-  )
+  return reader
 }
 
 export async function readStats(projects: Project[]): Promise<StatsFacts> {
-  const next = new Map<string, Cached>()
   const projections: Projection[] = []
   for (const project of projects) {
-    await readPool(project.slug, project.dataDir, next, projections)
-    await readPool(project.slug, project.archiveDir, next, projections)
+    const read = readerFor(project.slug)
+    for (const dir of [project.dataDir, project.archiveDir])
+      for (const entry of await read(dir)) projections.push(entry.value)
   }
-  // Rebuilt from this call's scan, so an entry for a removed file is not
-  // carried forward.
-  retained.clear()
-  for (const [file, cached] of next) retained.set(file, cached)
   return {
     recordedSince: RECORDED_SINCE,
     tasks: projections.map((p) => p.task),
