@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { Project } from './projects'
+import { retainedProjection } from './store'
 import { publicTaskStatus, type Ride } from './tasks'
 import { TASK_ID } from './task-identity'
 
@@ -35,44 +35,40 @@ function sameLink(a: TaskLink | undefined, b: TaskLink): boolean {
     a.archived === b.archived
 }
 
-function projectTask(task: LinkTask, projectSlug: string, id: string, archived: boolean): TaskLink {
+function linkFields(task: LinkTask, id: string): { title: string; status: string } {
   if (!TASK_ID.test(id)) throw new Error(`invalid task filename id: ${id}`)
   if (task.id !== undefined && task.id !== id)
     throw new Error(`task id does not match filename: ${String(task.id)} != ${id}`)
   if (typeof task.title !== 'string') throw new Error(`task ${id} has no title`)
   const status = publicTaskStatus(task as LinkTask & { status?: string })
   if (!status) throw new Error(`task ${id} has no status`)
-  return { id, projectSlug, title: task.title, status, archived }
+  return { title: task.title, status }
 }
 
-async function readPool(
+function projectTask(task: LinkTask, projectSlug: string, id: string, archived: boolean): TaskLink {
+  return { id, projectSlug, ...linkFields(task, id), archived }
+}
+
+// Strict, so a record that can't be read or projected fails the scan rather
+// than leaving its id out, which could make an ambiguous id look unique. A
+// file gone mid-scan is skipped: a Lander-owned archive/restore may move
+// a listed source, and its move overlay seeds the destination before publish.
+const readLinks = retainedProjection(
+  (record, id) => linkFields(record as LinkTask, id),
+  { strict: true },
+)
+
+async function poolLinks(
   project: Project,
   dir: string,
   archived: boolean,
 ): Promise<TaskLink[]> {
-  let names: string[]
-  try {
-    names = await readdir(dir)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
-    throw error
-  }
-  const links: TaskLink[] = []
-  for (const name of names) {
-    if (!name.endsWith('.json')) continue
-    const id = name.slice(0, -5)
-    let raw: string
-    try {
-      raw = await readFile(path.join(dir, name), 'utf8')
-    } catch (error) {
-      // A Lander-owned archive/restore may move a listed source. Its full move
-      // overlay is authoritative and will seed the destination before publish.
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue
-      throw error
-    }
-    links.push(projectTask(JSON.parse(raw) as LinkTask, project.slug, id, archived))
-  }
-  return links
+  return (await readLinks(dir)).map(({ id, value }) => ({
+    id,
+    projectSlug: project.slug,
+    ...value,
+    archived,
+  }))
 }
 
 export class TaskLinkIndex {
@@ -153,7 +149,7 @@ export class TaskLinkIndex {
         [project.archiveDir, true],
         [project.dataDir, false],
       ] as const) {
-        for (const link of await readPool(project, dir, archived)) {
+        for (const link of await poolLinks(project, dir, archived)) {
           const key = pairKey(link.projectSlug, link.id)
           const pools = base.get(key) ?? new Map<boolean, TaskLink>()
           pools.set(archived, link)

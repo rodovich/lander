@@ -1195,15 +1195,13 @@ export function publicTask<T extends object>(
   // `.map(publicTask)` would otherwise bind the array index to it) and gives
   // tests a way to pin caps.
   const flow = taskFlow(task as { flow?: string; agent?: string })
-  const caps = opts?.caps ?? flowCaps(flow)
   const out = {
     ...rest,
     // The task's driver flow, derived. Served additively alongside `agent`
     // until the client stops reading the latter — a pre-step-4 task has no
     // stored `flow`, so this is where its `agent` becomes one.
     flow,
-    grants: caps.grants,
-    reportsCost: caps.reportsCost,
+    ...announcedCaps(flow, opts?.caps),
   }
   return out as Omit<
     T,
@@ -1223,6 +1221,12 @@ export function publicTask<T extends object>(
     grants: GrantCaps
     reportsCost: boolean
   }
+}
+
+// The fields publicTask serves from the flow's announced capabilities, which
+// change when a daemon announces, not when the task's file does.
+export function announcedCaps(flow: string, caps: FlowCaps = flowCaps(flow)) {
+  return { grants: caps.grants, reportsCost: caps.reportsCost }
 }
 
 // The public task without its conversation: everything `publicTask` serves,

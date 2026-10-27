@@ -41,7 +41,9 @@ import type {
   TelemetryItem,
 } from './protocol'
 import {
+  newestFirst,
   readTaskEntries,
+  retainedProjection,
   readTask as readTaskStore,
   writeTask as writeTaskStore,
   mutateTask as mutateTaskStore,
@@ -51,6 +53,7 @@ import {
 import { parseProjects, type Project } from './projects'
 import { conversationText } from '../shared/conversationText'
 import {
+  announcedCaps,
   publicTask,
   taskSummary,
   taskFlow,
@@ -113,7 +116,11 @@ import { actionText, recordTaskAction } from './task-actions'
 import { TASK_ID, taskKey } from './task-identity'
 import { TaskLinkIndex, etagMatches } from './task-links'
 import { searchTasks } from './task-search'
-import type { TaskSearch } from '../shared/conversationSearch'
+import {
+  conversationIndex,
+  type ConversationIndex,
+  type TaskSearch,
+} from '../shared/conversationSearch'
 import {
   saveAttachment,
   readAttachmentMeta,
@@ -453,10 +460,21 @@ type Task = {
 
 // Bind the generic task store (server/store.ts) to the concrete Task type, so
 // the rest of the server keeps the same typed call sites.
+const isListable = (id: string, record: Task) =>
+  TASK_ID.test(id) && (record.id === undefined || record.id === id)
 const readTasks = async (dataDir: string) =>
   (await readTaskEntries<Task>(dataDir))
-    .filter(({ id, record }) => TASK_ID.test(id) && (record.id === undefined || record.id === id))
+    .filter(({ id, record }) => isListable(id, record))
     .map(({ id, record }) => ({ ...record, id }))
+// What the summary list keeps of each task between polls. Not the
+// announcedCaps fields: they follow the daemon's announcements, not the file,
+// so the route adds them per request.
+const readListed = retainedProjection((record, id) => {
+  const task = record as Task
+  if (!isListable(id, task)) return null
+  const { grants: _g, reportsCost: _r, ...summary } = taskSummary({ ...task, id })
+  return { summary, index: conversationIndex(task) }
+})
 const readTask = (dataDir: string, id: string) => readTaskStore<Task>(dataDir, id)
 const writeTask = (file: string, task: Task) => writeTaskStore(file, task)
 const taskLocation = (file: string) => {
@@ -1694,12 +1712,11 @@ app.get('/api/:project/tasks', async (c) => {
     const telemetry = Object.fromEntries(telemetryCache)
     // `?view=summary` serves each task without its conversation (see
     // taskSummary). Opt-in: with no param the response is what it always was,
-    // so the running client and any third-party caller are unaffected. Applied
-    // as a projection *inside* both branches below rather than as a third
-    // branch beside them, so the telemetry envelope can't be dropped from it.
+    // so the running client and any third-party caller are unaffected.
     const summary = c.req.query('view') === 'summary'
-    const toWire = <T extends object>(t: T) =>
-      summary ? taskSummary(t) : publicTask(t)
+    const archived = c.req.query('archived') === '1'
+    const pool = archived ? project.archiveDir : project.dataDir
+    const tag = <T extends object>(t: T) => (archived ? { ...t, archived: true } : t)
     // `?q=` searches each listed task's conversation, so a caller that lists
     // summaries can still find tasks by what was said in them.
     // `?expand=<id>:<n>,…` sets how many matches a task lists, in place of the
@@ -1712,26 +1729,35 @@ app.get('/api/:project/tasks', async (c) => {
         return Number.isInteger(limit) && limit > 0 ? [[id, limit] as const] : []
       }),
     )
-    const respond = (tasks: Task[]) =>
-      c.json({
-        // Arrow-wrapped: a bare `.map(publicTask)` binds the array index to the
-        // options parameter.
-        tasks: tasks.map((t) => toWire(t)),
-        telemetry,
-        ...(query
-          ? {
-              search: {
-                query,
-                matches: searchTasks(tasks, query, limits),
-              } satisfies TaskSearch,
-            }
-          : {}),
-      })
-    if (c.req.query('archived') !== '1')
-      return respond(await readTasks(project.dataDir))
-    return respond(
-      (await readTasks(project.archiveDir)).map((t) => ({ ...t, archived: true })),
-    )
+    let tasks: object[]
+    let indexed: { id: string; index: ConversationIndex }[]
+    if (summary) {
+      const listed = (await readListed(pool)).flatMap(({ id, value }) =>
+        value ? [{ id, ...value }] : [],
+      )
+      tasks = listed
+        .map(({ summary: s }) => tag({ ...s, ...announcedCaps(s.flow) }))
+        .sort(newestFirst)
+      indexed = listed
+    } else {
+      const full = await readTasks(pool)
+      // Arrow-wrapped: a bare `.map(publicTask)` binds the array index to the
+      // options parameter.
+      tasks = full.map((t) => publicTask(tag(t)))
+      indexed = query ? full.map((t) => ({ id: t.id, index: conversationIndex(t) })) : []
+    }
+    return c.json({
+      tasks,
+      telemetry,
+      ...(query
+        ? {
+            search: {
+              query,
+              matches: searchTasks(indexed, query, limits),
+            } satisfies TaskSearch,
+          }
+        : {}),
+    })
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }

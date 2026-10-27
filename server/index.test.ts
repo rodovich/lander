@@ -4729,6 +4729,27 @@ describe('flow dispatch gate', () => {
     await waitFor(() => !daemonConnected())
   }, 20_000)
 
+  it("serves a listed task's capabilities as announced now, though its file is unchanged", async () => {
+    const id = 'caps-follow-announce'
+    await seed(id, { agent: 'claude' })
+    const row = async () =>
+      ((await (await app.request(`/api/${slug}/tasks?view=summary`)).json()) as {
+        tasks: { id: string; grants: unknown; reportsCost: unknown }[]
+      }).tasks.find((t) => t.id === id)
+    expect(await row()).toMatchObject({
+      grants: { task: true, project: true },
+      reportsCost: true,
+    })
+
+    await connect(['claude', 'codex'])
+    expect(await row()).toMatchObject({
+      grants: { task: false, project: false },
+      reportsCost: false,
+    })
+    ws.close()
+    await waitFor(() => !daemonConnected())
+  }, 20_000)
+
   it('still sends `agent` alongside `flow` for a legacy task', async () => {
     // The compatibility half: a daemon that predates `flow` reads `agent` and
     // keeps driving claude and codex.

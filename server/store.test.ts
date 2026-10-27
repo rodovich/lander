@@ -102,16 +102,20 @@ describe('readTasks', () => {
   })
 })
 
-// readTasks retains parses between calls and revalidates each file's mtime/size,
-// so the 2s list poll stops re-parsing a corpus that hasn't changed. These pin
-// the property that makes that safe: the result still reflects what is on disk,
-// including writes the server did not make. Every write here is out-of-band by
-// construction — the suite writes files directly and never goes through the
-// store — so a cache that trusted its own writes would fail this whole block.
-describe('readTasks caching', () => {
+// A retainedProjection keeps projections between calls and revalidates each
+// file's mtime/size, so the 2s list poll stops re-parsing a corpus that hasn't
+// changed. These pin the property that makes that safe: the result still
+// reflects what is on disk, including writes the server did not make. Every
+// write here is out-of-band by construction — the suite writes files directly
+// and never goes through the store — so a cache that trusted its own writes
+// would fail this whole block.
+describe('retainedProjection caching', () => {
+  const cached = retainedProjection((record) => record as Rec)
+  const readCached = async (d: string) => (await cached(d)).map((e) => e.value)
+
   it('reflects a changed file rather than the retained parse', async () => {
     await writeFile(file('a'), JSON.stringify(rec({ id: 'a', title: 'first' })))
-    expect((await readTasks<Rec>(dir))[0].title).toBe('first')
+    expect((await readCached(dir))[0].title).toBe('first')
 
     // A longer title, so the record differs in size as well as mtime — two
     // writes inside one filesystem timestamp tick are otherwise possible.
@@ -119,24 +123,24 @@ describe('readTasks caching', () => {
       file('a'),
       JSON.stringify(rec({ id: 'a', title: 'second, and rather longer' })),
     )
-    expect((await readTasks<Rec>(dir))[0].title).toBe('second, and rather longer')
+    expect((await readCached(dir))[0].title).toBe('second, and rather longer')
   })
 
   it('picks up a file created after an earlier read', async () => {
     await writeFile(file('a'), JSON.stringify(rec({ id: 'a' })))
-    expect(await readTasks<Rec>(dir)).toHaveLength(1)
+    expect(await readCached(dir)).toHaveLength(1)
 
     await writeFile(file('b'), JSON.stringify(rec({ id: 'b' })))
-    expect((await readTasks<Rec>(dir)).map((t) => t.id).sort()).toEqual(['a', 'b'])
+    expect((await readCached(dir)).map((t) => t.id)).toEqual(['a', 'b'])
   })
 
   it('drops a record whose file has gone, and keeps the rest', async () => {
     await writeFile(file('a'), JSON.stringify(rec({ id: 'a' })))
     await writeFile(file('b'), JSON.stringify(rec({ id: 'b' })))
-    expect(await readTasks<Rec>(dir)).toHaveLength(2)
+    expect(await readCached(dir)).toHaveLength(2)
 
     await rm(file('a'))
-    expect((await readTasks<Rec>(dir)).map((t) => t.id)).toEqual(['b'])
+    expect((await readCached(dir)).map((t) => t.id)).toEqual(['b'])
   })
 
   it('keeps pools distinct when a record moves between them', async () => {
@@ -146,23 +150,23 @@ describe('readTasks caching', () => {
     const other = path.join(dir, 'archived')
     await mkdir(other, { recursive: true })
     await writeFile(file('a'), JSON.stringify(rec({ id: 'a', title: 'active' })))
-    expect(await readTasks<Rec>(dir)).toHaveLength(1)
-    expect(await readTasks<Rec>(other)).toHaveLength(0)
+    expect(await readCached(dir)).toHaveLength(1)
+    expect(await readCached(other)).toHaveLength(0)
 
     await rename(file('a'), path.join(other, 'a.json'))
-    expect(await readTasks<Rec>(dir)).toHaveLength(0)
-    expect((await readTasks<Rec>(other))[0].title).toBe('active')
+    expect(await readCached(dir)).toHaveLength(0)
+    expect((await readCached(other))[0].title).toBe('active')
   })
 
   it('still skips a file that becomes invalid, and recovers when it is fixed', async () => {
     await writeFile(file('a'), JSON.stringify(rec({ id: 'a', title: 'ok' })))
-    expect(await readTasks<Rec>(dir)).toHaveLength(1)
+    expect(await readCached(dir)).toHaveLength(1)
 
     await writeFile(file('a'), '{ not json at all')
-    expect(await readTasks<Rec>(dir)).toHaveLength(0)
+    expect(await readCached(dir)).toHaveLength(0)
 
     await writeFile(file('a'), JSON.stringify(rec({ id: 'a', title: 'ok again' })))
-    expect((await readTasks<Rec>(dir))[0].title).toBe('ok again')
+    expect((await readCached(dir))[0].title).toBe('ok again')
   })
 })
 

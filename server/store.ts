@@ -105,20 +105,16 @@ export function retainedProjection<P>(
   }
 }
 
-const readRecords = retainedProjection((record) => record)
-
-// Every record in a project's data dir, newest first. Unreadable or invalid
-// files are skipped rather than aborting the listing.
-//
-// IMPORTANT: the returned records are the retained parses, shared between
-// calls. Callers must treat them as read-only — both of today's copy before
-// serving (publicTask spreads; the archived branch spreads to add `archived`).
-// A caller that mutates one in place would corrupt every later response.
+// Every record in a project's data dir, parsed afresh, newest first.
+// Unreadable or invalid files are skipped rather than aborting the listing.
+// Nothing is kept between calls: a pool read repeatedly wants a
+// retainedProjection of the fields it needs.
 export async function readTaskEntries<T extends StoredRecord>(
   dataDir: string,
 ): Promise<StoredEntry<T>[]> {
-  return (await readRecords(dataDir))
-    .map(({ id, value }) => ({ id, record: value as T }))
+  const { entries } = await readPool(dataDir, (record) => record as T, {})
+  return entries
+    .map(({ id, value }) => ({ id, record: value }))
     .sort((a, b) => newestFirst(a.record, b.record))
 }
 
