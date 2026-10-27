@@ -112,6 +112,8 @@ import {
 import { actionText, recordTaskAction } from './task-actions'
 import { TASK_ID, taskKey } from './task-identity'
 import { TaskLinkIndex, etagMatches } from './task-links'
+import { searchTasks } from './task-search'
+import { MATCHES_SHOWN } from '../shared/conversationSearch'
 import {
   saveAttachment,
   readAttachmentMeta,
@@ -1698,21 +1700,42 @@ app.get('/api/:project/tasks', async (c) => {
     const summary = c.req.query('view') === 'summary'
     const toWire = <T extends object>(t: T) =>
       summary ? taskSummary(t) : publicTask(t)
-    if (c.req.query('archived') !== '1')
-      return c.json({
+    // `?q=` searches each listed task's conversation, so a caller that lists
+    // summaries can still find tasks by what was said in them.
+    // `?expand=<id>:<n>,…` sets how many matches a task lists, in place of the
+    // default.
+    const query = (c.req.query('q') ?? '').trim().toLowerCase()
+    const limits = new Map(
+      (c.req.query('expand') ?? '').split(',').flatMap((pair) => {
+        const [id, n] = pair.split(':')
+        const limit = Number(n)
+        return Number.isInteger(limit) && limit > 0 ? [[id, limit] as const] : []
+      }),
+    )
+    const respond = (tasks: Task[]) =>
+      c.json({
         // Arrow-wrapped: a bare `.map(publicTask)` binds the array index to the
         // options parameter.
-        tasks: (await readTasks(project.dataDir)).map((t) => toWire(t)),
+        tasks: tasks.map((t) => toWire(t)),
         telemetry,
+        ...(query
+          ? {
+              search: {
+                query,
+                matches: searchTasks(
+                  tasks,
+                  query,
+                  (id) => limits.get(id) ?? MATCHES_SHOWN,
+                ),
+              },
+            }
+          : {}),
       })
-    const archived = (await readTasks(project.archiveDir)).map((t) => ({
-      ...t,
-      archived: true,
-    }))
-    archived.sort((a, b) =>
-      (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt),
+    if (c.req.query('archived') !== '1')
+      return respond(await readTasks(project.dataDir))
+    return respond(
+      (await readTasks(project.archiveDir)).map((t) => ({ ...t, archived: true })),
     )
-    return c.json({ tasks: archived.map((t) => toWire(t)), telemetry })
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }

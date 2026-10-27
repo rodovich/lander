@@ -1883,6 +1883,57 @@ describe('server task provider behavior', () => {
     }
   })
 
+  it('searches the listed conversations under ?q=, in both list branches', async () => {
+    const say = (id: string, text: string) => ({
+      id,
+      at: AT,
+      kind: 'message',
+      role: 'user',
+      text,
+    })
+    const writeItems = async (id: string, items: unknown[]) => {
+      const file = path.join(tasksDir, `${id}.json`)
+      const record = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
+      await writeFile(file, JSON.stringify({ ...record, items }))
+    }
+    const hit = await createTask('Search hit')
+    await writeItems(hit.id, [
+      say('u1', 'a Zephyrine here, a zephyrine there'),
+      say('u2', 'zephyrine again'),
+      say('u3', 'and zephyrine twice more: zephyrine'),
+    ])
+    const miss = await createTask('Search miss')
+    await writeItems(miss.id, [say('u1', 'nothing to see')])
+    const gone = await createTask('Search archived')
+    await writeItems(gone.id, [say('u1', 'an archived zephyrine')])
+    expect((await post(`/api/${slug}/tasks/${gone.id}/archive`, {})).status).toBe(200)
+
+    type Body = {
+      tasks: { id: string }[]
+      search?: {
+        query: string
+        matches: Record<string, { count: number; list: { itemId: string }[] }>
+      }
+    }
+    const list = async (params: string) =>
+      (await (await app.request(`/api/${slug}/tasks?view=summary${params}`)).json()) as Body
+
+    const found = await list('&q=%20ZEPHYRINE%20')
+    expect(found.search?.query).toBe('zephyrine')
+    expect(found.tasks.map((t) => t.id)).toEqual(expect.arrayContaining([hit.id, miss.id]))
+    expect(Object.keys(found.search!.matches)).toEqual([hit.id])
+    expect(found.search!.matches[hit.id].count).toBe(5)
+    expect(found.search!.matches[hit.id].list.map((m) => m.itemId)).toEqual(['u1', 'u1', 'u2'])
+
+    const expanded = await list(`&q=zephyrine&expand=${hit.id}:4`)
+    expect(expanded.search!.matches[hit.id].list).toHaveLength(4)
+
+    const archived = await list('&archived=1&q=zephyrine')
+    expect(Object.keys(archived.search!.matches)).toEqual([gone.id])
+
+    expect(await list('')).not.toHaveProperty('search')
+  })
+
   it('reads an archived task on GET /tasks/:id, tagged archived', async () => {
     // `lander view` resolves an id across both pools, so the single-task endpoint
     // must fall back to the archive — otherwise a viewable id would 404.

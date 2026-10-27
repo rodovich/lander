@@ -17,13 +17,12 @@ import { TaskRow } from './taskRow'
 import type { TaskListShape, TaskRow as ListRow } from './taskRows'
 import type { ConversationMatch } from './taskSearch'
 import type { TaskView, TaskWithProject, TimeFilter } from './types'
+import { MATCHES_SHOWN } from '../shared/conversationSearch'
 
 const TASK_VIEWS: TaskView[] = ['inbox', 'unread', 'archived']
 const TIME_FILTERS: TimeFilter[] = ['today', 'week', 'older', 'any']
 
-// How many of a task's search matches show under it at first, and how many
-// more each "Show N more" adds.
-const MATCHES_SHOWN = 3
+// How many more of a task's search matches each "Show N more" adds.
 const MATCHES_MORE = 20
 
 // A sticky header over a run of tasks: a status, or a date bucket within a
