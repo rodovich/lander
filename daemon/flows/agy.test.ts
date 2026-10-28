@@ -63,6 +63,13 @@ const toolStep = (
     tool_info: { ...(parameters ? { parameters } : {}) },
     ...extra,
   })
+const response = (step_index: number, text_delta?: string) =>
+  event('step_update', {
+    step_index,
+    step_type: 'agent_response',
+    state: 'DONE',
+    ...(text_delta ? { text_delta } : {}),
+  })
 const patches = (events: Awaited<ReturnType<typeof driveFlow>>['events']) =>
   events.flatMap((e) => e.kind === 'state-patch' ? e.ops : [])
 const steps = (events: Awaited<ReturnType<typeof driveFlow>>['events']) =>
@@ -131,6 +138,31 @@ it('keeps completed checkpoints in stream order without duplicating them or inve
     expect.objectContaining({ kind: 'context', action: 'checkpoint', durationMs: 530 }),
     expect.objectContaining({ kind: 'message', text: 'After' }),
   ])
+})
+
+it('groups each response with the tool calls it made', async () => {
+  const g = fixture([[
+    init('group-session'),
+    response(1),
+    toolStep(2, 'read_file', { Path: 'a' }),
+    toolStep(3, 'read_file', { Path: 'b' }),
+    response(4, 'Read both.'),
+    toolStep(5, 'read_file', { Path: 'c' }),
+    response(6, 'Done'),
+    result(),
+  ]])
+  const items = (applyEvents(goldenInput(g).start, (await driveFlow(g, flow())).events).items ?? []) as
+    { kind: string; rideId?: string; groupId?: string }[]
+  const groups = items
+    .filter((it) => it.rideId && (it.kind === 'tool' || it.kind === 'message'))
+    .map((it) => it.groupId)
+  expect(groups).toEqual([
+    groups[0], groups[0],
+    groups[2], groups[2],
+    groups[4],
+  ])
+  expect(new Set(groups).size).toBe(3)
+  expect(groups[0]).toBeDefined()
 })
 
 it('reduces the recorded Antigravity stream into a session, tool lifecycle, usage, and reply', async () => {

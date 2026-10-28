@@ -20,7 +20,7 @@ import {
   type Usage,
 } from 'lander/flow'
 import type { AgentLaunchDir, AgentLaunchDirInput } from '../agent'
-import type { Ctx, FlowMeta, ToolHandle, TurnResult } from './ctx'
+import type { Ctx, FlowMeta, GroupHandle, ToolHandle, TurnResult } from './ctx'
 import {
   usageStatus,
   type UsageBody,
@@ -552,6 +552,10 @@ async function reduceAgy(
     }
   >()
   const texts = new Map<number, string>()
+  // Each agent_response step is one model call, and the tool steps after it are
+  // the calls it made, so a response's step index marks one inference.
+  const responseGroups = new Map<number, GroupHandle>()
+  let responseGroup: GroupHandle | undefined
   const seenUsageSteps = new Set<number>()
   const seenCheckpoints = new Set<number>()
   let liveUsage = startUsage
@@ -570,7 +574,7 @@ async function reduceAgy(
       const text = texts.get(pendingText) ?? ''
       if (text) {
         lastText = text
-        ctx.emit.message(text)
+        ctx.emit.message(text, { group: responseGroups.get(pendingText) })
       }
       pendingText = undefined
     }
@@ -620,6 +624,9 @@ async function reduceAgy(
       } else if (event.step_type === 'agent_response') {
         if (pendingText !== event.step_index) flushText()
         pendingText = event.step_index
+        responseGroup = responseGroups.get(event.step_index)
+        if (!responseGroup)
+          responseGroups.set(event.step_index, (responseGroup = ctx.emit.group()))
         texts.set(
           event.step_index,
           (texts.get(event.step_index) ?? '') + (event.text_delta ?? ''),
@@ -644,6 +651,7 @@ async function reduceAgy(
             name,
             ...call,
             ...(ruleInfo ? { rule: ruleInfo.rule } : {}),
+            group: responseGroup,
           })
           entry = { handle, name, input: call.input, action: ruleInfo?.action }
           tools.set(event.step_index, entry)
