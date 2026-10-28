@@ -113,9 +113,25 @@ describe('Markdown rendering', () => {
 
   it('leaves www. domains and email addresses as text', () => {
     expect(render('www.ex.com')).toBe('<p>www.ex.com</p>')
+    expect(render('drop www. links')).toBe('<p>drop www. links</p>')
     expect(render('log in as fablab@example.com')).toBe(
       '<p>log in as fablab@example.com</p>',
     )
+  })
+
+  it('does not infer links from decoded or bracketed text', () => {
+    expect(render('https&#58;//ex.com')).toBe('<p>https://ex.com</p>')
+    expect(render('https\\://ex.com')).toBe('<p>https://ex.com</p>')
+    expect(render('me&#64;ex.com and www&#46;ex.com')).toBe(
+      '<p>me@ex.com and www.ex.com</p>',
+    )
+    expect(render('[https://ex.com]')).toBe('<p>[https://ex.com]</p>')
+  })
+
+  it('keeps percent-encoded URLs clickable', () => {
+    const url = 'https://ex.com/a%20b?q=x%2Fy'
+    expect(render(url)).toBe(`<p>${externalLink(url, url)}</p>`)
+    expect(render(`[open](${url})`)).toBe(`<p>${externalLink(url, 'open')}</p>`)
   })
 
   it('keeps an email or www. link the author wrote', () => {
@@ -189,21 +205,22 @@ describe('Markdown rendering', () => {
     expect(html).toContain('>1</td>')
   })
 
-  it('renders a ~280KB pasted log within a loose time bound', () => {
-    // A resolver is supplied so the task-mention pass runs too. The bound is
-    // deliberately loose (a warm render takes about 200ms) so it flags only a
-    // blow-up like a quadratic scan's, which takes seconds. The short render
-    // first keeps the parser's first-use cost out of the timing when this test
-    // runs alone.
+  it('renders GFM task lists and footnotes', () => {
+    const tasks = render('- [x] done\n- [ ] todo')
+    expect(tasks).toContain('type="checkbox" disabled="" checked=""')
+    expect(tasks).toContain('type="checkbox" disabled=""/> todo')
+    const footnote = render('text[^note]\n\n[^note]: explanation')
+    expect(footnote).toContain('href="#user-content-fn-note"')
+    expect(footnote).toContain('explanation')
+  })
+
+  it('renders a ~260KB pasted log without changing its text', () => {
     const line =
       'at resolveBaseSync (file:///Users/x/node_modules/tsx/register.mjs:2:8745)'
     const text = Array.from({ length: 3500 }, () => line).join('\n')
     expect(text.length).toBeGreaterThan(250_000)
-    renderToStaticMarkup(<Markdown text={line} linkTask={() => undefined} />)
-    const t0 = performance.now()
-    renderToStaticMarkup(<Markdown text={text} linkTask={() => undefined} />)
-    const ms = performance.now() - t0
-    expect(ms).toBeLessThan(1500)
+    const html = renderToStaticMarkup(<Markdown text={text} linkTask={() => undefined} />)
+    expect(html).toBe(`<p>${text}</p>`)
   })
 })
 

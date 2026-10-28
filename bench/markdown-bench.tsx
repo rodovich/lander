@@ -2,12 +2,12 @@
 // as the 287KB pasted log in task AseVQXEokF.
 //
 // It profiles the Markdown render over the real messages of a chosen task, and
-// then runs a synthetic scaling sweep that doubles a prose message's length to
+// then runs synthetic scaling sweeps that double prose and pasted logs to
 // reveal whether cost grows linearly or super-linearly.
 //
 // Run it against a task with a long message:
 //   npm run bench:markdown -- data/Users-rodovich-code-lander/archived/AseVQXEokF.json
-// or with no arg to run only the synthetic scaling sweep.
+// or with no arg to run only the synthetic scaling sweeps.
 //
 // It is a standalone diagnostic, not part of `npm test`; it renders through
 // react-dom/server (no DOM needed), matching how the unit tests exercise the
@@ -111,18 +111,31 @@ function prose(chars: number): string {
   return s.slice(0, chars)
 }
 
-console.log('\n=== Synthetic scaling sweep (prose of 8+ char words) ===')
-const sweep = [2000, 4000, 8000, 16000, 32000].map((n) =>
-  profile(`prose ${n}c`, prose(n)),
-)
-printTable(sweep)
-
-console.log('\nPer-doubling growth of render+linkTask time (×2 length each step):')
-for (let i = 1; i < sweep.length; i++) {
-  const factor = sweep[i].renderWithLinkMs / sweep[i - 1].renderWithLinkMs
-  const verdict =
-    factor > 2.5 ? '  <-- SUPER-LINEAR (hotspot)' : factor < 1.8 ? '  (sub-linear)' : ''
-  console.log(
-    `  ${sweep[i - 1].chars}c -> ${sweep[i].chars}c: ${factor.toFixed(2)}×${verdict}`,
-  )
+function scalingSweep(title: string, inputs: { label: string; text: string }[]) {
+  console.log(`\n=== ${title} ===`)
+  const rows = inputs.map(({ label, text }) => profile(label, text))
+  printTable(rows)
+  console.log('\nPer-doubling growth of render+linkTask time (×2 length each step):')
+  for (let i = 1; i < rows.length; i++) {
+    const factor = rows[i].renderWithLinkMs / rows[i - 1].renderWithLinkMs
+    const verdict =
+      factor > 2.5 ? '  <-- SUPER-LINEAR (hotspot)' : factor < 1.8 ? '  (sub-linear)' : ''
+    console.log(
+      `  ${rows[i - 1].chars}c -> ${rows[i].chars}c: ${factor.toFixed(2)}×${verdict}`,
+    )
+  }
 }
+
+scalingSweep(
+  'Synthetic scaling sweep (prose of 8+ char words)',
+  [2000, 4000, 8000, 16000, 32000].map((n) => ({ label: `prose ${n}c`, text: prose(n) })),
+)
+
+const logLine = 'at resolveBaseSync (file:///Users/x/node_modules/tsx/register.mjs:2:8745)'
+scalingSweep(
+  'Synthetic scaling sweep (pasted log)',
+  [875, 1750, 3500, 7000].map((lines) => ({
+    label: `log ${lines} lines`,
+    text: Array.from({ length: lines }, () => logLine).join('\n'),
+  })),
+)

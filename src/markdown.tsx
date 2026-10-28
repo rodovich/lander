@@ -1,8 +1,14 @@
 import { memo, type JSX, type ReactNode } from 'react'
 import renderMarkdown, { type Components } from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { gfm } from 'micromark-extension-gfm'
+import { gfmAutolinkLiteralFromMarkdown } from 'mdast-util-gfm-autolink-literal'
+import { gfmFootnoteFromMarkdown } from 'mdast-util-gfm-footnote'
+import { gfmStrikethroughFromMarkdown } from 'mdast-util-gfm-strikethrough'
+import { gfmTableFromMarkdown } from 'mdast-util-gfm-table'
+import { gfmTaskListItemFromMarkdown } from 'mdast-util-gfm-task-list-item'
 import { findAndReplace } from 'mdast-util-find-and-replace'
-import { SKIP, visit } from 'unist-util-visit'
+import type { Processor } from 'unified'
+import type {} from 'remark-parse'
 import type { Root } from 'mdast'
 import type { Element, ElementContent } from 'hast'
 import { CopyButton } from './copyButton'
@@ -81,27 +87,32 @@ function remarkTaskMentions({ linkTask }: { linkTask?: TaskLinkResolver }) {
   }
 }
 
-// GFM autolinks bare email addresses and www. domains along with http(s) URLs.
-// Turn those two back into text: an address in a message is far more often
-// one to copy (a test user's) than to mail, and lander's history has no bare
-// www. domains to link. A link the author wrote, like
-// [me@x.com](mailto:me@x.com) or <me@x.com>, starts with "[" or "<" in the
-// source and stays a link.
-function remarkUnlinkEmailAndWww() {
-  return (tree: Root, file: { value: unknown }) => {
-    const source = String(file.value)
-    visit(tree, 'link', (node, index, parent) => {
-      if (!parent || index === undefined) return
-      const start = node.position?.start.offset
-      if (start !== undefined && '[<'.includes(source[start])) return
-      const [only] = node.children
-      if (only?.type !== 'text') return
-      if (node.url.startsWith('mailto:') || only.value.startsWith('www.')) {
-        parent.children.splice(index, 1, only)
-        return SKIP
-      }
-    })
-  }
+// Email addresses in messages usually identify test users; bare www. domains
+// have not appeared as useful links in our history. The email tokenizer also
+// triggers micromark's quadratic data-token merge on long pasted logs.
+// Reinterpreting escapes as links is unnecessary for conversation text.
+function remarkMessageGfm(this: Processor) {
+  const data = this.data()
+  const syntax = gfm({ singleTilde: false })
+  // micromark's disable list still breaks text at a disabled construct's
+  // registered characters, so disabling the tokenizer alone keeps the merge cost.
+  syntax.text = Object.fromEntries(
+    Object.entries(syntax.text!).map(([code, value]) => [
+      code,
+      (Array.isArray(value) ? value : [value!]).filter(
+        ({ name }) => name !== 'emailAutolink' && name !== 'wwwAutolink',
+      ),
+    ]),
+  )
+  ;(data.micromarkExtensions ??= []).push(syntax)
+  const { transforms: _transforms, ...autolink } = gfmAutolinkLiteralFromMarkdown()
+  ;(data.fromMarkdownExtensions ??= []).push(
+    autolink,
+    gfmFootnoteFromMarkdown(),
+    gfmStrikethroughFromMarkdown(),
+    gfmTableFromMarkdown(),
+    gfmTaskListItemFromMarkdown(),
+  )
 }
 
 // In CommonMark, a line without `>` after `> quote` is a "lazy continuation"
@@ -199,9 +210,8 @@ export const Markdown = memo(function Markdown({
       renderMarkdown({
         children: text,
         remarkPlugins: [
-          [remarkGfm, { singleTilde: false }],
+          remarkMessageGfm,
           remarkNoLazyContinuation,
-          remarkUnlinkEmailAndWww,
           [remarkTaskMentions, { linkTask }],
         ],
         urlTransform: safeHref,
