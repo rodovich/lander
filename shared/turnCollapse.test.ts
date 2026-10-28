@@ -6,11 +6,12 @@ import { planTurnCollapse, groupInferences, foldSummary } from './turnCollapse'
 type TestItem = {
   kind: 'message' | 'tool' | 'event' | 'ask'
   text?: string
+  groupId?: string
   parentId?: string
 }
 
-const text = (value: string): TestItem => ({ kind: 'message', text: value })
-const tool = (): TestItem => ({ kind: 'tool' })
+const text = (value: string, groupId?: string): TestItem => ({ kind: 'message', text: value, groupId })
+const tool = (groupId?: string): TestItem => ({ kind: 'tool', groupId })
 
 const plan = (items: TestItem[]) => planTurnCollapse(items)
 
@@ -114,6 +115,40 @@ describe('planTurnCollapse', () => {
     // No tools split the run, so it is a single sequence — nothing to fold.
     expect(plan(items)).toEqual({
       segments: [{ hidden: false, indices: [0, 1, 2] }],
+    })
+  })
+
+  it('splits adjacent messages from different inferences into separate sequences', () => {
+    const items = [
+      tool('g0'),
+      text('Waiting on the reviewers.', 'g1'),
+      text('One reviewer is back.', 'g2'),
+      text('Still waiting on the last reviewer.', 'g3'),
+      text('The review found two problems, both now fixed and committed.', 'g4'),
+    ]
+
+    expect(plan(items)).toEqual({
+      segments: [
+        { hidden: true, indices: [0, 1, 2, 3] },
+        { hidden: false, indices: [4] },
+      ],
+    })
+  })
+
+  it('keeps adjacent messages from one inference in one sequence', () => {
+    const items = [
+      tool(),
+      text('progress', 'g1'),
+      tool(),
+      text('first paragraph of the answer', 'g2'),
+      text('second paragraph', 'g2'),
+    ]
+
+    expect(plan(items)).toEqual({
+      segments: [
+        { hidden: true, indices: [0, 1, 2] },
+        { hidden: false, indices: [3, 4] },
+      ],
     })
   })
 

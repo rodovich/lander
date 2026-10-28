@@ -2,12 +2,14 @@ import type { Item } from '../src/types'
 
 // The subset of a ride item the collapse reads: whether it carries assistant
 // prose (a flow `message`) and how much, whether it's a tool call (the
-// separator that splits text sequences), and whether it belongs to a subagent
-// rather than the main thread. A ToolItem/MessageItem satisfies this
-// structurally, so callers pass a ride's items straight through.
+// separator that splits text sequences), which inference produced it, and
+// whether it belongs to a subagent rather than the main thread. A
+// ToolItem/MessageItem satisfies this structurally, so callers pass a ride's
+// items straight through.
 type CollapsibleItem = {
   kind: Item['kind']
   text?: string
+  groupId?: string
   parentId?: string
 }
 
@@ -57,6 +59,11 @@ export type TurnCollapsePlan = {
 // in its own group and never folds away.
 const isMarker = (kind: string | undefined) => kind === 'context' || kind === 'reprompt'
 
+// Not every flow records which inference produced an item, so an item without
+// a groupId is taken to continue whatever inference is beside it.
+const sameInference = (a: string | undefined, b: string | undefined) =>
+  !a || !b || a === b
+
 export function groupInferences(
   items: readonly { groupId?: string; kind?: string }[],
   idxs: readonly number[],
@@ -70,7 +77,7 @@ export function groupInferences(
       groups.length === 0 ||
       isMarker(it.kind) ||
       afterMarker ||
-      (it.groupId && last !== undefined && it.groupId !== last)
+      !sameInference(last, it.groupId)
     )
       groups.push([])
     groups[groups.length - 1].push(j)
@@ -98,12 +105,14 @@ export function foldSummary(
 const textLength = (item: CollapsibleItem) =>
   item.kind === 'message' ? (item.text?.length ?? 0) : 0
 
-// Collapse settled assistant traces by their message text, not by provider
-// inference groups. Adjacent flow-message items with no tool between them form
-// one sequence (Codex emits a message per paragraph, so a single answer is a run
-// of them). Keep three sequences — the opening prose before the first tool, the
-// longest concatenated sequence, and the last sequence — plus any trailing items
-// after the last one, and fold everything in between. Takes one agent turn's
+// Collapse settled assistant traces by their message text. Adjacent
+// flow-message items form one sequence (Codex emits a message per paragraph, so
+// a single answer is a run of them) unless a tool or a change of inference
+// separates them. An agent woken by a background task's notification speaks
+// again without calling a tool, and that status update should fold like one
+// written between tool calls. Keep three sequences — the opening prose before
+// the first tool, the longest concatenated sequence, and the last sequence —
+// plus any trailing items after the last one, and fold everything in between. Takes one agent turn's
 // items and plans over its main thread; subagent items appear in no segment.
 // Whether a turn folds at all (the conversation view leaves a running turn
 // whole) is the caller's call.
@@ -119,7 +128,12 @@ export function planTurnCollapse(
   const sequences: number[][] = []
   for (let pos = 0; pos < n; pos++) {
     if (!isText(pos)) continue
-    if (pos > 0 && isText(pos - 1)) sequences[sequences.length - 1].push(pos)
+    if (
+      pos > 0 &&
+      isText(pos - 1) &&
+      sameInference(items[indices[pos - 1]].groupId, items[indices[pos]].groupId)
+    )
+      sequences[sequences.length - 1].push(pos)
     else sequences.push([pos])
   }
 

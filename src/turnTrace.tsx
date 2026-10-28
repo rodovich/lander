@@ -67,9 +67,9 @@ export function TurnTrace({
   // Group consecutive main items by the groupId that produced them (see
   // groupInferences). Each group is one inference — ruled apart from the next.
   const groupByGroup = (idxs: number[]) => groupInferences(items, idxs)
-  // Settled turns fold down by their flow messages, independent of group
-  // boundaries: keep the opening prose before the first tool, the longest text
-  // sequence, and the last, collapsing the ranges between (see
+  // Settled turns fold down by their flow messages: keep the opening prose
+  // before the first tool, the longest text sequence, and the last, collapsing
+  // the ranges between (see
   // planTurnCollapse). An open ride renders in full — its shape isn't settled,
   // and the plan's hidden ranges would shift as prose streams in — as does any
   // turn too short to have a gap.
