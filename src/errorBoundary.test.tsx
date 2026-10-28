@@ -29,7 +29,6 @@ describe('ErrorBoundary', () => {
     const html = renderToStaticMarkup(<>{boundary.render()}</>)
     expect(html).toContain('role="alert"')
     expect(html).toContain('render this entry: bad payload')
-    expect(html).toContain('Try again')
     expect(html).not.toContain('child')
   })
 })

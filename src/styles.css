@@ -3035,17 +3035,9 @@ body.resizing-row {
 /* An ErrorBoundary's fallback, standing in for whatever region failed to render,
    from one timeline entry up to the whole app. */
 .render-error {
-  display: flex;
-  align-items: center;
-  gap: 12px;
   padding: 12px 28px;
   background: var(--bg-tinted);
   color: var(--wedged);
-}
-
-.render-error-text {
-  flex: 1;
-  min-width: 0;
   overflow-wrap: anywhere;
 }
 
