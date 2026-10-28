@@ -109,8 +109,8 @@ export function buildManifestBlock(
   if (!attachments.length) return ''
   const lines: string[] = [
     '<task-attachments>',
-    'Files attached to this message by the user (materialized locally, not shown ' +
-      'in the text above):',
+    'Files attached to this message (materialized locally, not shown in the ' +
+      'text above):',
     '',
   ]
   for (const a of attachments)
