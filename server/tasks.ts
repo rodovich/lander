@@ -882,9 +882,16 @@ export function pushHookItem(
   return item
 }
 
-// The last main-agent flow message item (a `flow` message with no `parentId`, so
-// not a subagent's nested prose), optionally scoped to one ride. The anchor for
-// finalText updates (applyUpdate) and attachment refs
+function isMainFlowItem(it: Item, rideId?: string): it is MessageItem {
+  return (
+    it.kind === 'message' &&
+    it.role === 'flow' &&
+    it.parentId === undefined &&
+    (rideId === undefined || it.rideId === rideId)
+  )
+}
+
+// The anchor for finalText updates (applyUpdate) and attachment refs
 // (recordAttachmentOnMessage).
 export function lastFlowItem(
   task: { items?: Item[] },
@@ -893,15 +900,21 @@ export function lastFlowItem(
   const items = task.items ?? []
   for (let i = items.length - 1; i >= 0; i--) {
     const it = items[i]
-    if (
-      it.kind === 'message' &&
-      it.role === 'flow' &&
-      it.parentId === undefined &&
-      (rideId === undefined || it.rideId === rideId)
-    )
-      return it
+    if (isMainFlowItem(it, rideId)) return it
   }
   return undefined
+}
+
+// Every file a ride published, in order. Spans all of the ride's flow items, not
+// just its last: recordAttachmentOnMessage files each output under whichever item
+// was last when it was put, and the turn may have gone on speaking after.
+export function rideAttachments(
+  task: { items?: Item[] },
+  rideId: string,
+): Attachment[] {
+  return (task.items ?? []).flatMap((it) =>
+    isMainFlowItem(it, rideId) ? (it.attachments ?? []) : [],
+  )
 }
 
 // The user message items in order (out-of-ride `message` items with role `user`).

@@ -92,6 +92,7 @@ import {
   recordUndispatchedRide,
   recordRideEnded,
   lastFlowItem,
+  rideAttachments,
   scheduledRideOf,
   hasOwnScheduledRide,
   clearScheduledTime,
@@ -1313,31 +1314,35 @@ async function deliverNotification(
   // into a permanent per-sweep write, and leaves a crash between the two writes
   // able to wake a task twice. Read under the same lock that clears them, so one
   // appended after the sweep's read is delivered rather than lost.
-  const deliveries: { to: string; text: string }[] = []
+  const deliveries: { to: string; message: ScheduledMessage }[] = []
   await mutateTask(path.join(project.dataDir, `${notifierId}.json`), (t) => {
     for (const pending of asList(t.pendingNotify)) {
-      const closing = lastFlowItem(t, pending.rideId)?.text?.trim() ?? ''
+      const item = lastFlowItem(t, pending.rideId)
+      const closing = item?.text?.trim() ?? ''
       deliveries.push({
         to: pending.to,
-        text:
-          closing.length > NOTIFY_TEXT_MAX_CHARS
-            ? `${closing.slice(0, NOTIFY_TEXT_MAX_CHARS)}…`
-            : closing,
+        message: {
+          text:
+            closing.length > NOTIFY_TEXT_MAX_CHARS
+              ? `${closing.slice(0, NOTIFY_TEXT_MAX_CHARS)}…`
+              : closing,
+          attachments: item?.rideId ? rideAttachments(t, item.rideId) : [],
+          from: { task: notifierId, via: 'notify' },
+        },
       })
     }
     delete t.pendingNotify
   }).catch(() => {})
-  for (const { to, text } of deliveries)
-    if (to !== notifierId) await wakeNotified(project, notifierId, to, text)
+  for (const { to, message } of deliveries)
+    if (to !== notifierId) await wakeNotified(project, to, message)
 }
 
 // The record holds the notifying task's closing words alone; the agent reads them
 // under the "finished a turn" header attributedPrompt composes.
 async function wakeNotified(
   project: Project,
-  notifierId: string,
   to: string,
-  text: string,
+  message: ScheduledMessage,
 ): Promise<void> {
   const target = await readTask(project.dataDir, to)
   // A landed target is deliberately not revived. Landing is terminal and the
@@ -1363,7 +1368,7 @@ async function wakeNotified(
       new Date(Date.parse(at) - 1).toISOString(),
       'system',
     )
-    applyDueMessages(t, [{ text, from: { task: notifierId, via: 'notify' } }], at)
+    applyDueMessages(t, [message], at)
     t.status = 'riding'
     t.updatedAt = at
     drive = true

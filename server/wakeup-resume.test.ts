@@ -346,4 +346,42 @@ describe('a notify delivery', () => {
     )
     expect((await readRaw('notify-many-child')).pendingNotify).toBeUndefined()
   })
+
+  // Delivered on the message the way a `send --attach` is, so the woken turn
+  // materializes them like any other incoming file.
+  it('carries the files the notifying turn put, from any of its items', async () => {
+    const file = (id: string) => ({ id, name: `${id}.txt`, mime: 'text/plain', size: 1 })
+    await seed('notify-files-launcher', {})
+    await seed('notify-files-child', {
+      items: [
+        { id: 'u0', at: AT, kind: 'message', role: 'user', text: 'go' },
+        {
+          id: 'f0', at: AT, rideId: 'r0', kind: 'message', role: 'flow',
+          text: 'earlier turn', attachments: [file('old')],
+        },
+        { id: 'u1', at: AT, kind: 'message', role: 'user', text: 'and?' },
+        {
+          id: 'f1', at: AT, rideId: 'r1', kind: 'message', role: 'flow',
+          text: 'made it', attachments: [file('a')],
+        },
+        {
+          id: 'f2', at: AT, rideId: 'r1', kind: 'message', role: 'flow',
+          text: 'done', attachments: [file('b')],
+        },
+      ],
+      rides: [
+        { id: 'r0', startedAt: AT, endedAt: AT, outcome: 'done' },
+        { id: 'r1', startedAt: AT, endedAt: AT, outcome: 'done' },
+      ],
+      pendingNotify: [{ to: 'notify-files-launcher', at: AT, rideId: 'r1' }],
+    })
+
+    await launchScheduled()
+
+    const items = (await readRaw('notify-files-launcher')).items as MessageItem[]
+    expect(items.filter((i) => i.role === 'user').at(-1)).toMatchObject({
+      text: 'done',
+      attachments: [file('a'), file('b')],
+    })
+  })
 })
