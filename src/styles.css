@@ -1384,17 +1384,34 @@ body {
   }
 }
 
-.telemetry-panel {
+/* The navbar's usage popup: one section per flow, each a name over its items.
+   Sized outright because the meters flex to fill whatever width they're given. */
+.telemetry-popup {
+  position: fixed;
+  z-index: 100;
+  width: 320px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px 16px 16px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-tinted);
+  gap: 16px;
+  padding: 12px 16px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px var(--shadow);
 }
 
-.telemetry-unsupported {
-  font-size: 12px;
+.telemetry-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.telemetry-flow-name {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
   color: var(--muted);
 }
 

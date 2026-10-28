@@ -104,7 +104,7 @@ function formatResetWhen(iso: string): string {
     : d.toLocaleDateString([], { weekday: 'short' })
 }
 
-// Map a usage snapshot to the generic telemetry items the status panel renders:
+// Map a usage snapshot to the generic telemetry items the usage popup renders:
 // the session (5-hour) and weekly windows as two meters, each with a 'warn' band
 // at ≥90% and a preformatted "resets …" note (session as a clock time, weekly as
 // clock-if-today-else-weekday).

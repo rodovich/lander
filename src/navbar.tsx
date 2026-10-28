@@ -6,7 +6,9 @@ import {
   VIEW_LABELS,
   lastPathComponent,
 } from './format'
+import type { FlowTelemetry } from './api'
 import { SegmentedControl } from './segmentedControl'
+import { UsageButton } from './telemetry'
 import type { Project, TaskView, TimeFilter } from './types'
 
 // The page title: the open project's leaf, then the time filter and view when
@@ -30,7 +32,8 @@ export type Panel = 'stats' | 'hooks'
 const PANEL_LABELS: Record<Panel, string> = { stats: 'Stats', hooks: 'Hooks' }
 
 // The bar across the top of the page: the brand, the project switcher, the
-// app-wide error if there is one, and the project's stats and hooks.
+// app-wide error if there is one, the flows' usage, and the project's stats and
+// hooks.
 export const Navbar = memo(function Navbar({
   projects,
   project,
@@ -38,6 +41,7 @@ export const Navbar = memo(function Navbar({
   panel,
   onTogglePanel,
   error,
+  telemetry,
 }: {
   projects: Project[]
   project: string
@@ -45,6 +49,7 @@ export const Navbar = memo(function Navbar({
   panel: Panel | null
   onTogglePanel: (panel: Panel) => void
   error: string | null
+  telemetry: FlowTelemetry
 }) {
   return (
     <nav className="navbar">
@@ -68,9 +73,10 @@ export const Navbar = memo(function Navbar({
           </div>
         )}
       </div>
-      {project && (
-        <div className="navbar-actions">
-          {(['stats', 'hooks'] as const).map((name) => (
+      <div className="navbar-actions">
+        <UsageButton telemetry={telemetry} />
+        {project &&
+          (['stats', 'hooks'] as const).map((name) => (
             <button
               key={name}
               type="button"
@@ -81,8 +87,7 @@ export const Navbar = memo(function Navbar({
               {PANEL_LABELS[name]}
             </button>
           ))}
-        </div>
-      )}
+      </div>
     </nav>
   )
 })

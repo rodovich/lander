@@ -15,9 +15,8 @@ import { ResizeHandle } from './resizeHandle'
 import { StatsPanel } from './statsPanel'
 import { TaskList } from './taskList'
 import { TaskLinkProvider } from './taskLinkContext'
-import { NO_GRANTS, taskFlowName, taskGrants } from './taskMeta'
+import { NO_GRANTS, taskGrants } from './taskMeta'
 import { buildTaskRows } from './taskRows'
-import { TelemetryPanel } from './telemetry'
 import type { ConversationMatch } from '../shared/conversationSearch'
 import { buildTimeline } from '../shared/timeline'
 import { useReadMarker, useViewingState } from './useReadMarker'
@@ -115,14 +114,6 @@ export function App() {
   // place you go, not a mode the app should still be in tomorrow.
   const [panel, setPanel] = useState<Panel | null>(null)
 
-  // The new-task form's agent pick. Session-scoped like the form's draft
-  // message (which lives in the form), so two tabs keep independent picks.
-  // Lifted here rather than owned by the form because App reads it for the
-  // telemetry panel.
-  const [newTaskFlow, setNewTaskFlow] = useSessionState<string>(
-    'lander:draft:newFlow',
-    'claude',
-  )
   // Heights of the two resizable bottom panels, dragged via the handle above
   // each and persisted globally so the sizing sticks across tabs and reloads.
   // The scrollable region above each (the message timeline, the task list)
@@ -296,6 +287,7 @@ export function App() {
         // up: the user is standing in front of it, and the poll's is the
         // ambient one.
         error={error ?? pollError}
+        telemetry={telemetry}
       />
       <div className="layout">
         <div className="sidebar">
@@ -330,20 +322,10 @@ export function App() {
           <ErrorBoundary label="the new task form">
             <NewTaskForm
               targetSlug={project}
-              flow={newTaskFlow}
-              setFlow={setNewTaskFlow}
               height={newTaskHeight}
               setError={setError}
               admit={admitTask}
               onCreated={onTaskCreated}
-            />
-          </ErrorBoundary>
-
-          <ErrorBoundary label="telemetry">
-            <TelemetryPanel
-              // Keyed by flow name — the telemetry cache is keyed that way
-              // server-side now.
-              items={telemetry[(current && taskFlowName(current)) ?? newTaskFlow] ?? []}
             />
           </ErrorBoundary>
         </div>

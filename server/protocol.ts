@@ -615,11 +615,11 @@ export type ProjectGrantResultMessage = {
   status?: number
 }
 
-// A fresh telemetry snapshot for one flow's status panel, pushed whenever the
+// A fresh telemetry snapshot for one flow's usage readout, pushed whenever the
 // producing flow refreshes it (per-turn, on the reset timer, at boot). Not tied
 // to any run; the server caches it keyed by flow and serves the items verbatim,
 // never learning what they mean. A flow that publishes nothing (Codex) simply
-// never sends this, so its panel stays empty.
+// never sends this, so the usage popup leaves it out.
 //
 // `flow` is the cache key. `agent` rides along for a legacy kind until step 5
 // retires them, and a daemon that predates `flow` sends only `agent`, so the

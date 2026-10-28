@@ -385,10 +385,10 @@ export type Project = {
   slug: string
 }
 
-// A presentation-agnostic telemetry datum a flow publishes for one of the two
-// readouts (the per-flow status panel below the new-task form; the per-task
-// composer footer). The server caches and serves these opaquely and the UI renders
-// them blind — the producing flow owns what they mean. Three shapes:
+// A presentation-agnostic telemetry datum for one of the two readouts: the
+// navbar's per-flow usage popup, whose items a flow publishes and the server
+// caches and serves opaquely, and the per-task composer footer, whose items the
+// client derives from the task. The UI renders them blind. Three shapes:
 //   text  — a labeled string ("Model: claude-sonnet-5")
 //   count — a labeled number, shown abbreviated ("Tokens: 12k")
 //   meter — a bar: value/max as a percentage, an optional accent band ('warn'), and

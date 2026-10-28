@@ -1,5 +1,4 @@
 import { memo, useEffect, useState } from 'react'
-import type { Dispatch, SetStateAction } from 'react'
 import { loadFlows, uiHeaders, uploadAttachments } from './api'
 import { ComposerPanel } from './composerPanel'
 import { agentDisplayName } from '../shared/agentDisplay'
@@ -7,13 +6,9 @@ import { useSessionState } from './hooks'
 import type { FlowMeta, Task, TaskWithProject } from './types'
 
 // The sidebar's new-task composer: the draft message and its attachments, the
-// agent picker, and task creation. The agent pick is owned by App — the
-// telemetry panel reads it — but the rest of the draft state lives here, used
-// nowhere else.
+// agent picker, and task creation.
 export const NewTaskForm = memo(function NewTaskForm({
   targetSlug,
-  flow,
-  setFlow,
   height,
   setError,
   admit,
@@ -21,10 +16,6 @@ export const NewTaskForm = memo(function NewTaskForm({
 }: {
   // The project a new task is created in: the one the navbar has open.
   targetSlug: string
-  // The picked driver flow's name. A plain string, not a closed union: the set
-  // is whatever the daemon announced.
-  flow: string
-  setFlow: Dispatch<SetStateAction<string>>
   height: number
   setError: (message: string | null) => void
   // Puts the created task into the displayed list from the POST's own answer,
@@ -37,6 +28,9 @@ export const NewTaskForm = memo(function NewTaskForm({
   // different tasks keep independent drafts (localStorage would let them
   // clobber each other).
   const [message, setMessage] = useSessionState('lander:draft:newTask', '')
+  // The picked driver flow's name, session-scoped like the draft. A plain
+  // string, not a closed union: the set is whatever the daemon announced.
+  const [flow, setFlow] = useSessionState<string>('lander:draft:newFlow', 'claude')
   // Files attached to the message, held as File objects (not session-persisted
   // — File isn't serializable) and uploaded to the durable store on submit.
   const [newFiles, setNewFiles] = useState<File[]>([])

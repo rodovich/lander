@@ -61,7 +61,7 @@ export function useTaskData(
   const [taskLinksLoaded, setTaskLinksLoaded] = useState(false)
   // Per-flow status telemetry (agent → items), carried on every tasks poll. The
   // producing flow decides when to refresh; the client just renders the latest
-  // snapshot it was handed for whichever flow is in view.
+  // snapshot it was handed.
   const [telemetry, setTelemetry] = useState<FlowTelemetry>({})
   // Each flow's capabilities by name, carried on every tasks poll the same way.
   const [flowCaps, setFlowCaps] = useState<Record<string, FlowCaps>>({})

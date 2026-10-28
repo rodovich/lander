@@ -1,4 +1,8 @@
+import { useId } from 'react'
+import { agentDisplayName } from '../shared/agentDisplay'
+import type { FlowTelemetry } from './api'
 import { formatTokens } from './format'
+import { useAnchoredPopup } from './hooks'
 import type { TelemetryItem } from './types'
 
 // One meter: value/max as a clamped percentage, an optional accent band, and an
@@ -71,18 +75,45 @@ export function TelemetryItemView({ item }: { item: TelemetryItem }) {
   }
 }
 
-// The paneled telemetry surface (below the new-task form): a flow's items in a
-// row, or nothing when the flow published none. Renders items blind — no knowledge
-// of what they represent.
-export function TelemetryPanel({ items }: { items: TelemetryItem[] }) {
-  if (!items.length) return null
+// The navbar's Usage button and the popup of every flow's status telemetry.
+// Renders items blind — no knowledge of what they represent.
+export function UsageButton({ telemetry }: { telemetry: FlowTelemetry }) {
+  const { open, setOpen, containerRef, triggerRef, popupRef, popupStyle } =
+    useAnchoredPopup()
+  const popupId = useId()
+  const flows = Object.entries(telemetry).filter(([, items]) => items.length)
+  if (!flows.length) return null
   return (
-    <div className="telemetry-panel">
-      <div className="telemetry-items">
-        {items.map((item) => (
-          <TelemetryItemView key={item.id} item={item} />
-        ))}
-      </div>
+    <div ref={containerRef}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={'action-button' + (open ? ' active' : '')}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={open ? popupId : undefined}
+        onClick={() => setOpen((o) => !o)}
+      >
+        Usage
+      </button>
+      {open && (
+        <div ref={popupRef} id={popupId} className="telemetry-popup"
+          role="dialog"
+          aria-label="Usage"
+          style={popupStyle}
+        >
+          {flows.map(([flow, items]) => (
+            <section key={flow} className="telemetry-flow">
+              <h2 className="telemetry-flow-name">{agentDisplayName(flow)}</h2>
+              <div className="telemetry-items">
+                {items.map((item) => (
+                  <TelemetryItemView key={item.id} item={item} />
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
