@@ -128,7 +128,7 @@ export async function checkoutReport(
   return {
     path: dir,
     ...(branch ? { branch } : {}),
-    files: await checkoutChanges(root, dir, git),
+    ...(await checkoutChanges(root, dir, git)),
   }
 }
 
@@ -149,22 +149,47 @@ async function checkoutComparisonHead(root: string, git: Git): Promise<string> {
   return counts[0] === '0' ? upstream : head
 }
 
-async function checkoutChanges(root: string, dir: string, git: Git): Promise<ChangedFile[]> {
+async function checkoutChanges(
+  root: string,
+  dir: string,
+  git: Git,
+): Promise<Pick<CheckoutReport, 'files' | 'split'>> {
   const main = await checkoutComparisonHead(root, git)
-  const base = (await git(dir, ['merge-base', 'HEAD', main])).trim()
+  // The agent may commit while these run; reading HEAD once keeps the
+  // commit-side counts consistent with each other.
+  const head = (await git(dir, ['rev-parse', 'HEAD'])).trim()
+  const base = (await git(dir, ['merge-base', head, main])).trim()
   // `--no-optional-locks` keeps the diff from rewriting the index, which an
   // agent's next turn may be using.
-  const tracked = parseNumstat(
-    await git(dir, ['--no-optional-locks', 'diff', '--numstat', '-z', base]),
-  )
-  const untrackedPaths = (await git(dir, ['ls-files', '--others', '--exclude-standard', '-z']))
-    .split('\0')
-    .filter(Boolean)
-  const untracked = await Promise.all(untrackedPaths.map((p) => untrackedFile(dir, p)))
-  return [...tracked, ...untracked.flatMap((f) => f ?? [])].sort((a, b) =>
-    a.path < b.path ? -1 : 1,
-  )
+  const numstat = async (...revs: string[]) =>
+    parseNumstat(await git(dir, ['--no-optional-locks', 'diff', '--numstat', '-z', ...revs]))
+  const [all, committed, uncommittedTracked, commits, untrackedPaths] = await Promise.all([
+    numstat(base),
+    numstat(base, head),
+    numstat(head),
+    git(dir, ['rev-list', '--count', `${base}..${head}`]),
+    git(dir, ['ls-files', '--others', '--exclude-standard', '-z']),
+  ])
+  const untracked = (
+    await Promise.all(
+      untrackedPaths
+        .split('\0')
+        .filter(Boolean)
+        .map((p) => untrackedFile(dir, p)),
+    )
+  ).flatMap((f) => f ?? [])
+  return {
+    files: byPath([...all, ...untracked]),
+    split: {
+      commits: Number(commits.trim()),
+      committed: byPath(committed),
+      uncommitted: byPath([...uncommittedTracked, ...untracked]),
+    },
+  }
 }
+
+const byPath = (files: ChangedFile[]): ChangedFile[] =>
+  files.sort((a, b) => (a.path < b.path ? -1 : 1))
 
 // `git diff --numstat -z`: `<added>\t<removed>\t<path>\0` per file, or for a
 // rename an empty path followed by `<old>\0<new>\0`. Binary files count `-`.

@@ -349,6 +349,12 @@ export type CheckoutReport = {
   branch?: string
   // Everything changed since the worktree diverged from the main checkout.
   files: ChangedFile[]
+  // Absent from reports made before the split.
+  split?: {
+    commits: number
+    committed: ChangedFile[]
+    uncommitted: ChangedFile[]
+  }
 }
 
 // Line counts are null for a binary file.

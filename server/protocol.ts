@@ -565,6 +565,15 @@ export type CheckoutReport = {
   // Every file that differs from where the checkout diverged from the main
   // checkout's HEAD: committed, uncommitted, and untracked changes together.
   files: ChangedFile[]
+  // The same span divided at HEAD: the commits since that divergence and what
+  // they change, then what the working tree changes on top of them, untracked
+  // files included. A file changed on both sides is in both lists. Absent from
+  // reports made before the split, which tasks keep on disk.
+  split?: {
+    commits: number
+    committed: ChangedFile[]
+    uncommitted: ChangedFile[]
+  }
 }
 
 // Line counts are null for a binary file.

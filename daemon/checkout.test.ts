@@ -72,11 +72,19 @@ describe('task checkouts', () => {
     commit(root, 'base')
     const dir = await ensureCheckout(root, 't1')
     const empty = await checkoutReport(root, dir)
-    expect(empty).toEqual({ path: dir, files: [] })
+    expect(empty).toEqual({
+      path: dir,
+      files: [],
+      split: { commits: 0, committed: [], uncommitted: [] },
+    })
 
     git(dir, 'switch', '-q', '-c', 'feature')
     writeFileSync(path.join(dir, 'kept.txt'), 'a\nB\nc\nd\n')
     commit(dir, 'edit')
+    writeFileSync(path.join(dir, 'later.txt'), 'l\n')
+    git(dir, 'add', 'later.txt')
+    commit(dir, 'add later')
+    writeFileSync(path.join(dir, 'kept.txt'), 'a\nB\nc\n')
     git(dir, 'mv', 'old-name.txt', 'new-name.txt')
     writeFileSync(path.join(dir, 'untracked.txt'), 'x\ny')
     writeFileSync(path.join(dir, 'blob.bin'), Buffer.from([1, 0, 2]))
@@ -90,10 +98,24 @@ describe('task checkouts', () => {
       branch: 'feature',
       files: [
         { path: 'blob.bin', added: null, removed: null },
-        { path: 'kept.txt', added: 2, removed: 1 },
+        { path: 'kept.txt', added: 1, removed: 1 },
+        { path: 'later.txt', added: 1, removed: 0 },
         { path: 'new-name.txt', added: 0, removed: 0 },
         { path: 'untracked.txt', added: 2, removed: 0 },
       ],
+      split: {
+        commits: 2,
+        committed: [
+          { path: 'kept.txt', added: 2, removed: 1 },
+          { path: 'later.txt', added: 1, removed: 0 },
+        ],
+        uncommitted: [
+          { path: 'blob.bin', added: null, removed: null },
+          { path: 'kept.txt', added: 0, removed: 1 },
+          { path: 'new-name.txt', added: 0, removed: 0 },
+          { path: 'untracked.txt', added: 2, removed: 0 },
+        ],
+      },
     })
   })
 

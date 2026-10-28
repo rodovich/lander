@@ -1,4 +1,5 @@
 import { CopyButton } from './copyButton'
+import { unit } from './format'
 import { useAnchoredPopup } from './hooks'
 import type { ChangedFile, CheckoutReport } from './types'
 
@@ -53,7 +54,7 @@ export function CheckoutChip({ checkout }: { checkout: CheckoutReport }) {
     useAnchoredPopup({ gap: 4 })
   const { path, branch, files } = checkout
   const sum = totals(files)
-  const fileCount = `${files.length} ${files.length === 1 ? 'file' : 'files'}`
+  const fileCount = unit(files.length, 'file')
 
   return (
     <div className="checkout" ref={containerRef}>
@@ -100,23 +101,41 @@ export function CheckoutChip({ checkout }: { checkout: CheckoutReport }) {
               <span className="checkout-value checkout-detached">detached</span>
             )}
           </div>
-          <div className="checkout-popup-section">
-            {files.length ? (
-              <div className="checkout-files">
-                <span className="checkout-files-head">{fileCount} changed</span>
-                <DiffStat {...sum} />
-                {files.map((f) => (
-                  <FileRow key={f.path} file={f} />
-                ))}
-              </div>
-            ) : (
-              <span className="checkout-files-head">No changes</span>
-            )}
-          </div>
+          <CheckoutChanges checkout={checkout} />
         </div>
       )}
     </div>
   )
+}
+
+export function CheckoutChanges({ checkout }: { checkout: CheckoutReport }) {
+  const { files, split } = checkout
+  const lists: { head: string; files: ChangedFile[] }[] = []
+  if (split) {
+    const { commits, committed, uncommitted } = split
+    if (commits) lists.push({ head: `Committed (${unit(commits, 'commit')})`, files: committed })
+    if (uncommitted.length) lists.push({ head: 'Uncommitted', files: uncommitted })
+  } else if (files.length) {
+    lists.push({ head: `${unit(files.length, 'file')} changed`, files })
+  }
+  if (!lists.length) {
+    return (
+      <div className="checkout-popup-section">
+        <span className="checkout-files-head">No changes</span>
+      </div>
+    )
+  }
+  return lists.map((list) => (
+    <div key={list.head} className="checkout-popup-section">
+      <div className="checkout-files">
+        <span className="checkout-files-head">{list.head}</span>
+        <DiffStat {...totals(list.files)} />
+        {list.files.map((f) => (
+          <FileRow key={f.path} file={f} />
+        ))}
+      </div>
+    </div>
+  ))
 }
 
 function FileRow({ file }: { file: ChangedFile }) {
