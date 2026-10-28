@@ -101,7 +101,9 @@ export function CheckoutChip({ checkout }: { checkout: CheckoutReport }) {
               <span className="checkout-value checkout-detached">detached</span>
             )}
           </div>
-          <CheckoutChanges checkout={checkout} />
+          <div className="checkout-changes">
+            <CheckoutChanges checkout={checkout} />
+          </div>
         </div>
       )}
     </div>

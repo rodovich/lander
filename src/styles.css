@@ -1648,7 +1648,8 @@ body {
   padding: 10px 12px;
 }
 
-.checkout-popup-section + .checkout-popup-section {
+.checkout-popup-section + .checkout-popup-section,
+.checkout-popup-section + .checkout-changes {
   border-top: 1px solid var(--border-secondary);
 }
 
@@ -1685,9 +1686,13 @@ body {
   display: grid;
   grid-template-columns: 1fr auto auto;
   gap: 3px 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Every list scrolls together under the worktree and branch. */
+.checkout-changes {
   max-height: 50vh;
   overflow-y: auto;
-  font-variant-numeric: tabular-nums;
 }
 
 .checkout-files > .diffstat-added,
