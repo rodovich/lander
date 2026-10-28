@@ -370,13 +370,14 @@ export type TaskWithProject = Task & { projectSlug: string }
 
 // The compact global projection used only for resolving task references. It is
 // deliberately independent of Task: the link poll never carries conversations,
-// permissions, telemetry, or timestamps.
+// permissions, or telemetry.
 export type TaskLink = {
   id: string
   projectSlug: string
   title: string
   status: string
   archived: boolean
+  createdAt?: string
 }
 
 export type Project = {

@@ -31,6 +31,7 @@ export function SentMessageNote({
         slug={slug}
         title={current?.title || sender}
         status={current?.status}
+        createdAt={current?.createdAt}
       />
     </MessageNote>
   )

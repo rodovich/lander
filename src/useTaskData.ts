@@ -372,7 +372,8 @@ export function useTaskData(
   // only after a changed ETag, and each open message
   // calls the resolver once per id-shaped token (thousands, on a pasted log). So
   // we depend on a *signature* of only the fields resolution reads (id, slug,
-  // title, status) rather than the array reference: `linkIndex` — and therefore
+  // title, status, creation time) rather than the array reference:
+  // `linkIndex` — and therefore
   // `resolveTaskLink`'s identity and the memoized messages that use it — changes
   // only when a mention could actually resolve differently, not on every poll.
   // The precomputed lowercased ids and link objects also keep each resolver call
@@ -380,7 +381,7 @@ export function useTaskData(
   const linkSig = taskLinks
     .map(
       (t) =>
-        `${t.id}\t${t.projectSlug}\t${t.title}\t${t.status}\t${t.archived}`,
+        `${t.id}\t${t.projectSlug}\t${t.title}\t${t.status}\t${t.createdAt}`,
     )
     .join('\n')
   const linkIndex = useMemo(
@@ -393,6 +394,7 @@ export function useTaskData(
           href: taskHref(t.projectSlug, t.id),
           title: t.title,
           status: t.status,
+          createdAt: t.createdAt,
         },
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -37,11 +37,13 @@ describe('TaskLinkIndex', () => {
   it('scans all pools once and serves the compact public status', async () => {
     await write(project.dataDir, 'active', {
       title: 'Active',
+      createdAt: '2026-10-28T15:00:00.000Z',
       status: 'riding',
       rides: [],
     })
     await write(project.archiveDir, 'old', {
       title: 'Old',
+      createdAt: '2026-08-21T20:00:00.000Z',
       status: 'landed',
       rides: [],
     })
@@ -51,6 +53,7 @@ describe('TaskLinkIndex', () => {
         id: 'active',
         projectSlug: 'one',
         title: 'Active',
+        createdAt: '2026-10-28T15:00:00.000Z',
         status: 'paced',
         archived: false,
       },
@@ -58,6 +61,7 @@ describe('TaskLinkIndex', () => {
         id: 'old',
         projectSlug: 'one',
         title: 'Old',
+        createdAt: '2026-08-21T20:00:00.000Z',
         status: 'landed',
         archived: true,
       },
@@ -88,6 +92,16 @@ describe('TaskLinkIndex', () => {
       rides: [],
     })
     expect((await index.snapshot()).etag).toBe(second.etag)
+    index.observeWrite(path.join(project.dataDir, 'task.json'), {
+      id: 'task',
+      title: 'Second',
+      status: 'riding',
+      rides: [],
+      createdAt: '2026-10-28T15:00:00.000Z',
+    })
+    const dated = await index.snapshot()
+    expect(dated.links[0].createdAt).toBe('2026-10-28T15:00:00.000Z')
+    expect(dated.etag).not.toBe(second.etag)
   })
 
   it('does not return to task files after the index is warm', async () => {

@@ -113,20 +113,11 @@ export function useTaskRouting({
     )
   }, [pendingRouteKey, setProject, setView, taskLinkByKey, taskLinksLoaded, tasks])
 
-  // Task links are ordinary anchors for copy/open-in-new-tab semantics. Plain
-  // clicks stay in-process so browser history, drafts, and file attachments all
+  // Plain clicks stay in-process so history, drafts, and attachments
   // survive a cross-project hop.
   useEffect(() => {
     const onClick = (event: MouseEvent) => {
-      if (
-        event.defaultPrevented ||
-        event.button !== 0 ||
-        event.metaKey ||
-        event.ctrlKey ||
-        event.shiftKey ||
-        event.altKey
-      )
-        return
+      if (event.defaultPrevented || event.button !== 0) return
       const target = event.target
       if (!(target instanceof Element)) return
       const anchor = target.closest<HTMLAnchorElement>('a[href]')
@@ -135,6 +126,12 @@ export function useTaskRouting({
       if (url.origin !== window.location.origin) return
       const ref = taskRefFromPath(url.pathname)
       if (!ref || !taskLinkByKey.has(taskKey(ref.projectSlug, ref.id))) return
+      if (event.shiftKey) {
+        event.preventDefault()
+        void navigator.clipboard?.writeText(ref.id).catch(() => {})
+        return
+      }
+      if (event.metaKey || event.ctrlKey || event.altKey) return
       event.preventDefault()
       routeToTask(ref, true)
     }

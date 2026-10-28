@@ -22,16 +22,19 @@ export function TaskChip({
   slug,
   title,
   status,
+  createdAt,
 }: {
   id: string
   slug: string
   title: ReactNode
   status?: string
+  createdAt?: string
 }) {
   return (
     <a
       className={`timeline-note-link${statusClass(status)}`}
       href={taskHref(slug, id)}
+      title={createdAt ? formatTimestamp(createdAt) : undefined}
     >
       {title}
     </a>

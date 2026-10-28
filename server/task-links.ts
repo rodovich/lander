@@ -11,6 +11,7 @@ export type TaskLink = {
   title: string
   status: string
   archived: boolean
+  createdAt?: string
 }
 
 type LinkTask = {
@@ -19,6 +20,7 @@ type LinkTask = {
   status?: unknown
   rides?: Ride[]
   runId?: unknown
+  createdAt?: unknown
 }
 type Overlay = { link: TaskLink; clearBothPools: boolean }
 type Pools = Map<boolean, TaskLink>
@@ -32,17 +34,22 @@ function sameLink(a: TaskLink | undefined, b: TaskLink): boolean {
     a.projectSlug === b.projectSlug &&
     a.title === b.title &&
     a.status === b.status &&
+    a.createdAt === b.createdAt &&
     a.archived === b.archived
 }
 
-function linkFields(task: LinkTask, id: string): { title: string; status: string } {
+function linkFields(task: LinkTask, id: string): Pick<TaskLink, 'title' | 'status' | 'createdAt'> {
   if (!TASK_ID.test(id)) throw new Error(`invalid task filename id: ${id}`)
   if (task.id !== undefined && task.id !== id)
     throw new Error(`task id does not match filename: ${String(task.id)} != ${id}`)
   if (typeof task.title !== 'string') throw new Error(`task ${id} has no title`)
   const status = publicTaskStatus(task as LinkTask & { status?: string })
   if (!status) throw new Error(`task ${id} has no status`)
-  return { title: task.title, status }
+  return {
+    title: task.title,
+    status,
+    ...(typeof task.createdAt === 'string' ? { createdAt: task.createdAt } : {}),
+  }
 }
 
 function projectTask(task: LinkTask, projectSlug: string, id: string, archived: boolean): TaskLink {

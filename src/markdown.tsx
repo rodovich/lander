@@ -6,6 +6,7 @@ import { SKIP, visit } from 'unist-util-visit'
 import type { Root } from 'mdast'
 import type { Element, ElementContent } from 'hast'
 import { CopyButton } from './copyButton'
+import { formatTimestamp } from './format'
 import { timed } from './perf'
 
 // Message Markdown: CommonMark plus GFM, rendered by react-markdown to React
@@ -20,7 +21,7 @@ import { timed } from './perf'
 export type TaskLinkResolver = (
   id: string,
   projectSlug?: string,
-) => { href: string; title: string; status: string } | undefined
+) => { href: string; title: string; status: string; createdAt?: string } | undefined
 
 // Only allow link schemes that can't execute script.
 export function safeHref(url: string): string | undefined {
@@ -66,7 +67,10 @@ function remarkTaskMentions({ linkTask }: { linkTask?: TaskLinkResolver }) {
             type: 'link',
             url: link.href,
             data: {
-              hProperties: { className: [TASK_MENTION_CLASS, link.status], title: id },
+              hProperties: {
+                className: [TASK_MENTION_CLASS, link.status],
+                title: link.createdAt ? formatTimestamp(link.createdAt) : undefined,
+              },
             },
             children: [{ type: 'text', value: link.title }],
           }

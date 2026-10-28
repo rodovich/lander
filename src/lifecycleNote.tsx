@@ -51,14 +51,18 @@ export function LifecycleNote({
     const single = tasks.length === 1
     // Tint each awaited link by its task's current status (when resolvable),
     // matching the status chips used for task mentions.
-    const chip = (t: { id: string; title: string }) => (
-      <TaskChip
-        id={t.id}
-        slug={slug}
-        title={t.title}
-        status={linkTask(t.id, slug)?.status}
-      />
-    )
+    const chip = (t: { id: string; title: string }) => {
+      const current = linkTask(t.id, slug)
+      return (
+        <TaskChip
+          id={t.id}
+          slug={slug}
+          title={t.title}
+          status={current?.status}
+          createdAt={current?.createdAt}
+        />
+      )
+    }
     return (
       <TimelineNote
         at={event.at}

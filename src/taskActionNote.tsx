@@ -18,6 +18,7 @@ function RefLink({ task }: { task: TaskActionRef }) {
       slug={task.projectSlug}
       title={current?.title || task.title || task.id}
       status={current?.status}
+      createdAt={current?.createdAt}
     />
   )
 }
