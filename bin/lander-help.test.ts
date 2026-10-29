@@ -46,7 +46,7 @@ function execLander(
           code: error && typeof error.code === 'number' ? error.code : 0,
         }),
     )
-    child.stdin?.end(stdin ?? '')
+    child.stdin?.end(stdin)
   })
 }
 
