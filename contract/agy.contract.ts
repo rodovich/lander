@@ -52,6 +52,37 @@ describe.skipIf(!VERSION)(`agy contract (${VERSION})`, () => {
     if (stubDir) rmSync(stubDir, { recursive: true, force: true })
   })
 
+  it('exposes per-response context sizes around a completed manual checkpoint', () => {
+    const root = testRoot()
+    const marker = 'cobalt-heron-842'
+    const input = [
+      `Remember the marker ${marker}. Reply with only that marker. Do not use tools, edit files, or launch agents.`,
+      '/compact Reply with only the remembered marker. Do not use tools.',
+    ].map(content => JSON.stringify({ event: 'user', message: { content } })).join('\n') + '\n'
+    const run = runJsonl('agy', [
+      '--input-format', 'stream-json', '--output-format', 'stream-json',
+      '--print-timeout', '0s', '--mode', 'accept-edits',
+      '--log-file', path.join(root, 'agy.log'),
+    ], { cwd: root, input })
+    expect(run.exit, run.stderr).toBe(0)
+    const results = run.lines.filter(line => line.event === 'result').map(line => line.result)
+    expect(results.map(r => r.status)).toEqual(['SUCCESS', 'SUCCESS'])
+    expect(results[1].conversation_id).toBe(results[0].conversation_id)
+    expect(results[1].response).toContain(marker)
+    const steps = run.lines.filter(line => line.event === 'step_update').map(line => line.step_update)
+    const checkpoint = steps.findIndex(step => step.step_type === 'checkpoint' && step.state === 'DONE')
+    expect(checkpoint).toBeGreaterThan(0)
+    const responseUsage = (step: Record<string, any>) => step.step_type === 'agent_response' && step.usage
+    const before = steps.slice(0, checkpoint).filter(responseUsage).at(-1)
+    const after = steps.slice(checkpoint + 1).find(responseUsage)
+    for (const response of [before, after]) {
+      expect(response).toBeDefined()
+      expect(response.usage.input_tokens).toEqual(expect.any(Number))
+      expect(response.usage.cache_read_tokens).toEqual(expect.any(Number))
+      expect(response.usage.input_tokens + response.usage.cache_read_tokens).toBeGreaterThan(0)
+    }
+  })
+
   it('allows command(lander) and workspace file edits under --mode accept-edits and --project', async () => {
     const root = testRoot()
     const file = path.join(root, 'probe.txt')

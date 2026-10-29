@@ -21,6 +21,7 @@ import {
 } from 'lander/flow'
 import type { AgentLaunchDir, AgentLaunchDirInput } from '../agent'
 import type { Ctx, FlowMeta, GroupHandle, ToolHandle, TurnResult } from './ctx'
+import type { ContextUpdate } from '../../shared/context'
 import {
   usageStatus,
   type UsageBody,
@@ -429,7 +430,7 @@ export function makeFlow({
       addDir('/tmp')
       addDir(process.env.TMPDIR)
       if (ctx.turn.filesDir && ctx.turn.filesDirExists) addDir(ctx.turn.filesDir)
-      const priorTotal = sessionId
+      let priorTotal = sessionId
         ? readThreadUsage(ctx.state.get(['threadUsage']))
         : { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 }
       let conversation = sessionId
@@ -444,6 +445,8 @@ export function makeFlow({
           ...(conversation ? ['--conversation', conversation] : []),
           ...[...dirs].flatMap((dir) => ['--add-dir', dir]),
         ], { sessionId: conversation, priorTotal, liveUsage, readLog: readAgyLog })
+        if (run.conversationId !== conversation)
+          priorTotal = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 }
         if (first && run.producedOutput) {
           if (sendTaskPrompt) ctx.state.set(['taskPrompt'], digest)
           if (sendDoc && docDigest !== undefined) ctx.state.set(['landerDoc'], docDigest)
@@ -558,6 +561,9 @@ async function reduceAgy(
   let responseGroup: GroupHandle | undefined
   const seenUsageSteps = new Set<number>()
   const seenCheckpoints = new Set<number>()
+  const savedContextTokens = sessionId ? ctx.state.get(['contextTokens']) : undefined
+  let contextTokens = typeof savedContextTokens === 'number' ? savedContextTokens : undefined
+  let pendingCheckpoint: ContextUpdate | undefined
   let liveUsage = startUsage
   let pendingText: number | undefined
   let lastText = ''
@@ -569,8 +575,17 @@ async function reduceAgy(
   const collectStderr = (async () => {
     for await (const line of child.stderr) stderr += `${line}\n`
   })()
+  const flushCheckpoint = (afterTokens?: number) => {
+    if (!pendingCheckpoint) return
+    ctx.emit.context({
+      ...pendingCheckpoint,
+      ...(afterTokens !== undefined ? { afterTokens } : {}),
+    })
+    pendingCheckpoint = undefined
+  }
   const flushText = () => {
     if (pendingText !== undefined) {
+      flushCheckpoint()
       const text = texts.get(pendingText) ?? ''
       if (text) {
         lastText = text
@@ -597,7 +612,16 @@ async function reduceAgy(
       ? envelope.step_update
       : envelope.event === 'result' ? envelope.result : envelope
     if (!event) continue
-    if (!conversationId && typeof event.conversation_id === 'string' && event.conversation_id) {
+    if (typeof event.conversation_id === 'string' && event.conversation_id && event.conversation_id !== conversationId) {
+      if (conversationId) {
+        contextTokens = undefined
+        ctx.state.delete(['contextTokens'])
+        ctx.state.delete(['threadUsage'])
+        ctx.state.delete(['taskPrompt'])
+        ctx.state.delete(['landerDoc'])
+        priorTotal = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 }
+        liveUsage = undefined
+      }
       conversationId = event.conversation_id
       ctx.state.set(['sessionId'], conversationId)
     }
@@ -611,15 +635,19 @@ async function reduceAgy(
       if (event.step_type === 'checkpoint') {
         if (event.state === 'DONE' && !seenCheckpoints.has(event.step_index)) {
           flushText()
+          flushCheckpoint()
           seenCheckpoints.add(event.step_index)
           const seconds = event.duration_seconds
-          ctx.emit.context({
+          pendingCheckpoint = {
             action: 'checkpoint',
             phase: 'completed',
+            ...(contextTokens !== undefined ? { beforeTokens: contextTokens } : {}),
             ...(typeof seconds === 'number' && Number.isFinite(seconds) && seconds >= 0
               ? { durationMs: seconds * 1000 }
               : {}),
-          })
+          }
+          contextTokens = undefined
+          ctx.state.delete(['contextTokens'])
         }
       } else if (event.step_type === 'agent_response') {
         if (pendingText !== event.step_index) flushText()
@@ -634,11 +662,15 @@ async function reduceAgy(
         const stepUsage = parseAgyUsage(event.usage)
         if (stepUsage && !seenUsageSteps.has(event.step_index)) {
           seenUsageSteps.add(event.step_index)
+          contextTokens = stepUsage.input + stepUsage.cacheRead
+          ctx.state.set(['contextTokens'], contextTokens)
+          flushCheckpoint(contextTokens)
           liveUsage = addUsage(liveUsage, stepUsage)
           ctx.emit.meter({ usage: liveUsage })
         }
         if (event.text_delta || stepUsage) producedOutput = true
       } else if (event.step_type === 'tool') {
+        flushCheckpoint()
         flushText()
         producedOutput = true
         const info = event.tool_info
@@ -674,6 +706,7 @@ async function reduceAgy(
         }
       }
     } else if (envelope.event === 'result') {
+      flushCheckpoint()
       flushText()
       if (Array.isArray(event.denied_actions)) deniedActions = event.denied_actions
       if (!lastText && event.response) {
@@ -699,6 +732,7 @@ async function reduceAgy(
       }
     }
   }
+  flushCheckpoint()
   flushText()
   const exitCode = await child.exit
   await collectStderr

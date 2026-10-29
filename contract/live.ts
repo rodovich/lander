@@ -130,13 +130,12 @@ export function replyText(turn: LiveTurn): string {
 
 export type JsonlRun = { lines: Record<string, any>[]; exit: number | null; stderr: string }
 
-// Run a CLI to completion with stdin closed and parse its JSONL stdout, keeping
-// only the lines that parse.
-export function runJsonl(cmd: string, args: string[], opts: { cwd: string }): JsonlRun {
+export function runJsonl(cmd: string, args: string[], opts: { cwd: string; input?: string }): JsonlRun {
   const r = spawnSync(cmd, args, {
     cwd: opts.cwd,
     encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: [opts.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+    input: opts.input,
     maxBuffer: 64 * 1024 * 1024,
     timeout: 170_000,
   })

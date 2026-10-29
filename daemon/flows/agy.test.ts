@@ -113,7 +113,7 @@ it('reads the Gemini group of /usage as used percentages', () => {
   expect(agyUsageBody({ command: { name: 'usage', data: { groups: [] } } })).toBeNull()
 })
 
-it('keeps completed checkpoints in stream order without duplicating them or inventing compaction metadata', async () => {
+it('pairs completed checkpoints with surrounding response usage in stream order', async () => {
   const checkpoint = (state: string) => event('step_update', {
     step_index: 2, step_type: 'checkpoint', state, duration_seconds: 0.53,
     usage: { input_tokens: 120, output_tokens: 8 },
@@ -121,23 +121,131 @@ it('keeps completed checkpoints in stream order without duplicating them or inve
   const g = fixture([
     [init('checkpoint-session'), event('step_update', {
       step_index: 1, step_type: 'agent_response', state: 'DONE', text_delta: 'Before',
+      usage: { input_tokens: 7925, cache_read_tokens: 7620, output_tokens: 132 },
     }), checkpoint('ACTIVE')],
     [checkpoint('DONE'), checkpoint('DONE')],
     [event('step_update', {
-      step_index: 3, step_type: 'agent_response', state: 'DONE', text_delta: 'After',
+      step_index: 3, step_type: 'agent_response', state: 'ACTIVE', text_delta: 'Af',
+    })],
+    [event('step_update', {
+      step_index: 3, step_type: 'agent_response', state: 'DONE', text_delta: 'ter',
+      usage: { input_tokens: 8124, cache_read_tokens: 0, output_tokens: 12 },
     }), result({ response: 'After' })],
   ])
   const driven = await driveFlow(g, flow())
   expect(steps(driven.events).map((s) => s.kind)).toEqual(['text', 'context', 'text'])
   expect(steps(driven.events)[1].context).toEqual({
     action: 'checkpoint', phase: 'completed', durationMs: 530,
+    beforeTokens: 15545, afterTokens: 8124,
   })
   const task = applyEvents(goldenInput(g).start, driven.events)
   expect(task.items).toEqual([
     expect.objectContaining({ kind: 'message', text: 'Before' }),
-    expect.objectContaining({ kind: 'context', action: 'checkpoint', durationMs: 530 }),
+    expect.objectContaining({ kind: 'context', action: 'checkpoint', durationMs: 530,
+      beforeTokens: 15545, afterTokens: 8124 }),
     expect.objectContaining({ kind: 'message', text: 'After' }),
   ])
+})
+
+it('remembers the last response context size when compaction starts on a resumed turn', async () => {
+  const first = fixture([[init('resumed-checkpoint'), event('step_update', {
+    step_index: 1, step_type: 'agent_response', state: 'DONE', text_delta: 'Before',
+    usage: { input_tokens: 900, cache_read_tokens: 600, output_tokens: 10 },
+  }), result()]])
+  const driven = await driveFlow(first, flow())
+  const prior = applyEvents(goldenInput(first).start, driven.events)
+  const second = fixture([[
+    init('resumed-checkpoint'),
+    event('step_update', { step_index: 3, step_type: 'checkpoint', state: 'DONE' }),
+  ], [event('step_update', {
+    step_index: 4, step_type: 'agent_response', state: 'DONE', text_delta: 'After',
+    usage: { input_tokens: 200, cache_read_tokens: 100, output_tokens: 10 },
+  }), result()]], prior.flowState as Record<string, unknown>)
+  const resumed = await driveFlow(second, flow())
+  expect(steps(resumed.events).filter(s => s.kind === 'context')).toEqual([
+    expect.objectContaining({ context: {
+      action: 'checkpoint', phase: 'completed', beforeTokens: 1500, afterTokens: 300,
+    } }),
+  ])
+})
+
+it('keeps a checkpoint when the stream ends before the next response', async () => {
+  const g = fixture([[init('interrupted-checkpoint'), event('step_update', {
+    step_index: 2, step_type: 'checkpoint', state: 'DONE', duration_seconds: 1,
+  })]], { sessionId: 'interrupted-checkpoint', contextTokens: 1500 })
+  g.exitCode = 1
+  const driven = await driveFlow(g, flow())
+  const task = applyEvents(goldenInput(g).start, driven.events)
+  const items = (task.items ?? []) as { kind: string; afterTokens?: number }[]
+  expect(items.filter(item => item.kind === 'context')).toEqual([
+    expect.objectContaining({ kind: 'context', action: 'checkpoint', beforeTokens: 1500, durationMs: 1000 }),
+  ])
+  expect(items[0]).not.toHaveProperty('afterTokens')
+  expect(task.flowState).not.toHaveProperty('contextTokens')
+})
+
+it.each([undefined, 'expired-session'])('does not use old context sizes when conversation %s starts fresh', async (sessionId) => {
+  const g = fixture([[init('fresh-checkpoint'),
+    event('step_update', { step_index: 0, step_type: 'checkpoint', state: 'DONE' }),
+    event('step_update', {
+      step_index: 1, step_type: 'agent_response', state: 'DONE', text_delta: 'After',
+      usage: { input_tokens: 200, cache_read_tokens: 100, output_tokens: 10 },
+    }), result({ usage: { input_tokens: 200, cache_read_tokens: 100, output_tokens: 10 } }),
+  ]], {
+    contextTokens: 1500,
+    threadUsage: { input: 100, cacheRead: 50, output: 5, cacheCreation: 0 },
+    ...(sessionId ? { sessionId } : {}),
+  })
+  const driven = await driveFlow(g, flow())
+  expect(steps(driven.events).filter(s => s.kind === 'context')).toEqual([
+    expect.objectContaining({ context: { action: 'checkpoint', phase: 'completed', afterTokens: 300 } }),
+  ])
+  const task = applyEvents(goldenInput(g).start, driven.events)
+  expect(task).toMatchObject({
+    flowState: { sessionId: 'fresh-checkpoint', contextTokens: 300 },
+    rides: [{ usage: { input: 200, cacheRead: 100, output: 10, cacheCreation: 0 } }],
+  })
+})
+
+it('keeps replacement-session usage whole when a refusal prompts another subprocess', async () => {
+  const g = fixture([[init('replacement-session'), toolStep(2, 'run_command', { CommandLine: 'echo probe' }), result({
+    denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
+    usage: { input_tokens: 200, output_tokens: 20 },
+  })]], {
+    sessionId: 'expired-session',
+    threadUsage: { input: 100, output: 10, cacheRead: 0, cacheCreation: 0 },
+  })
+  g.later = [{ chunks: [[init('replacement-session'), result({
+    usage: { input_tokens: 400, output_tokens: 40 },
+  })]] }]
+  const driven = await driveFlow(g, flow(undefined, refusalLine('replacement-session', 2)))
+  expect(driven.spawns).toHaveLength(2)
+  expect(applyEvents(goldenInput(g).start, driven.events)).toMatchObject({
+    flowState: { sessionId: 'replacement-session' },
+    rides: [{ usage: { input: 400, output: 40, cacheRead: 0, cacheCreation: 0 } }],
+  })
+})
+
+it('drops expired usage when a replacement session is interrupted before final totals', async () => {
+  const first = fixture([[init('replacement-session'), event('step_update', {
+    step_index: 1, step_type: 'agent_response', state: 'DONE', text_delta: 'Interrupted',
+    usage: { input_tokens: 200, output_tokens: 20 },
+  })]], {
+    sessionId: 'expired-session',
+    threadUsage: { input: 100, output: 10, cacheRead: 0, cacheCreation: 0 },
+  })
+  first.exitCode = 1
+  const driven = await driveFlow(first, flow())
+  const prior = applyEvents(goldenInput(first).start, driven.events)
+  expect(prior.flowState).not.toHaveProperty('threadUsage')
+  const resumed = fixture([[init('replacement-session'), event('step_update', {
+    step_index: 3, step_type: 'agent_response', state: 'DONE', text_delta: 'Resumed',
+    usage: { input_tokens: 200, output_tokens: 20 },
+  }), result({ usage: { input_tokens: 400, output_tokens: 40 } })]], prior.flowState as Record<string, unknown>)
+  const after = await driveFlow(resumed, flow())
+  expect(applyEvents(goldenInput(resumed).start, after.events)).toMatchObject({
+    rides: [{ usage: { input: 200, output: 20, cacheRead: 0, cacheCreation: 0 } }],
+  })
 })
 
 it('groups each response with the tool calls it made', async () => {
