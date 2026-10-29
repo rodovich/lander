@@ -164,6 +164,7 @@ import { dispatchPendingHooks, hookDispatchInFlightFor } from './hook-dispatch'
 import { TITLE_MAX_CHARS, generateTitle } from './title'
 import { createSlowLog, fileWriter } from './slow-log'
 import { readStats } from './stats'
+import { createComposedStore } from './composed'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const LANDER_BIN_DIR = path.join(ROOT, 'bin')
@@ -3596,6 +3597,30 @@ async function nudgeFromHook(
   if (claimed) void driveClaimedTask(project, id)
   return c.json({ ok: true, ...(deduped ? { deduped: true } : {}) })
 }
+
+const composed = createComposedStore()
+
+app.post('/api/:project/tasks/:id/composed', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  const id = c.req.param('id')
+  if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+  const body = await c.req.json<{ message?: unknown }>()
+  const message = typeof body.message === 'string' ? body.message : ''
+  if (!message.trim()) return c.json({ error: 'message is required' }, 400)
+  return c.json({ id: composed.put(project.slug, id, message) }, 201)
+})
+
+app.get('/api/:project/tasks/:id/composed/:draft', (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  const id = c.req.param('id')
+  if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+  const message = composed.get(project.slug, id, c.req.param('draft'))
+  if (message === undefined)
+    return c.json({ error: 'no such composed message; compose it again' }, 404)
+  return c.json({ message })
+})
 
 app.post('/api/:project/tasks/:id/messages', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))

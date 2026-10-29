@@ -15,7 +15,7 @@ import type { AddressInfo } from 'node:net'
 import { execFile } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 const BIN_DIR = path.dirname(fileURLToPath(import.meta.url))
 const LANDER_BIN = path.join(BIN_DIR, 'lander')
@@ -51,13 +51,22 @@ function execLander(args: string[]): Promise<{ stdout: string; stderr: string; c
   })
 }
 
+const COMPOSED = '/api/proj/tasks/task-1/composed/'
+const DRAFTS: Record<string, string> = { hi: 'say hi', go: 'go ahead' }
+
 beforeAll(async () => {
   server = createServer((req, res) => {
     let raw = ''
     req.on('data', (c) => (raw += c))
     req.on('end', () => {
+      res.writeHead(req.method === 'GET' ? 200 : 201, {
+        'content-type': 'application/json',
+      })
+      if (req.method === 'GET' && req.url?.startsWith(COMPOSED)) {
+        res.end(JSON.stringify({ message: DRAFTS[req.url.slice(COMPOSED.length)] }))
+        return
+      }
       lastBody = raw ? JSON.parse(raw) : undefined
-      res.writeHead(201, { 'content-type': 'application/json' })
       res.end(JSON.stringify({ id: 'new-task' }))
     })
   })
@@ -69,16 +78,32 @@ afterAll(async () => {
   await new Promise<void>((r) => server.close(() => r()))
 })
 
+beforeEach(() => {
+  lastBody = undefined
+})
+
 describe('lander launch --flow', () => {
   it('posts the requested flow', async () => {
-    const { stdout, code } = await execLander(['launch', '--flow', 'codex', 'say hi'])
+    const { stdout, code } = await execLander([
+      'launch',
+      '--flow',
+      'codex',
+      '--composed',
+      'hi',
+    ])
     expect(code).toBe(0)
     expect(stdout.trim()).toBe('new-task')
     expect(lastBody).toMatchObject({ flow: 'codex', message: 'say hi' })
   })
 
+  it('posts the composed message, not its id', async () => {
+    const { code } = await execLander(['launch', '--composed', 'hi'])
+    expect(code).toBe(0)
+    expect(lastBody?.message).toBe('say hi')
+  })
+
   it('omits flow entirely when none is given', async () => {
-    await execLander(['launch', 'say hi'])
+    await execLander(['launch', '--composed', 'hi'])
     expect(lastBody).toBeDefined()
     expect('flow' in lastBody!).toBe(false)
   })
@@ -100,6 +125,7 @@ describe('lander launch --flow', () => {
       '--key',
       'nil',
       'null',
+      '--composed',
       'go',
     ])
     // The whole point: `false` is a boolean, not the truthy string "false",
@@ -108,7 +134,7 @@ describe('lander launch --flow', () => {
   })
 
   it('keeps a branch-like value a string', async () => {
-    await execLander(['launch', '--key', 'branch', 'main', 'go'])
+    await execLander(['launch', '--key', 'branch', 'main', '--composed', 'go'])
     expect(lastBody?.flowConfig).toEqual({ branch: 'main' })
   })
 
@@ -124,19 +150,19 @@ describe('lander launch --flow', () => {
 // nothing else would catch it consuming the next argv token as a value.
 describe('lander launch --await', () => {
   it('posts await:true without swallowing the message', async () => {
-    const { stdout, code } = await execLander(['launch', '--await', 'say hi'])
+    const { stdout, code } = await execLander(['launch', '--await', '--composed', 'hi'])
     expect(code).toBe(0)
     expect(stdout.trim()).toBe('new-task')
     expect(lastBody).toMatchObject({ await: true, message: 'say hi' })
   })
 
   it('omits await entirely when the flag is absent', async () => {
-    await execLander(['launch', 'say hi'])
+    await execLander(['launch', '--composed', 'hi'])
     expect('await' in lastBody!).toBe(false)
   })
 
   it('combines with --after, which still takes its own value', async () => {
-    await execLander(['launch', '--await', '--after', 'abc123', 'go'])
-    expect(lastBody).toMatchObject({ await: true, after: ['abc123'], message: 'go' })
+    await execLander(['launch', '--await', '--after', 'abc123', '--composed', 'go'])
+    expect(lastBody).toMatchObject({ await: true, after: ['abc123'], message: 'go ahead' })
   })
 })

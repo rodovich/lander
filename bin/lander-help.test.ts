@@ -72,14 +72,14 @@ describe('lander help', () => {
   it('`launch --help` prints launch usage, spawns nothing', async () => {
     const { stdout, code } = await execLander(['launch', '--help'])
     expect(code).toBe(0)
-    expect(stdout).toContain('usage: lander launch <message|->')
+    expect(stdout).toContain('usage: lander launch --composed <message id>')
     expect(requests).toBe(0)
   })
 
   it('`launch -h` is equivalent', async () => {
     const { stdout, code } = await execLander(['launch', '-h'])
     expect(code).toBe(0)
-    expect(stdout).toContain('usage: lander launch <message|->')
+    expect(stdout).toContain('usage: lander launch --composed <message id>')
     expect(requests).toBe(0)
   })
 
@@ -95,7 +95,7 @@ describe('lander help', () => {
   it('`help <command>` prints that command', async () => {
     const { stdout, code } = await execLander(['help', 'send'])
     expect(code).toBe(0)
-    expect(stdout).toContain('usage: lander send <id> <message|->')
+    expect(stdout).toContain('usage: lander send <task id> --composed <message id>')
     expect(requests).toBe(0)
   })
 
@@ -117,52 +117,76 @@ describe('lander help', () => {
 
 // Defense in depth for flag typos the help interception doesn't catch (only
 // --help/-h/help are intercepted): a lone flag-shaped token as the whole message
-// is refused rather than spawned/sent as content.
+// is refused rather than composed as content.
 describe('message argument guards', () => {
-  it('`launch --titel foo` is refused, spawns nothing', async () => {
-    const { stderr, code } = await execLander(['launch', '--titel', 'foo'])
+  it('`compose --titel` is refused, composes nothing', async () => {
+    const { stderr, code } = await execLander(['compose', '--titel'])
     expect(code).not.toBe(0)
     expect(stderr).toContain('mistyped flag')
     expect(requests).toBe(0)
   })
 
-  it('`send <id> --xyz` is refused before it resolves the target', async () => {
-    const { stderr, code } = await execLander(['send', 'sometask', '--xyz'])
-    expect(code).not.toBe(0)
-    expect(stderr).toContain('mistyped flag')
-    expect(requests).toBe(0)
-  })
-
-  it('stdin is the escape hatch: a flag-shaped string still sends as content', async () => {
-    const { code } = await execLander(['launch', '-'], '--xyz')
+  it('stdin is the escape hatch: a flag-shaped string still composes as content', async () => {
+    const { code } = await execLander(['compose', '-'], '--xyz')
     expect(code).toBe(0)
     expect(requests).toBe(1)
   })
 
-  it('`launch --message <text>` is refused: --message is not a flag', async () => {
-    const { stderr, code } = await execLander(['launch', '--message', 'do the thing'])
-    expect(code).not.toBe(0)
-    expect(stderr).toContain('mistyped flag')
-    expect(requests).toBe(0)
-  })
-
   it('an unquoted multi-word message is refused, not truncated to its first word', async () => {
-    const { stderr, code } = await execLander(['send', 'sometask', 'fix', 'the', 'bug'])
+    const { stderr, code } = await execLander(['compose', 'fix', 'the', 'bug'])
     expect(code).not.toBe(0)
     expect(stderr).toContain('unexpected argument "the"')
     expect(requests).toBe(0)
   })
 
   it('an unknown flag after the message is refused, not dropped', async () => {
-    const { stderr, code } = await execLander(['launch', 'do the thing', '--titel', 'foo'])
+    const { stderr, code } = await execLander(['compose', 'do the thing', '--titel'])
     expect(code).not.toBe(0)
     expect(stderr).toContain('unexpected argument "--titel"')
     expect(requests).toBe(0)
   })
 
   it('prose that merely starts with a dash is not a flag', async () => {
-    const { code } = await execLander(['launch', '--flag means on'])
+    const { code } = await execLander(['compose', '--flag means on'])
     expect(code).toBe(0)
     expect(requests).toBe(1)
+  })
+})
+
+describe('composed messages', () => {
+  it('`launch <message>` is refused, spawns nothing', async () => {
+    const { stderr, code } = await execLander(['launch', 'do the thing'])
+    expect(code).not.toBe(0)
+    expect(stderr).toContain('launch takes a composed message')
+    expect(requests).toBe(0)
+  })
+
+  it('`send <id> <message>` is refused, sends nothing', async () => {
+    const { stderr, code } = await execLander(['send', 'sometask', 'do the thing'])
+    expect(code).not.toBe(0)
+    expect(stderr).toContain('send takes a composed message')
+    expect(requests).toBe(0)
+  })
+
+  it('a mistyped flag beside --composed is refused as an unexpected argument', async () => {
+    const { stderr, code } = await execLander(['launch', '--titel', 'foo', '--composed', 'x'])
+    expect(code).not.toBe(0)
+    expect(stderr).toContain('unexpected argument "--titel"')
+    expect(requests).toBe(0)
+  })
+
+  it('`launch --message <text>` is refused: --message is not a flag', async () => {
+    const { stderr, code } = await execLander(['launch', '--message', 'do the thing'])
+    expect(code).not.toBe(0)
+    expect(stderr).toContain('launch takes a composed message')
+    expect(requests).toBe(0)
+  })
+
+  it('`compose` prints the message back with its id and the check to make', async () => {
+    const { stdout, code } = await execLander(['compose', 'fix the bug'])
+    expect(code).toBe(0)
+    expect(stdout).toContain('fix the bug')
+    expect(stdout).toContain('check it against what the user requested')
+    expect(stdout).toContain('lander launch --composed new-task')
   })
 })

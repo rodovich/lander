@@ -348,9 +348,51 @@ async function readMessage(verb, [arg, ...extra]) {
   return message
 }
 
+// `launch` and `send` take only a message composed with `lander compose`, so the
+// sender has seen it back, with the check below, before anyone receives it.
+async function composeMessage(args) {
+  requireTask()
+  const message = await readMessage('compose', args)
+  const { id } = await call(PROJECT, `/tasks/${TASK}/composed`, {
+    method: 'POST',
+    body: JSON.stringify({ message }),
+  })
+  console.log(
+    `Composed message ${id}:\n\n${message.trimEnd()}\n\n` +
+      'Before you launch or send it, go through each thing this message asks ' +
+      'its recipient to do and check it against what the user requested. ' +
+      'Remove any request that is not covered: compose the message again ' +
+      'without it, and use the new id. Then run ' +
+      `\`lander launch --composed ${id}\` or \`lander send <task id> --composed ${id}\`, ` +
+      'with any other flags you need.',
+  )
+}
+
+async function readComposed(verb, id, pos) {
+  if (pos.length && id)
+    die(
+      `refusing to ${verb}: unexpected argument "${pos[0]}". Run ` +
+        `\`lander ${verb} --help\` for its flags.`,
+    )
+  if (pos.length)
+    die(
+      `${verb} takes a composed message, not "${pos[0]}": run ` +
+        `\`lander compose <message|->\` first, then \`lander ${USAGE[verb]}\`.`,
+    )
+  if (!id) dieUsage(verb)
+  requireTask()
+  const { message } = await call(
+    PROJECT,
+    `/tasks/${TASK}/composed/${encodeURIComponent(id)}`,
+    { method: 'GET' },
+  )
+  return message
+}
+
 async function launchTask(rest) {
   const o = { project: PROJECT, files: [] }
   const pos = []
+  let composed
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i]
     if (a === '--project') o.project = rest[++i]
@@ -361,6 +403,7 @@ async function launchTask(rest) {
     // --await takes no target: the server arms it against the calling task, so
     // there is no id to mistype and no way to point a notification at a stranger.
     else if (a === '--await') o.await = true
+    else if (a === '--composed') composed = rest[++i]
     else if (a === '--flow') o.flow = rest[++i]
     // --key <name> <value> pairs accumulate into the flow's config. Values are
     // coerced at this boundary so a flow receives real booleans/numbers.
@@ -375,7 +418,7 @@ async function launchTask(rest) {
         o.files.push(rest[++i])
     else pos.push(a)
   }
-  o.message = await readMessage('launch', pos)
+  o.message = await readComposed('launch', composed, pos)
   validateSchedule(o)
   // --after defers the launch until the named tasks land (resolved to full ids
   // here); combinable with --date/--time, in which case launch fires on
@@ -794,6 +837,7 @@ async function sendTask(args) {
     else if (a === '--after') o.after = args[++i]
     // Takes no target, as on `launch`: the server wakes the sending task.
     else if (a === '--await') o.await = true
+    else if (a === '--composed') o.composed = args[++i]
     // --attach is variadic: consume following args up to the next --flag.
     else if (a === '--attach')
       while (i + 1 < args.length && !args[i + 1].startsWith('--'))
@@ -802,7 +846,7 @@ async function sendTask(args) {
   }
   const target = pos.shift()
   if (!target) dieUsage('send')
-  const message = await readMessage('send', pos)
+  const message = await readComposed('send', o.composed, pos)
   validateSchedule(o)
   const after = resolveAfter(o.after)
   const attachments = o.files.length
@@ -1277,11 +1321,12 @@ async function recordCwd() {
 // (record-cwd) is internal and deliberately omitted.
 const USAGE = {
   land: 'land [id…]',
+  compose: 'compose <message|->',
   launch:
-    'launch <message|-> [--title <t>] [--project <slug>] [--date <when>|--time <min>] [--after <ids>] [--await] [--flow <name>] [--key <k> <v>]… [--attach <paths…>]',
+    'launch --composed <message id> [--title <t>] [--project <slug>] [--date <when>|--time <min>] [--after <ids>] [--await] [--flow <name>] [--key <k> <v>]… [--attach <paths…>]',
   list: 'list [--status <s>] [--since <when>] [--until <when>] [--text <terms>] [--archived] [--json]',
   view: 'view <id> [--expand] [--messages <N|all>] [--clip <N|all>] [--json]',
-  send: 'send <id> <message|-> [--date <when>|--time <min>] [--after <ids>] [--await] [--attach <paths…>]',
+  send: 'send <task id> --composed <message id> [--date <when>|--time <min>] [--after <ids>] [--await] [--attach <paths…>]',
   ride: 'ride (--date <when> | --time <min> | --after <ids> | --clear)',
   relaunch:
     'relaunch <message|-> [--date <when>|--time <min>|--after <ids>] [--interval <min> [--repeat-count <n>|--repeat-until <when>]] [--flow <name>] [--clear]',
@@ -1339,6 +1384,7 @@ const run = {
   ask: () => askTask(rest),
   ride: () => rideTask(rest),
   relaunch: () => relaunchTask(rest),
+  compose: () => composeMessage(rest),
   launch: () => launchTask(rest),
   list: () => listTasks(rest),
   view: () => viewTask(rest),
