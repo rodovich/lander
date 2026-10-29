@@ -84,10 +84,7 @@ describe('Claude flow', () => {
 
     expect(launch.args.at(-1)).toContain('-starts-with-dash')
     const settings = JSON.parse(launch.args[launch.args.indexOf('--settings') + 1])
-    expect(settings.hooks.PreToolUse[0].hooks[0].command).toBe(
-      '/repo/bin/lander bash-guard',
-    )
-    expect(settings.hooks.PostToolUse).toBeUndefined()
+    expect(Object.keys(settings.hooks)).toEqual(['Stop'])
     expect(settings.hooks.Stop[0].hooks[0].command).toBe(
       '/repo/bin/lander record-cwd',
     )

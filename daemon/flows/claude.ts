@@ -438,12 +438,6 @@ function buildClaudeArgs(
     // of the regenerated-per-turn system prompt — see the note on GIT_TIPS.
     includeGitInstructions: false,
     hooks: {
-      PreToolUse: [
-        {
-          matcher: 'Bash',
-          hooks: [{ type: 'command', command: `${landerBin} bash-guard` }],
-        },
-      ],
       Stop: [{ hooks: [{ type: 'command', command: `${landerBin} record-cwd` }] }],
     },
   })

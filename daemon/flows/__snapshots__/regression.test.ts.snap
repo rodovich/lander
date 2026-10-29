@@ -24,7 +24,7 @@ exports[`claude transcript regressions > a task checkout is the launch dir, snap
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Task prompt.
 
@@ -167,7 +167,7 @@ exports[`claude transcript regressions > a turn with a ride still scheduled is r
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Task prompt.
 
@@ -312,7 +312,7 @@ exports[`claude transcript regressions > agent stderr is aggregated into the don
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Task prompt.
 
@@ -454,7 +454,7 @@ exports[`claude transcript regressions > an API failure leads the done stderr wi
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Task prompt.
 
@@ -651,7 +651,7 @@ exports[`claude transcript regressions > attachment manifest rides the prompt wi
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Task prompt.
 
@@ -797,7 +797,7 @@ exports[`claude transcript regressions > blocked call via permission_denials 1`]
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Task prompt.
 
@@ -973,7 +973,7 @@ exports[`claude transcript regressions > edit and write produce diff hunks 1`] =
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Task prompt.
 
@@ -1190,7 +1190,7 @@ exports[`claude transcript regressions > errored result event carries no in-stre
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Task prompt.
 
@@ -1320,7 +1320,7 @@ exports[`claude transcript regressions > legacy top-level session resumes withou
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Task prompt.
 
@@ -1461,7 +1461,7 @@ exports[`claude transcript regressions > manual cd hint when the recorded cwd di
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Task prompt.
 
@@ -1606,7 +1606,7 @@ exports[`claude transcript regressions > nonexistent filesDir still sets the env
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Task prompt.
 
@@ -1748,7 +1748,7 @@ exports[`claude transcript regressions > parallel batch in one inference 1`] = `
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Task prompt.
 
@@ -1950,7 +1950,7 @@ exports[`claude transcript regressions > plain text reply 1`] = `
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Task prompt.
 
@@ -2091,7 +2091,7 @@ exports[`claude transcript regressions > rejecting rate limit event 1`] = `
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Task prompt.
 
@@ -2269,7 +2269,7 @@ exports[`claude transcript regressions > resume of an existing session 1`] = `
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Task prompt.
 
@@ -2411,7 +2411,7 @@ exports[`claude transcript regressions > revival notice names a cleared schedule
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Task prompt.
 
@@ -2556,7 +2556,7 @@ exports[`claude transcript regressions > revival notice rides the prompt of the 
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Task prompt.
 
@@ -2701,7 +2701,7 @@ exports[`claude transcript regressions > second ride seeded with a nonzero flowS
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Task prompt.
 
@@ -2843,7 +2843,7 @@ exports[`claude transcript regressions > single tool call and result in one chun
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Task prompt.
 
@@ -3015,7 +3015,7 @@ exports[`claude transcript regressions > subagent report closes its trace 1`] = 
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Task prompt.
 
@@ -3250,7 +3250,7 @@ exports[`claude transcript regressions > subagent trace with sub-subagent nestin
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Task prompt.
 
@@ -3474,7 +3474,7 @@ exports[`claude transcript regressions > task allow rules extend allowedTools 1`
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Task prompt.
 
@@ -3619,7 +3619,7 @@ exports[`claude transcript regressions > unchanged turn context is not re-sent 1
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Task prompt.
 
@@ -3759,7 +3759,7 @@ exports[`claude transcript regressions > usage across inferences with cache miss
         "--add-dir",
         "/tmp",
         "--settings",
-        "{"includeGitInstructions":false,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/repo/bin/lander bash-guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
+        "{"includeGitInstructions":false,"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/repo/bin/lander record-cwd"}]}]}}",
         "--append-system-prompt",
         "Task prompt.
 

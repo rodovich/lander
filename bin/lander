@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 // lander — the CLI an in-task agent uses to call back into the lander server
-// (launch/list/send/…), plus the hook handlers the server wires into claude
-// (bash-guard, record-cwd). Run execution now lives in the
-// host daemon (daemon/index.ts), not here.
+// (launch/list/send/…), plus the hook handler the Claude flow wires into
+// claude (record-cwd). Run execution lives in the host daemon (daemon/index.ts).
 // Identity is injected when the server runs a turn: LANDER_API, LANDER_PROJECT,
 // LANDER_TASK, and LANDER_TOKEN (the per-task secret that authenticates these
 // callbacks).
@@ -1242,41 +1241,6 @@ async function runFlow(args) {
   await runFlowByName(name, inputs)
 }
 
-// --- bash-guard (PreToolUse hook) ------------------------------------------
-// Wired in by the Claude flow as a PreToolUse hook on the Bash tool (see
-// daemon/flows/claude.ts). claude pipes the tool call as JSON on stdin; when the
-// agent runs a Bash command with run_in_background set, we attach an advisory
-// note.
-//
-// Crucially this is advisory only: we emit `additionalContext` and set NO
-// permissionDecision, so the normal permission flow is untouched — run_in_background
-// never grants access the same command wouldn't have in the foreground. Anything
-// else passes straight through. A malformed payload never interferes.
-async function bashGuard() {
-  let input
-  try {
-    input = JSON.parse((await readStdin()) || '{}')
-  } catch {
-    return // malformed payload — don't interfere with the tool call
-  }
-  if (input.tool_name !== 'Bash' || input.tool_input?.run_in_background !== true)
-    return
-  const context =
-    'Heads-up: once this job is running, end your turn rather than waiting on ' +
-    'it; you are woken when it finishes or reaches its `timeout`. Don\'t ' +
-    'schedule a `lander ride` to check on it: a ride can\'t fire until the job ' +
-    'has ended. For parallel agentic work, spawn a sibling task with ' +
-    '`lander launch <message>`.'
-  process.stdout.write(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: 'PreToolUse',
-        additionalContext: context,
-      },
-    }),
-  )
-}
-
 // --- record-cwd (Stop hook) ------------------------------------------------
 // Wired in as a Stop hook by the Claude flow (daemon/flows/claude.ts). At the
 // end of each turn claude pipes the session state as JSON on stdin, and we
@@ -1309,8 +1273,8 @@ async function recordCwd() {
 // `lander <cmd> --help`. These PRINT and exit without running the command, which
 // is the whole point: `lander launch --help` used to fall through `launchTask`'s
 // positional parse and spawn a real task whose message was the literal "--help"
-// (a sibling agent someone then had to notice and stop by hand). The hook verbs
-// (bash-guard/record-cwd/…) are internal and deliberately omitted.
+// (a sibling agent someone then had to notice and stop by hand). The hook verb
+// (record-cwd) is internal and deliberately omitted.
 const USAGE = {
   land: 'land [id…]',
   launch:
@@ -1383,7 +1347,6 @@ const run = {
   assist: () => assist(rest),
   attachment: () => attachmentCommand(rest),
   flow: () => runFlow(rest),
-  'bash-guard': () => bashGuard(),
   'record-cwd': () => recordCwd(),
 }[cmd]
 if (!run) {

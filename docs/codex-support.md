@@ -155,8 +155,8 @@ Granting the common directory alone left branch switches failing on
 `.git/worktrees/<id>/HEAD.lock` (codex 0.159.2), even though that directory is
 inside it.
 
-Codex hooks are not wired into Lander. Claude still has provider-specific hooks
-for background-shell advisory context and cwd recording.
+Codex hooks are not wired into Lander. Claude still has a provider-specific
+Stop hook for cwd recording.
 Codex currently relies on explicit launch cwd, prompt instructions, permission
 profiles, and environment config rather than equivalent per-turn hooks.
 
