@@ -34,9 +34,10 @@ exports[`claude transcript regressions > a task checkout is the launch dir, snap
 - Commit or push only when the user asks. If on the default branch, branch first.
 
 # Long-running commands
-- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
-- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
-- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.
+- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash \`run_in_background: true\`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.
+- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- A command that runs until stopped (a dev server, a file watcher, \`tail -f\`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.
+- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.
 
 This task works in a git worktree lander created for it at \`/repo/.worktrees/task-1\`, starting detached at whatever the project's main checkout (\`/repo\`) had checked out. Commit on a branch you create: lander removes this worktree when the task is landed or archived, and leaves branches alone.",
         "--output-format",
@@ -177,9 +178,10 @@ exports[`claude transcript regressions > a turn with a ride still scheduled is r
 - Commit or push only when the user asks. If on the default branch, branch first.
 
 # Long-running commands
-- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
-- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
-- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
+- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash \`run_in_background: true\`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.
+- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- A command that runs until stopped (a dev server, a file watcher, \`tail -f\`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.
+- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -322,9 +324,10 @@ exports[`claude transcript regressions > agent stderr is aggregated into the don
 - Commit or push only when the user asks. If on the default branch, branch first.
 
 # Long-running commands
-- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
-- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
-- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
+- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash \`run_in_background: true\`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.
+- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- A command that runs until stopped (a dev server, a file watcher, \`tail -f\`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.
+- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -464,9 +467,10 @@ exports[`claude transcript regressions > an API failure leads the done stderr wi
 - Commit or push only when the user asks. If on the default branch, branch first.
 
 # Long-running commands
-- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
-- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
-- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
+- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash \`run_in_background: true\`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.
+- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- A command that runs until stopped (a dev server, a file watcher, \`tail -f\`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.
+- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -661,9 +665,10 @@ exports[`claude transcript regressions > attachment manifest rides the prompt wi
 - Commit or push only when the user asks. If on the default branch, branch first.
 
 # Long-running commands
-- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
-- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
-- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
+- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash \`run_in_background: true\`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.
+- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- A command that runs until stopped (a dev server, a file watcher, \`tail -f\`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.
+- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -807,9 +812,10 @@ exports[`claude transcript regressions > blocked call via permission_denials 1`]
 - Commit or push only when the user asks. If on the default branch, branch first.
 
 # Long-running commands
-- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
-- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
-- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
+- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash \`run_in_background: true\`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.
+- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- A command that runs until stopped (a dev server, a file watcher, \`tail -f\`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.
+- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -983,9 +989,10 @@ exports[`claude transcript regressions > edit and write produce diff hunks 1`] =
 - Commit or push only when the user asks. If on the default branch, branch first.
 
 # Long-running commands
-- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
-- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
-- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
+- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash \`run_in_background: true\`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.
+- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- A command that runs until stopped (a dev server, a file watcher, \`tail -f\`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.
+- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -1200,9 +1207,10 @@ exports[`claude transcript regressions > errored result event carries no in-stre
 - Commit or push only when the user asks. If on the default branch, branch first.
 
 # Long-running commands
-- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
-- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
-- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
+- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash \`run_in_background: true\`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.
+- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- A command that runs until stopped (a dev server, a file watcher, \`tail -f\`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.
+- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -1330,9 +1338,10 @@ exports[`claude transcript regressions > legacy top-level session resumes withou
 - Commit or push only when the user asks. If on the default branch, branch first.
 
 # Long-running commands
-- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
-- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
-- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
+- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash \`run_in_background: true\`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.
+- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- A command that runs until stopped (a dev server, a file watcher, \`tail -f\`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.
+- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -1471,9 +1480,10 @@ exports[`claude transcript regressions > manual cd hint when the recorded cwd di
 - Commit or push only when the user asks. If on the default branch, branch first.
 
 # Long-running commands
-- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
-- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
-- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
+- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash \`run_in_background: true\`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.
+- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- A command that runs until stopped (a dev server, a file watcher, \`tail -f\`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.
+- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -1616,9 +1626,10 @@ exports[`claude transcript regressions > nonexistent filesDir still sets the env
 - Commit or push only when the user asks. If on the default branch, branch first.
 
 # Long-running commands
-- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
-- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
-- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
+- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash \`run_in_background: true\`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.
+- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- A command that runs until stopped (a dev server, a file watcher, \`tail -f\`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.
+- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -1758,9 +1769,10 @@ exports[`claude transcript regressions > parallel batch in one inference 1`] = `
 - Commit or push only when the user asks. If on the default branch, branch first.
 
 # Long-running commands
-- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
-- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
-- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
+- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash \`run_in_background: true\`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.
+- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- A command that runs until stopped (a dev server, a file watcher, \`tail -f\`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.
+- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -1960,9 +1972,10 @@ exports[`claude transcript regressions > plain text reply 1`] = `
 - Commit or push only when the user asks. If on the default branch, branch first.
 
 # Long-running commands
-- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
-- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
-- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
+- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash \`run_in_background: true\`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.
+- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- A command that runs until stopped (a dev server, a file watcher, \`tail -f\`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.
+- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -2101,9 +2114,10 @@ exports[`claude transcript regressions > rejecting rate limit event 1`] = `
 - Commit or push only when the user asks. If on the default branch, branch first.
 
 # Long-running commands
-- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
-- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
-- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
+- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash \`run_in_background: true\`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.
+- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- A command that runs until stopped (a dev server, a file watcher, \`tail -f\`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.
+- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -2279,9 +2293,10 @@ exports[`claude transcript regressions > resume of an existing session 1`] = `
 - Commit or push only when the user asks. If on the default branch, branch first.
 
 # Long-running commands
-- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
-- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
-- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
+- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash \`run_in_background: true\`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.
+- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- A command that runs until stopped (a dev server, a file watcher, \`tail -f\`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.
+- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -2421,9 +2436,10 @@ exports[`claude transcript regressions > revival notice names a cleared schedule
 - Commit or push only when the user asks. If on the default branch, branch first.
 
 # Long-running commands
-- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
-- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
-- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
+- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash \`run_in_background: true\`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.
+- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- A command that runs until stopped (a dev server, a file watcher, \`tail -f\`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.
+- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -2566,9 +2582,10 @@ exports[`claude transcript regressions > revival notice rides the prompt of the 
 - Commit or push only when the user asks. If on the default branch, branch first.
 
 # Long-running commands
-- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
-- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
-- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
+- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash \`run_in_background: true\`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.
+- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- A command that runs until stopped (a dev server, a file watcher, \`tail -f\`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.
+- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -2711,9 +2728,10 @@ exports[`claude transcript regressions > second ride seeded with a nonzero flowS
 - Commit or push only when the user asks. If on the default branch, branch first.
 
 # Long-running commands
-- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
-- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
-- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
+- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash \`run_in_background: true\`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.
+- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- A command that runs until stopped (a dev server, a file watcher, \`tail -f\`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.
+- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -2853,9 +2871,10 @@ exports[`claude transcript regressions > single tool call and result in one chun
 - Commit or push only when the user asks. If on the default branch, branch first.
 
 # Long-running commands
-- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
-- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
-- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
+- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash \`run_in_background: true\`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.
+- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- A command that runs until stopped (a dev server, a file watcher, \`tail -f\`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.
+- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -3025,9 +3044,10 @@ exports[`claude transcript regressions > subagent report closes its trace 1`] = 
 - Commit or push only when the user asks. If on the default branch, branch first.
 
 # Long-running commands
-- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
-- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
-- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
+- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash \`run_in_background: true\`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.
+- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- A command that runs until stopped (a dev server, a file watcher, \`tail -f\`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.
+- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -3260,9 +3280,10 @@ exports[`claude transcript regressions > subagent trace with sub-subagent nestin
 - Commit or push only when the user asks. If on the default branch, branch first.
 
 # Long-running commands
-- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
-- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
-- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
+- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash \`run_in_background: true\`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.
+- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- A command that runs until stopped (a dev server, a file watcher, \`tail -f\`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.
+- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -3484,9 +3505,10 @@ exports[`claude transcript regressions > task allow rules extend allowedTools 1`
 - Commit or push only when the user asks. If on the default branch, branch first.
 
 # Long-running commands
-- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
-- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
-- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
+- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash \`run_in_background: true\`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.
+- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- A command that runs until stopped (a dev server, a file watcher, \`tail -f\`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.
+- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -3629,9 +3651,10 @@ exports[`claude transcript regressions > unchanged turn context is not re-sent 1
 - Commit or push only when the user asks. If on the default branch, branch first.
 
 # Long-running commands
-- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
-- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
-- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
+- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash \`run_in_background: true\`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.
+- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- A command that runs until stopped (a dev server, a file watcher, \`tail -f\`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.
+- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",
@@ -3769,9 +3792,10 @@ exports[`claude transcript regressions > usage across inferences with cache miss
 - Commit or push only when the user asks. If on the default branch, branch first.
 
 # Long-running commands
-- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash \`run_in_background: true\`, its output sent to a file, and a \`timeout\` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.
-- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
-- Don't detach a command (\`nohup\`, \`&\`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.",
+- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash \`run_in_background: true\`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.
+- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.
+- A command that runs until stopped (a dev server, a file watcher, \`tail -f\`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.
+- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.",
         "--output-format",
         "stream-json",
         "--verbose",

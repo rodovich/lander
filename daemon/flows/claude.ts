@@ -55,9 +55,10 @@ const GIT_TIPS = [
 // Without this note, an agent given an hour-long suite detached it instead.
 const LONG_COMMAND_TIPS = [
   '# Long-running commands',
-  '- Run a command that may take more than a few minutes (a test suite, build or benchmark) with Bash `run_in_background: true`, its output sent to a file, and a `timeout` (ms) that covers the whole run. The command is stopped at its timeout: the default is 30 minutes, the maximum 2 hours. Split longer work into pieces.',
-  "- Then end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.",
-  '- Don\'t detach a command (`nohup`, `&`, or spawning it from a script) to get around this: lander can neither stop it nor wake you when it ends.',
+  '- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash `run_in_background: true`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.',
+  '- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.',
+  '- A command that runs until stopped (a dev server, a file watcher, `tail -f`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.',
+  "- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.",
 ].join('\n')
 
 export type ClaudeFlowDeps = {
