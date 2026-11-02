@@ -124,12 +124,14 @@ Only the task itself (or the human) may attach to a task's turn: uploading a blo
 
 Attaching the same name twice yields two chips, not one: every blob is immutable, the store has no delete, and two publishes are two outputs. An earlier turn's chip therefore keeps serving exactly the bytes and the size that turn attached. (Outputs were once "artifacts" — a mutable name→blob slot per task, where a republish deleted what it displaced and left the earlier turn's ref dangling. A boot migration folded the surviving records into attachments.)
 
-#### Authenticated permission grants
+#### Authenticated mutations
 
-Every request to the local API is unauthenticated by default, so the server distinguishes two **principals** before honoring any permission change, identifying the caller from request headers:
+Every mutation to the local API requires authentication. Missing or invalid browser/task credentials receive `401`; authenticated callers must also satisfy each operation's authorization rules. The server identifies two **principals** from request headers:
 
 - **The human** — the browser sends a shared UI secret (`X-Lander-UI-Token`). `dev.mjs` mints it once, persists it under `data/.ui-token` (gitignored, mode 0600), inlines it into the client as `VITE_LANDER_UI_TOKEN`, and passes it to the API as `LANDER_UI_TOKEN`. Each goes to the one process that needs it, never onto the shared environment the three processes inherit, and the daemon drops its own copy once it has read it — otherwise the value reaches every task's shell, where presenting it would resolve as the human (`server/secrets.ts`). This narrows the default blast radius rather than making the secret unobtainable: it is still a file a same-user task can read, still served to the browser by the Vite dev server, and still visible in a process's exec-time environment. The human may grant anything.
 - **A task** — the `lander` CLI sends its `LANDER_TOKEN` plus its task id/project (`X-Lander-Token`/`X-Lander-Task`/`X-Lander-Project`); the server matches the token against the task's stored secret. A task **cannot** add tool rules to itself or anyone else: `POST /tasks/:id/allow` is human only. Tokens are never returned over HTTP, so one task can't read another's to impersonate it.
+
+Hook callbacks authenticate separately with short-lived credentials scoped to their project and target; those credentials grant no access to other mutations.
 
 This is best-effort for a single-user local tool: a fully adversarial task running as the same user could still read `data/.ui-token` off disk. It blocks the realistic failure mode — an agent escalating itself or a child via the documented API — not a determined local attacker.
 
@@ -193,4 +195,4 @@ The task header carries a **rubber-stamp button** (beside the copy-id control) �
 
 - `status` moves through `riding` (agent working) → `paced` (idle) when a turn finishes; an agent can also set its own status — `wedged` (needs the user) or the terminal `landed` — via the `lander` CLI (see Self-management).
 - **Archiving** is orthogonal to status: it just relocates a task's JSON to `archived/` so it leaves the list and the scheduler/recovery sweeps. Any non-`riding` task can be archived (from the row's kebab menu or `lander archive`); restoring moves it back. An archived task keeps its status and history untouched.
-- Reads are unauthenticated (only permission *changes* check a principal — see Authenticated permission grants); delivery is by 2s polling, not SSE/websockets — though the turn itself streams (see Frontend).
+- Task reads are unauthenticated; mutations and attachment downloads require authentication (see Authenticated mutations); delivery is by 2s polling, not SSE/websockets — though the turn itself streams (see Frontend).

@@ -9,16 +9,6 @@
 // restart (docs/tmp/hooks.md Appendix B), and the retry re-mints. The durable
 // thing is the fire id, which lives on the task.
 //
-// **The credential is not a `Principal`.** `resolvePrincipal` is the shared front
-// door for every route, and the routes are gated individually with no middleware
-// — several gate only on `anon`, and `POST /tasks/:id/messages` and
-// `PATCH /tasks/:id` gate neither. A fourth principal kind would therefore hand a
-// hook body the ability to append a `role: 'user'` message and drive a turn, and
-// to land, wedge and interrupt its target: the nudge verb arriving early, in the
-// form the design forbids, and an inversion of hooks.md §6's claim that those
-// verbs are *absent from the surface* rather than denied per route. So the
-// credential is read only by the routes that accept one, each re-checking the
-// project and target it was minted for.
 
 import { randomUUID } from 'node:crypto'
 import { HOOK_ACTION_BOUND } from './tasks'

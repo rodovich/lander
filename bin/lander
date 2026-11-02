@@ -26,9 +26,8 @@ const die = (m) => {
 
 async function call(project, path, init) {
   if (!API) die('not inside a lander task (LANDER_API unset)')
-  // Identify the calling task so the server can authenticate it (e.g. to cap
-  // the permissions a spawned task may be granted to this task's own). Sent on
-  // every call; only permission-sensitive endpoints consult it.
+  // Mutations require the task's complete identity; reads carry it for routes
+  // such as attachment downloads that also authenticate their callers.
   const auth = {}
   if (TASK) auth['x-lander-task'] = TASK
   if (PROJECT) auth['x-lander-project'] = PROJECT

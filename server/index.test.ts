@@ -311,7 +311,7 @@ describe('hook approval', () => {
         headers: { 'content-type': 'application/json', ...headers },
         body: JSON.stringify(body),
       })
-      expect(res.status).toBe(403)
+      expect(res.status).toBe(headers['x-lander-token'] ? 403 : 401)
     }
     expect(await readStore().catch(() => null)).toBeNull()
   })
@@ -610,10 +610,6 @@ describe('the nudge', () => {
     expect(t.hookActions).toHaveLength(1)
   })
 
-  // The hazard the "a token present means a hook request" rule exists for: this
-  // route accepts anonymous callers, so falling through would let an expired
-  // credential quietly become a `role: 'user'` append — a timeout changing who
-  // the record says spoke.
   it('answers an unknown token rather than falling through to a user message', async () => {
     await seed()
     const res = await nudge('not-a-real-token', { message: 'sneak', key: 'nudge#0' })
@@ -793,13 +789,14 @@ describe('the action bound’s reset', () => {
     expect(await resetAt()).toBeUndefined()
   })
 
-  it('is NOT stamped by an unidentified caller', async () => {
+  it('rejects an unidentified caller without resetting the bound', async () => {
     await seedPair()
-    await app.request(`/api/${slug}/tasks/${ID}/messages`, {
+    const res = await app.request(`/api/${slug}/tasks/${ID}/messages`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message: 'anonymous' }),
     })
+    expect(res.status).toBe(401)
     expect(await resetAt()).toBeUndefined()
   })
 
@@ -1278,6 +1275,8 @@ describe('the launch', () => {
 // gate that silently stopped denying would still pass every test written from
 // the allowed side.
 describe('privileged paths by principal', () => {
+  afterEach(() => clearHookRunState())
+
   const seedTask = (id: string, over: Record<string, unknown> = {}) =>
     writeFile(
       path.join(tasksDir, `${id}.json`),
@@ -1322,6 +1321,74 @@ describe('privileged paths by principal', () => {
       body: JSON.stringify(body),
     })
 
+  const mutations = [
+    ['POST', '/tasks'],
+    ['PATCH', '/tasks/auth-target'],
+    ...['launch', 'ride', 'relaunch', 'cwd', 'archive', 'retitle', 'composed',
+      'messages', 'asks', 'asks/ask-1/answer', 'allow', 'seen', 'unread',
+      'attachments'].map((route) => ['POST', `/tasks/auth-target/${route}`]),
+    ['POST', '/attachments'],
+    ...['approve', 'revoke', 'trust-root', 'materialize'].map((route) =>
+      ['POST', `/hooks/${route}`]),
+  ]
+
+  it.each(mutations)('requires valid authentication for %s %s', async (method, route) => {
+    await seedTask('auth-target')
+    const file = path.join(tasksDir, 'auth-target.json')
+    const before = await readFile(file, 'utf8')
+    const namesBefore = (await readdir(tasksDir)).sort()
+    const mine = taskAuth('auth-target')
+    const invalid: Record<string, string>[] = [
+      {},
+      { 'x-lander-ui-token': 'wrong' },
+      taskAuth('auth-target', 'wrong'),
+      taskAuth('unknown-task'),
+      { 'x-lander-task': mine['x-lander-task'], 'x-lander-token': mine['x-lander-token'] },
+      { 'x-lander-task': mine['x-lander-task'], 'x-lander-project': slug },
+    ]
+    for (const headers of invalid) {
+      const res = await app.request(`/api/${slug}${route}`, {
+        method,
+        headers: { 'content-type': 'application/json', ...headers },
+        body: '{',
+      })
+      expect(res.status).toBe(401)
+      expect(await res.json()).toEqual({ error: 'authentication required' })
+      expect(await readFile(file, 'utf8')).toBe(before)
+      expect((await readdir(tasksDir)).sort()).toEqual(namesBefore)
+    }
+  })
+
+  it.each(mutations.filter(([, route]) =>
+    route !== '/tasks' && route !== '/tasks/auth-target' &&
+    route !== '/tasks/auth-target/messages' && route !== '/hooks/materialize',
+  ))('does not accept a hook credential for %s %s', async (method, route) => {
+    await seedTask('auth-target')
+    const file = path.join(tasksDir, 'auth-target.json')
+    const before = await readFile(file, 'utf8')
+    const { token } = mintHookCredential({
+      project: slug, target: 'auth-target', fireId: 'fire-auth',
+      path: '.lander/hooks/ride-ended/any/test.js', blob: 'b10b', name: 'test',
+    })
+    const res = await app.request(`/api/${slug}${route}`, {
+      method,
+      headers: { 'content-type': 'application/json', 'x-lander-hook-token': token },
+      body: '{',
+    })
+    expect(res.status).toBe(401)
+    expect(await readFile(file, 'utf8')).toBe(before)
+  })
+
+  it.each(['ui', 'task'])('accepts an authenticated %s mutation', async (caller) => {
+    await seedTask('auth-target')
+    const headers = caller === 'ui'
+      ? { 'x-lander-ui-token': UI_TOKEN }
+      : taskAuth('auth-target')
+    const res = await patch('auth-target', headers, { title: 'Authenticated edit' })
+    expect(res.status).toBe(200)
+    expect(await readTaskField('auth-target', 'title')).toBe('Authenticated edit')
+  })
+
   it('never serves a task’s token over HTTP', async () => {
     const res = await create({ 'x-lander-ui-token': UI_TOKEN })
     expect(res.status).toBe(201)
@@ -1337,12 +1404,12 @@ describe('privileged paths by principal', () => {
   // Identity is the (id, token) pair, so knowing a task's id buys no identity
   // on its own — ids travel in plain sight, in prompts and in the CLI. A child
   // launched under a borrowed id can't be landed as the real task's.
-  it('treats a real task id carrying the wrong token as anonymous', async () => {
+  it('rejects a real task id carrying the wrong token', async () => {
     await seedTask('tsk-impersonated')
+    const namesBefore = (await readdir(tasksDir)).sort()
     const res = await create(taskAuth('tsk-impersonated', 'not-the-token'))
-    expect(res.status).toBe(201)
-    const { id } = (await res.json()) as { id: string }
-    expect(JSON.parse(await settled(id)).spawnedBy).toBeUndefined()
+    expect(res.status).toBe(401)
+    expect((await readdir(tasksDir)).sort()).toEqual(namesBefore)
 
     const real = await create(taskAuth('tsk-impersonated'))
     expect(real.status).toBe(201)
@@ -1552,11 +1619,6 @@ describe('hook materialization re-check', () => {
     expect(res.status).toBe(401)
   })
 
-  // The header is read by this route and the create route, and nowhere else —
-  // which is what makes "landing, wedging and nudging are absent from the
-  // surface" true without a deny floor on every mutating path. A hook
-  // credential must therefore buy nothing on a route that gates on `anon`, and
-  // nothing at all on one that gates on neither.
   it('confers nothing on routes that do not read it', async () => {
     const token = mint().token
     const hooked = (pathname: string, method = 'POST', body?: unknown) =>
@@ -1569,15 +1631,13 @@ describe('hook materialization re-check', () => {
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       })
 
-    // Gates on `anon`: still anonymous.
     expect((await hooked(`/api/${slug}/hooks`, 'GET')).status).toBe(403)
-    // Gates on `ui`: still not the UI.
     expect(
       (await hooked(`/api/${slug}/hooks/approve`, 'POST', {
         path: SUPERVISE,
         blob: BLOB,
       })).status,
-    ).toBe(403)
+    ).toBe(401)
     // And the approval store is untouched by any of it.
     expect(await readFile(store(), 'utf8').catch(() => null)).toBeNull()
   })
@@ -2604,8 +2664,6 @@ describe('acting task coordination history', () => {
       ).status,
     ).toBe(200)
 
-    // A non-child land, a missing target, and an invalid launch all fail before
-    // attribution. An anonymous deferred message has no actor to receive a row.
     expect(
       (
         await asTask(
@@ -2635,7 +2693,7 @@ describe('acting task coordination history', () => {
           body: JSON.stringify({ message: 'anonymous', time: 60 }),
         })
       ).status,
-    ).toBe(200)
+    ).toBe(401)
 
     expect(await actions(actor.id)).toEqual(afterSuccess)
   })
@@ -2696,7 +2754,7 @@ describe('attachments', () => {
       [{ name: 'x', type: 'text/plain', bytes: new Uint8Array([1]) }],
       {},
     )
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(401)
   })
 
   it('rejects an anonymous download', async () => {
@@ -2938,7 +2996,7 @@ describe('task attachments (a task attaching its own output)', () => {
       { name: 'anon.txt', type: 'text/plain', bytes: new Uint8Array([1]) },
       { headers: {} },
     )
-    expect(anon.status).toBe(403)
+    expect(anon.status).toBe(401)
 
     const t = await raw(id)
     const flow = (t.items as { role?: string; attachments?: { name: string }[] }[]).find(
@@ -3101,7 +3159,7 @@ describe('asks', () => {
     )
     expect(foreign.status).toBe(403)
     const anon = await create(id, { prompt: 'p', form: choiceForm }, {})
-    expect(anon.status).toBe(403)
+    expect(anon.status).toBe(401)
   })
 
   it('creates a promptless ask (the agent message is the question)', async () => {

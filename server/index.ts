@@ -1599,15 +1599,6 @@ async function resolvePrincipal(req: {
   return { kind: 'anon' }
 }
 
-// The principal a task hook selects on: a hook lives at
-// `.lander/hooks/<trigger>/<by>/`, so this maps who made the request onto the
-// directory level that names them. An open set of strings rather than a union —
-// adding a principal later must not mean touching a mirrored type.
-//
-// `anon` becomes `system` deliberately: an unidentified caller is not a person,
-// and a hook under `human/` must not fire for one. That is also why the browser
-// now sends its token on every mutating call, gated or not — without it a human
-// landing a task from the kebab arrives here as `anon`.
 function isSelfPrincipal(principal: Principal, project: Project, id: string): boolean {
   return principal.kind === 'task' && principal.slug === project.slug && principal.id === id
 }
@@ -1655,13 +1646,28 @@ function noteHumanContact(
   if (principal.kind === 'ui') task.hookActionsResetAt = at
 }
 
-export const app = new Hono()
+export const app = new Hono<{ Variables: { principal: Principal } }>()
 
 // Times every request; writes nothing until the boot block below gives it a
 // file, so tests importing `app` leave no log behind.
 let writeSlowLine: ((line: string) => void) | null = null
 const slowLog = createSlowLog((line) => writeSlowLine?.(line))
 app.use('*', slowLog.middleware)
+
+app.use('/api/*', async (c, next) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) return next()
+
+  const principal = await resolvePrincipal(c.req)
+  c.set('principal', principal)
+  // Hook callbacks validate their per-fire credentials in their route handlers.
+  const hookCallback = c.req.header('x-lander-hook-token') !== undefined && (
+    (c.req.method === 'POST' && /^\/api\/[^/]+\/(?:hooks\/materialize|tasks(?:\/[^/]+\/messages)?)$/.test(c.req.path)) ||
+    (c.req.method === 'PATCH' && /^\/api\/[^/]+\/tasks\/[^/]+$/.test(c.req.path))
+  )
+  if (principal.kind === 'anon' && !hookCallback)
+    return c.json({ error: 'authentication required' }, 401)
+  await next()
+})
 
 // The per-flow status telemetry each producing adapter pushes, as an { agent:
 // items } map — the same cache the tasks poll embeds. Opaque to the server; empty
@@ -1920,7 +1926,7 @@ async function hookPairFromBody(req: {
 app.post('/api/:project/hooks/approve', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
-  if ((await resolvePrincipal(c.req)).kind !== 'ui')
+  if (c.get('principal').kind !== 'ui')
     return c.json({ error: 'not authorized to approve hooks' }, 403)
   const { pair, error } = await hookPairFromBody(c.req)
   if (!pair) return c.json({ error }, 400)
@@ -1982,7 +1988,7 @@ app.post('/api/:project/hooks/materialize', async (c) => {
 app.post('/api/:project/hooks/revoke', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
-  if ((await resolvePrincipal(c.req)).kind !== 'ui')
+  if (c.get('principal').kind !== 'ui')
     return c.json({ error: 'not authorized to revoke hook approvals' }, 403)
   const { pair, error } = await hookPairFromBody(c.req)
   if (!pair) return c.json({ error }, 400)
@@ -1997,7 +2003,7 @@ app.post('/api/:project/hooks/revoke', async (c) => {
 app.post('/api/:project/hooks/trust-root', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
-  if ((await resolvePrincipal(c.req)).kind !== 'ui')
+  if (c.get('principal').kind !== 'ui')
     return c.json({ error: 'not authorized to set the trusted branch' }, 403)
   const body = await c.req.json<{ ref?: unknown }>()
   const raw = typeof body.ref === 'string' ? body.ref.trim() : ''
@@ -2040,9 +2046,6 @@ app.get('/api/:project/flows/:name', async (c) => {
 app.post('/api/:project/attachments', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
-  const principal = await resolvePrincipal(c.req)
-  if (principal.kind === 'anon')
-    return c.json({ error: 'not authorized to upload attachments' }, 403)
   try {
     const body = await c.req.parseBody({ all: true })
     // `all: true` yields a single value or an array per field; normalize the
@@ -2121,7 +2124,7 @@ app.post('/api/:project/tasks/:id/attachments', async (c) => {
     if (!(await readTask(project.dataDir, id)))
       return c.json({ error: 'task not found' }, 404)
 
-    const principal = await resolvePrincipal(c.req)
+    const principal = c.get('principal')
     if (principal.kind !== 'ui' && !isSelfPrincipal(principal, project, id))
       return c.json(
         { error: 'only the task itself may attach its own output' },
@@ -2410,10 +2413,10 @@ app.post('/api/:project/tasks', async (c) => {
     // of what creation does (flow resolution, the opening item, the title, the
     // first turn), and a parallel copy of 180 lines is how two paths drift. The
     // credential is read here and NOT through resolvePrincipal, because that is
-    // the shared front door for every route and several gate only on `anon`: a
-    // fourth principal kind would hand a body capabilities nobody enumerated.
+    // browser/task identity resolver. Hook credentials authorize only the
+    // callbacks that explicitly accept them.
     //
-    // A present-but-unknown token never falls through to an anonymous create.
+    // A present-but-unknown hook token must retain its retryable error response.
     // The server restarts on every `server/**` edit, taking the credential map
     // with it, so this is a routine answer and not an accusation.
     const hookToken = c.req.header('x-lander-hook-token')
@@ -2450,7 +2453,7 @@ app.post('/api/:project/tasks', async (c) => {
 
     // Identify the caller once: it gates cross-project launches below and, when
     // a task spawned this one, is recorded as the spawner and message sender.
-    const principal = await resolvePrincipal(c.req)
+    const principal = c.get('principal')
 
     if (principal.kind === 'task' && principal.slug !== project.slug)
       return c.json(
@@ -2767,14 +2770,6 @@ app.post('/api/:project/tasks', async (c) => {
 
 // A hook's land: end the target when the judgment is that it is finished.
 //
-// It shares PATCH rather than getting a route of its own, for the same reason
-// the nudge shares /messages. But this route also accepts `wedged` and `riding`
-// and gates status changes on nobody, so the hook branch is **whitelisted to
-// `landed` and nothing else**: without that, a credential is one field away from
-// wedging its target — which hooks.md §8 says a hook never does — and from
-// reopening one, which the design gates behind a replay harness that does not
-// exist yet.
-//
 // Landing is preferred to nudging when the target looks done because it is
 // reversible where a spent turn is not. That is only true if the wakeups survive,
 // and they do not: the `landed` crossing deletes `scheduledFor` and
@@ -2882,16 +2877,12 @@ app.patch('/api/:project/tasks/:id', async (c) => {
       key?: unknown
     }>()
 
-    // A hook token means a hook request, answered here rather than fallen
-    // through — this route's status change is open to anonymous callers, so a
-    // stale credential must not quietly become an ordinary land.
+    // A stale hook credential must not fall through to an ordinary status change.
     const hookToken = c.req.header('x-lander-hook-token')
     if (hookToken !== undefined)
       return landFromHook(c, project, id, file, hookToken, body.status, body.key)
 
-    // Resolve the caller once: to gate a land by id, and to decide whether a
-    // wedge should interrupt a live run.
-    const principal = await resolvePrincipal(c.req)
+    const principal = c.get('principal')
 
     if (typeof body.title === 'string' && body.title.trim().length > TITLE_MAX_CHARS)
       return c.json({ error: titleTooLong }, 400)
@@ -3017,7 +3008,7 @@ app.post('/api/:project/tasks/:id/launch', async (c) => {
   try {
     const id = c.req.param('id')
     if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
-    const principal = await resolvePrincipal(c.req)
+    const principal = c.get('principal')
     const launched = await launchTask(project, id, hookBy(principal, project.slug, id), {
       kind: 'manual',
     })
@@ -3061,10 +3052,7 @@ app.post('/api/:project/tasks/:id/ride', async (c) => {
     if (!(await readTask(project.dataDir, id)))
       return c.json({ error: 'task not found' }, 404)
 
-    // Resolved for attribution, not authorization: this route stays open (the
-    // in-task CLI calls it mid-turn), but who rested the task decides which
-    // `unwedged/<by>/` hook a revival from a notable status would select.
-    const principal = await resolvePrincipal(c.req)
+    const principal = c.get('principal')
 
     const body = await c.req.json<{
       date?: unknown
@@ -3182,7 +3170,7 @@ app.post('/api/:project/tasks/:id/relaunch', async (c) => {
     if (!(await readTask(project.dataDir, id)))
       return c.json({ error: 'task not found' }, 404)
 
-    const principal = await resolvePrincipal(c.req)
+    const principal = c.get('principal')
     if (
       principal.kind !== 'ui' &&
       !isSelfPrincipal(principal, project, id)
@@ -3318,7 +3306,7 @@ app.post('/api/:project/tasks/:id/cwd', async (c) => {
     if (!(await readTask(project.dataDir, id)))
       return c.json({ error: 'task not found' }, 404)
 
-    const principal = await resolvePrincipal(c.req)
+    const principal = c.get('principal')
     if (
       principal.kind !== 'ui' &&
       !isSelfPrincipal(principal, project, id)
@@ -3646,10 +3634,8 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
     if (!rawMessage.trim()) return c.json({ error: 'message is required' }, 400)
 
     // The nudge. A request carrying a hook token IS a hook request — resolved
-    // here, before resolvePrincipal, and answered rather than fallen through. An
-    // expired credential must not quietly become an anonymous `role: 'user'`
-    // append: this route accepts anonymous callers, so falling through would let
-    // a timeout change who the record says spoke.
+    // here rather than treated as a browser/task message. An expired credential
+    // must not change who the record says spoke.
     const hookToken = c.req.header('x-lander-hook-token')
     if (hookToken !== undefined)
       return nudgeFromHook(c, project, id, file, hookToken, rawMessage, body.key)
@@ -3657,7 +3643,7 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
     // A task may only message tasks in its own project (the human, via the UI
     // token, may message any). The `lander send` CLI always targets the caller's
     // own project, so this just enforces that server-side.
-    const principal = await resolvePrincipal(c.req)
+    const principal = c.get('principal')
     if (principal.kind === 'task' && principal.slug !== c.req.param('project'))
       return c.json(
         { error: 'a task may only message tasks in its own project' },
@@ -3847,7 +3833,7 @@ app.post('/api/:project/tasks/:id/asks', async (c) => {
     if (!(await readTask(project.dataDir, id)))
       return c.json({ error: 'task not found' }, 404)
 
-    const principal = await resolvePrincipal(c.req)
+    const principal = c.get('principal')
     if (
       principal.kind !== 'ui' &&
       !isSelfPrincipal(principal, project, id)
@@ -3933,7 +3919,7 @@ app.post('/api/:project/tasks/:id/asks/:askId/answer', async (c) => {
     if (!(await readTask(project.dataDir, id)))
       return c.json({ error: 'task not found' }, 404)
 
-    if ((await resolvePrincipal(c.req)).kind !== 'ui')
+    if (c.get('principal').kind !== 'ui')
       return c.json({ error: 'not authorized to answer' }, 403)
 
     const body = await c.req.json<{ optionId?: unknown; text?: unknown }>()
@@ -4034,7 +4020,7 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
 
     // Granting a tool rule widens what the agent can run, so it's the human's
     // call: only the UI may do it. A task can't self-grant past its sandbox.
-    if ((await resolvePrincipal(c.req)).kind !== 'ui')
+    if (c.get('principal').kind !== 'ui')
       return c.json({ error: 'not authorized to grant tool permissions' }, 403)
 
     const body = await c.req.json<{ rule?: unknown; scope?: unknown }>()
@@ -4099,7 +4085,7 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
 // Mark a task read up through the given ISO timestamp. Advances `readThrough`
 // monotonically — a stale or out-of-order `at` never moves the marker
 // backwards — so the browser can fire these freely as the viewer reads. This is
-// harmless view-state, so it isn't principal-gated.
+// harmless view-state, so any authenticated caller may update it.
 app.post('/api/:project/tasks/:id/seen', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
@@ -4126,7 +4112,7 @@ app.post('/api/:project/tasks/:id/seen', async (c) => {
 // entry's stamp is), or to "" — read through nothing — when none is given. The
 // next /seen call advances the marker forward as the viewer reads. Unlike /seen
 // this deliberately moves the marker backwards, so it sets unconditionally.
-// Harmless view-state, so it isn't principal-gated.
+// Harmless view-state, so any authenticated caller may update it.
 app.post('/api/:project/tasks/:id/unread', async (c) => {
   const project = PROJECT_BY_SLUG.get(c.req.param('project'))
   if (!project) return c.json({ error: 'unknown project' }, 404)
@@ -4385,8 +4371,8 @@ if (process.env.NODE_ENV !== 'test' && process.env.VITEST !== 'true') {
   await backfillReadThrough()
   await recoverQueues()
 
-  // Loopback only: this API spawns agent processes, and an unauthenticated
-  // caller still resolves as `anon`. Every client reaches it as `localhost`
+  // Loopback only: this API controls agent processes and serves private task
+  // conversations. Every client reaches it as `localhost`
   // (Vite's proxy, the daemon, the in-task CLI), which falls back from ::1 to
   // 127.0.0.1.
   const server = serve({ fetch: app.fetch, port, hostname: '127.0.0.1' })
