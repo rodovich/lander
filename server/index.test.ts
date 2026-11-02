@@ -1277,9 +1277,13 @@ describe('the launch', () => {
 describe('privileged paths by principal', () => {
   afterEach(() => clearHookRunState())
 
-  const seedTask = (id: string, over: Record<string, unknown> = {}) =>
+  const seedTask = (
+    id: string,
+    over: Record<string, unknown> = {},
+    taskDirectory = tasksDir,
+  ) =>
     writeFile(
-      path.join(tasksDir, `${id}.json`),
+      path.join(taskDirectory, `${id}.json`),
       JSON.stringify({
         id,
         title: 'Spawner',
@@ -1364,10 +1368,7 @@ describe('privileged paths by principal', () => {
     let headers = taskAuth(caller === 'parent' ? 'ride-parent' : 'ride-sibling')
     if (caller === 'foreign-project') {
       await mkdir(secondTasksDir, { recursive: true })
-      await writeFile(path.join(secondTasksDir, `${id}.json`), JSON.stringify({
-        id, title: 'Same id in another project', status: 'riding',
-        createdAt: AT, token: 'foreign-token', shape: 2, rides: [], items: [],
-      }))
+      await seedTask(id, { token: 'foreign-token' }, secondTasksDir)
       headers = { ...taskAuth(id, 'foreign-token'), 'x-lander-project': secondSlug }
     }
     const file = path.join(tasksDir, `${id}.json`)
@@ -1380,6 +1381,50 @@ describe('privileged paths by principal', () => {
       })
       expect(await readFile(file, 'utf8')).toBe(before)
     }
+  })
+
+  it.each(['self', 'parent', 'sibling', 'foreign-project'])('refuses early launch by a %s without consuming the schedule', async (caller) => {
+    const id = 'launch-protected'
+    await seedTask('launch-parent')
+    await seedTask('launch-sibling')
+    await seedTask('launch-dependency')
+    await seedTask(id, {
+      spawnedBy: 'launch-parent', spawnedByProject: slug,
+      scheduledFor: '2099-01-01T00:00:00.000Z', waitingFor: ['launch-dependency'],
+      rides: [{ id: 'r0', startedAt: AT, endedAt: AT, outcome: 'done' }],
+    })
+    let headers = taskAuth(caller === 'self' ? id : `launch-${caller}`)
+    if (caller === 'foreign-project') {
+      await mkdir(secondTasksDir, { recursive: true })
+      await seedTask(id, { token: 'foreign-token' }, secondTasksDir)
+      headers = { ...taskAuth(id, 'foreign-token'), 'x-lander-project': secondSlug }
+    }
+    const file = path.join(tasksDir, `${id}.json`)
+    const before = await readFile(file, 'utf8')
+    const res = await app.request(`/api/${slug}/tasks/${id}/launch`, {
+      method: 'POST', headers, body: '{}',
+    })
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({
+      error: 'only the browser may launch a scheduled task early',
+    })
+    expect(await readFile(file, 'utf8')).toBe(before)
+  })
+
+  it('lets the browser launch ahead of both time and dependency triggers', async () => {
+    const id = 'launch-browser'
+    await seedTask('launch-browser-dependency')
+    await seedTask(id, {
+      scheduledFor: '2099-01-01T00:00:00.000Z', waitingFor: ['launch-browser-dependency'],
+      rides: [{ id: 'r0', startedAt: AT, endedAt: AT, outcome: 'done' }],
+    })
+    const res = await post(`/api/${slug}/tasks/${id}/launch`, {})
+    expect(res.status).toBe(200)
+    expect(await readTaskField(id, 'scheduledFor')).toBeUndefined()
+    expect(await readTaskField(id, 'waitingFor')).toBeUndefined()
+    expect(await readTaskField(id, 'items')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'message', role: 'user', text: 'go ahead' }),
+    ]))
   })
 
   const mutations = [

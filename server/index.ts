@@ -3009,6 +3009,8 @@ app.post('/api/:project/tasks/:id/launch', async (c) => {
     const id = c.req.param('id')
     if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
     const principal = c.get('principal')
+    if (principal.kind !== 'ui')
+      return c.json({ error: 'only the browser may launch a scheduled task early' }, 403)
     const launched = await launchTask(project, id, hookBy(principal, project.slug, id), {
       kind: 'manual',
     })
