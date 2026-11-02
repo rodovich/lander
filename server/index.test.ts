@@ -1321,6 +1321,67 @@ describe('privileged paths by principal', () => {
       body: JSON.stringify(body),
     })
 
+  const ride = (id: string, headers: Record<string, string>, body: unknown) =>
+    app.request(`/api/${slug}/tasks/${id}/ride`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify(body),
+    })
+
+  it.each(['ui', 'task'])('lets the %s set, replace, and clear its ride schedule', async (caller) => {
+    const id = 'ride-authorized'
+    await seedTask(id)
+    await seedTask('ride-dependency')
+    const headers = caller === 'ui'
+      ? { 'x-lander-ui-token': UI_TOKEN }
+      : taskAuth(id)
+    const at = '2099-01-01T00:00:00.000Z'
+    expect((await ride(id, headers, { date: at })).status).toBe(200)
+    expect(await readTaskField(id, 'scheduledFor')).toBe(at)
+
+    expect((await ride(id, headers, { after: ['ride-dependency'] })).status).toBe(200)
+    expect(await readTaskField(id, 'scheduledFor')).toBeUndefined()
+    expect(await readTaskField(id, 'waitingFor')).toEqual(['ride-dependency'])
+
+    expect((await ride(id, headers, { date: at, after: ['ride-dependency'] })).status).toBe(200)
+    expect(await readTaskField(id, 'scheduledFor')).toBe(at)
+    expect(await readTaskField(id, 'waitingFor')).toEqual(['ride-dependency'])
+
+    expect((await ride(id, headers, { clear: true })).status).toBe(200)
+    expect(await readTaskField(id, 'scheduledFor')).toBeUndefined()
+    expect(await readTaskField(id, 'waitingFor')).toBeUndefined()
+  })
+
+  it.each(['parent', 'sibling', 'foreign-project'])('refuses ride changes by a %s without changing the target', async (caller) => {
+    const id = 'ride-protected'
+    await seedTask('ride-parent')
+    await seedTask('ride-sibling')
+    await seedTask('ride-dependency')
+    await seedTask(id, {
+      spawnedBy: 'ride-parent', spawnedByProject: slug,
+      scheduledFor: '2099-01-01T00:00:00.000Z', waitingFor: ['ride-dependency'],
+    })
+    let headers = taskAuth(caller === 'parent' ? 'ride-parent' : 'ride-sibling')
+    if (caller === 'foreign-project') {
+      await mkdir(secondTasksDir, { recursive: true })
+      await writeFile(path.join(secondTasksDir, `${id}.json`), JSON.stringify({
+        id, title: 'Same id in another project', status: 'riding',
+        createdAt: AT, token: 'foreign-token', shape: 2, rides: [], items: [],
+      }))
+      headers = { ...taskAuth(id, 'foreign-token'), 'x-lander-project': secondSlug }
+    }
+    const file = path.join(tasksDir, `${id}.json`)
+    const before = await readFile(file, 'utf8')
+    for (const body of [{ date: '2099-02-01T00:00:00.000Z' }, { clear: true }]) {
+      const res = await ride(id, headers, body)
+      expect(res.status).toBe(403)
+      expect(await res.json()).toEqual({
+        error: 'only the task itself or the browser may change its ride schedule',
+      })
+      expect(await readFile(file, 'utf8')).toBe(before)
+    }
+  })
+
   const mutations = [
     ['POST', '/tasks'],
     ['PATCH', '/tasks/auth-target'],

@@ -3053,6 +3053,11 @@ app.post('/api/:project/tasks/:id/ride', async (c) => {
       return c.json({ error: 'task not found' }, 404)
 
     const principal = c.get('principal')
+    if (principal.kind !== 'ui' && !isSelfPrincipal(principal, project, id))
+      return c.json(
+        { error: 'only the task itself or the browser may change its ride schedule' },
+        403,
+      )
 
     const body = await c.req.json<{
       date?: unknown
