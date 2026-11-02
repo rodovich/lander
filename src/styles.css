@@ -1902,12 +1902,19 @@ body {
 
 .message-text ul,
 .message-text ol {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15em;
   margin: 0.3em 0;
   padding-left: 1.4em;
 }
 
 .message-text li {
-  margin: 0.15em 0;
+  margin: 0;
+}
+
+.message-text :is(ul, ol):has(> li > p) {
+  gap: 1em;
 }
 
 .message-text blockquote {
