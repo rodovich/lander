@@ -17,14 +17,10 @@ import { codexConfigArgs } from '../codex-config'
 import { execFileSync } from 'node:child_process'
 import {
   codexTurnUsage,
-  deliveryDigest,
   extractCodexSession,
-  projectDocBlock,
+  prepareUserMessagePrompt,
   readThreadUsage,
   reduceCodexStreamLine,
-  shouldDeliver,
-  checkoutNote,
-  fillTaskPrompt,
   type Usage,
 } from 'lander/flow'
 import type { Ctx, FlowMeta, ToolHandle, TurnResult } from './ctx'
@@ -95,62 +91,13 @@ export function makeFlow({
       const known = ctx.state.get(['sessionId'])
       const sessionId = typeof known === 'string' && known ? known : undefined
 
-      // ── Task prompt ──────────────────────────────────────────────────────
-      // Codex has no request-scoped channel for lander's own prose (claude uses
-      // --append-system-prompt), so this rides the user message — which means a
-      // copy sent on one turn stays in that turn's message and replays on every
-      // later one. Deliver it once per thread, and again only when the rendered
-      // text changes: the digest is content-addressed, so a template edit
-      // re-delivers the corrected text on the next turn without any separate
-      // staleness machinery.
-      //
-      // The commit is deferred to after the read loop, gated on the turn having
-      // produced output. See deliveryDigest/shouldDeliver for why that ordering
-      // is the whole safety argument.
-      const taskPrompt = fillTaskPrompt(taskPromptTemplate, ctx.task.taskId)
-      // The checkout note rides with it, so a task adopted into a checkout gets
-      // it on its next turn through the digest change.
-      const rendered = ctx.task.checkout
-        ? `${taskPrompt}\n\n${checkoutNote(ctx.task.checkout, ctx.task.root)}`
-        : taskPrompt
-      const digest = deliveryDigest(rendered)
-      const sendTaskPrompt = shouldDeliver(
+      const { prompt, commitDelivered } = prepareUserMessagePrompt(ctx, {
         sessionId,
-        ctx.state.get(['taskPrompt']),
-        digest,
-      )
+        taskPromptTemplate,
+        readProjectDoc,
+      })
 
-      // ── Prompt ───────────────────────────────────────────────────────────
-      const promptParts = [ctx.turn.prompts.join('\n\n')]
-      if (ctx.turn.manifestBlock) promptParts.push(ctx.turn.manifestBlock)
-      // Codex has no turn-context block to hide this in, which is half of why the
-      // revival notice is part of the user prompt.
-      if (ctx.turn.revivedBlock) promptParts.push(ctx.turn.revivedBlock)
-      if (ctx.turn.scheduledRideBlock) promptParts.push(ctx.turn.scheduledRideBlock)
-      // ── Project doc ──────────────────────────────────────────────────────
-      // The project's optional LANDER.md, delivered through the same
-      // deliver-once record as the task prompt but under its own key, because
-      // the two change independently. Codex has no request-scoped channel, so
-      // unlike claude — where this rides --append-system-prompt with no record
-      // at all — it has to be tracked. Read from the tree the shell lands in,
-      // falling back to root.
-      const doc =
-        (ctx.task.checkout !== undefined
-          ? readProjectDoc(ctx.task.checkout)
-          : undefined) ?? readProjectDoc(ctx.task.root)
-      const docDigest = doc === undefined ? undefined : deliveryDigest(doc)
-      const sendDoc =
-        docDigest !== undefined &&
-        shouldDeliver(sessionId, ctx.state.get(['landerDoc']), docDigest)
-
-      // Both unshift, so the final order is: task prompt, project doc, user
-      // text. Lander's own instructions precede the repo's, and the repo's
-      // precede the user's — each layer able to be read in light of the one
-      // before it.
-      if (sendDoc && doc !== undefined) promptParts.unshift(projectDocBlock(doc))
-      if (sendTaskPrompt) promptParts.unshift(rendered)
-
-      const args = buildCodexArgs(ctx, promptParts.join('\n\n'), sessionId, {
+      const args = buildCodexArgs(ctx, prompt, sessionId, {
         profile,
         configOverrides,
         gitDirs: resolveGitDirs(ctx.task.cwd),
@@ -273,22 +220,7 @@ export function makeFlow({
         }
       }
 
-      // Commit the delivery only now, and only if the model actually consumed
-      // the turn. Written after the loop rather than inside it so the decision
-      // sees the whole turn; runFlowTurn flushes state after onTurn returns, so
-      // this still reaches the server. Non-throwing on purpose: a rejected state
-      // write (oversize blob) must degrade to a duplicate next turn, never to a
-      // failed turn.
-      if (producedOutput) {
-        try {
-          if (sendTaskPrompt) ctx.state.set(['taskPrompt'], digest)
-          // Separate key: an edit to one must not suppress the other.
-          if (sendDoc && docDigest !== undefined)
-            ctx.state.set(['landerDoc'], docDigest)
-        } catch {
-          // Deliberate: re-delivering is the benign direction.
-        }
-      }
+      if (producedOutput) commitDelivered()
 
       const exitCode = await child.exit
       await collectStderr

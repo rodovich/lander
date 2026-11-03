@@ -1,14 +1,10 @@
 import { createHash } from 'node:crypto'
-import type { RevivedMarker, ScheduledRide } from '../server/protocol'
+import { projectDocBlock } from '../flow/project-doc'
+import type { Ctx } from './flows/ctx'
 
 // Deliver-once, for a flow whose channel for lander's own prose is the user
 // message (e.g. codex and agy), where a block put in front of one turn stays in
 // that turn's message forever and is replayed on every later one.
-//
-// The pair is deliberately PURE: it takes the state values rather than a Ctx, so
-// this module keeps no dependency on daemon/flows (which imports
-// buildRevivedBlock from here — the reverse edge would be a cycle) and stays
-// testable without a harness. The caller owns the two state touches.
 //
 // The contract is a two-phase one, and the phases must stay split:
 //
@@ -44,59 +40,6 @@ export function fillTaskPrompt(taskPromptTemplate: string, id: string): string {
   return taskPromptTemplate.replace('{{id}}', id)
 }
 
-// The prompt block a revived task's first turn carries: a short notice telling
-// the resumed session what the arriving message changed out from under it. The
-// session's own last act was `lander wedge`/`lander land`/`lander ride` and
-// nothing else contradicts that memory, so left alone the agent answers as if
-// still wedged — or re-arms nothing and lets a cleared timer go unreplaced.
-//
-// Two facts, either or both (see RevivedMarker): the notable status it was pulled
-// out of, and the scheduled time the message cleared. The ride clause names the
-// time, because "your ride is cleared" is only actionable if the agent knows
-// which ride — and it points at `lander ride` because scheduling it again is the
-// remedy. An await is not mentioned here: it survives the revival, and the turn's
-// scheduled-ride reminder (buildScheduledRideBlock) reports it, warning that
-// scheduling a ride replaces it.
-//
-// Provider-neutral by construction, and shaped like buildManifestBlock — a small
-// self-framing block appended to the user prompt — so it works across every flow
-// without disturbing any delta-compared turn-context baseline.
-export function buildRevivedBlock(revived: RevivedMarker): string {
-  // `waiting` when no notable status was crossed — which is the case a cleared
-  // ride arrives in almost every time.
-  const prior = revived.from ?? 'waiting'
-  const sentence = revived.waitingUntil
-    ? `You were ${prior} until ${revived.waitingUntil} when this message arrived; ` +
-      'the message changed your status to riding and cleared the ride you had ' +
-      'scheduled for then. Schedule it again with `lander ride` if you still ' +
-      'want it.'
-    : `You were ${prior} when this message arrived; the message changed your ` +
-      'status to riding.'
-  return ['<task-revived>', sentence, '</task-revived>'].join('\n')
-}
-
-// The prompt block a turn carries while a ride is still scheduled behind it: the
-// turn was woken by something else — a notification, another task's message, or
-// the human's message with an await left standing — and the ride it scheduled
-// earlier is not in its own context unless it remembers it. Without this the
-// agent re-schedules a ride that is still there, or forgets one it no longer
-// needs. Shaped like buildRevivedBlock for the same reason.
-export function buildScheduledRideBlock(ride: ScheduledRide): string {
-  const awaiting = ride.awaiting ?? []
-  const landing = awaiting.length
-    ? `when ${awaiting.join(', ')} ${awaiting.length > 1 ? 'have all landed' : 'lands'}`
-    : ''
-  const when =
-    ride.at && landing
-      ? `for ${ride.at} or ${landing}, whichever comes first`
-      : `for ${ride.at ?? landing}`
-  const sentence =
-    `You have a ride scheduled ${when}. It stays scheduled unless you clear ` +
-    'it with `lander ride --clear`; scheduling another with `lander ride` ' +
-    'replaces it.'
-  return ['<ride-scheduled>', sentence, '</ride-scheduled>'].join('\n')
-}
-
 export function checkoutNote(checkout: string, root: string): string {
   return (
     `This task works in a git worktree lander created for it at \`${checkout}\`, ` +
@@ -104,4 +47,74 @@ export function checkoutNote(checkout: string, root: string): string {
     'checked out. Commit on a branch you create: lander removes this worktree ' +
     'when the task is landed or archived, and leaves branches alone.'
   )
+}
+
+export function resolveProjectDoc(
+  task: Pick<Ctx['task'], 'checkout' | 'root'>,
+  readProjectDoc: (dir: string) => string | undefined,
+): string | undefined {
+  return (
+    (task.checkout !== undefined ? readProjectDoc(task.checkout) : undefined) ??
+    readProjectDoc(task.root)
+  )
+}
+
+export function turnPromptParts(
+  turn: Pick<
+    Ctx['turn'],
+    'prompts' | 'manifestBlock' | 'revivedBlock' | 'scheduledRideBlock'
+  >,
+): string[] {
+  return [
+    turn.prompts.join('\n\n'),
+    turn.manifestBlock,
+    turn.revivedBlock,
+    turn.scheduledRideBlock,
+  ].filter((part): part is string => part !== undefined)
+}
+
+export function prepareUserMessagePrompt(
+  ctx: {
+    task: Pick<Ctx['task'], 'taskId' | 'root' | 'checkout'>
+    turn: Parameters<typeof turnPromptParts>[0]
+    state: Pick<Ctx['state'], 'get' | 'set'>
+  },
+  {
+    sessionId,
+    taskPromptTemplate,
+    readProjectDoc,
+  }: {
+    sessionId: string | undefined
+    taskPromptTemplate: string
+    readProjectDoc: (dir: string) => string | undefined
+  },
+): { prompt: string; commitDelivered(): void } {
+  const taskPrompt = fillTaskPrompt(taskPromptTemplate, ctx.task.taskId)
+  const rendered = ctx.task.checkout
+    ? `${taskPrompt}\n\n${checkoutNote(ctx.task.checkout, ctx.task.root)}`
+    : taskPrompt
+  const digest = deliveryDigest(rendered)
+  const sendTaskPrompt = shouldDeliver(
+    sessionId,
+    ctx.state.get(['taskPrompt']),
+    digest,
+  )
+  const doc = resolveProjectDoc(ctx.task, readProjectDoc)
+  const docDigest = doc === undefined ? undefined : deliveryDigest(doc)
+  const sendDoc =
+    docDigest !== undefined &&
+    shouldDeliver(sessionId, ctx.state.get(['landerDoc']), docDigest)
+  const prompt = [
+    ...(sendTaskPrompt ? [rendered] : []),
+    ...(sendDoc && doc !== undefined ? [projectDocBlock(doc)] : []),
+    ...turnPromptParts(ctx.turn),
+  ].join('\n\n')
+  return {
+    prompt,
+    commitDelivered() {
+      if (sendTaskPrompt) ctx.state.set(['taskPrompt'], digest)
+      if (sendDoc && docDigest !== undefined)
+        ctx.state.set(['landerDoc'], docDigest)
+    },
+  }
 }

@@ -25,12 +25,16 @@
 import { spawn as nodeSpawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import type { ChildProcess } from 'node:child_process'
-import type { FlowMeta, StatePatchOp } from '../../server/protocol'
+import type {
+  FlowMeta,
+  RevivedMarker,
+  ScheduledRide,
+  StatePatchOp,
+} from '../../server/protocol'
 import type { Step, Usage } from '../../shared/stream'
 import type { HostEvent, HostInput, SpawnLike } from '../host-protocol'
 import type { ContextUpdate } from '../../shared/context'
 import { isAssistProvider, runAssist } from '../assist'
-import { buildRevivedBlock, buildScheduledRideBlock } from '../task-management'
 import { taskApiHeaders } from '../task-api'
 
 // ── Handles ────────────────────────────────────────────────────────────────
@@ -354,6 +358,59 @@ export type FlowModule = {
 // server caches and serves it (the flow registry) as well as the daemon building
 // it. Re-exported here so flow modules keep importing it from their own tree.
 export type { FlowMeta }
+
+// The prompt block a revived task's first turn carries: a short notice telling
+// the resumed session what the arriving message changed out from under it. The
+// session's own last act was `lander wedge`/`lander land`/`lander ride` and
+// nothing else contradicts that memory, so left alone the agent answers as if
+// still wedged — or re-arms nothing and lets a cleared timer go unreplaced.
+//
+// Two facts, either or both (see RevivedMarker): the notable status it was pulled
+// out of, and the scheduled time the message cleared. The ride clause names the
+// time, because "your ride is cleared" is only actionable if the agent knows
+// which ride — and it points at `lander ride` because scheduling it again is the
+// remedy. An await is not mentioned here: it survives the revival, and the turn's
+// scheduled-ride reminder (buildScheduledRideBlock) reports it, warning that
+// scheduling a ride replaces it.
+//
+// Provider-neutral by construction, and shaped like buildManifestBlock — a small
+// self-framing block appended to the user prompt — so it works across every flow
+// without disturbing any delta-compared turn-context baseline.
+export function buildRevivedBlock(revived: RevivedMarker): string {
+  // `waiting` when no notable status was crossed — which is the case a cleared
+  // ride arrives in almost every time.
+  const prior = revived.from ?? 'waiting'
+  const sentence = revived.waitingUntil
+    ? `You were ${prior} until ${revived.waitingUntil} when this message arrived; ` +
+      'the message changed your status to riding and cleared the ride you had ' +
+      'scheduled for then. Schedule it again with `lander ride` if you still ' +
+      'want it.'
+    : `You were ${prior} when this message arrived; the message changed your ` +
+      'status to riding.'
+  return ['<task-revived>', sentence, '</task-revived>'].join('\n')
+}
+
+// The prompt block a turn carries while a ride is still scheduled behind it: the
+// turn was woken by something else — a notification, another task's message, or
+// the human's message with an await left standing — and the ride it scheduled
+// earlier is not in its own context unless it remembers it. Without this the
+// agent re-schedules a ride that is still there, or forgets one it no longer
+// needs. Shaped like buildRevivedBlock for the same reason.
+export function buildScheduledRideBlock(ride: ScheduledRide): string {
+  const awaiting = ride.awaiting ?? []
+  const landing = awaiting.length
+    ? `when ${awaiting.join(', ')} ${awaiting.length > 1 ? 'have all landed' : 'lands'}`
+    : ''
+  const when =
+    ride.at && landing
+      ? `for ${ride.at} or ${landing}, whichever comes first`
+      : `for ${ride.at ?? landing}`
+  const sentence =
+    `You have a ride scheduled ${when}. It stays scheduled unless you clear ` +
+    'it with `lander ride --clear`; scheduling another with `lander ride` ' +
+    'replaces it.'
+  return ['<ride-scheduled>', sentence, '</ride-scheduled>'].join('\n')
+}
 
 // ── The runtime ────────────────────────────────────────────────────────────
 

@@ -4,10 +4,11 @@
 // the substitution and guard against a leftover placeholder reaching the child.
 
 import { describe, expect, it } from 'vitest'
+import { buildRevivedBlock, buildScheduledRideBlock } from './flows/ctx'
 import {
-  buildRevivedBlock,
-  buildScheduledRideBlock,
+  deliveryDigest,
   fillTaskPrompt,
+  prepareUserMessagePrompt,
 } from './task-management'
 
 const TEMPLATE = 'You are running inside a lander task. This task id is {{id}}.'
@@ -94,6 +95,67 @@ describe('buildScheduledRideBlock', () => {
   it('names both triggers of a ride that has both', () => {
     expect(buildScheduledRideBlock({ at: '1:21:00 PM', awaiting: ['a1'] })).toBe(
       sentence('for 1:21:00 PM or when a1 lands, whichever comes first'),
+    )
+  })
+})
+
+describe('prepareUserMessagePrompt', () => {
+  function makeCtx(
+    initial: Record<string, unknown> = {},
+    checkout?: string,
+  ) {
+    const store = { ...initial }
+    return {
+      store,
+      ctx: {
+        task: { taskId: 't1', root: '/repo', ...(checkout ? { checkout } : {}) },
+        turn: {
+          prompts: ['do work'],
+          manifestBlock: '<attached-files/>',
+          revivedBlock: '<task-revived/>',
+          scheduledRideBlock: '<ride-scheduled/>',
+        },
+        state: {
+          get: (path: string[]) => store[path[0]],
+          set: (path: string[], value: unknown) => {
+            store[path[0]] = value
+          },
+        },
+      },
+    }
+  }
+
+  it('delivers task prompt and project doc on a fresh session and suppresses unchanged ones after commit', () => {
+    const { store, ctx } = makeCtx({}, '/repo/.worktrees/t1')
+    const docs: Record<string, string> = {
+      '/repo': 'Root doc',
+      '/repo/.worktrees/t1': 'Checkout doc',
+    }
+    const first = prepareUserMessagePrompt(ctx, {
+      sessionId: undefined,
+      taskPromptTemplate: TEMPLATE,
+      readProjectDoc: (dir) => docs[dir],
+    })
+    expect(first.prompt).toContain('This task id is t1.')
+    expect(first.prompt).toContain('git worktree lander created for it at `/repo/.worktrees/t1`')
+    expect(first.prompt).toContain('Checkout doc')
+    expect(first.prompt).not.toContain('Root doc')
+    expect(first.prompt).toContain(
+      'do work\n\n<attached-files/>\n\n<task-revived/>\n\n<ride-scheduled/>',
+    )
+    expect(store).toEqual({})
+
+    first.commitDelivered()
+    expect(store.taskPrompt).toMatch(/^sha256:/)
+    expect(store.landerDoc).toBe(deliveryDigest('Checkout doc'))
+
+    const second = prepareUserMessagePrompt(ctx, {
+      sessionId: 'sess-1',
+      taskPromptTemplate: TEMPLATE,
+      readProjectDoc: (dir) => docs[dir],
+    })
+    expect(second.prompt).toBe(
+      'do work\n\n<attached-files/>\n\n<task-revived/>\n\n<ride-scheduled/>',
     )
   })
 })

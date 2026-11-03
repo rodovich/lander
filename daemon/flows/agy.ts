@@ -6,15 +6,11 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import {
   addUsage,
-  checkoutNote,
   codexTurnUsage,
-  deliveryDigest,
   diffEdits,
-  fillTaskPrompt,
   fullToolInput,
-  projectDocBlock,
+  prepareUserMessagePrompt,
   readThreadUsage,
-  shouldDeliver,
   summarizeToolInput,
   summarizeToolResult,
   type Usage,
@@ -399,31 +395,11 @@ export function makeFlow({
       const version = readCliVersion?.()
       const known = ctx.state.get(['sessionId'])
       const sessionId = typeof known === 'string' && known ? known : undefined
-      const taskPrompt = fillTaskPrompt(taskPromptTemplate, ctx.task.taskId)
-      const rendered = ctx.task.checkout
-        ? `${taskPrompt}\n\n${checkoutNote(ctx.task.checkout, ctx.task.root)}`
-        : taskPrompt
-      const digest = deliveryDigest(rendered)
-      const sendTaskPrompt = shouldDeliver(
+      const { prompt, commitDelivered } = prepareUserMessagePrompt(ctx, {
         sessionId,
-        ctx.state.get(['taskPrompt']),
-        digest,
-      )
-      const doc =
-        (ctx.task.checkout ? readProjectDoc(ctx.task.checkout) : undefined) ??
-        readProjectDoc(ctx.task.root)
-      const docDigest = doc === undefined ? undefined : deliveryDigest(doc)
-      const sendDoc =
-        docDigest !== undefined &&
-        shouldDeliver(sessionId, ctx.state.get(['landerDoc']), docDigest)
-      const prompt = [
-        sendTaskPrompt ? rendered : undefined,
-        sendDoc && doc !== undefined ? projectDocBlock(doc) : undefined,
-        ctx.turn.prompts.join('\n\n'),
-        ctx.turn.manifestBlock,
-        ctx.turn.revivedBlock,
-        ctx.turn.scheduledRideBlock,
-      ].filter((part) => part !== undefined).join('\n\n')
+        taskPromptTemplate,
+        readProjectDoc,
+      })
       const projectId = ensureAgyProjectRules(ctx.task.root, [], geminiConfigDir)
       const dirs = new Set<string>()
       const addDir = (dir: string | undefined) => {
@@ -451,10 +427,7 @@ export function makeFlow({
         ], { sessionId: conversation, priorTotal, liveUsage, readLog: readAgyLog })
         if (run.conversationId !== conversation)
           priorTotal = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 }
-        if (first && run.producedOutput) {
-          if (sendTaskPrompt) ctx.state.set(['taskPrompt'], digest)
-          if (sendDoc && docDigest !== undefined) ctx.state.set(['landerDoc'], docDigest)
-        }
+        if (first && run.producedOutput) commitDelivered()
         // agy ends the turn at a call no rule covers instead of letting the
         // agent carry on without it, so tell the agent and let it choose.
         if (run.refusals.length > 0 && !run.terminalError && !ctx.signal.aborted && run.conversationId) {

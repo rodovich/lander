@@ -13,7 +13,9 @@ import {
   gitContext as realGitContext,
   projectDocBlock,
   reduceStreamLine,
+  resolveProjectDoc,
   sessionCost,
+  turnPromptParts,
   type SessionTotals,
   type Usage,
 } from 'lander/flow'
@@ -119,10 +121,7 @@ export function makeFlow({
       // The revival notice goes here and not in the context block above: that
       // block is delta-compared against a stored baseline, so a one-turn line in
       // it would cost a spurious full resend next turn.
-      const promptParts = [ctx.turn.prompts.join('\n\n')]
-      if (ctx.turn.manifestBlock) promptParts.push(ctx.turn.manifestBlock)
-      if (ctx.turn.revivedBlock) promptParts.push(ctx.turn.revivedBlock)
-      if (ctx.turn.scheduledRideBlock) promptParts.push(ctx.turn.scheduledRideBlock)
+      const promptParts = turnPromptParts(ctx.turn)
       if (sendContext) promptParts.push(block)
 
       const args = [
@@ -130,15 +129,7 @@ export function makeFlow({
         ...buildClaudeArgs(ctx, promptParts.join('\n\n'), {
           landerBin,
           taskPromptTemplate,
-          // Read from the task's checkout when it has one, so it gets its own
-          // branch's conventions rather than the main checkout's; falls back to
-          // root when there is none there. Deliberately NOT stateful: this
-          // channel is request-scoped, so an edit takes effect on the next turn
-          // with nothing to remember.
-          projectDoc:
-            (ctx.task.checkout !== undefined
-              ? readProjectDoc(ctx.task.checkout)
-              : undefined) ?? readProjectDoc(ctx.task.root),
+          projectDoc: resolveProjectDoc(ctx.task, readProjectDoc),
         }),
       ]
 

@@ -47,8 +47,9 @@ export {
 export {
   fillTaskPrompt,
   checkoutNote,
-  buildRevivedBlock,
-  buildScheduledRideBlock,
+  resolveProjectDoc,
+  turnPromptParts,
+  prepareUserMessagePrompt,
   // Deliver-once, for a provider whose only prose channel is the user message.
   deliveryDigest,
   shouldDeliver,
