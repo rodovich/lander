@@ -178,20 +178,16 @@ concurrently(
     // keeps going across a reload, the fresh server reattaches over the WS and
     // resumes it from the persisted cursor (resume-from; see recoverQueues), and
     // the server drains open requests before exiting (graceful shutdown in
-    // server/index.ts). So a restart — including when claude edits
-    // server/index.ts while lander runs on its own repo — no longer loses a run.
+    // server/index.ts). So a restart — including when an agent edits
+    // server/index.ts while lander runs on its own repo — does not lose a run.
     {
       command: `tsx watch --include '${projectsFile.replaceAll("'", `'\\''`)}' server/index.ts`,
       name: 'api',
       prefixColor: 'green',
       env: apiEnv,
     },
-    // The host daemon owns claude process management + stream reduction + usage.
-    // It reads the projects file named above. daemon-watch.mjs
-    // supervises it: on a daemon source edit, or a rewrite of that file, it
-    // drains the running daemon (finish riding turns, take no new ones, exit
-    // when empty) and hands off to a fresh one, so an edit no longer aborts
-    // in-flight turns — it takes effect at the next turn boundary.
+    // Runs under daemon-watch.mjs rather than `tsx watch` so edits to daemon
+    // code or the projects file above drain in-flight turns before exiting.
     {
       command: 'node daemon-watch.mjs',
       name: 'daemon',

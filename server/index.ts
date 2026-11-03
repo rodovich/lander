@@ -291,9 +291,8 @@ type Task = {
   // over HTTP (see publicTask), so one task can't read another's token. Absent
   // on tasks saved before this field existed; backfilled on the next run.
   token?: string
-  // Extra permission rules granted from the UI's "allow in task" action; passed
-  // to Claude as --allowedTools on every future turn for this task. Absent on
-  // tasks saved before this field existed — treat undefined as empty.
+  // Task-scoped permission rules recorded by `/allow` (for flows with
+  // `grants.task`) and forwarded to the daemon on `start-run`.
   allow?: string[]
   // The unified item log (v2 storage): messages, tool calls, lifecycle events, and
   // asks, in one flat ordered array (see docs/conversation-model.md). Replaces the

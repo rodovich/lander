@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto'
 import type { RevivedMarker, ScheduledRide } from '../server/protocol'
 
-// Deliver-once, for a provider whose only channel for lander's own prose is the
-// user message — i.e. codex, where a message put in front of one turn stays in
+// Deliver-once, for a flow whose channel for lander's own prose is the user
+// message (e.g. codex and agy), where a block put in front of one turn stays in
 // that turn's message forever and is replayed on every later one.
 //
 // The pair is deliberately PURE: it takes the state values rather than a Ctx, so
@@ -40,15 +40,12 @@ export function shouldDeliver(
   return !sessionId || delivered !== digest
 }
 
-// Fill the task prompt template's {{id}} slot with the task's own id, which is
-// constant for the task's life and so safe in Claude's byte-stable
-// --append-system-prompt.
 export function fillTaskPrompt(taskPromptTemplate: string, id: string): string {
   return taskPromptTemplate.replace('{{id}}', id)
 }
 
-// The prompt block a revived task's first turn carries: one sentence telling the
-// resumed session what the arriving message changed out from under it. The
+// The prompt block a revived task's first turn carries: a short notice telling
+// the resumed session what the arriving message changed out from under it. The
 // session's own last act was `lander wedge`/`lander land`/`lander ride` and
 // nothing else contradicts that memory, so left alone the agent answers as if
 // still wedged — or re-arms nothing and lets a cleared timer go unreplaced.
@@ -62,12 +59,8 @@ export function fillTaskPrompt(taskPromptTemplate: string, id: string): string {
 // scheduling a ride replaces it.
 //
 // Provider-neutral by construction, and shaped like buildManifestBlock — a small
-// self-framing block appended to the user prompt — for two reasons. It does NOT
-// belong in Claude's `<task-context>` block: that block is delta-compared against
-// a baseline the server stores, so a line that appears for one turn and vanishes
-// counts as a change twice and costs a spurious full resend on the turn after.
-// And codex has no turn-context block at all (daemon/flows/codex.ts), so putting
-// it there would fix claude only.
+// self-framing block appended to the user prompt — so it works across every flow
+// without disturbing any delta-compared turn-context baseline.
 export function buildRevivedBlock(revived: RevivedMarker): string {
   // `waiting` when no notable status was crossed — which is the case a cleared
   // ride arrives in almost every time.
@@ -87,7 +80,7 @@ export function buildRevivedBlock(revived: RevivedMarker): string {
 // the human's message with an await left standing — and the ride it scheduled
 // earlier is not in its own context unless it remembers it. Without this the
 // agent re-schedules a ride that is still there, or forgets one it no longer
-// needs. Shaped like buildRevivedBlock, and for the same two reasons.
+// needs. Shaped like buildRevivedBlock for the same reason.
 export function buildScheduledRideBlock(ride: ScheduledRide): string {
   const awaiting = ride.awaiting ?? []
   const landing = awaiting.length
@@ -104,10 +97,6 @@ export function buildScheduledRideBlock(ride: ScheduledRide): string {
   return ['<ride-scheduled>', sentence, '</ride-scheduled>'].join('\n')
 }
 
-// What an agent working in a lander-managed checkout must know about it: where
-// it is, that it starts with no branch, and that it does not outlive the task.
-// Constant for the task's life, so it can ride Claude's byte-stable appended
-// system prompt.
 export function checkoutNote(checkout: string, root: string): string {
   return (
     `This task works in a git worktree lander created for it at \`${checkout}\`, ` +

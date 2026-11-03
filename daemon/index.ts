@@ -291,9 +291,6 @@ function resolveHooksCwd(
   return { root, cwd: isDir(cwd) ? cwd : root }
 }
 
-// Root under which each task's materialized attachment blobs live (cached across
-// turns). Overridable for tests/containers; defaults to the OS temp dir.
-// (Claude reads attached images from here via the flow's --add-dir grant.)
 const FILES_ROOT = process.env.LANDER_FILES_ROOT?.trim() || defaultFilesRoot()
 
 // Where a hook body may keep durable state, per project. A NEW convention, not

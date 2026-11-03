@@ -1,6 +1,6 @@
 // The optional repo-level `LANDER.md`: conventions a project wants applied to
-// lander tasks specifically, and deliberately invisible to a `claude` or `codex`
-// session run by hand in the same repo. Neither provider reads a file by this
+// lander tasks specifically, and deliberately invisible to an agent CLI
+// session run by hand in the same repo. No provider reads a file by this
 // name, so lander is the only thing that delivers it — which is the point.
 //
 // Two functions, kept in the stdlib so a third-party flow that drives a model can
@@ -77,9 +77,9 @@ export function readProjectDoc(dir: string): string | undefined {
 //
 // The framing marks the contents as REPO-AUTHORED, which matters more than it
 // looks: this is the first block lander builds around content it did not write,
-// it is delivered into claude's system prompt, and `LANDER.md` is exactly the
-// kind of file that arrives on a pulled branch. The block must not lend lander's
-// voice to it.
+// flows deliver it alongside lander's own instructions, and `LANDER.md` is
+// exactly the kind of file that arrives on a pulled branch. The block must not
+// lend lander's voice to it.
 //
 // The closing-tag escape stops repo content from ending this block early and
 // opening a forged one — `<task-context>` in particular, whose framing asserts
