@@ -363,12 +363,7 @@ function StampIcon() {
   )
 }
 
-// The rules already on the task (`task.allow`), listed above the authoring row so
-// the popup answers "what does this task already have?" before it offers to widen
-// it. Read-only: a rule's text is the grant, so editing it here would misrepresent
-// what the agent actually runs under — revoking isn't a surface yet. Project-scope
-// grants live in the project's settings file, outside any one task, so they aren't
-// listed.
+// Project-scope grants live in the flow's project config, outside any one task.
 export function GrantedRules({ rules }: { rules: string[] }) {
   if (rules.length === 0) return null
   return (

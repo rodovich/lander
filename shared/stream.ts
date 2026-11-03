@@ -32,48 +32,24 @@ export type Step = {
   // steps (harness output, attributed to the preceding inference by position) and
   // on steps recorded before this field existed.
   inferenceId?: string
-  // The stream's top-level `parent_tool_use_id`: when this block was produced by
-  // a subagent (the Agent/Explore tools spawn one), the id of the parent tool_use
-  // that spawned it — otherwise absent. It's set on the subagent's own text,
-  // tool_use, and tool_result blocks alike (the whole nested trace), and points at
-  // the spawning chip's `toolUseId`, so the UI can fold a subagent's activity in
-  // under that chip instead of interleaving it with the main agent's. Nesting goes
-  // arbitrarily deep — a sub-subagent's blocks carry its spawner's id — so the
-  // parent→child links form the tree. Absent on every main-agent block.
+  // When a subagent produced this step, the `toolUseId` of the parent tool call
+  // that spawned it (mapped to `Item.parentId` so the timeline nests the
+  // subagent's trace under the spawning tool item).
   parentToolUseId?: string
-  // tool_use only: the call rendered as a settings.json permission string
-  // (e.g. `Bash(npm run build)`), used to seed the "allow" popup.
+  // tool_use only: the call formatted in the flow's permission-rule syntax,
+  // used to seed a grant in the UI.
   rule?: string
-  // tool_use only, for the file-writing tools (Edit/Write/MultiEdit): the change
-  // as before/after hunks, so the UI can reveal a diff under the chip. One hunk
-  // per edit (MultiEdit has several); Write has a single hunk with empty `old`.
-  // Absent for every other tool.
+  // tool_use only: file-modification hunks revealed as a diff under the chip
+  // (`old` is empty for a full-file write).
   edits?: { old: string; new: string }[]
-  // tool_result fields. `isError` is the result's own error flag — set whenever
-  // the call errored, whether it was refused before running or ran and failed.
-  // `blocked` narrows that to a permission-gate refusal: set during a turn's
-  // terminal result event from its authoritative permission_denials list, not
-  // inferred from the result text. (That list covers only the interactive
-  // permission gate — a Bash static-analysis or sandbox block surfaces as
-  // `isError` without `blocked`.) The UI reads a `blocked` call as "blocked" and
-  // offers a grant; an `isError`-only call as "failed"; neither as a clean run.
   isError?: boolean
   blocked?: boolean
   createdAt: string
 }
 
-// The token usage a turn consumed. Accumulated live as the turn streams — each
-// `assistant` event carries its inference's usage, which the reducer sums across
-// the turn's inferences — then finalized by the run's terminal `result` event,
-// which reports the authoritative cumulative totals. `input` is the fresh,
-// uncached input and `cacheCreation` the fresh input that was also written to
-// cache — both processed at full price this turn; `cacheRead` is the discounted
-// re-read of cached context. The full prompt size across the turn's inferences is
-// the three summed. `model` is the session's driving (main-agent) model — see
-// reduceStreamLine's `drivingModel`. `costUsd` is the turn's dollar cost across
-// every model it touched; it is derived only once the turn's final event lands,
-// so it's absent until then. The UI shows the most recent turn's counts in the
-// corner, updating as they stream, and can sum them across the task.
+// Token usage for a turn. `input` (uncached), `cacheCreation` (newly cached),
+// and `cacheRead` (re-read from cache) partition the prompt tokens processed
+// across the turn's inferences, so their sum is the total prompt size.
 export type Usage = {
   input: number
   output: number
@@ -86,16 +62,10 @@ export type Usage = {
   // earlier turn of a resumed session (CLI 2.1.278+), so a turn's own cost is
   // the difference from the previous turn's total.
   sessionCostUsd?: number
-  // Why the turn's prompt cache missed, when the API reported one (Claude's
-  // assistant events carry `message.diagnostics.cache_miss_reason`): the reason
-  // type (e.g. `system_changed`, `tools_changed`, `previous_message_not_found`)
-  // and the tokens that had to be re-processed instead of read from cache. Taken
-  // from the turn's first main-agent inference that reports one — the
-  // resume-boundary miss, the interesting one — and kept through the result
-  // event's authoritative replacement (see the run manager). Subagent inferences
-  // are ignored: they run separate prompts whose first inference always misses.
-  // Absent when the turn hit cache cleanly, and for providers that don't report
-  // it (Codex).
+  // Why the turn's prompt cache missed on its resume boundary, when the
+  // provider reports cache-miss diagnostics (e.g. Claude's
+  // `message.diagnostics.cache_miss_reason`). Subagent inferences are excluded
+  // because their separate prompts always miss on their first inference.
   cacheMiss?: CacheMiss
 }
 

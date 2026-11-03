@@ -221,11 +221,8 @@ export function useTaskActions(opts: {
     [writeTask],
   )
 
-  // Grant a permission rule: "task" scope persists the rule on the task (used on
-  // future turns), "project" scope writes it to the project's settings.local.json.
-  // Refresh so a task-scoped grant shows up. Returns whether the grant landed, so
-  // a caller (the blocked-summary rows) can mark the row granted only on success.
-  // The rule may have been hand-edited before granting.
+  // Only task-scope grants live on the task record (`task.allow`); project-scope
+  // grants are persisted by the flow's `onGrant` handler outside task state.
   const allowTool = useCallback(
     async (rule: string, scope: 'task' | 'project'): Promise<boolean> => {
       const current = currentRef.current

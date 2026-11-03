@@ -8,7 +8,6 @@ import type { TaskAction } from './taskActions'
 import { taskKeyOf } from './taskRef'
 import type { FlowCaps, TaskWithProject } from './types'
 
-// The naming sparkle, shown while haiku is picking a title for the task.
 function SparkleIcon() {
   return (
     <svg

@@ -50,10 +50,7 @@ export type ToolHandle = {
 export type ToolResult = {
   output?: string
   isError?: boolean
-  // A permission-gate refusal. This does NOT fold a tool_result step; it names
-  // the call on the update's blockedIds, exactly where the terminal
-  // permission_denials list lands today. A call can therefore take a real result
-  // and a later blocked marking without emitting two results.
+  // Marks the call as a permission-gate refusal on `UpdateMessage.blockedIds`.
   blocked?: boolean
 }
 

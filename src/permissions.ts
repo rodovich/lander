@@ -13,19 +13,12 @@ export type BlockedItem = {
   status?: string
 }
 
-// One denied call as a grant opportunity: `rule` is the editable settings.json
-// permission string (what a grant actually persists), `tool` the bare tool name
-// for display, and `key` a stable React/dedupe key.
+// `rule` is the permission rule a grant persists (editable in the UI before
+// granting).
 export type BlockedRequest = { key: string; rule: string; tool: string }
 
-// The turn's confirmed permission denials, as deduped grant opportunities: the
-// tool items whose call was refused at the permission gate (`status: 'blocked'`,
-// the authoritative permission_denials reconciled onto the item at turn end),
-// deduped by rule so the same denied command run three times is one row.
-// Subagent calls (parentId set) are included — their denials ride the same
-// turn-level permission_denials and are just as grantable. A plain `failed` is a
-// failure, not a denial. A tool recorded before the `rule` field existed falls
-// back to its bare name.
+// Subagent calls (`parentId` set) stay in the list because a task or project
+// grant covers subagents too.
 export function blockedRequests(items: BlockedItem[]): BlockedRequest[] {
   const out: BlockedRequest[] = []
   const seen = new Set<string>()

@@ -13,9 +13,6 @@ export type TokenUsage = {
   cacheCreation: number
   model?: string
   costUsd?: number
-  // Why the turn's prompt cache missed, when the API reported one: the reason
-  // type and the tokens re-processed instead of read from cache. Shown in the
-  // turn-scope tooltip; absent on a clean cache hit and for Codex turns.
   cacheMiss?: { reason: string; missedTokens: number }
 }
 
@@ -154,14 +151,13 @@ export type ToolItem = ItemCommon & {
   // The untruncated, newline-preserving input revealed under the chip's
   // disclosure; absent for short inputs and older items.
   inputFull?: string
-  // The call as a settings.json permission rule, e.g. `Bash(ls)`.
+  // The call formatted in the flow's permission-rule syntax, used to seed a grant.
   rule?: string
   // Folded in from the tool_result: the result peek and the call's outcome.
   // `running` until the result lands.
   output?: string
   status: 'running' | 'ok' | 'failed' | 'blocked'
-  // For the file-writing tools (Edit/Write/MultiEdit): the change as before/
-  // after hunks, revealed as a diff under the chip's disclosure.
+  // File-modification hunks revealed as a diff under the chip's disclosure.
   edits?: { old: string; new: string }[]
 }
 
@@ -288,10 +284,9 @@ export type Task = {
   // Optional on the wire only because a response from a pre-step-4 server
   // wouldn't carry it; the current server always does.
   flow?: string
-  // Permission rules granted on this task itself ("allow in task"), which the
-  // header's grant popup lists. Absent until the first task-scope grant — and on
-  // a payload from a server that predates the field — so read undefined as none.
-  // Project-scope grants aren't here: they live in the project's settings file.
+  // Permission rules granted in task scope ("allow in task"), listed in the
+  // header's grant popup. Project-scope grants are persisted by the flow in
+  // project config rather than on the task.
   allow?: string[]
   title: string
   status: string
