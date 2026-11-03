@@ -105,7 +105,11 @@ describe('RuleRow', () => {
   })
 
   it('starts in edit mode with a placeholder for an empty authoring row', () => {
-    const html = render({ rule: '', autoEdit: true, placeholder: 'Author a rule…' })
+    const html = render({
+      rule: '',
+      autoEdit: true,
+      grants: { task: true, project: true, placeholder: 'Author a rule…' },
+    })
     expect(html).toContain('rule-row-input')
     expect(html).toContain('Author a rule…')
     // An empty rule leaves the kebab disabled (nothing to grant yet).

@@ -27,9 +27,7 @@ export const LEGACY_FLOW = 'claude'
 
 // The capability subset the server acts on and the UI reads, derived from a
 // flow's announced meta.
-export type FlowCaps = {
-  grants: { task: boolean; project: boolean }
-}
+export type FlowCaps = Pick<FlowMeta['capabilities'], 'grants'>
 
 // A flow the server has never heard of degrades to the conservative floor —
 // no grant controls — rather than falsely advertising a capability the flow
@@ -62,7 +60,11 @@ export const BOOTSTRAP_FLOWS: FlowMeta[] = [
     description: 'Drive a task as a Claude Code conversation',
     driver: true,
     capabilities: {
-      grants: { task: true, project: true },
+      grants: {
+        task: true,
+        project: true,
+        placeholder: 'e.g. Bash(git:*)',
+      },
       usageSnapshot: true,
       rateLimitRetry: true,
       reportsCost: true,

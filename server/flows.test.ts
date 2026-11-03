@@ -48,7 +48,9 @@ describe('flow registry', () => {
     // register. The picker must still render and existing claude/codex tasks
     // must still derive capabilities.
     expect(flowRegistry('proj').map((f) => f.name)).toEqual(['claude', 'codex'])
-    expect(flowCaps('claude')).toEqual({ grants: { task: true, project: true } })
+    expect(flowCaps('claude')).toEqual({
+      grants: { task: true, project: true, placeholder: 'e.g. Bash(git:*)' },
+    })
     expect(flowCaps('codex')).toEqual({ grants: { task: false, project: false } })
   })
 

@@ -53,7 +53,7 @@ export type FlowMeta = {
   description: string
   driver: boolean
   capabilities: {
-    grants: { task: boolean; project: boolean }
+    grants: { task: boolean; project: boolean; placeholder?: string }
     usageSnapshot: boolean
     rateLimitRetry: boolean
     reportsCost: boolean

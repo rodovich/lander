@@ -27,7 +27,11 @@ export const meta: FlowMeta = {
   description: 'Drive a task as a Claude Code conversation',
   driver: true,
   capabilities: {
-    grants: { task: true, project: true },
+    grants: {
+      task: true,
+      project: true,
+      placeholder: 'e.g. Bash(git:*)',
+    },
     usageSnapshot: true,
     rateLimitRetry: true,
     // Claude's result event carries the turn's dollar cost.

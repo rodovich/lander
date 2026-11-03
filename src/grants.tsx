@@ -45,7 +45,6 @@ export function RuleRow({
   granted,
   onGrant,
   autoEdit,
-  placeholder,
 }: {
   rule: string
   grants: FlowCaps['grants']
@@ -56,7 +55,6 @@ export function RuleRow({
   onGrant: (rule: string, scope: GrantScope) => void
   // Start in edit mode (the empty authoring row); a seeded denial row starts read.
   autoEdit?: boolean
-  placeholder?: string
 }) {
   const [editing, setEditing] = useState(!!autoEdit)
   const [committed, setCommitted] = useState(initialRule)
@@ -99,7 +97,7 @@ export function RuleRow({
           ref={inputRef}
           className="rule-row-input"
           value={draft}
-          placeholder={placeholder}
+          placeholder={grants.placeholder ?? 'Add a rule…'}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
@@ -124,7 +122,7 @@ export function RuleRow({
         >
           {committed || (
             <span className="rule-row-placeholder">
-              {placeholder ?? 'Add a rule…'}
+              {grants.placeholder ?? 'Add a rule…'}
             </span>
           )}
         </button>
@@ -210,7 +208,7 @@ function RulePopup({
   // Seeded rows, one per rule.
   rules: { key: string; rule: string }[]
   // An empty row, in edit mode, for writing a rule from scratch.
-  authoring?: { placeholder: string }
+  authoring?: boolean
   forgetOnClose?: boolean
   grants: FlowCaps['grants']
   onAllow: (rule: string, scope: GrantScope) => Promise<boolean>
@@ -234,7 +232,7 @@ function RulePopup({
     if (forgetOnClose) setGranted({})
   }, [open, forgetOnClose])
 
-  const row = (key: string, rule: string, extra?: { autoEdit: true; placeholder: string }) => (
+  const row = (key: string, rule: string, autoEdit?: boolean) => (
     <RuleRow
       key={key}
       rule={rule}
@@ -248,13 +246,13 @@ function RulePopup({
         try {
           if (!(await onAllow(committed, scope))) return
           setPermissionAdded(true)
-          if (extra) setAuthoringRound((n) => n + 1)
+          if (autoEdit) setAuthoringRound((n) => n + 1)
           else setGranted((g) => ({ ...g, [key]: { scope, rule: committed } }))
         } finally {
           setGranting((n) => n - 1)
         }
       }}
-      {...extra}
+      autoEdit={autoEdit}
     />
   )
 
@@ -278,11 +276,7 @@ function RulePopup({
           {rules.map((r) => row(r.key, r.rule))}
           {/* Remounted fresh after each grant, and each time the popup reopens
               (the popup unmounts on close). */}
-          {authoring &&
-            row(AUTHORING_KEY + authoringRound, '', {
-              autoEdit: true,
-              placeholder: authoring.placeholder,
-            })}
+          {authoring && row(AUTHORING_KEY + authoringRound, '', true)}
           {permissionAdded && onRetry && (
             <button
               type="button"
@@ -429,7 +423,7 @@ export function GrantControl({
         </>
       }
       rules={[]}
-      authoring={{ placeholder: 'e.g. Bash(git:*)' }}
+      authoring
       forgetOnClose
       grants={grants}
       onAllow={onAllow}

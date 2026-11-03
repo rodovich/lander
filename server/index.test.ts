@@ -197,7 +197,11 @@ describe('flow registry endpoint', () => {
     const claude = body.flows.find((f) => f.name === 'claude')
     const codex = body.flows.find((f) => f.name === 'codex')
     expect(claude?.capabilities).toMatchObject({
-      grants: { task: true, project: true },
+      grants: {
+        task: true,
+        project: true,
+        placeholder: 'e.g. Bash(git:*)',
+      },
       reportsCost: true,
     })
     expect(codex?.capabilities).toMatchObject({
@@ -4887,7 +4891,13 @@ describe('flow dispatch gate', () => {
       ((await (await app.request(`/api/${slug}/tasks?view=summary`)).json()) as {
         flows: Record<string, { grants: unknown }>
       }).flows
-    expect((await flows()).claude).toEqual({ grants: { task: true, project: true } })
+    expect((await flows()).claude).toEqual({
+      grants: {
+        task: true,
+        project: true,
+        placeholder: 'e.g. Bash(git:*)',
+      },
+    })
 
     await connect(['claude', 'codex', 'example-flow'])
     const announced = await flows()
