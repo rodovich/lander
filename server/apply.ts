@@ -106,7 +106,7 @@ export type ApplyDoneOpts = {
 
 // The tool_result outcome → the folded tool item status.
 function resultStatus(step: Step): ToolItem['status'] {
-  return step.blocked ? 'blocked' : step.isError ? 'failed' : 'ok'
+  return step.isError ? 'failed' : 'ok'
 }
 
 // Wedge a task for a retry and stash what recovery needs: flip to wedged, record

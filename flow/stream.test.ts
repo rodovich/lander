@@ -702,8 +702,6 @@ describe('reduceStreamLine', () => {
       }),
       AT,
     )
-    // blocked is set later, from the terminal result event's permission_denials
-    // list — never guessed from the result text here.
     expect(r.steps).toEqual([
       {
         kind: 'tool_result',
@@ -713,7 +711,7 @@ describe('reduceStreamLine', () => {
         createdAt: AT,
       },
     ])
-    expect(r.steps[0].blocked).toBeUndefined()
+    expect(r.blockedIds).toBeUndefined()
   })
 
   it('surfaces blockedIds from the result event permission_denials', () => {

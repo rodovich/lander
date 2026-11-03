@@ -43,7 +43,6 @@ export type Step = {
   // (`old` is empty for a full-file write).
   edits?: { old: string; new: string }[]
   isError?: boolean
-  blocked?: boolean
   createdAt: string
 }
 
