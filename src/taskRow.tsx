@@ -1,5 +1,5 @@
 import { forwardRef } from 'react'
-import { formatTaskTime } from './format'
+import { formatHoursMinutes, formatTaskTime } from './format'
 import { HighlightedText } from './highlightedText'
 import { TaskActionsMenu } from './menus'
 import { availableTaskActions } from './taskActions'
@@ -46,6 +46,19 @@ function RepeatIcon() {
       <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
       <path d="M21 3v5h-5" />
     </svg>
+  )
+}
+
+// The check a watching task is waiting on, with its arguments and when it last
+// ran in the tooltip.
+function WatchLabel({ watch }: { watch: NonNullable<TaskWithProject['watch']> }) {
+  const args = Object.entries(watch.args).map(([k, v]) => `${k}=${v}`)
+  const checked = `checked ${formatHoursMinutes(Date.now() - Date.parse(watch.lastRunAt))} ago`
+  return (
+    <span className="task-watch" title={[...args, checked].join('\n')}>
+      <ClockIcon label="Watching" />
+      watching {watch.check}
+    </span>
   )
 }
 
@@ -136,6 +149,7 @@ export const TaskRow = forwardRef<
             />
           )}
           {task.scheduledMessages?.some((m) => m.repeat) && <RepeatIcon />}
+          {task.watch && <WatchLabel watch={task.watch} />}
           {task.status === 'riding' && (
             <span className="riding-spinner" aria-label="Riding" />
           )}

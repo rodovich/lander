@@ -97,6 +97,20 @@ describe('buildScheduledRideBlock', () => {
       sentence('for 1:21:00 PM or when a1 lands, whichever comes first'),
     )
   })
+
+  it('names a watch’s check and arguments', () => {
+    expect(
+      buildScheduledRideBlock({
+        watching: { check: 'file-changed', args: { path: 'out.log' } },
+      }),
+    ).toBe(
+      '<ride-scheduled>\n' +
+        'You are watching `file-changed` (path=out.log); it wakes you when it ' +
+        'fires. It stays armed unless you clear it with `lander ride --clear`; ' +
+        'scheduling another ride with `lander ride` replaces it.\n' +
+        '</ride-scheduled>',
+    )
+  })
 })
 
 describe('prepareUserMessagePrompt', () => {

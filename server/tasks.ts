@@ -517,7 +517,7 @@ export type TaskSender = {
 
 // Lander itself, telling a task why it is awake: the time it set came, the
 // tasks it awaited landed, or a restart cut off its previous ride.
-export type LanderSender = { lander: 'time' | 'await' | 'restart' }
+export type LanderSender = { lander: 'time' | 'await' | 'watch' | 'restart' }
 
 // A prompt item as the agent receives it: a message from another task with its
 // sender named ahead of its words. Composed whenever the item is queued for a
@@ -594,6 +594,8 @@ export type EventItem = ItemCommon & {
   title?: string
   scheduledFor?: string
   awaiting?: { id: string; title: string }[]
+  // Why lander itself wedged the task, when it did (a watch that kept failing).
+  reason?: string
   // The id of the user item this event delivered — a relaunch's brief, or the
   // notification on a 'notified' (always present there) — which the timeline
   // tells inside the event's note rather than as the user speaking. Set by
@@ -799,6 +801,7 @@ export function pushEventItem(
     title?: string
     scheduledFor?: string
     awaiting?: { id: string; title: string }[]
+    reason?: string
   },
   at: string,
 ): EventItem {
@@ -810,6 +813,7 @@ export function pushEventItem(
     ...(ev.title !== undefined ? { title: ev.title } : {}),
     ...(ev.scheduledFor !== undefined ? { scheduledFor: ev.scheduledFor } : {}),
     ...(ev.awaiting !== undefined ? { awaiting: ev.awaiting } : {}),
+    ...(ev.reason !== undefined ? { reason: ev.reason } : {}),
   }
   ;(task.items ??= []).push(item)
   return item
@@ -1116,6 +1120,7 @@ export function publicTask<T extends object>(
   | 'hookFireSeq'
   | 'hookActionsResetAt'
   | 'hookActions'
+  | 'watchState'
 > & { flow: string } {
   const {
     token: _t,
@@ -1138,6 +1143,8 @@ export function publicTask<T extends object>(
     hookFireSeq: _hfs,
     hookActionsResetAt: _hra,
     hookActions: _ha,
+    // Each watch check's private state, which means nothing to a reader.
+    watchState: _ws,
     // Tasks saved while read-only tasks existed still carry the edit flag. No
     // code reads it, and served as `false` it would misreport the task's access.
     allowEdits: _ae,
@@ -1154,6 +1161,7 @@ export function publicTask<T extends object>(
     hookFireSeq?: unknown
     hookActionsResetAt?: unknown
     hookActions?: unknown
+    watchState?: unknown
     allowEdits?: unknown
     queued?: string[]
     items?: Item[]
@@ -1197,6 +1205,7 @@ export function publicTask<T extends object>(
   | 'hookFireSeq'
   | 'hookActionsResetAt'
   | 'hookActions'
+  | 'watchState'
   > & { flow: string }
 }
 
@@ -1348,6 +1357,8 @@ export function recordStatusTransition(
     revived?: RevivedMarker
     scheduledFor?: string
     waitingFor?: string[]
+    watch?: Watch
+    watchState?: Record<string, unknown>
     pendingHooks?: PendingHook[]
     hookFireSeq?: number
   },
@@ -1357,6 +1368,7 @@ export function recordStatusTransition(
   // The hook whose action caused this crossing, when one did. Rides onto the
   // fire so dispatch can skip that hook and only that hook.
   byHook?: string,
+  reason?: string,
 ): void {
   const prev = task.status
   if (prev === next) return
@@ -1364,7 +1376,11 @@ export function recordStatusTransition(
   // Entering a notable status records the arrival (and only the arrival, when
   // moving straight between two notable ones).
   if (next === 'wedged') {
-    pushEventItem(task, { eventKind: 'wedged', title: task.title }, at)
+    pushEventItem(
+      task,
+      { eventKind: 'wedged', title: task.title, ...(reason ? { reason } : {}) },
+      at,
+    )
     recordHookFire(task, { trigger: 'wedged', by, at, ...cause })
     return
   }
@@ -1385,6 +1401,8 @@ export function recordStatusTransition(
     // stale trigger left to fire.
     delete task.scheduledFor
     delete task.waitingFor
+    delete task.watch
+    delete task.watchState
     recordHookFire(task, { trigger: 'landed', by, at, ...cause })
   } else if (prev === 'wedged' || prev === 'landed') {
     const eventKind = prev === 'wedged' ? 'unwedged' : 'unlanded'
@@ -1694,15 +1712,74 @@ export function displayTime(iso: string): string {
 
 // The ride a task still has scheduled, for the turn about to start to be reminded
 // of.
-export function scheduledRideOf(task: {
-  scheduledFor?: string
-  waitingFor?: string[]
-}): ScheduledRide | undefined {
-  if (!task.scheduledFor && !task.waitingFor?.length) return undefined
+export function scheduledRideOf(task: PendingTriggers): ScheduledRide | undefined {
+  if (!hasPendingTrigger(task)) return undefined
   return {
     ...(task.scheduledFor ? { at: displayTime(task.scheduledFor) } : {}),
     ...(task.waitingFor?.length ? { awaiting: task.waitingFor } : {}),
+    ...(task.watch
+      ? { watching: { check: task.watch.check, args: task.watch.args } }
+      : {}),
   }
+}
+
+// A watch armed with `lander ride --watch`: a bundled check the scheduler runs
+// every WATCH_INTERVAL_MS until it fires. Its saved state lives apart, in
+// `watchState`, keyed by `watchStateKey`, so re-arming the same watch resumes
+// where the last one left off.
+export type Watch = {
+  check: string
+  args: Record<string, string>
+  armedAt: string
+  lastRunAt: string
+  // How many runs in a row have failed. Counted rather than timed, so a laptop
+  // asleep between two failures doesn't read as an hour of them.
+  failures?: number
+}
+
+export type PendingTriggers = {
+  scheduledFor?: string
+  waitingFor?: string[]
+  watch?: Watch
+}
+
+export function hasPendingTrigger(task: PendingTriggers): boolean {
+  return !!(task.scheduledFor || task.waitingFor?.length || task.watch)
+}
+
+export function clearPendingTriggers(task: PendingTriggers): void {
+  delete task.scheduledFor
+  delete task.waitingFor
+  delete task.watch
+}
+
+function watchStateKey(watch: Pick<Watch, 'check' | 'args'>): string {
+  const sorted = Object.fromEntries(
+    Object.entries(watch.args).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+  )
+  return `${watch.check} ${JSON.stringify(sorted)}`
+}
+
+export function watchStateOf(
+  task: { watchState?: Record<string, unknown> },
+  watch: Pick<Watch, 'check' | 'args'>,
+): unknown {
+  return task.watchState?.[watchStateKey(watch)]
+}
+
+export function saveWatchState(
+  task: { watchState?: Record<string, unknown> },
+  watch: Pick<Watch, 'check' | 'args'>,
+  state: unknown,
+): void {
+  ;(task.watchState ??= {})[watchStateKey(watch)] = state
+}
+
+export function watchNotification(
+  check: string,
+  message: string,
+): { text: string; from: LanderSender } {
+  return { text: `Watch \`${check}\` fired: ${message}`, from: { lander: 'watch' } }
 }
 
 // Whether what a task has scheduled is a ride it scheduled for itself, rather
@@ -1712,14 +1789,14 @@ export function scheduledRideOf(task: {
 // lander's notification of the trigger; a held-back trigger fires by driving
 // its queue, and a message that reaches the task drives it sooner, leaving the
 // trigger nothing to do.
-export function hasOwnScheduledRide(task: {
-  status: string
-  rides?: Ride[]
-  queued?: string[]
-  scheduledFor?: string
-  waitingFor?: string[]
-}): boolean {
-  if (!task.scheduledFor && !task.waitingFor?.length) return false
+export function hasOwnScheduledRide(
+  task: {
+    status: string
+    rides?: Ride[]
+    queued?: string[]
+  } & PendingTriggers,
+): boolean {
+  if (!hasPendingTrigger(task)) return false
   if (!task.rides?.length) return false
   return !(task.status === 'wedged' && task.queued?.length)
 }

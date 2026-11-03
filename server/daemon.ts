@@ -24,10 +24,13 @@ import type {
   HooksResolution,
   HookRunMessage,
   HookRunReport,
+  CheckRunMessage,
+  CheckOutcome,
   AgentKind,
   TelemetryItem,
 } from './protocol'
 import { clearAnnouncedFlows, setAnnouncedFlows } from './flows'
+import { setAnnouncedChecks } from './checks'
 
 // One run's inbound events, delivered in order to the reducer awaiting them. The
 // WS message handler pushes; reduceRunWs pulls via `next()`. A `crashed` event is
@@ -193,6 +196,7 @@ export function sendToDaemon(msg: ServerToDaemon): boolean {
     msg.type === 'project-grant' ||
     msg.type === 'hooks-resolve' ||
     msg.type === 'hook-run' ||
+    msg.type === 'check-run' ||
     msg.type === 'release-checkout'
   ) {
     // Not tied to a run, so there is no owner to follow — the primary answers.
@@ -354,6 +358,31 @@ export function requestHookRun(
   )
 }
 
+export type CheckRunResponse = {
+  ok: boolean
+  error?: string
+  // 503 when no daemon could be asked, 504 when it did not answer in time.
+  status?: number
+  outcome?: CheckOutcome
+}
+
+// Ask the daemon to run one watch check. The message's `timeoutMs` is the check's
+// budget; `waitMs` is ours, and must exceed it so the daemon's own timeout
+// answer is the one that arrives.
+export function requestCheckRun(
+  input: Omit<CheckRunMessage, 'type' | 'requestId'> & { waitMs: number },
+): Promise<CheckRunResponse> {
+  const { waitMs, ...msg } = input
+  return askDaemon<CheckRunResponse>(
+    (requestId) => ({ type: 'check-run', requestId, ...msg }),
+    {
+      timeoutMs: waitMs,
+      onTimeout: { ok: false, error: 'daemon did not answer check request', status: 504 },
+      onUnsent: { ok: false, error: 'no daemon connected', status: 503 },
+    },
+  )
+}
+
 // Open run-ids that no currently-connected daemon owns — candidates to crash once
 // the reconnect grace lapses (their daemon never came back to claim them).
 function unownedOpenRuns(): string[] {
@@ -444,6 +473,7 @@ export function attachDaemonServer(
     // set. Callers adopt only non-draining registrations, so a draining daemon
     // can't overwrite the live registry on its way out.
     setAnnouncedFlows(msg.flows ?? [])
+    setAnnouncedChecks(msg.checks ?? [])
     registeredSlugs.clear()
     for (const p of msg.projects) registeredSlugs.add(p.slug)
     opts.onRegister?.([...registeredSlugs])
@@ -456,6 +486,7 @@ export function attachDaemonServer(
     registeredSlugs.clear()
     // The registry describes the PRIMARY's capabilities, so it goes with it.
     clearAnnouncedFlows()
+    setAnnouncedChecks([])
     const next = [...registrations].reverse().find(([, m]) => !m.draining)
     if (next) adopt(...next)
   }
@@ -584,6 +615,14 @@ export function attachDaemonServer(
             status: msg.status,
             report: msg.report,
           } satisfies HookRunResponse)
+          break
+        case 'check-run-result':
+          settleRequest(msg.requestId, {
+            ok: msg.ok,
+            error: msg.error,
+            status: msg.status,
+            outcome: msg.outcome,
+          } satisfies CheckRunResponse)
           break
         case 'telemetry': {
           const flow = msg.flow ?? msg.agent

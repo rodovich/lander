@@ -397,6 +397,19 @@ export function buildRevivedBlock(revived: RevivedMarker): string {
 // agent re-schedules a ride that is still there, or forgets one it no longer
 // needs. Shaped like buildRevivedBlock for the same reason.
 export function buildScheduledRideBlock(ride: ScheduledRide): string {
+  if (ride.watching) {
+    const args = Object.entries(ride.watching.args)
+      .map(([k, v]) => `${k}=${v}`)
+      .join(', ')
+    return [
+      '<ride-scheduled>',
+      `You are watching \`${ride.watching.check}\`${args ? ` (${args})` : ''}; ` +
+        'it wakes you when it fires. It stays armed unless you clear it with ' +
+        '`lander ride --clear`; scheduling another ride with `lander ride` ' +
+        'replaces it.',
+      '</ride-scheduled>',
+    ].join('\n')
+  }
   const awaiting = ride.awaiting ?? []
   const landing = awaiting.length
     ? `when ${awaiting.join(', ')} ${awaiting.length > 1 ? 'have all landed' : 'lands'}`

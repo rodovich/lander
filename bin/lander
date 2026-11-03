@@ -454,7 +454,32 @@ async function rideTask(args) {
     else if (a === '--time') o.time = Number(args[++i])
     else if (a === '--after') o.after = args[++i]
     else if (a === '--clear') o.clear = true
-    else die(`ride: unexpected argument ${a}`)
+    else if (a === '--watch') o.watch = { check: args[++i], args: {} }
+    else if (a === '--arg') {
+      const kv = args[++i] ?? ''
+      const eq = kv.indexOf('=')
+      if (eq <= 0) die('ride: --arg must be <key>=<value>')
+      ;(o.watchArgs ??= {})[kv.slice(0, eq)] = kv.slice(eq + 1)
+    } else die(`ride: unexpected argument ${a}`)
+  }
+  if (o.watchArgs && !o.watch) die('ride: --arg needs --watch')
+  if (o.watch) {
+    if (!o.watch.check) die('ride: --watch needs a check name')
+    if (o.clear || o.date != null || o.time != null || o.after != null)
+      die('ride --watch combines with no other trigger (--date/--time/--after/--clear)')
+    o.watch.args = o.watchArgs ?? {}
+    const res = await call(PROJECT, `/tasks/${TASK}/ride`, {
+      method: 'POST',
+      body: JSON.stringify({ watch: o.watch }),
+    })
+    // A watch whose change has already happened is not armed, and the turn
+    // that asked must not end expecting a wake.
+    console.log(
+      res.fired
+        ? `Not armed: the watch fired now. ${res.message}`
+        : `watching ${o.watch.check}; it wakes this task when it fires`,
+    )
+    return
   }
   if (o.clear) {
     if (o.date != null || o.time != null || o.after != null)

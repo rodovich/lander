@@ -31,9 +31,12 @@ import {
   closeRunChannel,
   requestResume,
   requestProjectGrant,
+  requestCheckRun,
 } from './daemon'
+import { announcedChecks, checkRefusal, readChecksStore, setCheckEnabled } from './checks'
 import type {
   AgentKind,
+  CheckOutcome,
   CheckoutReport,
   HookSelector,
   RevivedMarker,
@@ -95,6 +98,12 @@ import {
   rideAttachments,
   scheduledRideOf,
   hasOwnScheduledRide,
+  hasPendingTrigger,
+  clearPendingTriggers,
+  watchNotification,
+  watchStateOf,
+  saveWatchState,
+  type Watch,
   clearScheduledTime,
   asList,
   type NotifyArming,
@@ -158,6 +167,7 @@ import {
   selectorsFor,
   setTrustRoot,
   taskCheckout,
+  checkoutHints,
 } from './hooks'
 import { readHookCredential, hookCredentialFor, HookRefusal } from './hook-runs'
 import { dispatchPendingHooks, hookDispatchInFlightFor } from './hook-dispatch'
@@ -179,6 +189,8 @@ const DATA_ROOT = process.env.LANDER_DATA_ROOT
   : path.join(ROOT, 'data')
 
 const PROJECTS = parseProjects(DATA_ROOT, process.env, process.cwd())
+// Which bundled watch checks the user has switched on (see checks.ts).
+const CHECKS_FILE = path.join(DATA_ROOT, 'checks.json')
 const PROJECT_BY_SLUG = new Map<string, Project>(
   PROJECTS.map((p) => [p.slug, p]),
 )
@@ -345,6 +357,11 @@ type Task = {
   // that wakes the task early, since a dependency on siblings outlives that.
   // Absent when not awaiting.
   waitingFor?: string[]
+  // A watch the task armed (`lander ride --watch`), and every watch's saved
+  // check state. Landing deletes both; a message that wakes the task early
+  // leaves the watch, as it leaves an await.
+  watch?: Watch
+  watchState?: Record<string, unknown>
   // The tasks to wake once, when THIS task next finishes a turn cleanly: the
   // launcher, armed at creation by `lander launch --await`, and any task whose
   // `lander send --await` this task has read (deliverQueuedBatch). Each names
@@ -1140,6 +1157,9 @@ type LaunchTrigger =
   | { kind: 'time' }
   | { kind: 'await'; landed: string[] }
   | { kind: 'manual' }
+  // A watch's check fired. `armedAt` names the arm that was checked, so a watch
+  // re-armed or cleared since is not fired by its predecessor's result.
+  | { kind: 'watch'; armedAt: string; message: string; state: unknown }
 
 // Launch a deferred (scheduled) task now: clear its scheduledFor, record the
 // "launched" event, mark it riding, and drive its queued opening message.
@@ -1164,10 +1184,15 @@ async function launchTask(
   let go = false
   let claimed = false
   await mutateTask(file, (t) => {
-    // Launch on either pending trigger (a scheduled time or an await condition);
-    // the scheduler only calls us once one has fired. Clear both so the OR
-    // fallback doesn't re-fire the task after it's running.
-    if ((!t.scheduledFor && !t.waitingFor) || running.has(taskKey(project.slug, id))) return
+    // Launch on the trigger that fired; the scheduler only calls us once one has.
+    // A time or await clears both of those, so the OR fallback doesn't re-fire
+    // the task after it's running.
+    if (running.has(taskKey(project.slug, id))) return
+    const fire = trigger.kind === 'watch' ? trigger : undefined
+    const watch = fire ? t.watch : undefined
+    if (fire) {
+      if (!watch || watch.armedAt !== fire.armedAt || t.status === 'wedged') return
+    } else if (!t.scheduledFor && !t.waitingFor) return
     // Read before the deletes and the status change below erase what it reads.
     const prompted = hasOwnScheduledRide(t)
     // The caller resolved `landed` outside this lock, so the arm being cleared
@@ -1179,8 +1204,16 @@ async function launchTask(
       !!landed?.length &&
       landed.length === awaited.length &&
       landed.every((w) => awaited.includes(w))
-    delete t.scheduledFor
-    delete t.waitingFor
+    // A time or await firing leaves a watch armed: the two coexist only when a
+    // session-limit retry was scheduled on a watching task, and the watch should
+    // outlast that retry as it outlasts a message.
+    if (fire && watch) {
+      saveWatchState(t, watch, fire.state)
+      delete t.watch
+    } else {
+      delete t.scheduledFor
+      delete t.waitingFor
+    }
     const at = new Date().toISOString()
     // A task that scheduled a session-limit retry stayed wedged until now (see
     // the /retry handler), so record the un-wedge a hair ahead of the launch —
@@ -1197,7 +1230,10 @@ async function launchTask(
     // The human's Launch button fired no trigger: it is the human telling the task
     // to proceed, in their own voice.
     if (prompted && trigger.kind !== 'manual') {
-      const { text, from } = wakeupNotification(at, fired ? landed : undefined)
+      const { text, from } =
+        fire && watch
+          ? watchNotification(watch.check, fire.message)
+          : wakeupNotification(at, fired ? landed : undefined)
       const event = pushEventItem(t, { eventKind: 'notified', title: t.title }, at)
       ;(t.queued ??= []).push(attributedPrompt(pushEventPrompt(t, event, text, at, from)))
     } else {
@@ -1518,7 +1554,113 @@ async function sweepOnce(): Promise<void> {
             ? { kind: 'await', landed: task.waitingFor! }
             : { kind: 'time' },
         )
+      // Below the `running` guard like the notification above, and for the same
+      // reason: a fire can only be delivered to a task that is waiting. Not
+      // awaited, since a check may take its whole budget.
+      else if (
+        task.watch &&
+        task.status !== 'wedged' &&
+        Date.parse(task.watch.lastRunAt) + WATCH_INTERVAL_MS <= now &&
+        !watchesInFlight.has(taskKey(project.slug, id))
+      )
+        void runWatch(project, id, task, task.watch)
     }
+  }
+}
+
+// How often a watch's check runs, the check's own budget, and how long the
+// server waits for its answer — longer than the budget, so the daemon's timeout
+// answer is the one that arrives.
+const WATCH_INTERVAL_MS = 5 * 60_000
+const CHECK_BUDGET_MS = 20_000
+const CHECK_WAIT_MS = 30_000
+// About an hour of runs at WATCH_INTERVAL_MS.
+const WATCH_MAX_FAILURES = 12
+
+const watchesInFlight = new Set<string>()
+
+function checkRunRequest(
+  project: Project,
+  id: string,
+  task: Task,
+  watch: Pick<Watch, 'check' | 'args'>,
+) {
+  return requestCheckRun({
+    project: project.slug,
+    ...checkoutHints(id, task),
+    check: watch.check,
+    args: watch.args,
+    prevState: watchStateOf(task, watch),
+    timeoutMs: CHECK_BUDGET_MS,
+    waitMs: CHECK_WAIT_MS,
+  })
+}
+
+// Run one due watch and apply what its check said. A result is applied only to
+// the arm it was run for, and only while the task is neither running nor wedged;
+// otherwise it is dropped without saving its state, so the next run sees the
+// same change.
+async function runWatch(
+  project: Project,
+  id: string,
+  task: Task,
+  watch: Watch,
+): Promise<void> {
+  const key = taskKey(project.slug, id)
+  watchesInFlight.add(key)
+  try {
+    // The switch is consulted on every run, not only when arming, so switching a
+    // check off stops the watches already armed on it. A check no daemon has
+    // announced is skipped rather than refused: a daemon handoff clears the list.
+    const refusal = await checkRefusal(CHECKS_FILE, watch.check)
+    if (refusal?.reason === 'unknown') return
+    let outcome: CheckOutcome
+    if (refusal) outcome = { kind: 'error', error: refusal.message, permanent: true }
+    else {
+      const res = await checkRunRequest(project, id, task, watch)
+      // No daemon to ask is an outage of the whole instance, not of this check.
+      if (!res.ok && res.status === 503) return
+      outcome = res.outcome ?? {
+        kind: 'error',
+        error: res.error ?? 'check failed',
+        permanent: false,
+      }
+    }
+    if (outcome.kind === 'fired') {
+      await launchTask(project, id, 'system', {
+        kind: 'watch',
+        armedAt: watch.armedAt,
+        message: outcome.message,
+        state: outcome.state,
+      })
+      return
+    }
+    await mutateTask(path.join(project.dataDir, `${id}.json`), (t) => {
+      if (t.watch?.armedAt !== watch.armedAt) return
+      if (running.has(key) || t.status === 'wedged') return
+      const at = new Date().toISOString()
+      t.watch.lastRunAt = at
+      if (outcome.kind === 'quiet') {
+        saveWatchState(t, watch, outcome.state)
+        delete t.watch.failures
+        return
+      }
+      t.watch.failures = (t.watch.failures ?? 0) + 1
+      if (!outcome.permanent && t.watch.failures < WATCH_MAX_FAILURES) return
+      delete t.watch
+      recordStatusTransition(
+        t,
+        'wedged',
+        at,
+        'system',
+        undefined,
+        `watch ${watch.check} failed: ${outcome.error}`,
+      )
+      t.status = 'wedged'
+      t.updatedAt = at
+    }).catch(() => {})
+  } finally {
+    watchesInFlight.delete(key)
   }
 }
 
@@ -1935,6 +2077,28 @@ app.post('/api/:project/hooks/approve', async (c) => {
   return c.json({ ok: true })
 })
 
+app.get('/api/checks', async (c) => {
+  const { enabled } = await readChecksStore(CHECKS_FILE)
+  return c.json({
+    checks: announcedChecks().map((meta) => ({
+      ...meta,
+      enabled: enabled.includes(meta.name),
+    })),
+  })
+})
+
+// Human-only, like approving a hook: a check reads outside systems with the
+// user's credentials, so a task must not be able to switch one on for itself.
+app.post('/api/checks/:name', async (c) => {
+  if (c.get('principal').kind !== 'ui')
+    return c.json({ error: 'not authorized to switch checks' }, 403)
+  const { enabled } = await c.req.json<{ enabled?: unknown }>()
+  if (typeof enabled !== 'boolean')
+    return c.json({ error: 'enabled must be true or false' }, 400)
+  const store = await setCheckEnabled(CHECKS_FILE, c.req.param('name'), enabled)
+  return c.json({ enabled: store.enabled })
+})
+
 // The last gate before a hook body is imported: the host asks whether the pair
 // it was dispatched with is approved *now*, and refuses to materialize if not.
 //
@@ -2203,6 +2367,22 @@ function resolveSchedule(body: {
     }
   }
   return { scheduledFor: null }
+}
+
+function parseWatchBody(
+  raw: unknown,
+): { check: string; args: Record<string, string> } | { error: string } {
+  const { check, args } = (raw ?? {}) as { check?: unknown; args?: unknown }
+  if (typeof check !== 'string' || !check.trim())
+    return { error: '--watch needs a check name' }
+  if (args != null && (typeof args !== 'object' || Array.isArray(args)))
+    return { error: 'watch args must be an object' }
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(args ?? {})) {
+    if (typeof v !== 'string') return { error: `watch arg ${k} must be a string` }
+    out[k] = v
+  }
+  return { check: check.trim(), args: out }
 }
 
 // Resolve the repeating-relaunch flags (`lander relaunch --interval <minutes>`
@@ -2821,7 +3001,7 @@ async function landFromHook(
       if (openRide(t) || t.runId || t.queued?.length || running.has(taskKey(project.slug, id)))
         throw new HookRefusal('riding')
       // The wakeup the crossing would silently delete.
-      if (t.scheduledFor || t.waitingFor?.length) throw new HookRefusal('scheduled')
+      if (hasPendingTrigger(t)) throw new HookRefusal('scheduled')
 
       const accepted = acceptHookAction(t, {
         hook: cred.path,
@@ -3065,25 +3245,75 @@ app.post('/api/:project/tasks/:id/ride', async (c) => {
       time?: unknown
       after?: unknown
       clear?: unknown
+      watch?: unknown
     }>()
 
     if (body.clear) {
-      if (body.date != null || body.time != null || body.after != null)
+      if (
+        body.date != null ||
+        body.time != null ||
+        body.after != null ||
+        body.watch != null
+      )
         return c.json(
-          { error: 'clear takes no trigger (--date/--time/--after)' },
+          { error: 'clear takes no trigger (--date/--time/--after/--watch)' },
           400,
         )
       let cleared = false
       await mutateTask(file, (t) => {
-        cleared = t.scheduledFor != null || (t.waitingFor?.length ?? 0) > 0
+        cleared = hasPendingTrigger(t)
         if (!cleared) return
-        delete t.scheduledFor
-        delete t.waitingFor
+        clearPendingTriggers(t)
         t.updatedAt = new Date().toISOString()
       })
       const task = await readTask(project.dataDir, id)
       if (!task) return c.json({ error: 'task not found' }, 404)
       return c.json({ ...publicTask(task), cleared })
+    }
+
+    if (body.watch != null) {
+      if (body.date != null || body.time != null || body.after != null)
+        return c.json(
+          { error: '--watch combines with no other trigger (--date/--time/--after)' },
+          400,
+        )
+      const watch = parseWatchBody(body.watch)
+      if ('error' in watch) return c.json({ error: watch.error }, 400)
+      const refusal = await checkRefusal(CHECKS_FILE, watch.check)
+      if (refusal) return c.json({ error: refusal.message }, 400)
+      const task = await readTask(project.dataDir, id)
+      if (!task) return c.json({ error: 'task not found' }, 404)
+      // The first run happens now, outside the task's lock, so the arming turn's
+      // streamed updates don't queue behind a check that takes its whole budget.
+      const res = await checkRunRequest(project, id, task, watch)
+      if (!res.ok || !res.outcome)
+        return c.json({ error: `could not run ${watch.check}: ${res.error}` }, 503)
+      const outcome = res.outcome
+      if (outcome.kind === 'error')
+        return c.json({ error: outcome.error }, outcome.permanent ? 400 : 503)
+      const armedAt = new Date().toISOString()
+      let landed = false
+      await mutateTask(file, (t) => {
+        // Landed while the check ran: arming now would revive it.
+        landed = t.status === 'landed' && task.status !== 'landed'
+        if (landed) return
+        saveWatchState(t, watch, outcome.state)
+        clearPendingTriggers(t)
+        if (outcome.kind === 'fired') return
+        recordStatusTransition(t, 'riding', armedAt, hookBy(principal, project.slug, id))
+        noteHumanContact(t, principal, armedAt)
+        t.watch = { ...watch, armedAt, lastRunAt: armedAt }
+        t.status = 'riding'
+        t.updatedAt = armedAt
+      })
+      if (landed) return c.json({ error: 'the task landed; no watch armed' }, 409)
+      const armed = await readTask(project.dataDir, id)
+      if (!armed) return c.json({ error: 'task not found' }, 404)
+      return c.json(
+        outcome.kind === 'fired'
+          ? { ...publicTask(armed), fired: true, message: outcome.message }
+          : publicTask(armed),
+      )
     }
 
     const sched = resolveSchedule(body)
@@ -3110,10 +3340,9 @@ app.post('/api/:project/tasks/:id/ride', async (c) => {
       recordStatusTransition(t, 'riding', at, hookBy(principal, project.slug, id))
       noteHumanContact(t, principal, at)
       // Replace any prior triggers so re-arming doesn't leave a stale one armed.
+      clearPendingTriggers(t)
       if (scheduledFor) t.scheduledFor = scheduledFor
-      else delete t.scheduledFor
       if (waitingFor) t.waitingFor = waitingFor
-      else delete t.waitingFor
       // An await condition is what's shown (with its links) even alongside a time
       // fallback; a pure time wakeup keeps the scheduled event.
       pushEventItem(
@@ -4220,7 +4449,7 @@ export async function recoverQueues(): Promise<void> {
       // had already run. A ride a task scheduled for itself holds nothing back, so
       // a turn another task woke it for is recovered like any other.
       if (
-        (task.scheduledFor || task.waitingFor?.length) &&
+        hasPendingTrigger(task) &&
         !hasOwnScheduledRide(task)
       )
         continue

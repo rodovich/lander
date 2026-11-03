@@ -1588,6 +1588,12 @@ body {
 
 /* The list layout stacks the time under the status with a small offset; in
    the header's single row that offset would knock it out of line. */
+.task-watch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .detail-meta .task-time {
   margin-top: 0;
 }
@@ -3176,6 +3182,34 @@ body.resizing-row {
 }
 
 .hook-note {
+  color: var(--muted);
+}
+
+.watch-check-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Checkbox in its own column, so every name and description lines up. */
+.watch-check {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  row-gap: 2px;
+  align-items: baseline;
+  cursor: pointer;
+}
+
+.watch-check input {
+  margin: 0;
+}
+
+.watch-check-description {
+  grid-column: 2;
   color: var(--muted);
 }
 

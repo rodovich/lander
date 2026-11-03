@@ -115,6 +115,7 @@ export type RevivedMarker = {
 export type ScheduledRide = {
   at?: string
   awaiting?: string[]
+  watching?: { check: string; args: Record<string, string> }
 }
 
 // Launch a run: like today's RunJob minus the file paths and the absolute cwd.
@@ -298,22 +299,25 @@ export type HooksResolution = {
   }
 }
 
+// Which checkout to work in, as hints the daemon resolves the same way it
+// resolves a run's launch dir — so a task working in its own checkout is
+// answered from that checkout. All absent → the project root.
+//
+// `taskId` locates a checkout the daemon manages for the task, which it
+// derives from the id rather than from any hint the task wrote.
+export type CheckoutHints = {
+  taskId?: string
+  flow?: string
+  recordedCwd?: string
+}
+
 // Ask the daemon what a checkout declares. Request/response like
 // `project-grant`: the server correlates on `requestId` and times out on its own.
-export type HooksResolveMessage = {
+export type HooksResolveMessage = CheckoutHints & {
   type: 'hooks-resolve'
   requestId: string
   // The project slug; the daemon maps it to a host path.
   project: string
-  // Which checkout to read, as hints the daemon resolves the same way it
-  // resolves a run's launch dir — so a task working in its own checkout is
-  // answered from that checkout's HEAD. All absent → the project root.
-  //
-  // `taskId` locates a checkout the daemon manages for the task, which it
-  // derives from the id rather than from any hint the task wrote.
-  taskId?: string
-  flow?: string
-  recordedCwd?: string
   // The remote-tracking ref this project approves wholesale, when it designates
   // one. The server holds the setting; the daemon only reads the ref.
   trustRoot?: string
@@ -411,6 +415,41 @@ export type HookRunResultMessage = {
   report?: HookRunReport
 }
 
+// A bundled watch check, as the daemon announces it.
+export type CheckMeta = {
+  name: string
+  description: string
+  args: Record<string, { required?: boolean; description: string }>
+}
+
+// Run one watch check for one task, in the task's checkout.
+export type CheckRunMessage = CheckoutHints & {
+  type: 'check-run'
+  requestId: string
+  project: string
+  check: string
+  args: Record<string, string>
+  // The state last saved for this task, check, and args; absent on the first
+  // run.
+  prevState?: unknown
+  // The check's budget, below the server's wait so its answer always arrives.
+  timeoutMs: number
+}
+
+export type CheckOutcome =
+  | { kind: 'quiet'; state: unknown }
+  | { kind: 'fired'; state: unknown; message: string }
+  | { kind: 'error'; error: string; permanent: boolean }
+
+export type CheckRunResultMessage = {
+  type: 'check-run-result'
+  requestId: string
+  ok: boolean
+  error?: string
+  status?: number
+  outcome?: CheckOutcome
+}
+
 // The task is done with its checkout — landed with nothing left to run against
 // it, or archived. The daemon removes the git worktree it manages for the task,
 // if there is one; it owns whether there is, so this is sent for any landing or
@@ -430,6 +469,7 @@ export type ServerToDaemon =
   | AckMessage
   | HooksResolveMessage
   | HookRunMessage
+  | CheckRunMessage
   | ReleaseCheckoutMessage
 
 // The server has applied a `register`: if it was not draining, the daemon that
@@ -467,6 +507,9 @@ export type RegisterMessage = {
   // because such a daemon can only run the legacy flows, and those carry
   // StartRunMessage.agent and bypass the gate.
   flows?: FlowAnnouncement[]
+  // The bundled watch checks this daemon can run. Absent from an older daemon,
+  // which the server reads as none.
+  checks?: CheckMeta[]
 }
 
 // A structured run update — one reduced batch of stream output, plus the
@@ -673,3 +716,4 @@ export type DaemonToServer =
   | TelemetryMessage
   | HooksResolveResultMessage
   | HookRunResultMessage
+  | CheckRunResultMessage

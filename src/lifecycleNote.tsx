@@ -94,6 +94,7 @@ export function LifecycleNote({
             </span>
           )}
       </span>
+      {event.reason && <>: {event.reason}</>}
     </>
   )
   return message ? (

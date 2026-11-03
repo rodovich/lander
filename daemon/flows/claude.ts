@@ -22,6 +22,7 @@ import {
 import { fetchUsage, usageStatus, type UsageStatus } from '../../server/usage'
 import type { Ctx, FlowMeta, GroupHandle, ToolHandle, TurnResult } from './ctx'
 import type { AgentLaunchDir, AgentLaunchDirInput } from '../agent'
+import { isInside } from '../paths'
 
 export const meta: FlowMeta = {
   api: 1,
@@ -377,11 +378,6 @@ function buildContextBlock(
 }
 
 // Whether `p` is strictly below `dir`.
-function isInside(dir: string, p: string): boolean {
-  const rel = path.relative(dir, p)
-  return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel)
-}
-
 // Deliberately silent on HOW: whether a location carries into the next turn
 // depends on how the agent got there (a plain `cd` doesn't; Claude restores a
 // worktree it entered itself), and that has changed under us before.

@@ -11,7 +11,8 @@
 //          hosts and agent children this process spawns — see server/secrets.ts)
 
 import path from 'node:path'
-import { ROOT } from './paths'
+import { ROOT, isInside } from './paths'
+import { realpath } from 'node:fs/promises'
 import { projectDirs, projectSlug } from '../server/projects'
 import {
   FLOW_MODULES,
@@ -28,6 +29,8 @@ import type {
   StartRunMessage,
   HooksResolveMessage,
   HookRunMessage,
+  CheckRunMessage,
+  CheckoutHints,
   ProjectGrantMessage,
   RegisterMessage,
   ReleaseCheckoutMessage,
@@ -37,6 +40,7 @@ import { createReply, type ReplyBody, type ReplyMessage } from './reply'
 import { taskApiHeaders } from './task-api'
 import { gitExec, resolveHooks } from './hooks'
 import { createHookRuns, runHook } from './hook-run'
+import { bundledCheckMetas, runCheck } from './checks'
 import { existsSync, statSync } from 'node:fs'
 import { createProjectOptions } from './config'
 import {
@@ -256,9 +260,10 @@ function resolveRunPaths(msg: StartRunMessage, caps: ProviderCaps): RunPaths {
   return { root, cwd: launch.cwd }
 }
 
-// Which checkout a hook resolution reads. The tree that matters is the one the
-// target task is working in: its own checkout when it has one, otherwise
-// wherever the same provider-owned resolveLaunchDir a run uses would launch it.
+// Which checkout a hook resolution reads, or a watch check works in. The tree
+// that matters is the one the target task is working in: its own checkout when
+// it has one, otherwise wherever the same provider-owned resolveLaunchDir a run
+// uses would launch it.
 //
 // It falls back to the project root twice over: for a flow the daemon does not
 // know (a resolve can arrive for any task, including one whose flow this build
@@ -267,12 +272,13 @@ function resolveRunPaths(msg: StartRunMessage, caps: ProviderCaps): RunPaths {
 // project's — where answering from a missing directory would report "not a git
 // repository" for a repository that plainly is one.
 //
-// The root travels with it because resolution checks that the two are the same
-// repository before reading the target's: the recorded cwd is task-writable, so
-// a directory being under the project root does not make it the project's tree.
-function resolveHooksCwd(
+// The root travels with it because the recorded cwd is task-writable, so a
+// directory being under the project root does not make it the project's tree:
+// hook resolution checks that the two are the same repository before reading the
+// target's, and a watch check confines itself to the root (runWatchCheck).
+function resolveTaskCwd(
   project: string,
-  hints: { taskId?: string; flow?: string; recordedCwd?: string },
+  hints: CheckoutHints,
 ): {
   root: string
   cwd: string
@@ -444,6 +450,10 @@ function onMessage(raw: string): void {
       return
     case 'hook-run':
       return runHookFire(msg)
+    // Taken while draining too: a check only reads, and is bounded by its budget.
+    case 'check-run':
+      void reply('check-run-result', msg.requestId, () => runWatchCheck(msg))
+      return
     // Taken while draining too: it spawns no run, and the drain waits for it.
     case 'release-checkout':
       return releaseCheckout(msg)
@@ -512,7 +522,7 @@ async function grantProject(
 async function resolveHooksFor(
   msg: HooksResolveMessage,
 ): Promise<ReplyBody<'hooks-resolve-result'>> {
-  const { root, cwd } = resolveHooksCwd(msg.project, msg)
+  const { root, cwd } = resolveTaskCwd(msg.project, msg)
   const resolution = await resolveHooks(gitExec, {
     root,
     cwd,
@@ -521,6 +531,24 @@ async function resolveHooksFor(
     ...(msg.history ? { history: msg.history } : {}),
   })
   return { ok: true, resolution }
+}
+
+async function runWatchCheck(
+  msg: CheckRunMessage,
+): Promise<ReplyBody<'check-run-result'>> {
+  const { root, cwd } = resolveTaskCwd(msg.project, msg)
+  // The recorded cwd is task-writable, and a symlink under the project root can
+  // point anywhere, so a check works in it only if it really is under the root.
+  const [realRoot, realCwd] = await Promise.all([realpath(root), realpath(cwd)])
+  const confined = realCwd === realRoot || isInside(realRoot, realCwd) ? cwd : root
+  const outcome = await runCheck(
+    msg.check,
+    { cwd: confined },
+    msg.args,
+    msg.prevState,
+    msg.timeoutMs,
+  )
+  return { ok: true, outcome }
 }
 
 function runHookFire(msg: HookRunMessage): void {
@@ -543,7 +571,7 @@ function runHookFire(msg: HookRunMessage): void {
     // are asked to tolerate.
     if (hookRuns.has(msg.fireId))
       return { ok: true, report: { outcome: 'already-running', reports: [] } }
-    const { root, cwd } = resolveHooksCwd(msg.project, {
+    const { root, cwd } = resolveTaskCwd(msg.project, {
       ...msg.target,
       taskId: msg.target.id,
     })
@@ -616,6 +644,7 @@ function sendRegister(): void {
     // flow is bundled today; the scope envelope leaves room for user- and
     // project-scoped flows without another wire change.
     flows: announcedFlows(),
+    checks: bundledCheckMetas(),
   })
 }
 

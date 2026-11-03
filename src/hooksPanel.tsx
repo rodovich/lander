@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { loadHooks, setHookApproval, setTrustedBranch } from './api'
+import {
+  loadChecks,
+  loadHooks,
+  setCheckEnabled,
+  setHookApproval,
+  setTrustedBranch,
+} from './api'
 import { PanelHeader } from './panelHeader'
 import { MonotonicRequestGate } from './requestOrder'
-import type { Hook, ProjectHooks } from './types'
+import type { Hook, ProjectHooks, WatchCheck } from './types'
 
 // A project's hooks: the modules its tree declares under `.lander/hooks/`, and
 // the two independent ways one comes to be allowed to run — a human approving
@@ -185,6 +191,44 @@ export function HooksList({
   )
 }
 
+// The bundled watch checks, which are the user's rather than the project's: a
+// check runs with the same credentials whichever project's task arms it.
+export function WatchChecks({
+  checks,
+  busy,
+  onSetEnabled,
+}: {
+  checks: WatchCheck[]
+  busy: boolean
+  onSetEnabled: (check: WatchCheck, enabled: boolean) => void
+}) {
+  return (
+    <section className="hooks-section">
+      <h3 className="hooks-section-title">Watch checks</h3>
+      <p className="hooks-note">
+        A task can wait on one of these with <code>lander ride --watch</code> only
+        while it is enabled. These settings apply to every project.
+      </p>
+      <ul className="watch-check-list">
+        {checks.map((check) => (
+          <li key={check.name}>
+            <label className="watch-check">
+              <input
+                type="checkbox"
+                checked={check.enabled}
+                disabled={busy}
+                onChange={(e) => onSetEnabled(check, e.target.checked)}
+              />
+              <span className="hook-name">{check.name}</span>
+              <span className="watch-check-description">{check.description}</span>
+            </label>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
 // The panel proper: loads the navbar's project's hooks, and reloads after every
 // change, since approving a version can change what a different path resolves to.
 export function HooksPanel({
@@ -195,6 +239,7 @@ export function HooksPanel({
   onClose: () => void
 }) {
   const [hooks, setHooks] = useState<ProjectHooks | null>(null)
+  const [checks, setChecks] = useState<WatchCheck[]>([])
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const reloadOrderRef = useRef(new MonotonicRequestGate())
@@ -223,11 +268,23 @@ export function HooksPanel({
     return () => reloadOrderRef.current.invalidate()
   }, [reload])
 
+  const reloadChecks = useCallback(async () => {
+    try {
+      setChecks(await loadChecks())
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
+
+  useEffect(() => {
+    void reloadChecks()
+  }, [reloadChecks])
+
   const act = async (run: () => Promise<unknown>) => {
     setBusy(true)
     try {
       await run()
-      await reload()
+      await Promise.all([reload(), reloadChecks()])
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -255,6 +312,15 @@ export function HooksPanel({
               onSave={(ref) => void act(() => setTrustedBranch(slug, ref))}
             />
           </>
+        )}
+        {checks.length > 0 && (
+          <WatchChecks
+            checks={checks}
+            busy={busy}
+            onSetEnabled={(check, enabled) =>
+              void act(() => setCheckEnabled(check.name, enabled))
+            }
+          />
         )}
       </div>
     </>

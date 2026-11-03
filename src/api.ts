@@ -10,6 +10,7 @@ import type {
   TaskLink,
   TaskWithProject,
   TelemetryItem,
+  WatchCheck,
 } from './types'
 
 // The per-flow status telemetry map (agent → items) the tasks poll carries. Global,
@@ -175,6 +176,25 @@ export async function loadHooks(slug: string): Promise<ProjectHooks> {
   const body = await r.json().catch(() => ({}))
   if (!r.ok) throw new Error(body.error ?? r.statusText)
   return body as ProjectHooks
+}
+
+export async function loadChecks(): Promise<WatchCheck[]> {
+  const r = await fetch('/api/checks', { headers: uiHeaders() })
+  const body = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(body.error ?? r.statusText)
+  return (body as { checks: WatchCheck[] }).checks
+}
+
+// Switch a bundled watch check on or off. Human-only server-side: a check reads
+// outside systems with the user's credentials.
+export async function setCheckEnabled(name: string, enabled: boolean): Promise<void> {
+  const r = await fetch(`/api/checks/${encodeURIComponent(name)}`, {
+    method: 'POST',
+    headers: uiHeaders(),
+    body: JSON.stringify({ enabled }),
+  })
+  const body = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(body.error ?? r.statusText)
 }
 
 // Approve, or withdraw approval of, one version of one hook. Human-only

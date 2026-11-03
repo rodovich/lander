@@ -133,7 +133,7 @@ export type MessageItem = ItemCommon & {
   from?:
     | { hook: string; path: string; fireId: string }
     | { task: string; via: 'launch' | 'send' | 'notify' | 'relaunch' }
-    | { lander: 'time' | 'await' | 'restart' }
+    | { lander: 'time' | 'await' | 'watch' | 'restart' }
   attachments?: Attachment[]
   // Set on a user message once a queued batch delivers it: the ride that
   // consumed it. Absent on converted history.
@@ -168,6 +168,8 @@ export type EventItem = ItemCommon & {
   title?: string
   scheduledFor?: string
   awaiting?: { id: string; title: string }[]
+  // Why lander itself wedged the task (a watch that kept failing).
+  reason?: string
   // The user item this event delivered (a relaunch's brief, a wakeup's
   // notification), told inside the
   // event's note rather than as the user speaking. See buildTimeline.
@@ -307,6 +309,8 @@ export type Task = {
   // Task ids this task is waiting on (`--after`); the scheduler launches it once
   // all have landed. Present only while awaiting; may coexist with scheduledFor.
   waitingFor?: string[]
+  // Armed with `lander ride --watch`; served without its check's saved state.
+  watch?: { check: string; args: Record<string, string>; lastRunAt: string }
   // Deferred messages armed on this task (`lander send/relaunch --date/--time/
   // --after`), each firing on its own trigger. We read `relaunch` (a pending
   // scheduled relaunch, shown as the scheduled clock alongside scheduledFor/
@@ -463,6 +467,13 @@ export type ProjectHooks = {
     reason?: string
   }
   hooks: Hook[]
+}
+
+// As GET /api/checks serves it.
+export type WatchCheck = {
+  name: string
+  description: string
+  enabled: boolean
 }
 
 // The list's time window: tasks updated today, this week (from Sunday), before

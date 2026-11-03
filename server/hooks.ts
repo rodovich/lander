@@ -21,6 +21,7 @@ import { mutateJson, readTask } from './store'
 import { readFile } from 'node:fs/promises'
 import { requestHooksResolution } from './daemon'
 import type {
+  CheckoutHints,
   HookDeclaration,
   HookPair,
   HookSelector,
@@ -460,13 +461,19 @@ export function selectorsFor(trigger: string, by: string): HookSelector[] {
 export async function taskCheckout(
   project: Project,
   id: string,
-): Promise<{ taskId: string; flow?: string; recordedCwd?: string } | null> {
+): Promise<CheckoutHints | null> {
   const task = await readTask<{
     flow?: string
     agent?: string
     cwd?: string
   }>(project.dataDir, id)
-  if (!task) return null
+  return task ? checkoutHints(id, task) : null
+}
+
+export function checkoutHints(
+  id: string,
+  task: { flow?: string; agent?: string; cwd?: string },
+): CheckoutHints {
   const flow = task.flow ?? task.agent
   return {
     taskId: id,
