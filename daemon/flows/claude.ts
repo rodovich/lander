@@ -15,6 +15,9 @@ import {
   reduceStreamLine,
   resolveProjectDoc,
   sessionCost,
+  changedContextParts,
+  taskContextBlock,
+  taskContextParts,
   turnPromptParts,
   type SessionTotals,
   type Usage,
@@ -22,7 +25,6 @@ import {
 import { fetchUsage, usageStatus, type UsageStatus } from '../../server/usage'
 import type { Ctx, FlowMeta, GroupHandle, ToolHandle, TurnResult } from './ctx'
 import type { AgentLaunchDir, AgentLaunchDirInput } from '../agent'
-import { isInside } from '../paths'
 
 export const meta: FlowMeta = {
   api: 1,
@@ -112,18 +114,20 @@ export function makeFlow({
       if (!resuming) ctx.state.set(['sessionId'], sessionId)
 
       // ── Turn context ─────────────────────────────────────────────────────
-      const block = buildContextBlock(ctx, gitContext)
-      const baseline = ctx.state.get(['turnContext'])
-      const sendContext = block !== '' && (!resuming || block !== baseline)
-      if (sendContext) ctx.state.set(['turnContext'], block)
+      const context = changedContextParts(
+        taskContextParts(ctx.task, gitContext),
+        resuming ? sessionId : undefined,
+        ctx.state.get(['turnContext']),
+      )
+      const block = taskContextBlock(context.send)
+      let contextRecorded = false
 
       // ── Prompt ───────────────────────────────────────────────────────────
       // The extras ride at the cache-friendly end, after the user's own text.
-      // The revival notice goes here and not in the context block above: that
-      // block is delta-compared against a stored baseline, so a one-turn line in
-      // it would cost a spurious full resend next turn.
+      // The revival notice goes here and not in the context block above, which
+      // reports standing state rather than what happened this turn.
       const promptParts = turnPromptParts(ctx.turn)
-      if (sendContext) promptParts.push(block)
+      if (block) promptParts.push(block)
 
       const args = [
         ...sessionArgs,
@@ -184,7 +188,15 @@ export function makeFlow({
         if (!trimmed) continue
         const r = reduceStreamLine(trimmed, ctx.now())
 
-        if (r.turnStarted) ctx.emit.committed()
+        if (r.turnStarted) {
+          ctx.emit.committed()
+          // Recorded only once claude has taken the turn, so a context block it
+          // never received is sent again.
+          if (context.changed && !contextRecorded) {
+            ctx.state.set(['turnContext'], context.record)
+            contextRecorded = true
+          }
+        }
         if (r.apiError) apiError = r.apiError
         ctx.emit.waiting(waitingUntil(r, Date.parse(ctx.now())))
         if (r.drivingModel) ctx.emit.meter({ drivingModel: r.drivingModel })
@@ -198,6 +210,10 @@ export function makeFlow({
         for (const step of r.steps) {
           if (step.kind === 'context') {
             if (step.context) ctx.emit.context(step.context)
+            // Compaction can summarize earlier context blocks away, so the next
+            // turn sends every part again.
+            if (step.context?.action === 'compaction' && step.context.phase === 'completed')
+              ctx.state.delete(['turnContext'])
           } else if (step.kind === 'tool_use') {
             const h = ctx.emit.tool({
               name: step.tool ?? '',
@@ -330,64 +346,6 @@ export function anchorFileRule(rule: string): string {
   return match && FILE_RULE_TOOLS.includes(match[1])
     ? `${match[1]}(/${match[2]})`
     : rule
-}
-
-// The dynamic per-turn context block. Dynamic facts belong at the cache-friendly
-// end of the conversation, not in the system prompt where any change invalidates
-// the whole cached prefix. Empty when there is no state to report.
-function buildContextBlock(
-  ctx: Ctx,
-  gitContext: (cwd: string) => string | undefined,
-): string {
-  const parts: string[] = []
-  // The rules granted to this task, which ride --allowedTools. Listed as state
-  // rather than as a "newly granted" note, so a grant surfaces exactly once — by
-  // changing the block, which the baseline compare then re-sends — and a
-  // one-turn line never costs a second resend when it drops out.
-  if (ctx.task.allow?.length)
-    parts.push(
-      'Tool permissions granted to this task (beyond the defaults): ' +
-        ctx.task.allow.map((rule) => `\`${rule}\``).join(', '),
-    )
-  // Read from where the shell starts — the task's checkout, when it has one.
-  const landed = ctx.task.cwd
-  const git = gitContext(landed)
-  if (git) parts.push(git)
-  // The last turn's shell ended somewhere other than where this one launches.
-  // Fires only when the two differ.
-  //
-  // In a lander-managed checkout it fires only for a dir inside the checkout.
-  // One outside it is where the task worked before it had a checkout — the
-  // root, for a task adopted into one — and pointing back there would send it
-  // out of its checkout.
-  if (
-    ctx.task.recordedCwd &&
-    ctx.task.recordedCwd !== landed &&
-    (!ctx.task.checkout || isInside(ctx.task.checkout, ctx.task.recordedCwd))
-  )
-    parts.push(manualCdHint(ctx.task.root, ctx.task.recordedCwd))
-  if (!parts.length) return ''
-  return [
-    '<task-context>',
-    'Task state as of this message — background context from lander, not ' +
-      "the user's words. Re-sent only when it changes.",
-    '',
-    parts.join('\n\n'),
-    '</task-context>',
-  ].join('\n')
-}
-
-// Whether `p` is strictly below `dir`.
-// Deliberately silent on HOW: whether a location carries into the next turn
-// depends on how the agent got there (a plain `cd` doesn't; Claude restores a
-// worktree it entered itself), and that has changed under us before.
-function manualCdHint(root: string, recordedCwd: string): string {
-  const rel = path.relative(root, recordedCwd) || 'the project root'
-  return (
-    `Note: your previous turn ended in ${rel}. Depending how you moved there, ` +
-    'that location may or may not have been preserved in this new turn. Check ' +
-    '`pwd` before relying on the location.'
-  )
 }
 
 const SELF_SCHEDULING_TOOLS = ['ScheduleWakeup', 'CronCreate', 'CronDelete', 'CronList']

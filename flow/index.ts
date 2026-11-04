@@ -49,6 +49,10 @@ export {
   checkoutNote,
   resolveProjectDoc,
   turnPromptParts,
+  taskContextParts,
+  taskContextBlock,
+  changedContextParts,
+  type ContextPart,
   prepareUserMessagePrompt,
   // Deliver-once, for a provider whose only prose channel is the user message.
   deliveryDigest,

@@ -75,18 +75,16 @@ function testFlows(readProjectDoc: (dir: string) => string | undefined = () => u
   }
 }
 
-// Read the context baseline persisted by a flow turn.
-function turnContextWrites(events: HostEvent[]): string[] {
+// Read the context record persisted by a flow turn.
+function turnContextWrites(events: HostEvent[]): unknown[] {
   return events.flatMap((e) =>
-    e.kind === 'turn-context'
-      ? [e.context]
-      : e.kind === 'state-patch'
-        ? e.ops
-            .filter((op) => op.path.join('.') === 'turnContext')
-            .map((op) => String(op.value))
-        : [],
+    e.kind === 'state-patch'
+      ? e.ops.filter((op) => op.path.join('.') === 'turnContext').map((op) => op.value)
+      : [],
   )
 }
+
+const GIT_PART = 'Git status as of this message:\n\non branch test'
 
 // `readProjectDoc` is parameterized so the LANDER.md suites can supply a doc
 // without touching the filesystem; it defaults to "no doc in this project",
@@ -224,11 +222,9 @@ describe('flow host', () => {
     })
     const claudeContext = [
       '<task-context>',
-      "Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.",
+      "Task state as of this message — background context from lander, not the user's words. Each part is sent again when it changes.",
       '',
-      'Git status as of this message:',
-      '',
-      'on branch test',
+      GIT_PART,
       '</task-context>',
     ].join('\n')
     expect(h.spawns[1]).toMatchObject({
@@ -267,56 +263,54 @@ describe('flow host', () => {
       ops: [{ op: 'set', path: ['sessionId'], value: 'minted-session' }],
       rev: 1,
     })
-    expect(h.events).toContainEqual({
-      kind: 'state-patch',
-      ops: [{ op: 'set', path: ['turnContext'], value: claudeContext }],
-      rev: 2,
-    })
     // Codex has no context builder: its prompt is untouched and nothing is
     // announced for it at all.
     expect(h.events.filter((e) => e.kind === 'turn-context')).toHaveLength(0)
   })
 
-  it('omits an unchanged turn context and appends a changed one', () => {
+  it('records the context once claude takes the turn, and sends only parts that changed', async () => {
     const h = harness()
+    const start = async (i: number, over: Partial<StartRunMessage>) => {
+      h.run(makeInput({ runId: `run-${i}`, agent: 'claude', prompt: 'follow-up', sessionId: 'sess-1', ...over }))
+      h.spawns[i].child.stdout.emit('data', line({ type: 'system', subtype: 'init' }))
+      await settle()
+      return h.spawns[i].args.at(-1)!
+    }
 
-    // Resume with the baseline matching what the flow regenerates: the prompt
-    // goes out bare and no turn-context is emitted.
-    h.run(makeInput({ agent: 'claude', prompt: 'follow-up', sessionId: 'sess-1' }))
-    const unchanged = h.spawns[0].args.at(-1)!
-    expect(unchanged.startsWith('follow-up\n\n<task-context>')).toBe(true)
-    const context = unchanged.slice('follow-up\n\n'.length)
+    // A resumed session with no record yet gets every part.
+    expect(await start(0, {})).toContain(GIT_PART)
+    const record = turnContextWrites(h.events)[0]
+    expect(record).toEqual({ git: deliveryDigest(GIT_PART) })
 
-    h.run(
-      makeInput({
-        runId: 'run-2',
-        agent: 'claude',
-        prompt: 'follow-up',
-        sessionId: 'sess-1',
-        turnContext: context,
-      }),
-    )
-    expect(h.spawns[1].args.at(-1)).toBe('follow-up')
-    // Only the first run recorded a baseline; the unchanged second one wrote
-    // nothing.
+    // Nothing changed: the prompt goes out bare and nothing is re-recorded.
+    const flowState = { sessionId: 'sess-1', turnContext: record }
+    expect(await start(1, { flowState })).toBe('follow-up')
     expect(turnContextWrites(h.events)).toHaveLength(1)
 
-    // A stale baseline (the grants changed) re-appends and re-records.
-    h.run(
-      makeInput({
-        runId: 'run-3',
-        agent: 'claude',
-        prompt: 'follow-up',
-        sessionId: 'sess-1',
-        turnContext: context,
-        task: { allow: ['Bash(npm test)'] },
-      }),
-    )
-    const changed = h.spawns[2].args.at(-1)!
-    expect(changed).toContain('Tool permissions granted to this task')
-    expect(turnContextWrites(h.events)).toContainEqual(
-      changed.slice('follow-up\n\n'.length),
-    )
+    // A new grant is sent on its own, without the unchanged git part.
+    const granted = await start(2, { flowState, task: { allow: ['Bash(npm test)'] } })
+    expect(granted).toContain('Tool permissions granted to this task')
+    expect(granted).not.toContain(GIT_PART)
+  })
+
+  it('forgets what context it sent once claude compacts the conversation', async () => {
+    const h = harness()
+    h.run(makeInput({ agent: 'claude', prompt: 'follow-up', sessionId: 'sess-1' }))
+    const child = h.spawns[0].child
+    child.stdout.emit('data', line({ type: 'system', subtype: 'init' }))
+    child.stdout.emit('data', line({ type: 'system', subtype: 'compact_boundary', compact_metadata: {} }))
+    await settle()
+    const ops = h.events.flatMap((e) => (e.kind === 'state-patch' ? e.ops : []))
+    expect(ops.filter((op) => op.path.join('.') === 'turnContext').map((op) => op.op)).toEqual([
+      'set',
+      'delete',
+    ])
+  })
+
+  it('records nothing for a turn claude never took', () => {
+    const h = harness()
+    h.run(makeInput({ agent: 'claude', prompt: 'follow-up', sessionId: 'sess-1' }))
+    expect(turnContextWrites(h.events)).toEqual([])
   })
 
   it('reduces stdout into state, update, and done events', async () => {

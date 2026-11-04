@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto'
+import path from 'node:path'
 import { projectDocBlock } from '../flow/project-doc'
 import type { Ctx } from './flows/ctx'
+import { isInside } from './paths'
 
 // Deliver-once, for a flow whose channel for lander's own prose is the user
 // message (e.g. codex and agy), where a block put in front of one turn stays in
@@ -57,6 +59,97 @@ export function resolveProjectDoc(
     (task.checkout !== undefined ? readProjectDoc(task.checkout) : undefined) ??
     readProjectDoc(task.root)
   )
+}
+
+// One fact about the task an agent should keep in mind across turns, named so a
+// changed fact can be told apart from the rest. An `everyTurn` part describes
+// the turn itself, so it is sent whenever it applies.
+export type ContextPart = { key: string; text: string; everyTurn?: true }
+
+export function taskContextParts(
+  task: Pick<Ctx['task'], 'allow' | 'cwd' | 'recordedCwd' | 'checkout' | 'root'>,
+  gitContext: (cwd: string) => string | undefined,
+): ContextPart[] {
+  const parts: ContextPart[] = []
+  // The rules granted to this task, listed in full so a new grant changes the
+  // part and is sent once.
+  if (task.allow?.length)
+    parts.push({
+      key: 'grants',
+      text:
+        'Tool permissions granted to this task (beyond the defaults): ' +
+        task.allow.map((rule) => `\`${rule}\``).join(', '),
+    })
+  // Read from where the shell starts — the task's checkout, when it has one.
+  const git = gitContext(task.cwd)
+  if (git) parts.push({ key: 'git', text: git })
+  // The last turn's shell ended somewhere other than where this one launches.
+  // Fires only when the two differ.
+  //
+  // In a lander-managed checkout it fires only for a dir inside the checkout.
+  // One outside it is where the task worked before it had a checkout — the
+  // root, for a task adopted into one — and pointing back there would send it
+  // out of its checkout.
+  if (
+    task.recordedCwd &&
+    task.recordedCwd !== task.cwd &&
+    (!task.checkout || isInside(task.checkout, task.recordedCwd))
+  )
+    parts.push({
+      key: 'cwd',
+      text: manualCdHint(task.root, task.recordedCwd),
+      everyTurn: true,
+    })
+  return parts
+}
+
+// Deliberately silent on HOW: whether a location carries into the next turn
+// depends on how the agent got there (a plain `cd` doesn't; Claude restores a
+// worktree it entered itself), and that has changed under us before.
+function manualCdHint(root: string, recordedCwd: string): string {
+  const rel = path.relative(root, recordedCwd) || 'the project root'
+  return (
+    `Note: your previous turn ended in ${rel}. Depending how you moved there, ` +
+    'that location may or may not have been preserved in this new turn. Check ' +
+    '`pwd` before relying on the location.'
+  )
+}
+
+// A record in its older form, the whole block as one string, counts as none.
+export function changedContextParts(
+  parts: ContextPart[],
+  sessionId: string | undefined,
+  sent: unknown,
+): { send: ContextPart[]; record: Record<string, string>; changed: boolean } {
+  const kept = parts.filter((p) => !p.everyTurn)
+  const record = Object.fromEntries(kept.map((p) => [p.key, deliveryDigest(p.text)]))
+  const before =
+    sessionId && sent && typeof sent === 'object'
+      ? (sent as Record<string, string>)
+      : undefined
+  const send = before
+    ? parts.filter((p) => p.everyTurn || before[p.key] !== record[p.key])
+    : parts
+  const changed =
+    !before ||
+    Object.keys(before).length !== kept.length ||
+    kept.some((p) => before[p.key] !== record[p.key])
+  return { send, record, changed }
+}
+
+// Dynamic facts belong at the cache-friendly end of the conversation, not in a
+// system prompt where any change invalidates the whole cached prefix. Empty when
+// there is nothing to report.
+export function taskContextBlock(parts: ContextPart[]): string {
+  if (!parts.length) return ''
+  return [
+    '<task-context>',
+    'Task state as of this message — background context from lander, not ' +
+      "the user's words. Each part is sent again when it changes.",
+    '',
+    parts.map((p) => p.text).join('\n\n'),
+    '</task-context>',
+  ].join('\n')
 }
 
 export function turnPromptParts(

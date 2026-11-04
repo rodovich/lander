@@ -48,7 +48,7 @@ This task works in a git worktree lander created for it at \`/repo/.worktrees/ta
         "do the thing
 
 <task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+Task state as of this message — background context from lander, not the user's words. Each part is sent again when it changes.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -66,11 +66,9 @@ GIT-SNAPSHOT-STUB
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
+      "turnContext": {
+        "git": "sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc",
+      },
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -194,7 +192,7 @@ You have a ride scheduled for 3:00:00 PM or when sibling-1 lands, whichever come
 </ride-scheduled>
 
 <task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+Task state as of this message — background context from lander, not the user's words. Each part is sent again when it changes.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -212,11 +210,9 @@ GIT-SNAPSHOT-STUB
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
+      "turnContext": {
+        "git": "sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc",
+      },
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -336,7 +332,7 @@ exports[`claude transcript regressions > agent stderr is aggregated into the don
         "do the thing
 
 <task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+Task state as of this message — background context from lander, not the user's words. Each part is sent again when it changes.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -354,11 +350,9 @@ GIT-SNAPSHOT-STUB
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
+      "turnContext": {
+        "git": "sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc",
+      },
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -479,7 +473,7 @@ exports[`claude transcript regressions > an API failure leads the done stderr wi
         "do the thing
 
 <task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+Task state as of this message — background context from lander, not the user's words. Each part is sent again when it changes.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -497,11 +491,9 @@ GIT-SNAPSHOT-STUB
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
+      "turnContext": {
+        "git": "sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc",
+      },
     },
     "flowStateRev": 2,
     "hookFireSeq": 2,
@@ -681,7 +673,7 @@ shot.png, notes.txt
 </task-attachments>
 
 <task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+Task state as of this message — background context from lander, not the user's words. Each part is sent again when it changes.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -700,11 +692,9 @@ GIT-SNAPSHOT-STUB
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
+      "turnContext": {
+        "git": "sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc",
+      },
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -824,7 +814,7 @@ exports[`claude transcript regressions > blocked call via permission_denials 1`]
         "do the thing
 
 <task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+Task state as of this message — background context from lander, not the user's words. Each part is sent again when it changes.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -842,11 +832,9 @@ GIT-SNAPSHOT-STUB
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
+      "turnContext": {
+        "git": "sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc",
+      },
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -1001,7 +989,7 @@ exports[`claude transcript regressions > edit and write produce diff hunks 1`] =
         "do the thing
 
 <task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+Task state as of this message — background context from lander, not the user's words. Each part is sent again when it changes.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -1019,11 +1007,9 @@ GIT-SNAPSHOT-STUB
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
+      "turnContext": {
+        "git": "sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc",
+      },
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -1219,7 +1205,7 @@ exports[`claude transcript regressions > errored result event carries no in-stre
         "do the thing
 
 <task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+Task state as of this message — background context from lander, not the user's words. Each part is sent again when it changes.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -1237,11 +1223,9 @@ GIT-SNAPSHOT-STUB
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
+      "turnContext": {
+        "git": "sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc",
+      },
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -1350,7 +1334,7 @@ exports[`claude transcript regressions > legacy top-level session resumes withou
         "do the thing
 
 <task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+Task state as of this message — background context from lander, not the user's words. Each part is sent again when it changes.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -1367,11 +1351,9 @@ GIT-SNAPSHOT-STUB
   "task": {
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
+      "turnContext": {
+        "git": "sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc",
+      },
     },
     "flowStateRev": 1,
     "hookFireSeq": 1,
@@ -1492,7 +1474,7 @@ exports[`claude transcript regressions > manual cd hint when the recorded cwd di
         "do the thing
 
 <task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+Task state as of this message — background context from lander, not the user's words. Each part is sent again when it changes.
 
 GIT-SNAPSHOT-STUB
 
@@ -1512,13 +1494,9 @@ Note: your previous turn ended in sub/dir. Depending how you moved there, that l
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-GIT-SNAPSHOT-STUB
-
-Note: your previous turn ended in sub/dir. Depending how you moved there, that location may or may not have been preserved in this new turn. Check \`pwd\` before relying on the location.
-</task-context>",
+      "turnContext": {
+        "git": "sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc",
+      },
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -1638,7 +1616,7 @@ exports[`claude transcript regressions > nonexistent filesDir still sets the env
         "do the thing
 
 <task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+Task state as of this message — background context from lander, not the user's words. Each part is sent again when it changes.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -1657,11 +1635,9 @@ GIT-SNAPSHOT-STUB
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
+      "turnContext": {
+        "git": "sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc",
+      },
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -1781,7 +1757,7 @@ exports[`claude transcript regressions > parallel batch in one inference 1`] = `
         "do the thing
 
 <task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+Task state as of this message — background context from lander, not the user's words. Each part is sent again when it changes.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -1799,11 +1775,9 @@ GIT-SNAPSHOT-STUB
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
+      "turnContext": {
+        "git": "sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc",
+      },
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -1984,7 +1958,7 @@ exports[`claude transcript regressions > plain text reply 1`] = `
         "do the thing
 
 <task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+Task state as of this message — background context from lander, not the user's words. Each part is sent again when it changes.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -2002,11 +1976,9 @@ GIT-SNAPSHOT-STUB
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
+      "turnContext": {
+        "git": "sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc",
+      },
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -2126,7 +2098,7 @@ exports[`claude transcript regressions > rejecting rate limit event 1`] = `
         "do the thing
 
 <task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+Task state as of this message — background context from lander, not the user's words. Each part is sent again when it changes.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -2144,11 +2116,9 @@ GIT-SNAPSHOT-STUB
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
+      "turnContext": {
+        "git": "sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc",
+      },
     },
     "flowStateRev": 2,
     "hookFireSeq": 2,
@@ -2305,7 +2275,7 @@ exports[`claude transcript regressions > resume of an existing session 1`] = `
         "do the thing
 
 <task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+Task state as of this message — background context from lander, not the user's words. Each part is sent again when it changes.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -2323,11 +2293,9 @@ GIT-SNAPSHOT-STUB
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "sess-existing",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
+      "turnContext": {
+        "git": "sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc",
+      },
     },
     "flowStateRev": 1,
     "hookFireSeq": 1,
@@ -2452,7 +2420,7 @@ You were waiting until 3:00:00 PM when this message arrived; the message changed
 </task-revived>
 
 <task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+Task state as of this message — background context from lander, not the user's words. Each part is sent again when it changes.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -2470,11 +2438,9 @@ GIT-SNAPSHOT-STUB
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
+      "turnContext": {
+        "git": "sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc",
+      },
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -2598,7 +2564,7 @@ You were wedged when this message arrived; the message changed your status to ri
 </task-revived>
 
 <task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+Task state as of this message — background context from lander, not the user's words. Each part is sent again when it changes.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -2616,11 +2582,9 @@ GIT-SNAPSHOT-STUB
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
+      "turnContext": {
+        "git": "sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc",
+      },
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -2740,7 +2704,7 @@ exports[`claude transcript regressions > second ride seeded with a nonzero flowS
         "do the thing
 
 <task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+Task state as of this message — background context from lander, not the user's words. Each part is sent again when it changes.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -2759,11 +2723,9 @@ GIT-SNAPSHOT-STUB
     "flowState": {
       "phase": "reviewing",
       "sessionId": "minted-session-id",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
+      "turnContext": {
+        "git": "sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc",
+      },
     },
     "flowStateRev": 8,
     "hookFireSeq": 1,
@@ -2883,7 +2845,7 @@ exports[`claude transcript regressions > single tool call and result in one chun
         "do the thing
 
 <task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+Task state as of this message — background context from lander, not the user's words. Each part is sent again when it changes.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -2901,11 +2863,9 @@ GIT-SNAPSHOT-STUB
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
+      "turnContext": {
+        "git": "sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc",
+      },
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -3056,7 +3016,7 @@ exports[`claude transcript regressions > subagent report closes its trace 1`] = 
         "do the thing
 
 <task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+Task state as of this message — background context from lander, not the user's words. Each part is sent again when it changes.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -3074,11 +3034,9 @@ GIT-SNAPSHOT-STUB
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
+      "turnContext": {
+        "git": "sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc",
+      },
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -3292,7 +3250,7 @@ exports[`claude transcript regressions > subagent trace with sub-subagent nestin
         "do the thing
 
 <task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+Task state as of this message — background context from lander, not the user's words. Each part is sent again when it changes.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -3310,11 +3268,9 @@ GIT-SNAPSHOT-STUB
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
+      "turnContext": {
+        "git": "sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc",
+      },
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -3517,7 +3473,7 @@ exports[`claude transcript regressions > task allow rules extend allowedTools 1`
         "do the thing
 
 <task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+Task state as of this message — background context from lander, not the user's words. Each part is sent again when it changes.
 
 Tool permissions granted to this task (beyond the defaults): \`Bash(npm test)\`, \`Bash(npm run build)\`
 
@@ -3537,13 +3493,10 @@ GIT-SNAPSHOT-STUB
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "minted-session-id",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-Tool permissions granted to this task (beyond the defaults): \`Bash(npm test)\`, \`Bash(npm run build)\`
-
-GIT-SNAPSHOT-STUB
-</task-context>",
+      "turnContext": {
+        "git": "sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc",
+        "grants": "sha256:984dee4c4756022faf03931f7b9b72fb49235d807a2ab307c48d5eb82c9992e6",
+      },
     },
     "flowStateRev": 2,
     "hookFireSeq": 1,
@@ -3675,11 +3628,9 @@ exports[`claude transcript regressions > unchanged turn context is not re-sent 1
     "createdAt": "2026-01-01T00:00:00.000Z",
     "flowState": {
       "sessionId": "sess-existing",
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
+      "turnContext": {
+        "git": "sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc",
+      },
     },
     "hookFireSeq": 1,
     "id": "task-1",
@@ -3717,11 +3668,6 @@ GIT-SNAPSHOT-STUB
     "shape": 2,
     "status": "riding",
     "title": "Parity task",
-    "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
     "updatedAt": "2026-01-01T00:00:00.000Z",
   },
   "updates": [
@@ -3804,7 +3750,7 @@ exports[`claude transcript regressions > usage across inferences with cache miss
         "do the thing
 
 <task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
+Task state as of this message — background context from lander, not the user's words. Each part is sent again when it changes.
 
 GIT-SNAPSHOT-STUB
 </task-context>",
@@ -3826,11 +3772,9 @@ GIT-SNAPSHOT-STUB
         "costUsd": 0.0421,
         "tokens": 0,
       },
-      "turnContext": "<task-context>
-Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.
-
-GIT-SNAPSHOT-STUB
-</task-context>",
+      "turnContext": {
+        "git": "sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc",
+      },
     },
     "flowStateRev": 3,
     "hookFireSeq": 1,

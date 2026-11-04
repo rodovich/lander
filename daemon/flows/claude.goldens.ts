@@ -294,28 +294,15 @@ export const CLAUDE_GOLDENS: Golden[] = [
   {
     name: 'unchanged turn context is not re-sent',
     chunks: [[init(), assistantText('same context')], [result()]],
-    // Matches what the stub gitContext produces with no grants, so the block
-    // compares equal and is neither appended nor re-recorded. Both the top-level
-    // fields and flowState are set, mirroring what runTurn sends for a task whose
-    // thread identity lives in flowState (the accessors' union read fills both).
+    // Records exactly the part the stub gitContext produces with no grants, so
+    // nothing has changed and the block is neither appended nor re-recorded.
     start: {
       sessionId: 'sess-existing',
-      turnContext: [
-        '<task-context>',
-        "Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.",
-        '',
-        'GIT-SNAPSHOT-STUB',
-        '</task-context>',
-      ].join('\n'),
       flowState: {
         sessionId: 'sess-existing',
-        turnContext: [
-          '<task-context>',
-          "Task state as of this message — background context from lander, not the user's words. Re-sent only when it changes.",
-          '',
-          'GIT-SNAPSHOT-STUB',
-          '</task-context>',
-        ].join('\n'),
+        turnContext: {
+          git: 'sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc',
+        },
       },
     },
   },

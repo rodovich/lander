@@ -6,12 +6,38 @@
 import { describe, expect, it } from 'vitest'
 import { buildRevivedBlock, buildScheduledRideBlock } from './flows/ctx'
 import {
+  changedContextParts,
   deliveryDigest,
   fillTaskPrompt,
   prepareUserMessagePrompt,
 } from './task-management'
 
 const TEMPLATE = 'You are running inside a lander task. This task id is {{id}}.'
+
+describe('changedContextParts', () => {
+  const git = { key: 'git', text: 'on main' }
+  const cwd = { key: 'cwd', text: 'ended in sub', everyTurn: true as const }
+
+  it('sends every part with no session or no record in this form', () => {
+    expect(changedContextParts([git], undefined, { git: deliveryDigest('on main') }).send).toEqual([git])
+    expect(changedContextParts([git], 's', 'an old block string').send).toEqual([git])
+  })
+
+  it('sends only parts that changed, and an every-turn part whenever it applies', () => {
+    const first = changedContextParts([git, cwd], 's', undefined)
+    expect(first.record).toEqual({ git: deliveryDigest('on main') })
+    const again = changedContextParts([git, cwd], 's', first.record)
+    expect(again).toEqual({ send: [cwd], record: first.record, changed: false })
+    const moved = changedContextParts([{ key: 'git', text: 'on topic' }], 's', first.record)
+    expect(moved.send.map((p) => p.text)).toEqual(['on topic'])
+    expect(moved.changed).toBe(true)
+  })
+
+  it('counts a part that went away as a change to record', () => {
+    const r = changedContextParts([], 's', { git: deliveryDigest('on main') })
+    expect(r).toEqual({ send: [], record: {}, changed: true })
+  })
+})
 
 describe('fillTaskPrompt', () => {
   it('substitutes {{id}} and leaves no placeholder', () => {

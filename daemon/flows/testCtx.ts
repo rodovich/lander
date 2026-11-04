@@ -200,7 +200,7 @@ export async function captureDriverTurn(
       materialized: fixture.materialized,
     },
   }, flow)
-  const context = result.events.flatMap((e) => e.kind === 'state-patch' ? e.ops : [])
-    .find((op) => op.path.join('.') === 'turnContext')?.value
+  const prompt = result.spawns[0]?.args.at(-1) ?? ''
+  const context = prompt.match(/<task-context>[\s\S]*<\/task-context>/)?.[0]
   return { ...result.spawns[0], context, events: result.events }
 }

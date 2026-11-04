@@ -255,7 +255,13 @@ describe('claude thread identity', () => {
     const g: Golden = {
       name: 'fresh session with a stale baseline',
       chunks: [['{"type":"system","subtype":"init","model":"m"}']],
-      start: { flowState: { turnContext: 'GIT-SNAPSHOT-STUB-stale' } },
+      start: {
+        flowState: {
+          turnContext: {
+            git: 'sha256:358fae196c81fca8dd367c0e2b9268f085ba18c6d97afc97455428a73821cffc',
+          },
+        },
+      },
     }
     const flow = await driveFlow(g, claudeFlow())
     expect(flow.spawns[0].args.at(-1)).toContain('<task-context>')
