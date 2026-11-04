@@ -1232,7 +1232,7 @@ async function launchTask(
     if (prompted && trigger.kind !== 'manual') {
       const { text, from } =
         fire && watch
-          ? watchNotification(watch.check, fire.message)
+          ? watchNotification(watch, fire.message)
           : wakeupNotification(at, fired ? landed : undefined)
       const event = pushEventItem(t, { eventKind: 'notified', title: t.title }, at)
       ;(t.queued ??= []).push(attributedPrompt(pushEventPrompt(t, event, text, at, from)))

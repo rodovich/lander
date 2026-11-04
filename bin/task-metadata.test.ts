@@ -152,6 +152,58 @@ describe('taskMetadata over a summarized task', () => {
     expect(meta.repeats).toBe(true)
     expect(meta.status).toBe('riding') // derived from the ride the summary drops
   })
+
+  it('carries an armed watch and the last watch fire, which the summary derives', () => {
+    const watching = {
+      ...full,
+      watch: { check: 'gh-pr-activity', args: { pr: 'o/r#1' }, armedAt: 'x', lastRunAt: 'x' },
+      items: [
+        ...full.items,
+        {
+          id: 'i2',
+          at: '2026-06-30T03:00:00.000Z',
+          kind: 'message',
+          role: 'user',
+          text: 'Watch fired',
+          from: { lander: 'watch', check: 'gh-pr-activity', args: { pr: 'o/r#1' } },
+        },
+      ],
+    }
+    const meta = taskMetadata(taskSummary(watching))
+    expect(meta.watch).toEqual({ check: 'gh-pr-activity', args: { pr: 'o/r#1' } })
+    expect(meta.lastWatchFire).toEqual({
+      check: 'gh-pr-activity',
+      args: { pr: 'o/r#1' },
+      at: '2026-06-30T03:00:00.000Z',
+    })
+    expect(taskMetadata(publicTask(watching))).toEqual(meta)
+  })
+
+  it('reports the newest fire that names its watch', () => {
+    const fire = (id: string, at: string, from: Record<string, unknown>) => ({
+      id,
+      at,
+      kind: 'message',
+      role: 'user',
+      text: 'Watch fired',
+      from,
+    })
+    const meta = taskMetadata(
+      taskSummary({
+        ...full,
+        items: [
+          fire('a', '2026-06-30T03:00:00.000Z', { lander: 'watch', check: 'one', args: {} }),
+          fire('b', '2026-06-30T04:00:00.000Z', { lander: 'watch', check: 'two', args: {} }),
+          fire('c', '2026-06-30T05:00:00.000Z', { lander: 'watch' }),
+        ],
+      }),
+    )
+    expect(meta.lastWatchFire).toEqual({ check: 'two', args: {}, at: '2026-06-30T04:00:00.000Z' })
+    const legacyOnly = taskMetadata(
+      taskSummary({ ...full, items: [fire('c', '2026-06-30T05:00:00.000Z', { lander: 'watch' })] }),
+    )
+    expect(legacyOnly).not.toHaveProperty('lastWatchFire')
+  })
 })
 
 describe('inDateRange', () => {

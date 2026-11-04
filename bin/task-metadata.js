@@ -16,6 +16,8 @@ export function taskMetadata(t) {
         ? { scheduledFor: relaunch.deliverAt, relaunching: true }
         : {}),
     ...(hasRepeat(t) ? { repeats: true } : {}),
+    ...(t.watch ? { watch: { check: t.watch.check, args: t.watch.args } } : {}),
+    ...(t.lastWatchFire ? { lastWatchFire: t.lastWatchFire } : {}),
   }
 }
 

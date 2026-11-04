@@ -290,7 +290,7 @@ describe('the sweep running a watch', () => {
     const prompt = (raw.items as Item[])
       .filter((i): i is MessageItem => i.kind === 'message' && i.role === 'user')
       .at(-1)!
-    expect(prompt.from).toEqual({ lander: 'watch' })
+    expect(prompt.from).toEqual({ lander: 'watch', check: 'probe', args: { thing: 'a' } })
     expect(attributedPrompt(prompt)).toContain('the file changed')
     expect(raw.watch).toBeUndefined()
     expect(Object.values(raw.watchState)).toEqual([{ n: 4 }])

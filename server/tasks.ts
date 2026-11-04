@@ -517,7 +517,9 @@ export type TaskSender = {
 
 // Lander itself, telling a task why it is awake: the time it set came, the
 // tasks it awaited landed, or a restart cut off its previous ride.
-export type LanderSender = { lander: 'time' | 'await' | 'watch' | 'restart' }
+export type LanderSender =
+  | { lander: 'time' | 'await' | 'restart' }
+  | { lander: 'watch'; check: string; args: Record<string, string> }
 
 // A prompt item as the agent receives it: a message from another task with its
 // sender named ahead of its words. Composed whenever the item is queued for a
@@ -1185,8 +1187,10 @@ export function publicTask<T extends object>(
   })
   if (status !== undefined) restT.status = status
 
+  const fired = lastWatchFire(restT.items)
   const out = {
     ...rest,
+    ...(fired ? { lastWatchFire: fired } : {}),
     // The task's driver flow, derived. Served additively alongside `agent`
     // until the client stops reading the latter — a pre-step-4 task has no
     // stored `flow`, so this is where its `agent` becomes one.
@@ -1776,10 +1780,27 @@ export function saveWatchState(
 }
 
 export function watchNotification(
-  check: string,
+  watch: Pick<Watch, 'check' | 'args'>,
   message: string,
 ): { text: string; from: LanderSender } {
-  return { text: `Watch \`${check}\` fired: ${message}`, from: { lander: 'watch' } }
+  return {
+    text: `Watch \`${watch.check}\` fired: ${message}`,
+    from: { lander: 'watch', check: watch.check, args: watch.args },
+  }
+}
+
+// Which watch fired most recently in a task's conversation, and when, for
+// readers of its metadata alone. A fire recorded before senders named their
+// watch is skipped, since it can't say which watch it was.
+export function lastWatchFire(
+  items: Item[] | undefined,
+): { check: string; args: Record<string, string>; at: string } | undefined {
+  for (const item of userItems({ items }).reverse()) {
+    const from = item.from
+    if (from && 'lander' in from && from.lander === 'watch' && from.check)
+      return { check: from.check, args: from.args, at: item.at }
+  }
+  return undefined
 }
 
 // Whether what a task has scheduled is a ride it scheduled for itself, rather
