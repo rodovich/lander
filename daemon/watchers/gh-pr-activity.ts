@@ -1,5 +1,5 @@
 import { getJson, iso, timeline, viewer as viewerOf, type Login, type TimelineEvent } from './github'
-import { PermanentCheckError, type BundledCheck } from './types'
+import { PermanentWatcherError, type BundledWatcher } from './types'
 
 type Pr = {
   state: string
@@ -32,7 +32,7 @@ function parsePr(arg: string): { repo: string; number: number } {
   const m =
     arg.match(/github\.com\/([^/\s]+\/[^/\s]+)\/pull\/(\d+)/) ??
     arg.match(/^([^/\s]+\/[^#\s]+)#(\d+)$/)
-  if (!m) throw new PermanentCheckError(`pr must be owner/repo#123 or a PR URL, not "${arg}"`)
+  if (!m) throw new PermanentWatcherError(`pr must be owner/repo#123 or a PR URL, not "${arg}"`)
   return { repo: m[1], number: Number(m[2]) }
 }
 
@@ -83,7 +83,7 @@ function activities(events: TimelineEvent[], viewer: string): Activity[] {
   return out
 }
 
-const ghPrActivity: BundledCheck = {
+const ghPrActivity: BundledWatcher = {
   meta: {
     name: 'gh-pr-activity',
     description:
@@ -102,9 +102,9 @@ const ghPrActivity: BundledCheck = {
   async run(ctx, args, prevState) {
     const { repo, number } = parsePr(args.pr)
     if (args.from && args.from !== 'author' && args.from !== 'others')
-      throw new PermanentCheckError('from must be "author" or "others"')
+      throw new PermanentWatcherError('from must be "author" or "others"')
     if (args.since && Number.isNaN(Date.parse(args.since)))
-      throw new PermanentCheckError(`since must be a date and time, not "${args.since}"`)
+      throw new PermanentWatcherError(`since must be a date and time, not "${args.since}"`)
     const prev = prevState as State | undefined
     const read = `Read it with \`gh pr view ${number} --repo ${repo} --comments\` and \`gh pr diff ${number} --repo ${repo}\`.`
 

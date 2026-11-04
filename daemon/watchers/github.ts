@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { PermanentCheckError, type CheckCtx } from './types'
+import { PermanentWatcherError, type WatcherCtx } from './types'
 
 const execFileAsync = promisify(execFile)
 
@@ -24,7 +24,7 @@ export type GitHub = {
   get(path: string, opts: { signal: AbortSignal }): Promise<{ body: unknown }>
 }
 
-type GitHubCtx = Pick<CheckCtx, 'github' | 'signal'>
+type GitHubCtx = Pick<WatcherCtx, 'github' | 'signal'>
 
 // GitHub's times have no milliseconds and ours do, so every time is put in one
 // form before times are compared as strings.
@@ -92,7 +92,7 @@ export function createGitHub(token: () => Promise<string> = ghToken): GitHub {
         res = await request(path, opts)
       }
       if (res.status === 404)
-        throw new PermanentCheckError(`GitHub has no ${path}, or you can't see it`)
+        throw new PermanentWatcherError(`GitHub has no ${path}, or you can't see it`)
       if (res.status !== 200) throw new Error(`GitHub answered ${res.status} for ${path}`)
       return { body: await res.json() }
     },

@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  loadChecks,
   loadHooks,
-  setCheckEnabled,
+  loadWatchers,
   setHookApproval,
   setTrustedBranch,
+  setWatcherEnabled,
 } from './api'
 import { PanelHeader } from './panelHeader'
 import { MonotonicRequestGate } from './requestOrder'
-import type { Hook, ProjectHooks, WatchCheck } from './types'
+import type { Hook, ProjectHooks, Watcher } from './types'
 
 // A project's hooks: the modules its tree declares under `.lander/hooks/`, and
 // the two independent ways one comes to be allowed to run — a human approving
@@ -191,36 +191,36 @@ export function HooksList({
   )
 }
 
-// The bundled watch checks, which are the user's rather than the project's: a
-// check runs with the same credentials whichever project's task arms it.
-export function WatchChecks({
-  checks,
+// The bundled watchers, which are the user's rather than the project's: a
+// watcher runs with the same credentials whichever project's task arms it.
+export function WatcherSettings({
+  watchers,
   busy,
   onSetEnabled,
 }: {
-  checks: WatchCheck[]
+  watchers: Watcher[]
   busy: boolean
-  onSetEnabled: (check: WatchCheck, enabled: boolean) => void
+  onSetEnabled: (watcher: Watcher, enabled: boolean) => void
 }) {
   return (
     <section className="hooks-section">
-      <h3 className="hooks-section-title">Watch checks</h3>
+      <h3 className="hooks-section-title">Watchers</h3>
       <p className="hooks-note">
         A task can wait on one of these with <code>lander ride --watch</code> only
         while it is enabled. These settings apply to every project.
       </p>
-      <ul className="watch-check-list">
-        {checks.map((check) => (
-          <li key={check.name}>
-            <label className="watch-check">
+      <ul className="watcher-setting-list">
+        {watchers.map((watcher) => (
+          <li key={watcher.name}>
+            <label className="watcher-setting">
               <input
                 type="checkbox"
-                checked={check.enabled}
+                checked={watcher.enabled}
                 disabled={busy}
-                onChange={(e) => onSetEnabled(check, e.target.checked)}
+                onChange={(e) => onSetEnabled(watcher, e.target.checked)}
               />
-              <span className="hook-name">{check.name}</span>
-              <span className="watch-check-description">{check.description}</span>
+              <span className="hook-name">{watcher.name}</span>
+              <span className="watcher-setting-description">{watcher.description}</span>
             </label>
           </li>
         ))}
@@ -239,7 +239,7 @@ export function HooksPanel({
   onClose: () => void
 }) {
   const [hooks, setHooks] = useState<ProjectHooks | null>(null)
-  const [checks, setChecks] = useState<WatchCheck[]>([])
+  const [watchers, setWatchers] = useState<Watcher[]>([])
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const reloadOrderRef = useRef(new MonotonicRequestGate())
@@ -268,23 +268,23 @@ export function HooksPanel({
     return () => reloadOrderRef.current.invalidate()
   }, [reload])
 
-  const reloadChecks = useCallback(async () => {
+  const reloadWatchers = useCallback(async () => {
     try {
-      setChecks(await loadChecks())
+      setWatchers(await loadWatchers())
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
   }, [])
 
   useEffect(() => {
-    void reloadChecks()
-  }, [reloadChecks])
+    void reloadWatchers()
+  }, [reloadWatchers])
 
   const act = async (run: () => Promise<unknown>) => {
     setBusy(true)
     try {
       await run()
-      await Promise.all([reload(), reloadChecks()])
+      await Promise.all([reload(), reloadWatchers()])
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -313,12 +313,12 @@ export function HooksPanel({
             />
           </>
         )}
-        {checks.length > 0 && (
-          <WatchChecks
-            checks={checks}
+        {watchers.length > 0 && (
+          <WatcherSettings
+            watchers={watchers}
             busy={busy}
-            onSetEnabled={(check, enabled) =>
-              void act(() => setCheckEnabled(check.name, enabled))
+            onSetEnabled={(watcher, enabled) =>
+              void act(() => setWatcherEnabled(watcher.name, enabled))
             }
           />
         )}

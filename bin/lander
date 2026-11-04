@@ -454,7 +454,7 @@ async function rideTask(args) {
     else if (a === '--time') o.time = Number(args[++i])
     else if (a === '--after') o.after = args[++i]
     else if (a === '--clear') o.clear = true
-    else if (a === '--watch') o.watch = { check: args[++i], args: {} }
+    else if (a === '--watch') o.watch = { watcher: args[++i], args: {} }
     else if (a === '--arg') {
       const kv = args[++i] ?? ''
       const eq = kv.indexOf('=')
@@ -464,7 +464,7 @@ async function rideTask(args) {
   }
   if (o.watchArgs && !o.watch) die('ride: --arg needs --watch')
   if (o.watch) {
-    if (!o.watch.check) die('ride: --watch needs a check name')
+    if (!o.watch.watcher) die('ride: --watch needs a watcher name')
     if (o.clear || o.date != null || o.time != null || o.after != null)
       die('ride --watch combines with no other trigger (--date/--time/--after/--clear)')
     o.watch.args = o.watchArgs ?? {}
@@ -477,7 +477,7 @@ async function rideTask(args) {
     console.log(
       res.fired
         ? `Not armed: the watch fired now. ${res.message}`
-        : `watching ${o.watch.check}; it wakes this task when it fires`,
+        : `watching ${o.watch.watcher}; it wakes this task when it fires`,
     )
     return
   }
@@ -1351,7 +1351,7 @@ const USAGE = {
   list: 'list [--status <s>] [--since <when>] [--until <when>] [--text <terms>] [--archived] [--json]',
   view: 'view <id> [--expand] [--messages <N|all>] [--clip <N|all>] [--json]',
   send: 'send <task id> --composed <message id> [--date <when>|--time <min>] [--after <ids>] [--await] [--attach <paths…>]',
-  ride: 'ride (--date <when> | --time <min> | --after <ids> | --watch <check> [--arg <key>=<value> …] | --clear)',
+  ride: 'ride (--date <when> | --time <min> | --after <ids> | --watch <watcher> [--arg <key>=<value> …] | --clear)',
   relaunch:
     'relaunch <message|-> [--date <when>|--time <min>|--after <ids>] [--interval <min> [--repeat-count <n>|--repeat-until <when>]] [--flow <name>] [--clear]',
   wedge:

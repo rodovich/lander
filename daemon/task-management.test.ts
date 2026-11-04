@@ -98,10 +98,10 @@ describe('buildScheduledRideBlock', () => {
     )
   })
 
-  it('names a watch’s check and arguments', () => {
+  it('names a watch’s watcher and arguments', () => {
     expect(
       buildScheduledRideBlock({
-        watching: { check: 'file-changed', args: { path: 'out.log' } },
+        watching: { watcher: 'file-changed', args: { path: 'out.log' } },
       }),
     ).toBe(
       '<ride-scheduled>\n' +

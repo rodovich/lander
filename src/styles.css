@@ -3185,7 +3185,7 @@ body.resizing-row {
   color: var(--muted);
 }
 
-.watch-check-list {
+.watcher-setting-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -3195,7 +3195,7 @@ body.resizing-row {
 }
 
 /* Checkbox in its own column, so every name and description lines up. */
-.watch-check {
+.watcher-setting {
   display: grid;
   grid-template-columns: auto 1fr;
   column-gap: 8px;
@@ -3204,11 +3204,11 @@ body.resizing-row {
   cursor: pointer;
 }
 
-.watch-check input {
+.watcher-setting input {
   margin: 0;
 }
 
-.watch-check-description {
+.watcher-setting-description {
   grid-column: 2;
   color: var(--muted);
 }

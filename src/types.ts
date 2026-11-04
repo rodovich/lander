@@ -134,7 +134,7 @@ export type MessageItem = ItemCommon & {
     | { hook: string; path: string; fireId: string }
     | { task: string; via: 'launch' | 'send' | 'notify' | 'relaunch' }
     | { lander: 'time' | 'await' | 'restart' }
-    | { lander: 'watch'; check: string; args: Record<string, string> }
+    | { lander: 'watch'; watcher: string; args: Record<string, string> }
   attachments?: Attachment[]
   // Set on a user message once a queued batch delivers it: the ride that
   // consumed it. Absent on converted history.
@@ -310,8 +310,8 @@ export type Task = {
   // Task ids this task is waiting on (`--after`); the scheduler launches it once
   // all have landed. Present only while awaiting; may coexist with scheduledFor.
   waitingFor?: string[]
-  // Armed with `lander ride --watch`; served without its check's saved state.
-  watch?: { check: string; args: Record<string, string>; lastRunAt: string }
+  // Armed with `lander ride --watch`; served without its watcher's saved state.
+  watch?: { watcher: string; args: Record<string, string>; lastRunAt: string }
   // Deferred messages armed on this task (`lander send/relaunch --date/--time/
   // --after`), each firing on its own trigger. We read `relaunch` (a pending
   // scheduled relaunch, shown as the scheduled clock alongside scheduledFor/
@@ -470,8 +470,8 @@ export type ProjectHooks = {
   hooks: Hook[]
 }
 
-// As GET /api/checks serves it.
-export type WatchCheck = {
+// As GET /api/watchers serves it.
+export type Watcher = {
   name: string
   description: string
   enabled: boolean

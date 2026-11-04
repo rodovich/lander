@@ -519,7 +519,7 @@ export type TaskSender = {
 // tasks it awaited landed, or a restart cut off its previous ride.
 export type LanderSender =
   | { lander: 'time' | 'await' | 'restart' }
-  | { lander: 'watch'; check: string; args: Record<string, string> }
+  | { lander: 'watch'; watcher: string; args: Record<string, string> }
 
 // A prompt item as the agent receives it: a message from another task with its
 // sender named ahead of its words. Composed whenever the item is queued for a
@@ -1145,7 +1145,7 @@ export function publicTask<T extends object>(
     hookFireSeq: _hfs,
     hookActionsResetAt: _hra,
     hookActions: _ha,
-    // Each watch check's private state, which means nothing to a reader.
+    // Each watcher's private state, which means nothing to a reader.
     watchState: _ws,
     // Tasks saved while read-only tasks existed still carry the edit flag. No
     // code reads it, and served as `false` it would misreport the task's access.
@@ -1722,17 +1722,17 @@ export function scheduledRideOf(task: PendingTriggers): ScheduledRide | undefine
     ...(task.scheduledFor ? { at: displayTime(task.scheduledFor) } : {}),
     ...(task.waitingFor?.length ? { awaiting: task.waitingFor } : {}),
     ...(task.watch
-      ? { watching: { check: task.watch.check, args: task.watch.args } }
+      ? { watching: { watcher: task.watch.watcher, args: task.watch.args } }
       : {}),
   }
 }
 
-// A watch armed with `lander ride --watch`: a bundled check the scheduler runs
+// A watch armed with `lander ride --watch`: a bundled watcher the scheduler runs
 // every WATCH_INTERVAL_MS until it fires. Its saved state lives apart, in
 // `watchState`, keyed by `watchStateKey`, so re-arming the same watch resumes
 // where the last one left off.
 export type Watch = {
-  check: string
+  watcher: string
   args: Record<string, string>
   armedAt: string
   lastRunAt: string
@@ -1757,35 +1757,35 @@ export function clearPendingTriggers(task: PendingTriggers): void {
   delete task.watch
 }
 
-function watchStateKey(watch: Pick<Watch, 'check' | 'args'>): string {
+function watchStateKey(watch: Pick<Watch, 'watcher' | 'args'>): string {
   const sorted = Object.fromEntries(
     Object.entries(watch.args).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
   )
-  return `${watch.check} ${JSON.stringify(sorted)}`
+  return `${watch.watcher} ${JSON.stringify(sorted)}`
 }
 
 export function watchStateOf(
   task: { watchState?: Record<string, unknown> },
-  watch: Pick<Watch, 'check' | 'args'>,
+  watch: Pick<Watch, 'watcher' | 'args'>,
 ): unknown {
   return task.watchState?.[watchStateKey(watch)]
 }
 
 export function saveWatchState(
   task: { watchState?: Record<string, unknown> },
-  watch: Pick<Watch, 'check' | 'args'>,
+  watch: Pick<Watch, 'watcher' | 'args'>,
   state: unknown,
 ): void {
   ;(task.watchState ??= {})[watchStateKey(watch)] = state
 }
 
 export function watchNotification(
-  watch: Pick<Watch, 'check' | 'args'>,
+  watch: Pick<Watch, 'watcher' | 'args'>,
   message: string,
 ): { text: string; from: LanderSender } {
   return {
-    text: `Watch \`${watch.check}\` fired: ${message}`,
-    from: { lander: 'watch', check: watch.check, args: watch.args },
+    text: `Watch \`${watch.watcher}\` fired: ${message}`,
+    from: { lander: 'watch', watcher: watch.watcher, args: watch.args },
   }
 }
 
@@ -1794,11 +1794,11 @@ export function watchNotification(
 // watch is skipped, since it can't say which watch it was.
 export function lastWatchFire(
   items: Item[] | undefined,
-): { check: string; args: Record<string, string>; at: string } | undefined {
+): { watcher: string; args: Record<string, string>; at: string } | undefined {
   for (const item of userItems({ items }).reverse()) {
     const from = item.from
-    if (from && 'lander' in from && from.lander === 'watch' && from.check)
-      return { check: from.check, args: from.args, at: item.at }
+    if (from && 'lander' in from && from.lander === 'watch' && from.watcher)
+      return { watcher: from.watcher, args: from.args, at: item.at }
   }
   return undefined
 }

@@ -1,5 +1,5 @@
 import { getJson, iso, timeline, viewer as viewerOf } from './github'
-import { PermanentCheckError, type BundledCheck, type CheckCtx } from './types'
+import { PermanentWatcherError, type BundledWatcher, type WatcherCtx } from './types'
 
 type SearchItem = {
   number: number
@@ -19,7 +19,7 @@ type State = { requested: string[] }
 // GitHub's search returns at most 1,000 results.
 const MAX_PAGES = 10
 // Beyond this many new requests in one run, the rest are listed without the
-// timeline lookup that times and labels them, to stay within the check's budget.
+// timeline lookup that times and labels them, to stay within the watcher's budget.
 const MAX_DESCRIBED = 10
 
 function repoOf(item: SearchItem): string {
@@ -35,7 +35,7 @@ function prKey(item: SearchItem): string {
 // which teams are yours, so the latest request to you or to any team is taken.
 // Best effort: the request is reported either way.
 async function describeRequest(
-  ctx: CheckCtx,
+  ctx: WatcherCtx,
   item: SearchItem,
   viewer: string,
 ): Promise<string> {
@@ -58,7 +58,7 @@ async function describeRequest(
   }
 }
 
-const ghReviewRequests: BundledCheck = {
+const ghReviewRequests: BundledWatcher = {
   meta: {
     name: 'gh-review-requests',
     description:
@@ -76,7 +76,7 @@ const ghReviewRequests: BundledCheck = {
   },
   async run(ctx, args, prevState) {
     if (args.repo && !/^[^/\s]+\/[^/\s]+$/.test(args.repo))
-      throw new PermanentCheckError(`repo must be owner/repo, not "${args.repo}"`)
+      throw new PermanentWatcherError(`repo must be owner/repo, not "${args.repo}"`)
     const prev = (prevState as Partial<State> | undefined)?.requested
     const me = await viewerOf(ctx)
     const terms = [

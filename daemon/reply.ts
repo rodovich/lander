@@ -1,8 +1,8 @@
 import type {
-  CheckRunResultMessage,
   HookRunResultMessage,
   HooksResolveResultMessage,
   ProjectGrantResultMessage,
+  WatcherRunResultMessage,
 } from '../server/protocol'
 
 // The daemon's answers to requests the server holds open until a reply arrives.
@@ -10,7 +10,7 @@ export type ReplyMessage =
   | ProjectGrantResultMessage
   | HooksResolveResultMessage
   | HookRunResultMessage
-  | CheckRunResultMessage
+  | WatcherRunResultMessage
 
 export type ReplyBody<T extends ReplyMessage['type']> = Omit<
   Extract<ReplyMessage, { type: T }>,

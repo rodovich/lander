@@ -31,17 +31,22 @@ import {
   closeRunChannel,
   requestResume,
   requestProjectGrant,
-  requestCheckRun,
+  requestWatcherRun,
 } from './daemon'
-import { announcedChecks, checkRefusal, readChecksStore, setCheckEnabled } from './checks'
+import {
+  announcedWatchers,
+  readWatchersStore,
+  setWatcherEnabled,
+  watcherRefusal,
+} from './watchers'
 import type {
   AgentKind,
-  CheckOutcome,
   CheckoutReport,
   HookSelector,
   RevivedMarker,
   StartRunMessage,
   TelemetryItem,
+  WatcherOutcome,
 } from './protocol'
 import {
   newestFirst,
@@ -189,8 +194,8 @@ const DATA_ROOT = process.env.LANDER_DATA_ROOT
   : path.join(ROOT, 'data')
 
 const PROJECTS = parseProjects(DATA_ROOT, process.env, process.cwd())
-// Which bundled watch checks the user has switched on (see checks.ts).
-const CHECKS_FILE = path.join(DATA_ROOT, 'checks.json')
+// Which bundled watchers the user has switched on (see watchers.ts).
+const WATCHERS_FILE = path.join(DATA_ROOT, 'watchers.json')
 const PROJECT_BY_SLUG = new Map<string, Project>(
   PROJECTS.map((p) => [p.slug, p]),
 )
@@ -358,7 +363,7 @@ type Task = {
   // Absent when not awaiting.
   waitingFor?: string[]
   // A watch the task armed (`lander ride --watch`), and every watch's saved
-  // check state. Landing deletes both; a message that wakes the task early
+  // watcher state. Landing deletes both; a message that wakes the task early
   // leaves the watch, as it leaves an await.
   watch?: Watch
   watchState?: Record<string, unknown>
@@ -1157,7 +1162,7 @@ type LaunchTrigger =
   | { kind: 'time' }
   | { kind: 'await'; landed: string[] }
   | { kind: 'manual' }
-  // A watch's check fired. `armedAt` names the arm that was checked, so a watch
+  // A watch's watcher fired. `armedAt` names the arm that was run, so a watch
   // re-armed or cleared since is not fired by its predecessor's result.
   | { kind: 'watch'; armedAt: string; message: string; state: unknown }
 
@@ -1556,7 +1561,7 @@ async function sweepOnce(): Promise<void> {
         )
       // Below the `running` guard like the notification above, and for the same
       // reason: a fire can only be delivered to a task that is waiting. Not
-      // awaited, since a check may take its whole budget.
+      // awaited, since a watcher may take its whole budget.
       else if (
         task.watch &&
         task.status !== 'wedged' &&
@@ -1568,35 +1573,35 @@ async function sweepOnce(): Promise<void> {
   }
 }
 
-// How often a watch's check runs, the check's own budget, and how long the
+// How often a watch's watcher runs, the watcher's own budget, and how long the
 // server waits for its answer — longer than the budget, so the daemon's timeout
 // answer is the one that arrives.
 const WATCH_INTERVAL_MS = 5 * 60_000
-const CHECK_BUDGET_MS = 20_000
-const CHECK_WAIT_MS = 30_000
+const WATCHER_BUDGET_MS = 20_000
+const WATCHER_WAIT_MS = 30_000
 // About an hour of runs at WATCH_INTERVAL_MS.
 const WATCH_MAX_FAILURES = 12
 
 const watchesInFlight = new Set<string>()
 
-function checkRunRequest(
+function watcherRunRequest(
   project: Project,
   id: string,
   task: Task,
-  watch: Pick<Watch, 'check' | 'args'>,
+  watch: Pick<Watch, 'watcher' | 'args'>,
 ) {
-  return requestCheckRun({
+  return requestWatcherRun({
     project: project.slug,
     ...checkoutHints(id, task),
-    check: watch.check,
+    watcher: watch.watcher,
     args: watch.args,
     prevState: watchStateOf(task, watch),
-    timeoutMs: CHECK_BUDGET_MS,
-    waitMs: CHECK_WAIT_MS,
+    timeoutMs: WATCHER_BUDGET_MS,
+    waitMs: WATCHER_WAIT_MS,
   })
 }
 
-// Run one due watch and apply what its check said. A result is applied only to
+// Run one due watch and apply what its watcher said. A result is applied only to
 // the arm it was run for, and only while the task is neither running nor wedged;
 // otherwise it is dropped without saving its state, so the next run sees the
 // same change.
@@ -1610,19 +1615,19 @@ async function runWatch(
   watchesInFlight.add(key)
   try {
     // The switch is consulted on every run, not only when arming, so switching a
-    // check off stops the watches already armed on it. A check no daemon has
+    // watcher off stops the watches already armed on it. A watcher no daemon has
     // announced is skipped rather than refused: a daemon handoff clears the list.
-    const refusal = await checkRefusal(CHECKS_FILE, watch.check)
+    const refusal = await watcherRefusal(WATCHERS_FILE, watch.watcher)
     if (refusal?.reason === 'unknown') return
-    let outcome: CheckOutcome
+    let outcome: WatcherOutcome
     if (refusal) outcome = { kind: 'error', error: refusal.message, permanent: true }
     else {
-      const res = await checkRunRequest(project, id, task, watch)
-      // No daemon to ask is an outage of the whole instance, not of this check.
+      const res = await watcherRunRequest(project, id, task, watch)
+      // No daemon to ask is an outage of the whole instance, not of this watcher.
       if (!res.ok && res.status === 503) return
       outcome = res.outcome ?? {
         kind: 'error',
-        error: res.error ?? 'check failed',
+        error: res.error ?? 'watcher failed',
         permanent: false,
       }
     }
@@ -1654,7 +1659,7 @@ async function runWatch(
         at,
         'system',
         undefined,
-        `watch ${watch.check} failed: ${outcome.error}`,
+        `watcher ${watch.watcher} failed: ${outcome.error}`,
       )
       t.status = 'wedged'
       t.updatedAt = at
@@ -2077,25 +2082,25 @@ app.post('/api/:project/hooks/approve', async (c) => {
   return c.json({ ok: true })
 })
 
-app.get('/api/checks', async (c) => {
-  const { enabled } = await readChecksStore(CHECKS_FILE)
+app.get('/api/watchers', async (c) => {
+  const { enabled } = await readWatchersStore(WATCHERS_FILE)
   return c.json({
-    checks: announcedChecks().map((meta) => ({
+    watchers: announcedWatchers().map((meta) => ({
       ...meta,
       enabled: enabled.includes(meta.name),
     })),
   })
 })
 
-// Human-only, like approving a hook: a check reads outside systems with the
+// Human-only, like approving a hook: a watcher reads outside systems with the
 // user's credentials, so a task must not be able to switch one on for itself.
-app.post('/api/checks/:name', async (c) => {
+app.post('/api/watchers/:name', async (c) => {
   if (c.get('principal').kind !== 'ui')
-    return c.json({ error: 'not authorized to switch checks' }, 403)
+    return c.json({ error: 'not authorized to switch watchers' }, 403)
   const { enabled } = await c.req.json<{ enabled?: unknown }>()
   if (typeof enabled !== 'boolean')
     return c.json({ error: 'enabled must be true or false' }, 400)
-  const store = await setCheckEnabled(CHECKS_FILE, c.req.param('name'), enabled)
+  const store = await setWatcherEnabled(WATCHERS_FILE, c.req.param('name'), enabled)
   return c.json({ enabled: store.enabled })
 })
 
@@ -2371,10 +2376,10 @@ function resolveSchedule(body: {
 
 function parseWatchBody(
   raw: unknown,
-): { check: string; args: Record<string, string> } | { error: string } {
-  const { check, args } = (raw ?? {}) as { check?: unknown; args?: unknown }
-  if (typeof check !== 'string' || !check.trim())
-    return { error: '--watch needs a check name' }
+): { watcher: string; args: Record<string, string> } | { error: string } {
+  const { watcher, args } = (raw ?? {}) as { watcher?: unknown; args?: unknown }
+  if (typeof watcher !== 'string' || !watcher.trim())
+    return { error: '--watch needs a watcher name' }
   if (args != null && (typeof args !== 'object' || Array.isArray(args)))
     return { error: 'watch args must be an object' }
   const out: Record<string, string> = {}
@@ -2382,7 +2387,7 @@ function parseWatchBody(
     if (typeof v !== 'string') return { error: `watch arg ${k} must be a string` }
     out[k] = v
   }
-  return { check: check.trim(), args: out }
+  return { watcher: watcher.trim(), args: out }
 }
 
 // Resolve the repeating-relaunch flags (`lander relaunch --interval <minutes>`
@@ -3279,22 +3284,22 @@ app.post('/api/:project/tasks/:id/ride', async (c) => {
         )
       const watch = parseWatchBody(body.watch)
       if ('error' in watch) return c.json({ error: watch.error }, 400)
-      const refusal = await checkRefusal(CHECKS_FILE, watch.check)
+      const refusal = await watcherRefusal(WATCHERS_FILE, watch.watcher)
       if (refusal) return c.json({ error: refusal.message }, 400)
       const task = await readTask(project.dataDir, id)
       if (!task) return c.json({ error: 'task not found' }, 404)
       // The first run happens now, outside the task's lock, so the arming turn's
-      // streamed updates don't queue behind a check that takes its whole budget.
-      const res = await checkRunRequest(project, id, task, watch)
+      // streamed updates don't queue behind a watcher that takes its whole budget.
+      const res = await watcherRunRequest(project, id, task, watch)
       if (!res.ok || !res.outcome)
-        return c.json({ error: `could not run ${watch.check}: ${res.error}` }, 503)
+        return c.json({ error: `could not run ${watch.watcher}: ${res.error}` }, 503)
       const outcome = res.outcome
       if (outcome.kind === 'error')
         return c.json({ error: outcome.error }, outcome.permanent ? 400 : 503)
       const armedAt = new Date().toISOString()
       let landed = false
       await mutateTask(file, (t) => {
-        // Landed while the check ran: arming now would revive it.
+        // Landed while the watcher ran: arming now would revive it.
         landed = t.status === 'landed' && task.status !== 'landed'
         if (landed) return
         saveWatchState(t, watch, outcome.state)

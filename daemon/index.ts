@@ -29,7 +29,7 @@ import type {
   StartRunMessage,
   HooksResolveMessage,
   HookRunMessage,
-  CheckRunMessage,
+  WatcherRunMessage,
   CheckoutHints,
   ProjectGrantMessage,
   RegisterMessage,
@@ -40,7 +40,7 @@ import { createReply, type ReplyBody, type ReplyMessage } from './reply'
 import { taskApiHeaders } from './task-api'
 import { gitExec, resolveHooks } from './hooks'
 import { createHookRuns, runHook } from './hook-run'
-import { bundledCheckMetas, runCheck } from './checks'
+import { bundledWatcherMetas, runWatcher } from './watchers'
 import { existsSync, statSync } from 'node:fs'
 import { createProjectOptions } from './config'
 import {
@@ -88,7 +88,7 @@ const TOKEN = process.env.LANDER_DAEMON_TOKEN?.trim() || ''
 // without this the UI token reached every task's shell, where presenting it as
 // `x-lander-ui-token` resolves as the trusted human on every route.
 //
-// Here rather than in daemon-watch.mjs: the watcher spawns each daemon with its
+// Here rather than in daemon-watch.mjs: that supervisor spawns each daemon with its
 // own env and must keep the value to hand to the successor across a drain
 // handoff. Here rather than at the spawn sites: a new spawn site can forget a
 // filter, but it cannot un-inherit what is no longer in the environment.
@@ -260,7 +260,7 @@ function resolveRunPaths(msg: StartRunMessage, caps: ProviderCaps): RunPaths {
   return { root, cwd: launch.cwd }
 }
 
-// Which checkout a hook resolution reads, or a watch check works in. The tree
+// Which checkout a hook resolution reads, or a watcher works in. The tree
 // that matters is the one the target task is working in: its own checkout when
 // it has one, otherwise wherever the same provider-owned resolveLaunchDir a run
 // uses would launch it.
@@ -275,7 +275,7 @@ function resolveRunPaths(msg: StartRunMessage, caps: ProviderCaps): RunPaths {
 // The root travels with it because the recorded cwd is task-writable, so a
 // directory being under the project root does not make it the project's tree:
 // hook resolution checks that the two are the same repository before reading the
-// target's, and a watch check confines itself to the root (runWatchCheck).
+// target's, and a watcher confines itself to the root (handleWatcherRun).
 function resolveTaskCwd(
   project: string,
   hints: CheckoutHints,
@@ -450,9 +450,9 @@ function onMessage(raw: string): void {
       return
     case 'hook-run':
       return runHookFire(msg)
-    // Taken while draining too: a check only reads, and is bounded by its budget.
-    case 'check-run':
-      void reply('check-run-result', msg.requestId, () => runWatchCheck(msg))
+    // Taken while draining too: a watcher only reads, and is bounded by its budget.
+    case 'watcher-run':
+      void reply('watcher-run-result', msg.requestId, () => handleWatcherRun(msg))
       return
     // Taken while draining too: it spawns no run, and the drain waits for it.
     case 'release-checkout':
@@ -533,16 +533,16 @@ async function resolveHooksFor(
   return { ok: true, resolution }
 }
 
-async function runWatchCheck(
-  msg: CheckRunMessage,
-): Promise<ReplyBody<'check-run-result'>> {
+async function handleWatcherRun(
+  msg: WatcherRunMessage,
+): Promise<ReplyBody<'watcher-run-result'>> {
   const { root, cwd } = resolveTaskCwd(msg.project, msg)
   // The recorded cwd is task-writable, and a symlink under the project root can
-  // point anywhere, so a check works in it only if it really is under the root.
+  // point anywhere, so a watcher works in it only if it really is under the root.
   const [realRoot, realCwd] = await Promise.all([realpath(root), realpath(cwd)])
   const confined = realCwd === realRoot || isInside(realRoot, realCwd) ? cwd : root
-  const outcome = await runCheck(
-    msg.check,
+  const outcome = await runWatcher(
+    msg.watcher,
     { cwd: confined },
     msg.args,
     msg.prevState,
@@ -644,7 +644,7 @@ function sendRegister(): void {
     // flow is bundled today; the scope envelope leaves room for user- and
     // project-scoped flows without another wire change.
     flows: announcedFlows(),
-    checks: bundledCheckMetas(),
+    watchers: bundledWatcherMetas(),
   })
 }
 

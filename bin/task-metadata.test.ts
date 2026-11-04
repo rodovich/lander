@@ -156,7 +156,7 @@ describe('taskMetadata over a summarized task', () => {
   it('carries an armed watch and the last watch fire, which the summary derives', () => {
     const watching = {
       ...full,
-      watch: { check: 'gh-pr-activity', args: { pr: 'o/r#1' }, armedAt: 'x', lastRunAt: 'x' },
+      watch: { watcher: 'gh-pr-activity', args: { pr: 'o/r#1' }, armedAt: 'x', lastRunAt: 'x' },
       items: [
         ...full.items,
         {
@@ -165,14 +165,14 @@ describe('taskMetadata over a summarized task', () => {
           kind: 'message',
           role: 'user',
           text: 'Watch fired',
-          from: { lander: 'watch', check: 'gh-pr-activity', args: { pr: 'o/r#1' } },
+          from: { lander: 'watch', watcher: 'gh-pr-activity', args: { pr: 'o/r#1' } },
         },
       ],
     }
     const meta = taskMetadata(taskSummary(watching))
-    expect(meta.watch).toEqual({ check: 'gh-pr-activity', args: { pr: 'o/r#1' } })
+    expect(meta.watch).toEqual({ watcher: 'gh-pr-activity', args: { pr: 'o/r#1' } })
     expect(meta.lastWatchFire).toEqual({
-      check: 'gh-pr-activity',
+      watcher: 'gh-pr-activity',
       args: { pr: 'o/r#1' },
       at: '2026-06-30T03:00:00.000Z',
     })
@@ -192,13 +192,13 @@ describe('taskMetadata over a summarized task', () => {
       taskSummary({
         ...full,
         items: [
-          fire('a', '2026-06-30T03:00:00.000Z', { lander: 'watch', check: 'one', args: {} }),
-          fire('b', '2026-06-30T04:00:00.000Z', { lander: 'watch', check: 'two', args: {} }),
+          fire('a', '2026-06-30T03:00:00.000Z', { lander: 'watch', watcher: 'one', args: {} }),
+          fire('b', '2026-06-30T04:00:00.000Z', { lander: 'watch', watcher: 'two', args: {} }),
           fire('c', '2026-06-30T05:00:00.000Z', { lander: 'watch' }),
         ],
       }),
     )
-    expect(meta.lastWatchFire).toEqual({ check: 'two', args: {}, at: '2026-06-30T04:00:00.000Z' })
+    expect(meta.lastWatchFire).toEqual({ watcher: 'two', args: {}, at: '2026-06-30T04:00:00.000Z' })
     const legacyOnly = taskMetadata(
       taskSummary({ ...full, items: [fire('c', '2026-06-30T05:00:00.000Z', { lander: 'watch' })] }),
     )

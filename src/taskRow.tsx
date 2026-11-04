@@ -49,7 +49,7 @@ function RepeatIcon() {
   )
 }
 
-// The check a watching task is waiting on, with its arguments and when it last
+// The watcher a watching task is waiting on, with its arguments and when it last
 // ran in the tooltip.
 function WatchLabel({ watch }: { watch: NonNullable<TaskWithProject['watch']> }) {
   const args = Object.entries(watch.args).map(([k, v]) => `${k}=${v}`)
@@ -57,7 +57,7 @@ function WatchLabel({ watch }: { watch: NonNullable<TaskWithProject['watch']> })
   return (
     <span className="task-watch" title={[...args, checked].join('\n')}>
       <ClockIcon label="Watching" />
-      watching {watch.check}
+      watching {watch.watcher}
     </span>
   )
 }

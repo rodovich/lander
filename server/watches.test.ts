@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { CheckRunResponse } from './daemon'
+import type { WatcherRunResponse } from './daemon'
 import { normalizeProjectPath, projectSlug } from './projects'
 import { attributedPrompt, type EventItem, type Item, type MessageItem } from './tasks'
 
@@ -10,12 +10,12 @@ import { attributedPrompt, type EventItem, type Item, type MessageItem } from '.
 // it, and its result wakes, waits, or wedges the task. The daemon's answer is the
 // one thing faked.
 
-const { requestCheckRun } = vi.hoisted(() => ({
-  requestCheckRun: vi.fn<(input: unknown) => Promise<CheckRunResponse>>(),
+const { requestWatcherRun } = vi.hoisted(() => ({
+  requestWatcherRun: vi.fn<(input: unknown) => Promise<WatcherRunResponse>>(),
 }))
 vi.mock('./daemon', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./daemon')>()),
-  requestCheckRun,
+  requestWatcherRun,
 }))
 
 const UI_TOKEN = 'test-ui-token'
@@ -63,16 +63,16 @@ async function post(pathname: string, body: unknown): Promise<Response> {
 }
 
 function armWatch(id: string, args: Record<string, string> = { thing: 'a' }) {
-  return post(`/api/${slug}/tasks/${id}/ride`, { watch: { check: 'probe', args } })
+  return post(`/api/${slug}/tasks/${id}/ride`, { watch: { watcher: 'probe', args } })
 }
 
 function watching(lastRunAt: string, extra: Record<string, unknown> = {}) {
   return {
-    watch: { check: 'probe', args: { thing: 'a' }, armedAt: AT, lastRunAt, ...extra },
+    watch: { watcher: 'probe', args: { thing: 'a' }, armedAt: AT, lastRunAt, ...extra },
   }
 }
 
-const answer = (outcome: CheckRunResponse['outcome']): CheckRunResponse => ({
+const answer = (outcome: WatcherRunResponse['outcome']): WatcherRunResponse => ({
   ok: true,
   outcome,
 })
@@ -89,12 +89,12 @@ beforeAll(async () => {
   process.env.LANDER_UI_TOKEN = UI_TOKEN
   await mkdir(tasksDir, { recursive: true })
   await writeFile(
-    path.join(dataDirRoot, 'checks.json'),
+    path.join(dataDirRoot, 'watchers.json'),
     JSON.stringify({ enabled: ['probe'] }),
   )
   ;({ app, launchScheduled } = await import('./index'))
-  const { setAnnouncedChecks } = await import('./checks')
-  setAnnouncedChecks([
+  const { setAnnouncedWatchers } = await import('./watchers')
+  setAnnouncedWatchers([
     { name: 'probe', description: 'test', args: { thing: { description: 'x' } } },
     { name: 'off', description: 'never switched on', args: {} },
   ])
@@ -107,28 +107,28 @@ afterAll(async () => {
 })
 
 beforeEach(() => {
-  requestCheckRun.mockReset()
+  requestWatcherRun.mockReset()
 })
 
 describe('arming a watch', () => {
-  it('refuses an unknown check and a switched-off one without running either', async () => {
+  it('refuses an unknown watcher and a switched-off one without running either', async () => {
     await seed('arm-refused')
     const unknown = await post(`/api/${slug}/tasks/arm-refused/ride`, {
-      watch: { check: 'nope', args: {} },
+      watch: { watcher: 'nope', args: {} },
     })
     expect(unknown.status).toBe(400)
     const off = await post(`/api/${slug}/tasks/arm-refused/ride`, {
-      watch: { check: 'off', args: {} },
+      watch: { watcher: 'off', args: {} },
     })
     expect(off.status).toBe(400)
     expect((await off.json()).error).toMatch(/Hooks panel/)
-    expect(requestCheckRun).not.toHaveBeenCalled()
+    expect(requestWatcherRun).not.toHaveBeenCalled()
   })
 
   it('rejects --watch with another trigger', async () => {
     await seed('arm-combined')
     const res = await post(`/api/${slug}/tasks/arm-combined/ride`, {
-      watch: { check: 'probe', args: {} },
+      watch: { watcher: 'probe', args: {} },
       time: 5,
     })
     expect(res.status).toBe(400)
@@ -136,11 +136,11 @@ describe('arming a watch', () => {
 
   it('arms after a quiet first run, saving its state and adding no item', async () => {
     await seed('arm-quiet')
-    requestCheckRun.mockResolvedValueOnce(answer({ kind: 'quiet', state: { n: 1 } }))
+    requestWatcherRun.mockResolvedValueOnce(answer({ kind: 'quiet', state: { n: 1 } }))
     const res = await armWatch('arm-quiet')
     expect(res.status).toBe(200)
     const served = await res.json()
-    expect(served.watch).toMatchObject({ check: 'probe', args: { thing: 'a' } })
+    expect(served.watch).toMatchObject({ watcher: 'probe', args: { thing: 'a' } })
     expect(served.watchState).toBeUndefined()
     const raw = await readRaw('arm-quiet')
     expect(raw.watch.lastRunAt).toBe(raw.watch.armedAt)
@@ -150,7 +150,7 @@ describe('arming a watch', () => {
 
   it('does not arm when the first run fires, and says so', async () => {
     await seed('arm-fired')
-    requestCheckRun.mockResolvedValueOnce(
+    requestWatcherRun.mockResolvedValueOnce(
       answer({ kind: 'fired', state: { n: 2 }, message: 'it happened' }),
     )
     const served = await (await armWatch('arm-fired')).json()
@@ -160,42 +160,42 @@ describe('arming a watch', () => {
     expect(Object.values(raw.watchState)).toEqual([{ n: 2 }])
   })
 
-  it('arms nothing when the check errors or no daemon answers', async () => {
+  it('arms nothing when the watcher errors or no daemon answers', async () => {
     await seed('arm-error')
-    requestCheckRun.mockResolvedValueOnce(
+    requestWatcherRun.mockResolvedValueOnce(
       answer({ kind: 'error', error: 'bad path', permanent: true }),
     )
     const bad = await armWatch('arm-error')
     expect(bad.status).toBe(400)
     expect((await bad.json()).error).toBe('bad path')
-    requestCheckRun.mockResolvedValueOnce({ ok: false, error: 'none', status: 503 })
+    requestWatcherRun.mockResolvedValueOnce({ ok: false, error: 'none', status: 503 })
     expect((await armWatch('arm-error')).status).toBe(503)
     expect((await readRaw('arm-error')).watch).toBeUndefined()
   })
 
-  it('resumes from the state saved by the last watch on the same check and args', async () => {
+  it('resumes from the state saved by the last watch on the same watcher and args', async () => {
     await seed('arm-resume')
-    requestCheckRun.mockResolvedValueOnce(
+    requestWatcherRun.mockResolvedValueOnce(
       answer({ kind: 'fired', state: { cursor: 7 }, message: 'm' }),
     )
     await armWatch('arm-resume')
-    requestCheckRun.mockResolvedValueOnce(answer({ kind: 'quiet', state: {} }))
+    requestWatcherRun.mockResolvedValueOnce(answer({ kind: 'quiet', state: {} }))
     await armWatch('arm-resume')
-    expect(requestCheckRun.mock.calls[1][0]).toMatchObject({ prevState: { cursor: 7 } })
-    requestCheckRun.mockResolvedValueOnce(answer({ kind: 'quiet', state: {} }))
+    expect(requestWatcherRun.mock.calls[1][0]).toMatchObject({ prevState: { cursor: 7 } })
+    requestWatcherRun.mockResolvedValueOnce(answer({ kind: 'quiet', state: {} }))
     await armWatch('arm-resume', { thing: 'b' })
-    expect((requestCheckRun.mock.calls[2][0] as { prevState?: unknown }).prevState).toBeUndefined()
+    expect((requestWatcherRun.mock.calls[2][0] as { prevState?: unknown }).prevState).toBeUndefined()
   })
 
-  it('maps a check that may succeed later to 503, and does not revive a task that landed meanwhile', async () => {
+  it('maps a watcher error that may clear later to 503, and does not revive a task that landed meanwhile', async () => {
     await seed('arm-transient')
-    requestCheckRun.mockResolvedValueOnce(
+    requestWatcherRun.mockResolvedValueOnce(
       answer({ kind: 'error', error: 'timed out', permanent: false }),
     )
     expect((await armWatch('arm-transient')).status).toBe(503)
 
     await seed('arm-landing')
-    requestCheckRun.mockImplementationOnce(async () => {
+    requestWatcherRun.mockImplementationOnce(async () => {
       const raw = await readRaw('arm-landing')
       await writeFile(
         path.join(tasksDir, 'arm-landing.json'),
@@ -230,11 +230,11 @@ describe('a watch across the task’s life', () => {
     const res = await post(`/api/${slug}/tasks/life-message/messages`, { message: 'hi' })
     expect(res.status).toBeLessThan(300)
     const raw = await readRaw('life-message')
-    expect(raw.watch).toMatchObject({ check: 'probe' })
+    expect(raw.watch).toMatchObject({ watcher: 'probe' })
     expect(raw.revived?.waitingUntil).toBeUndefined()
     const { scheduledRideOf } = await import('./tasks')
     expect(scheduledRideOf(raw)).toEqual({
-      watching: { check: 'probe', args: { thing: 'a' } },
+      watching: { watcher: 'probe', args: { thing: 'a' } },
     })
   })
 
@@ -255,7 +255,7 @@ describe('a watch across the task’s life', () => {
 describe('the sweep running a watch', () => {
   it('records a quiet run without moving the task in the list or adding items', async () => {
     await seed('sweep-quiet', watching(LONG_AGO))
-    requestCheckRun.mockResolvedValue(answer({ kind: 'quiet', state: { n: 3 } }))
+    requestWatcherRun.mockResolvedValue(answer({ kind: 'quiet', state: { n: 3 } }))
     await launchScheduled()
     await vi.waitFor(async () =>
       expect((await readRaw('sweep-quiet')).watch.lastRunAt).not.toBe(LONG_AGO),
@@ -269,16 +269,16 @@ describe('the sweep running a watch', () => {
   it('does not run a watch that is not yet due, or one on a wedged task', async () => {
     await seed('sweep-not-due', watching(new Date().toISOString()))
     await seed('sweep-wedged', { ...watching(LONG_AGO), status: 'wedged' })
-    requestCheckRun.mockResolvedValue(answer({ kind: 'quiet', state: {} }))
+    requestWatcherRun.mockResolvedValue(answer({ kind: 'quiet', state: {} }))
     await launchScheduled()
-    const ran = requestCheckRun.mock.calls.map((c) => (c[0] as { taskId: string }).taskId)
+    const ran = requestWatcherRun.mock.calls.map((c) => (c[0] as { taskId: string }).taskId)
     expect(ran).not.toContain('sweep-not-due')
     expect(ran).not.toContain('sweep-wedged')
   })
 
-  it('wakes the task with the check’s message when it fires', async () => {
+  it('wakes the task with the watcher’s message when it fires', async () => {
     await seed('sweep-fired', watching(LONG_AGO))
-    requestCheckRun.mockResolvedValue(
+    requestWatcherRun.mockResolvedValue(
       answer({ kind: 'fired', state: { n: 4 }, message: 'the file changed' }),
     )
     await launchScheduled()
@@ -290,15 +290,15 @@ describe('the sweep running a watch', () => {
     const prompt = (raw.items as Item[])
       .filter((i): i is MessageItem => i.kind === 'message' && i.role === 'user')
       .at(-1)!
-    expect(prompt.from).toEqual({ lander: 'watch', check: 'probe', args: { thing: 'a' } })
+    expect(prompt.from).toEqual({ lander: 'watch', watcher: 'probe', args: { thing: 'a' } })
     expect(attributedPrompt(prompt)).toContain('the file changed')
     expect(raw.watch).toBeUndefined()
     expect(Object.values(raw.watchState)).toEqual([{ n: 4 }])
   })
 
-  it('keeps retrying a failing check until it has failed twelve runs in a row, then wedges', async () => {
+  it('keeps retrying a failing watcher until it has failed twelve runs in a row, then wedges', async () => {
     await seed('sweep-failing', watching(LONG_AGO))
-    requestCheckRun.mockResolvedValue(
+    requestWatcherRun.mockResolvedValue(
       answer({ kind: 'error', error: 'flaky', permanent: false }),
     )
     await launchScheduled()
@@ -315,12 +315,12 @@ describe('the sweep running a watch', () => {
     const wedged = (raw.items as Item[])
       .filter((i): i is EventItem => i.kind === 'event')
       .at(-1)!
-    expect(wedged).toMatchObject({ eventKind: 'wedged', reason: 'watch probe failed: flaky' })
+    expect(wedged).toMatchObject({ eventKind: 'wedged', reason: 'watcher probe failed: flaky' })
   })
 
   it('wedges at once on a permanent error', async () => {
     await seed('sweep-permanent', watching(LONG_AGO))
-    requestCheckRun.mockResolvedValue(
+    requestWatcherRun.mockResolvedValue(
       answer({ kind: 'error', error: 'gone', permanent: true }),
     )
     await launchScheduled()
@@ -329,27 +329,27 @@ describe('the sweep running a watch', () => {
     )
   })
 
-  it('stops a watch whose check the user switched off after it was armed', async () => {
-    const checksFile = path.join(dataDirRoot, 'checks.json')
+  it('stops a watch whose watcher the user switched off after it was armed', async () => {
+    const watchersFile = path.join(dataDirRoot, 'watchers.json')
     await seed('sweep-switched-off', watching(LONG_AGO))
-    await writeFile(checksFile, JSON.stringify({ enabled: [] }))
+    await writeFile(watchersFile, JSON.stringify({ enabled: [] }))
     try {
       await launchScheduled()
       await vi.waitFor(async () =>
         expect((await readRaw('sweep-switched-off')).status).toBe('wedged'),
       )
-      const ran = requestCheckRun.mock.calls.map((c) => (c[0] as { taskId: string }).taskId)
+      const ran = requestWatcherRun.mock.calls.map((c) => (c[0] as { taskId: string }).taskId)
       expect(ran).not.toContain('sweep-switched-off')
     } finally {
-      await writeFile(checksFile, JSON.stringify({ enabled: ['probe'] }))
+      await writeFile(watchersFile, JSON.stringify({ enabled: ['probe'] }))
     }
   })
 
   it('does not count a missing daemon toward the failure streak', async () => {
     await seed('sweep-no-daemon', watching(LONG_AGO))
-    requestCheckRun.mockResolvedValue({ ok: false, error: 'none', status: 503 })
+    requestWatcherRun.mockResolvedValue({ ok: false, error: 'none', status: 503 })
     await launchScheduled()
-    await vi.waitFor(() => expect(requestCheckRun).toHaveBeenCalled())
+    await vi.waitFor(() => expect(requestWatcherRun).toHaveBeenCalled())
     await new Promise((r) => setTimeout(r, 50))
     const raw = await readRaw('sweep-no-daemon')
     expect(raw.watch).toEqual(watching(LONG_AGO).watch)

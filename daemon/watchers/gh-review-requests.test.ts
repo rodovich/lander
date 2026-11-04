@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import ghReviewRequests from './gh-review-requests'
 import type { GitHub } from './github'
-import { PermanentCheckError } from './types'
+import { PermanentWatcherError } from './types'
 
 const pr = (repo: string, number: number) => ({
   number,
@@ -140,7 +140,7 @@ describe('gh-review-requests', () => {
 
   it('refuses a malformed repo', async () => {
     await expect(run({ items: [] }, undefined, { repo: 'nope' })).rejects.toBeInstanceOf(
-      PermanentCheckError,
+      PermanentWatcherError,
     )
   })
 })

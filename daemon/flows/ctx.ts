@@ -403,7 +403,7 @@ export function buildScheduledRideBlock(ride: ScheduledRide): string {
       .join(', ')
     return [
       '<ride-scheduled>',
-      `You are watching \`${ride.watching.check}\`${args ? ` (${args})` : ''}; ` +
+      `You are watching \`${ride.watching.watcher}\`${args ? ` (${args})` : ''}; ` +
         'it wakes you when it fires. It stays armed unless you clear it with ' +
         '`lander ride --clear`; scheduling another ride with `lander ride` ' +
         'replaces it.',

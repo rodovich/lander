@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ghPrActivity from './gh-pr-activity'
 import { createGitHub, type GitHub } from './github'
-import { PermanentCheckError } from './types'
+import { PermanentWatcherError } from './types'
 
 const PR = '/repos/o/r/pulls/7'
 const TIMELINE = '/repos/o/r/issues/7/timeline?per_page=100&page=1'
@@ -233,9 +233,9 @@ describe('gh-pr-activity arguments', () => {
         { pr: 'not a pr' },
         undefined,
       ),
-    ).rejects.toBeInstanceOf(PermanentCheckError)
+    ).rejects.toBeInstanceOf(PermanentWatcherError)
     await expect(run(world, undefined, { from: 'everyone' })).rejects.toBeInstanceOf(
-      PermanentCheckError,
+      PermanentWatcherError,
     )
   })
 
@@ -288,6 +288,6 @@ describe('createGitHub', () => {
     const gh = createGitHub(async () => 't')
     await expect(
       gh.get('/repos/o/r/pulls/1', { signal: new AbortController().signal }),
-    ).rejects.toBeInstanceOf(PermanentCheckError)
+    ).rejects.toBeInstanceOf(PermanentWatcherError)
   })
 })

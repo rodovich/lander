@@ -1,24 +1,24 @@
-// The watch checks bundled with lander, and the one place the daemon runs them.
+// The watchers bundled with lander, and the one place the daemon runs them.
 //
-// A check is lander's own read-only code: the agent that arms a watch supplies
+// A watcher is lander's own read-only code: the agent that arms a watch supplies
 // only its arguments. It runs in the daemon process, so everything it does must
 // be asynchronous and bounded by `ctx.signal`.
 
-import type { CheckMeta, CheckOutcome } from '../../server/protocol'
+import type { WatcherMeta, WatcherOutcome } from '../../server/protocol'
 import ghPrActivity from './gh-pr-activity'
 import ghReviewRequests from './gh-review-requests'
 import { createGitHub } from './github'
-import { PermanentCheckError, type BundledCheck, type CheckCtx } from './types'
+import { PermanentWatcherError, type BundledWatcher, type WatcherCtx } from './types'
 
-const BUNDLED: BundledCheck[] = [ghPrActivity, ghReviewRequests]
+const BUNDLED: BundledWatcher[] = [ghPrActivity, ghReviewRequests]
 
 const github = createGitHub()
 
-export function bundledCheckMetas(): CheckMeta[] {
-  return BUNDLED.map((c) => c.meta)
+export function bundledWatcherMetas(): WatcherMeta[] {
+  return BUNDLED.map((w) => w.meta)
 }
 
-function argsError(meta: CheckMeta, args: Record<string, string>): string | null {
+function argsError(meta: WatcherMeta, args: Record<string, string>): string | null {
   for (const name of Object.keys(args))
     if (!Object.hasOwn(meta.args, name)) return `${meta.name} takes no argument "${name}"`
   for (const [name, spec] of Object.entries(meta.args))
@@ -33,23 +33,23 @@ function rejectOnAbort(signal: AbortSignal, message: string): Promise<never> {
   )
 }
 
-export async function runCheck(
+export async function runWatcher(
   name: string,
-  ctx: Omit<CheckCtx, 'signal' | 'github'>,
+  ctx: Omit<WatcherCtx, 'signal' | 'github'>,
   args: Record<string, string>,
   prevState: unknown,
   timeoutMs: number,
-  checks: BundledCheck[] = BUNDLED,
-): Promise<CheckOutcome> {
-  const check = checks.find((c) => c.meta.name === name)
-  if (!check)
-    return { kind: 'error', error: `no bundled check named ${name}`, permanent: true }
-  const invalid = argsError(check.meta, args)
+  watchers: BundledWatcher[] = BUNDLED,
+): Promise<WatcherOutcome> {
+  const watcher = watchers.find((w) => w.meta.name === name)
+  if (!watcher)
+    return { kind: 'error', error: `no bundled watcher named ${name}`, permanent: true }
+  const invalid = argsError(watcher.meta, args)
   if (invalid) return { kind: 'error', error: invalid, permanent: true }
   const signal = AbortSignal.timeout(timeoutMs)
   try {
     const result = await Promise.race([
-      check.run({ ...ctx, github, signal }, args, prevState),
+      watcher.run({ ...ctx, github, signal }, args, prevState),
       rejectOnAbort(signal, `${name} timed out after ${timeoutMs / 1000}s`),
     ])
     return result.fired
@@ -59,7 +59,7 @@ export async function runCheck(
     return {
       kind: 'error',
       error: e instanceof Error ? e.message : String(e),
-      permanent: e instanceof PermanentCheckError,
+      permanent: e instanceof PermanentWatcherError,
     }
   }
 }

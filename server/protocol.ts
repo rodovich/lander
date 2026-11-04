@@ -115,7 +115,7 @@ export type RevivedMarker = {
 export type ScheduledRide = {
   at?: string
   awaiting?: string[]
-  watching?: { check: string; args: Record<string, string> }
+  watching?: { watcher: string; args: Record<string, string> }
 }
 
 // Launch a run: like today's RunJob minus the file paths and the absolute cwd.
@@ -415,39 +415,39 @@ export type HookRunResultMessage = {
   report?: HookRunReport
 }
 
-// A bundled watch check, as the daemon announces it.
-export type CheckMeta = {
+// A bundled watcher, as the daemon announces it.
+export type WatcherMeta = {
   name: string
   description: string
   args: Record<string, { required?: boolean; description: string }>
 }
 
-// Run one watch check for one task, in the task's checkout.
-export type CheckRunMessage = CheckoutHints & {
-  type: 'check-run'
+// Run one watcher for one task, in the task's checkout.
+export type WatcherRunMessage = CheckoutHints & {
+  type: 'watcher-run'
   requestId: string
   project: string
-  check: string
+  watcher: string
   args: Record<string, string>
-  // The state last saved for this task, check, and args; absent on the first
+  // The state last saved for this task, watcher, and args; absent on the first
   // run.
   prevState?: unknown
-  // The check's budget, below the server's wait so its answer always arrives.
+  // The watcher's budget, below the server's wait so its answer always arrives.
   timeoutMs: number
 }
 
-export type CheckOutcome =
+export type WatcherOutcome =
   | { kind: 'quiet'; state: unknown }
   | { kind: 'fired'; state: unknown; message: string }
   | { kind: 'error'; error: string; permanent: boolean }
 
-export type CheckRunResultMessage = {
-  type: 'check-run-result'
+export type WatcherRunResultMessage = {
+  type: 'watcher-run-result'
   requestId: string
   ok: boolean
   error?: string
   status?: number
-  outcome?: CheckOutcome
+  outcome?: WatcherOutcome
 }
 
 // The task is done with its checkout — landed with nothing left to run against
@@ -469,7 +469,7 @@ export type ServerToDaemon =
   | AckMessage
   | HooksResolveMessage
   | HookRunMessage
-  | CheckRunMessage
+  | WatcherRunMessage
   | ReleaseCheckoutMessage
 
 // The server has applied a `register`: if it was not draining, the daemon that
@@ -507,9 +507,9 @@ export type RegisterMessage = {
   // because such a daemon can only run the legacy flows, and those carry
   // StartRunMessage.agent and bypass the gate.
   flows?: FlowAnnouncement[]
-  // The bundled watch checks this daemon can run. Absent from an older daemon,
+  // The bundled watchers this daemon can run. Absent from an older daemon,
   // which the server reads as none.
-  checks?: CheckMeta[]
+  watchers?: WatcherMeta[]
 }
 
 // A structured run update — one reduced batch of stream output, plus the
@@ -716,4 +716,4 @@ export type DaemonToServer =
   | TelemetryMessage
   | HooksResolveResultMessage
   | HookRunResultMessage
-  | CheckRunResultMessage
+  | WatcherRunResultMessage
