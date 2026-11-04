@@ -1,9 +1,11 @@
 import type { CheckMeta } from '../../server/protocol'
+import type { GitHub } from './github'
 
 export type CheckCtx = {
   // The checkout of the task that armed the watch.
   cwd: string
   signal: AbortSignal
+  github: GitHub
 }
 
 export type CheckResult =

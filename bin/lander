@@ -1351,7 +1351,7 @@ const USAGE = {
   list: 'list [--status <s>] [--since <when>] [--until <when>] [--text <terms>] [--archived] [--json]',
   view: 'view <id> [--expand] [--messages <N|all>] [--clip <N|all>] [--json]',
   send: 'send <task id> --composed <message id> [--date <when>|--time <min>] [--after <ids>] [--await] [--attach <paths…>]',
-  ride: 'ride (--date <when> | --time <min> | --after <ids> | --clear)',
+  ride: 'ride (--date <when> | --time <min> | --after <ids> | --watch <check> [--arg <key>=<value> …] | --clear)',
   relaunch:
     'relaunch <message|-> [--date <when>|--time <min>|--after <ids>] [--interval <min> [--repeat-count <n>|--repeat-until <when>]] [--flow <name>] [--clear]',
   wedge:

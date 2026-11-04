@@ -5,9 +5,14 @@
 // be asynchronous and bounded by `ctx.signal`.
 
 import type { CheckMeta, CheckOutcome } from '../../server/protocol'
+import ghPrActivity from './gh-pr-activity'
+import ghReviewRequests from './gh-review-requests'
+import { createGitHub } from './github'
 import { PermanentCheckError, type BundledCheck, type CheckCtx } from './types'
 
-const BUNDLED: BundledCheck[] = []
+const BUNDLED: BundledCheck[] = [ghPrActivity, ghReviewRequests]
+
+const github = createGitHub()
 
 export function bundledCheckMetas(): CheckMeta[] {
   return BUNDLED.map((c) => c.meta)
@@ -30,7 +35,7 @@ function rejectOnAbort(signal: AbortSignal, message: string): Promise<never> {
 
 export async function runCheck(
   name: string,
-  ctx: Omit<CheckCtx, 'signal'>,
+  ctx: Omit<CheckCtx, 'signal' | 'github'>,
   args: Record<string, string>,
   prevState: unknown,
   timeoutMs: number,
@@ -44,7 +49,7 @@ export async function runCheck(
   const signal = AbortSignal.timeout(timeoutMs)
   try {
     const result = await Promise.race([
-      check.run({ ...ctx, signal }, args, prevState),
+      check.run({ ...ctx, github, signal }, args, prevState),
       rejectOnAbort(signal, `${name} timed out after ${timeoutMs / 1000}s`),
     ])
     return result.fired
