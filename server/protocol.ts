@@ -155,6 +155,8 @@ export type StartRunMessage = {
   prompt: string
   task: {
     allow?: string[]
+    // The watchers the user has enabled, which this task's agent can arm.
+    watchers?: WatcherMeta[]
   }
   // The provider session to resume, when the task already has one (a prior turn
   // reported it — see SessionMessage). Absent on a task's first turn. For Claude

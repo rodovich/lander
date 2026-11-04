@@ -10,6 +10,7 @@ import {
   deliveryDigest,
   fillTaskPrompt,
   prepareUserMessagePrompt,
+  watchersPart,
 } from './task-management'
 
 const TEMPLATE = 'You are running inside a lander task. This task id is {{id}}.'
@@ -36,6 +37,60 @@ describe('changedContextParts', () => {
   it('counts a part that went away as a change to record', () => {
     const r = changedContextParts([], 's', { git: deliveryDigest('on main') })
     expect(r).toEqual({ send: [], record: {}, changed: true })
+  })
+
+  it('tells the agent once when every watcher has been switched off', () => {
+    const r = changedContextParts([], 's', { watchers: 'sha256:x' })
+    expect(r.send.map((p) => p.text)).toEqual([
+      'No watchers are enabled anymore; `lander ride --watch` will refuse.',
+    ])
+    expect(changedContextParts([], 's', r.record).send).toEqual([])
+  })
+
+  it('replaces a record left from an earlier session, so it is never retracted', () => {
+    const fresh = changedContextParts([], undefined, { watchers: 'sha256:x' })
+    expect(fresh).toEqual({ send: [], record: {}, changed: true })
+    expect(changedContextParts([], 's', fresh.record).send).toEqual([])
+  })
+})
+
+const WATCHER = {
+  name: 'gh-pr-activity',
+  description: 'Fires when someone responds.',
+  args: {
+    pr: { required: true, description: 'owner/repo#123' },
+    since: { description: 'an ISO time' },
+  },
+}
+
+describe('watchersPart', () => {
+  it('lists each enabled watcher with its arguments', () => {
+    expect(watchersPart({ watchers: [WATCHER] })?.text).toBe(
+      'Watchers you can arm with `lander ride --watch <watcher> --arg <key>=<value>`:\n' +
+        '- `gh-pr-activity`: Fires when someone responds.\n' +
+        '  - `--arg pr=…` (required): owner/repo#123\n' +
+        '  - `--arg since=…`: an ISO time',
+    )
+    expect(watchersPart({ watchers: [] })).toBeUndefined()
+  })
+
+  it('reaches a user-message prompt once, and again only when the list changes', () => {
+    const store: Record<string, unknown> = {}
+    const ctx = {
+      task: { taskId: 't1', root: '/repo', watchers: [WATCHER] },
+      turn: { prompts: ['go'] },
+      state: {
+        get: (p: string[]) => store[p[0]],
+        set: (p: string[], v: unknown) => void (store[p[0]] = v),
+      },
+    }
+    const opts = { sessionId: 'thread-1', taskPromptTemplate: TEMPLATE, readProjectDoc: () => undefined }
+    const first = prepareUserMessagePrompt(ctx, opts)
+    expect(first.prompt).toContain('`gh-pr-activity`')
+    first.commitDelivered()
+    expect(prepareUserMessagePrompt(ctx, opts).prompt).not.toContain('`gh-pr-activity`')
+    ctx.task.watchers = []
+    expect(prepareUserMessagePrompt(ctx, opts).prompt).toContain('No watchers are enabled anymore')
   })
 })
 

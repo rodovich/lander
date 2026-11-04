@@ -67,7 +67,7 @@ export function resolveProjectDoc(
 export type ContextPart = { key: string; text: string; everyTurn?: true }
 
 export function taskContextParts(
-  task: Pick<Ctx['task'], 'allow' | 'cwd' | 'recordedCwd' | 'checkout' | 'root'>,
+  task: Pick<Ctx['task'], 'allow' | 'cwd' | 'recordedCwd' | 'checkout' | 'root' | 'watchers'>,
   gitContext: (cwd: string) => string | undefined,
 ): ContextPart[] {
   const parts: ContextPart[] = []
@@ -100,7 +100,27 @@ export function taskContextParts(
       text: manualCdHint(task.root, task.recordedCwd),
       everyTurn: true,
     })
+  const watchers = watchersPart(task)
+  if (watchers) parts.push(watchers)
   return parts
+}
+
+// The watchers the user has enabled, with what each takes.
+export function watchersPart(task: Pick<Ctx['task'], 'watchers'>): ContextPart | undefined {
+  if (!task.watchers?.length) return undefined
+  const lines = task.watchers.flatMap((w) => [
+    `- \`${w.name}\`: ${w.description}`,
+    ...Object.entries(w.args).map(
+      ([name, a]) => `  - \`--arg ${name}=…\`${a.required ? ' (required)' : ''}: ${a.description}`,
+    ),
+  ])
+  return {
+    key: 'watchers',
+    text: [
+      'Watchers you can arm with `lander ride --watch <watcher> --arg <key>=<value>`:',
+      ...lines,
+    ].join('\n'),
+  }
 }
 
 // Deliberately silent on HOW: whether a location carries into the next turn
@@ -113,6 +133,12 @@ function manualCdHint(root: string, recordedCwd: string): string {
     'that location may or may not have been preserved in this new turn. Check ' +
     '`pwd` before relying on the location.'
   )
+}
+
+// What to tell an agent when a part it was sent goes away. A part with no entry
+// just stops being sent.
+const GONE: Record<string, string> = {
+  watchers: 'No watchers are enabled anymore; `lander ride --watch` will refuse.',
 }
 
 // A record in its older form, the whole block as one string, counts as none.
@@ -129,11 +155,15 @@ export function changedContextParts(
       : undefined
   const send = before
     ? parts.filter((p) => p.everyTurn || before[p.key] !== record[p.key])
-    : parts
-  const changed =
-    !before ||
-    Object.keys(before).length !== kept.length ||
-    kept.some((p) => before[p.key] !== record[p.key])
+    : [...parts]
+  for (const key of Object.keys(before ?? {}))
+    if (!(key in record) && GONE[key]) send.push({ key, text: GONE[key] })
+  // A record left from an earlier session is replaced even when there is
+  // nothing to send, or it would read as parts this session was told about.
+  const changed = before
+    ? Object.keys(before).length !== kept.length ||
+      kept.some((p) => before[p.key] !== record[p.key])
+    : kept.length > 0 || sent !== undefined
   return { send, record, changed }
 }
 
@@ -168,7 +198,7 @@ export function turnPromptParts(
 
 export function prepareUserMessagePrompt(
   ctx: {
-    task: Pick<Ctx['task'], 'taskId' | 'root' | 'checkout'>
+    task: Pick<Ctx['task'], 'taskId' | 'root' | 'checkout' | 'watchers'>
     turn: Parameters<typeof turnPromptParts>[0]
     state: Pick<Ctx['state'], 'get' | 'set'>
   },
@@ -197,10 +227,18 @@ export function prepareUserMessagePrompt(
   const sendDoc =
     docDigest !== undefined &&
     shouldDeliver(sessionId, ctx.state.get(['landerDoc']), docDigest)
+  const watchers = watchersPart(ctx.task)
+  const context = changedContextParts(
+    watchers ? [watchers] : [],
+    sessionId,
+    ctx.state.get(['contextParts']),
+  )
+  const block = taskContextBlock(context.send)
   const prompt = [
     ...(sendTaskPrompt ? [rendered] : []),
     ...(sendDoc && doc !== undefined ? [projectDocBlock(doc)] : []),
     ...turnPromptParts(ctx.turn),
+    ...(block ? [block] : []),
   ].join('\n\n')
   return {
     prompt,
@@ -208,6 +246,7 @@ export function prepareUserMessagePrompt(
       if (sendTaskPrompt) ctx.state.set(['taskPrompt'], digest)
       if (sendDoc && docDigest !== undefined)
         ctx.state.set(['landerDoc'], docDigest)
+      if (context.changed) ctx.state.set(['contextParts'], context.record)
     },
   }
 }

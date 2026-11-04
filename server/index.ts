@@ -35,6 +35,7 @@ import {
 } from './daemon'
 import {
   announcedWatchers,
+  enabledWatchers,
   readWatchersStore,
   setWatcherEnabled,
   watcherRefusal,
@@ -789,6 +790,7 @@ async function runTurn(
     prompt,
     task: {
       allow: task.allow,
+      watchers: await enabledWatchers(WATCHERS_FILE),
     },
     // The provider session to resume; absent on the first turn, so the daemon
     // reports one back (reduceRunWs persists it onto the task's thread state).

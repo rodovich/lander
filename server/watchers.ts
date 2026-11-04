@@ -26,6 +26,12 @@ export function announcedWatchers(): WatcherMeta[] {
   return announced
 }
 
+// The watchers a task's agent can arm right now.
+export async function enabledWatchers(file: string): Promise<WatcherMeta[]> {
+  const { enabled } = await readWatchersStore(file)
+  return announced.filter((w) => enabled.includes(w.name))
+}
+
 export type WatchersStore = { enabled: string[] }
 
 function emptyWatchersStore(): WatchersStore {
