@@ -461,7 +461,7 @@ export function resolveLaunchDir({ root }: AgentLaunchDirInput): AgentLaunchDir 
 // per-turn trigger, boot/connect fetch, re-arming from refreshAt) because that
 // schedule runs when no run — and therefore no host — is alive; the flow owns
 // what a snapshot is: the credential read, the fetch, the item mapping, and when
-// to look again. Codex exports none of this, so its panel stays empty.
+// to look again.
 export async function onStatus(): Promise<UsageStatus | null> {
   const r = await fetchUsage()
   return r.ok ? usageStatus(r.body) : null

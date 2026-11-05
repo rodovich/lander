@@ -55,6 +55,8 @@ export type Usage = {
   cacheRead: number
   cacheCreation: number
   model?: string
+  // The driving model's reasoning effort, from flows that report one.
+  effort?: string
   costUsd?: number
   // The provider's running cost for the whole session as of this turn, when the
   // flow derived `costUsd` from one. Claude's `total_cost_usd` carries every

@@ -5,8 +5,12 @@ import type { FlowCaps, Ride, Task, TelemetryItem, TokenUsage } from './types'
 
 export { openRide }
 
-export function taskAgentModelName(agent: string | undefined, model?: string): string {
-  return formatAgentModelName(agentDisplayName(agent), model)
+export function taskAgentModelName(
+  agent: string | undefined,
+  model?: string,
+  effort?: string,
+): string {
+  return formatAgentModelName(agentDisplayName(agent), model, effort)
 }
 
 // The task's most recent ride that reported any usage. A streaming turn reports
@@ -65,7 +69,7 @@ export function taskGrants(
 }
 
 // Token usage summed across every ride of the task. The token counts and dollar
-// cost add up; the model is the latest ride's, unless that ride was another
+// cost add up; the model and effort are the latest ride's, unless that ride was another
 // flow's — the footer pairs it with the current flow's name. Cost stays
 // undefined until some ride reports one (a turn still streaming hasn't).
 // Undefined when no ride has reported usage at all.
@@ -85,9 +89,8 @@ export function totalUsage(task: Task): TokenUsage | undefined {
   }
   if (!any) return undefined
   const latest = latestUsageRide(task)
-  const model =
-    latest && ranUnderCurrentFlow(task, latest) ? latest.usage?.model : undefined
-  return { ...total, model, costUsd: cost }
+  const current = latest && ranUnderCurrentFlow(task, latest) ? latest.usage : undefined
+  return { ...total, model: current?.model, effort: current?.effort, costUsd: cost }
 }
 
 // The composer footer's summary as generic telemetry items: who did the work
@@ -112,7 +115,7 @@ export function taskUsageSummary(task: Task): TelemetryItem[] {
       type: 'text',
       // The flow name is the model-name display lookup only, never a behavior
       // branch.
-      value: taskAgentModelName(taskFlowName(task), u?.model),
+      value: taskAgentModelName(taskFlowName(task), u?.model, u?.effort),
     },
     // Time leads cost: it is the shape of the work, where cost is its price.
     // Either is dropped from the line when it has no figure — whether none has

@@ -1,7 +1,7 @@
 import { existsSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { makeFlow } from '../daemon/flows/codex'
+import { makeFlow, onStatus, readThreadSettings } from '../daemon/flows/codex'
 import { buildManifestBlock } from '../daemon/attachments'
 import { captureDriverTurn } from '../daemon/flows/testCtx'
 import {
@@ -24,6 +24,7 @@ describe.skipIf(!VERSION)(`codex contract (${VERSION})`, () => {
     taskPromptTemplate: TASK_PROMPT,
     readProjectDoc: () => undefined,
     configOverrides: PROBE_CONFIG,
+    readThreadSettings,
   })
 
   // One two-turn thread, shared by the resume check.
@@ -80,10 +81,23 @@ describe.skipIf(!VERSION)(`codex contract (${VERSION})`, () => {
     const a = first.ride.usage!
     const b = second.ride.usage!
     const total = second.task.flowState?.threadUsage as typeof a
-    expect(first.task.flowState?.threadUsage).toEqual(a)
+    expect(a).toMatchObject(first.task.flowState?.threadUsage as typeof a)
     for (const k of ['input', 'output', 'cacheRead', 'cacheCreation'] as const)
       expect(a[k] + b[k]).toBe(total[k])
     expect(b.input + b.cacheRead).toBeLessThan(1.5 * (a.input + a.cacheRead))
+  })
+
+  it('stamps each ride with the model and effort its thread ran with', () => {
+    for (const turn of [first, second]) {
+      expect(turn.ride.usage?.model).toMatch(/\S/)
+      expect(turn.ride.usage?.effort).toBe('low')
+    }
+  })
+
+  it("reads the account's 5-hour and weekly windows from the app-server", async () => {
+    const status = await onStatus()
+    expect(status?.items.map((i) => i.id)).toEqual(['session', 'weekly'])
+    expect(Date.parse(status?.refreshAt ?? '')).toBeGreaterThan(Date.now())
   })
 
   it('opens an image from the attachment manifest by local path', async () => {

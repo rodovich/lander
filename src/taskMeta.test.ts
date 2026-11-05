@@ -129,6 +129,17 @@ describe('taskUsageSummary', () => {
     ])
   })
 
+  it('names the latest turn’s effort with its model', () => {
+    const items = taskUsageSummary({
+      ...withRides([
+        { id: 'r1', startedAt: '…', usage: usage({ model: 'gpt-6-astra', effort: 'high' }) },
+        { id: 'r2', startedAt: '…', usage: usage({ model: 'gpt-6-astra', effort: 'low' }) },
+      ]),
+      flow: 'codex',
+    } as Task)
+    expect(items[0]).toMatchObject({ id: 'model', value: 'Codex (gpt-6-astra, low effort)' })
+  })
+
   it('drops the time and the cost from the line when it has no figure', () => {
     // A riding turn: the counts are climbing, but nothing has measured the ride
     // or landed its cost. The summary says the model and stops there.

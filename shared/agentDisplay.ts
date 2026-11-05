@@ -16,8 +16,10 @@ export function agentDisplayName(agent: string | undefined): string {
 export function formatAgentModelName(
   agentName: string,
   modelName?: string,
+  effort?: string,
 ): string {
   const name = agentName.trim() || 'Assistant'
   const model = modelName?.trim()
-  return model ? `${name} (${model})` : name
+  if (!model) return name
+  return effort ? `${name} (${model}, ${effort} effort)` : `${name} (${model})`
 }

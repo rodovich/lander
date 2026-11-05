@@ -7,6 +7,8 @@ import {
   makeFlow,
   resolveLaunchDir,
   codexOptionsFromEnv,
+  codexThreadSettings,
+  codexUsageBody,
   type CodexFlowDeps,
 } from './codex'
 import { buildManifestBlock } from '../attachments'
@@ -400,6 +402,58 @@ describe('Codex flow launch', () => {
   it('does not mint a session before Codex reports its thread', async () => {
     const launch = await runCodex({ task: {}, root: '/repo', cwd: '/repo' })
     expect(launch.events.filter((e) => e.kind === 'state-patch')).toEqual([])
+  })
+
+  it('stamps the turn’s usage with the model and effort its thread ran with', async () => {
+    const threads: string[] = []
+    const { events } = await driveFlow(
+      {
+        name: 'settings',
+        chunks: [[
+          JSON.stringify({ type: 'thread.started', thread_id: 'thread-1' }),
+          JSON.stringify({ type: 'turn.started' }),
+          JSON.stringify({
+            type: 'turn.completed',
+            usage: { input_tokens: 100, cached_input_tokens: 40, output_tokens: 7 },
+          }),
+        ]],
+      },
+      codexFlow({
+        readThreadSettings: async (threadId) => {
+          threads.push(threadId)
+          return { model: 'gpt-6-astra', effort: 'low' }
+        },
+      }),
+    )
+    const update = events.filter((e) => e.kind === 'update' && e.usageChanged).at(-1)
+    expect(threads).toEqual(['thread-1'])
+    expect(update).toMatchObject({
+      drivingModel: 'gpt-6-astra',
+      usage: { input: 60, cacheRead: 40, output: 7, effort: 'low' },
+    })
+  })
+
+  it('reads the 5-hour and weekly windows from the app-server’s rate limits', () => {
+    const result = {
+      rateLimits: {
+        primary: { usedPercent: 100, windowDurationMins: 300, resetsAt: 1793856921 },
+        secondary: { usedPercent: 32, windowDurationMins: 10080, resetsAt: 1794425663 },
+      },
+    }
+    expect(codexUsageBody(result)).toEqual({
+      session: { utilization: 100, resetsAt: '2026-11-05T05:35:21.000Z' },
+      weekly: { utilization: 32, resetsAt: '2026-11-11T19:34:23.000Z' },
+    })
+    expect(codexUsageBody({ rateLimits: { primary: null, secondary: null } })).toBeNull()
+  })
+
+  it('reads a thread’s model and effort from thread/read', () => {
+    expect(
+      codexThreadSettings({
+        thread: { id: 't', model: 'gpt-6-astra', reasoningEffort: 'low' },
+      }),
+    ).toEqual({ model: 'gpt-6-astra', effort: 'low' })
+    expect(codexThreadSettings({ thread: { model: null, reasoningEffort: null } })).toEqual({})
   })
 
   it('leaves the stdin banner out of a failed run’s stderr', async () => {

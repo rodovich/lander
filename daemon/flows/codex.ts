@@ -1,6 +1,6 @@
 // Codex as a driver flow. Shorter than claude's because codex carries less: no
 // session minting (the thread id arrives in the stream), no per-turn context
-// block, and no project grants or usage snapshot to own.
+// block, and no project grants to own.
 //
 // What it carries instead is deliver-once. Codex has no request-scoped channel
 // for lander's own prose — claude appends to the system prompt, which is rebuilt
@@ -13,8 +13,10 @@
 // exit rather than arriving as a non-zero exit code.
 
 import path from 'node:path'
+import { codexAppServerRequest } from '../codex-app-server'
 import { codexConfigArgs } from '../codex-config'
 import { execFileSync } from 'node:child_process'
+import { toIso, usageStatus, type UsageBody, type UsageStatus, type UsageWindow } from '../../server/usage'
 import {
   codexTurnUsage,
   extractCodexSession,
@@ -35,7 +37,7 @@ export const meta: FlowMeta = {
   driver: true,
   capabilities: {
     grants: { task: false, project: false },
-    usageSnapshot: false,
+    usageSnapshot: true,
     rateLimitRetry: false,
     // Codex reports tokens without an account cost.
     reportsCost: false,
@@ -65,7 +67,12 @@ export type CodexFlowDeps = {
   readProjectDoc: (dir: string) => string | undefined
   // The installed codex's version, for the ride's record.
   readCliVersion?: () => Promise<string | undefined>
+  // The model and reasoning effort most recently saved with a thread, for the
+  // ride's usage.
+  readThreadSettings?: (threadId: string) => Promise<CodexThreadSettings>
 }
+
+export type CodexThreadSettings = { model?: string; effort?: string }
 
 export type CodexFlow = {
   meta: FlowMeta
@@ -79,6 +86,7 @@ export function makeFlow({
   resolveGitDirs = resolveGitDirsWithGit,
   readProjectDoc,
   readCliVersion,
+  readThreadSettings,
 }: CodexFlowDeps): CodexFlow {
   return {
     meta,
@@ -135,6 +143,7 @@ export function makeFlow({
       // finalText) is what catches an empty agent_message, which still pushes a
       // text step.
       let producedOutput = false
+      let settings: Promise<CodexThreadSettings & { usage: Usage }> | undefined
 
       const collectStderr = (async () => {
         for await (const l of child.stderr)
@@ -215,7 +224,14 @@ export function makeFlow({
 
         if (r.threadUsage) {
           const usage = codexTurnUsage(r.threadUsage, priorTotal)
-          if (usage) ctx.emit.meter({ usage })
+          if (usage) {
+            ctx.emit.meter({ usage })
+            const threadId = ctx.state.get(['sessionId'])
+            if (readThreadSettings && typeof threadId === 'string')
+              settings = readThreadSettings(threadId)
+                .catch(() => ({}))
+                .then((s) => ({ usage, ...s }))
+          }
           ctx.state.set(['threadUsage'], r.threadUsage)
         }
       }
@@ -224,6 +240,12 @@ export function makeFlow({
 
       const exitCode = await child.exit
       await collectStderr
+      const stamped = settings && !ctx.signal.aborted ? await settings : undefined
+      if (stamped?.model || stamped?.effort)
+        ctx.emit.meter({
+          usage: stamped.effort ? { ...stamped.usage, effort: stamped.effort } : stamped.usage,
+          drivingModel: stamped.model,
+        })
       return {
         // A clean exit that nonetheless folded a terminal error reports failed.
         exitCode: exitCode === 0 && terminalError ? 1 : exitCode,
@@ -357,6 +379,48 @@ function tomlEntry(key: string, value: string): string {
 
 function tomlArray(values: readonly string[]): string {
   return `[${values.map(tomlString).join(',')}]`
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined
+}
+
+// The app-server's `account/rateLimits/read` result as the usage panel's two
+// windows. The schema leaves each window's length to its `windowDurationMins`;
+// on a ChatGPT plan `primary` has been the 5-hour window and `secondary` the
+// weekly one (0.166.0).
+export function codexUsageBody(result: unknown): UsageBody | null {
+  const limits = asRecord(asRecord(result)?.rateLimits)
+  const window = (w: unknown): UsageWindow | null => {
+    const r = asRecord(w)
+    if (typeof r?.usedPercent !== 'number') return null
+    return { utilization: r.usedPercent, resetsAt: toIso(r.resetsAt) }
+  }
+  const body = { session: window(limits?.primary), weekly: window(limits?.secondary) }
+  return body.session || body.weekly ? body : null
+}
+
+export async function onStatus(): Promise<UsageStatus | null> {
+  const body = codexUsageBody(await codexAppServerRequest('account/rateLimits/read', undefined))
+  return body ? usageStatus(body) : null
+}
+
+// The app-server answering `thread/read` is lander's own fresh one, which never
+// has the thread loaded, so the model and effort are the latest ones saved with
+// the thread rather than any live configuration.
+export function codexThreadSettings(result: unknown): CodexThreadSettings {
+  const thread = asRecord(asRecord(result)?.thread)
+  const { model, reasoningEffort: effort } = thread ?? {}
+  return {
+    ...(typeof model === 'string' && model ? { model } : {}),
+    ...(typeof effort === 'string' && effort ? { effort } : {}),
+  }
+}
+
+export async function readThreadSettings(threadId: string): Promise<CodexThreadSettings> {
+  return codexThreadSettings(
+    await codexAppServerRequest('thread/read', { threadId }, { timeoutMs: 10_000 }),
+  )
 }
 
 // Where codex launches its next turn. Pure, and called by the DAEMON pre-host.

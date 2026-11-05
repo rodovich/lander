@@ -3,7 +3,8 @@ import type { ContextAction, ContextDetails } from '../shared/context'
 // Token counts a turn consumed, accumulated as it streams and finalized by its
 // result event. `input` and `cacheCreation` are fresh input processed this turn
 // (uncached); `cacheRead` is the discounted re-read of cached context. `model`
-// is the session's driving (main-agent) model. `costUsd` is the turn's dollar
+// is the session's driving (main-agent) model, and `effort` its reasoning effort
+// when the flow reports one. `costUsd` is the turn's dollar
 // cost, present only once the turn lands. Shown in the composer's corner — latest
 // turn, or summed across the task — updating live as the turn runs.
 export type TokenUsage = {
@@ -12,6 +13,7 @@ export type TokenUsage = {
   cacheRead: number
   cacheCreation: number
   model?: string
+  effort?: string
   costUsd?: number
   cacheMiss?: { reason: string; missedTokens: number }
 }

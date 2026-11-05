@@ -25,6 +25,12 @@ describe('formatAgentModelName', () => {
     )
   })
 
+  it('adds the effort after the model when known', () => {
+    expect(formatAgentModelName('Codex', 'gpt-6-astra', 'low')).toBe(
+      'Codex (gpt-6-astra, low effort)',
+    )
+  })
+
   it('trims blank inputs before formatting', () => {
     expect(formatAgentModelName('  Claude  ', '  opus  ')).toBe(
       'Claude (opus)',

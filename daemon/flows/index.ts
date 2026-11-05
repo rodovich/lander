@@ -48,6 +48,7 @@ export const FLOW_MODULES: Record<string, BundledFlowModule> = {
         taskPromptTemplate,
         readProjectDoc,
         readCliVersion: () => cliVersion('codex'),
+        readThreadSettings: codexFlowModule.readThreadSettings,
         ...codexFlowModule.codexOptionsFromEnv(env),
       }),
   },
