@@ -39,7 +39,7 @@ export const meta: FlowMeta = {
       placeholder: 'e.g. command(git)',
     },
     usageSnapshot: true,
-    rateLimitRetry: false,
+    rateLimitRetry: true,
     reportsCost: false,
   },
 }

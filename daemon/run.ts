@@ -122,6 +122,9 @@ export type RunManagerOptions = {
     msg: StartRunMessage,
   ) => Promise<MaterializedFiles | undefined>
   refreshUsage?: (flow: string) => void | Promise<void>
+  // Asked when the agent CLI exits with a failure and gave no reset time: when
+  // the flow's used-up usage windows have all reset, if any are used up now.
+  usageFullUntil?: (flow: string) => Promise<string | undefined>
   runBufferTtlMs?: number
   spawnHost?: SpawnHostLike
   onEmpty?: () => void
@@ -142,6 +145,23 @@ const WAIT_GRACE_MS = 2 * 60_000
 
 const DEFAULT_CHECKOUT_REFRESH_MS = 5_000
 
+// The done waits on the usage check too; past this it goes out without a reset.
+const USAGE_CHECK_TIMEOUT_MS = 10_000
+
+function withTimeout<T>(p: Promise<T>, ms: number, onTimeout: () => void): Promise<T | undefined> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      onTimeout()
+      resolve(undefined)
+    }, ms)
+    timer.unref?.()
+    p.then(
+      (v) => resolve(v),
+      () => resolve(undefined),
+    ).finally(() => clearTimeout(timer))
+  })
+}
+
 export function createRunManager({
   caps,
   resolveRunPaths,
@@ -153,6 +173,7 @@ export function createRunManager({
   resolveFilesDir,
   materialize,
   refreshUsage = () => {},
+  usageFullUntil,
   runBufferTtlMs = DEFAULT_RUN_BUFFER_TTL_MS,
   spawnHost = () => spawnHostProcess(HOST_ENTRY),
   onEmpty = () => {},
@@ -382,6 +403,8 @@ export function createRunManager({
       interrupted: boolean
       cause?: DoneCause
       idleMs?: number
+      // The done the host sent, as opposed to one the run manager made up.
+      reported?: boolean
     }): void => {
       if (settled) return
       settled = true
@@ -401,12 +424,21 @@ export function createRunManager({
         ...(d.cause ? { cause: d.cause } : {}),
         ...(d.idleMs ? { idleMs: d.idleMs } : {}),
       }
+      const extras: Promise<Partial<DoneMessage>>[] = []
       // Read here, like durationMs, so every way a run ends reports the state
       // its checkout was left in. A failed read reports nothing about it.
       if (paths.checkout)
-        void readCheckout(paths.checkout).then((checkout) =>
-          finish(checkout ? { ...doneMsg, checkout } : doneMsg),
+        extras.push(
+          readCheckout(paths.checkout).then((checkout) => (checkout ? { checkout } : {})),
         )
+      if (d.reported && d.exitCode !== 0 && !sawRateLimit && usageFlow && usageFullUntil)
+        extras.push(
+          withTimeout(usageFullUntil(usageFlow), USAGE_CHECK_TIMEOUT_MS, () =>
+            console.error(`usage check for ${msg.runId} timed out`),
+          ).then((at) => (at ? { usageFullUntil: at } : {})),
+        )
+      if (extras.length)
+        void Promise.all(extras).then((parts) => finish(Object.assign({}, doneMsg, ...parts)))
       else finish(doneMsg)
     }
     const readCheckout = (dir: string): Promise<CheckoutReport | undefined> =>
@@ -518,6 +550,7 @@ export function createRunManager({
             exitCode: event.exitCode,
             stderr: event.stderr,
             interrupted: false,
+            reported: true,
           })
           break
       }

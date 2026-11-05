@@ -38,7 +38,7 @@ export const meta: FlowMeta = {
   capabilities: {
     grants: { task: false, project: false },
     usageSnapshot: true,
-    rateLimitRetry: false,
+    rateLimitRetry: true,
     // Codex reports tokens without an account cost.
     reportsCost: false,
   },

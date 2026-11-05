@@ -151,18 +151,23 @@ export function usageTelemetry(body: UsageBody): TelemetryItem[] {
 // A flow's onStatus answer for a usage snapshot: its meters, and a refresh just
 // past the soonest window reset so the readout catches utilization dropping
 // back. The daemon still clamps refreshAt against its TTL floor — a reset
-// already in the past must not become a busy loop.
-export type UsageStatus = { items: TelemetryItem[]; refreshAt?: string }
+// already in the past must not become a busy loop. `fullUntil` is when the last
+// of the used-up windows resets, the earliest a failed turn's retry could run.
+export type UsageStatus = { items: TelemetryItem[]; refreshAt?: string; fullUntil?: string }
 
 export function usageStatus(body: UsageBody): UsageStatus {
-  const resets = [body.session?.resetsAt, body.weekly?.resetsAt]
-    .map((s) => (s ? Date.parse(s) : NaN))
-    .filter((n) => Number.isFinite(n))
+  let next: number | undefined
+  let full: { at: number; iso: string } | undefined
+  for (const w of [body.session, body.weekly]) {
+    const at = w?.resetsAt ? Date.parse(w.resetsAt) : NaN
+    if (!w?.resetsAt || !Number.isFinite(at)) continue
+    if (next === undefined || at < next) next = at
+    if (w.utilization >= 100 && (!full || at > full.at)) full = { at, iso: w.resetsAt }
+  }
   return {
     items: usageTelemetry(body),
-    ...(resets.length
-      ? { refreshAt: new Date(Math.min(...resets) + 2_000).toISOString() }
-      : {}),
+    ...(next !== undefined ? { refreshAt: new Date(next + 2_000).toISOString() } : {}),
+    ...(full ? { fullUntil: full.iso } : {}),
   }
 }
 

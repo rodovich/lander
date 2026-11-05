@@ -44,9 +44,10 @@ export type TelemetryItem =
 // `capabilities` is the announced replacement for the compiled-in adapter
 // booleans. Two of them are advisory and deliberately have no consumer, because
 // something already gates on the datum itself. `rateLimitRetry` documents
-// whether a flow can supply a reset timestamp, but the scheduled-retry option
-// gates on `resetsAt` being present. `reportsCost` documents whether turns
-// carry a dollar cost, and the footer shows whatever cost a turn reported.
+// whether a failed turn can get a reset timestamp, from the flow's stream or
+// from its usage snapshot, but the scheduled-retry option gates on one being
+// present. `reportsCost` documents whether turns carry a dollar cost, and the
+// footer shows whatever cost a turn reported.
 export type FlowMeta = {
   api: number
   name: string
@@ -579,6 +580,10 @@ export type DoneMessage = {
   // time rather than a wrong one, the way a turn that never reached its result
   // event reports no cost.
   durationMs?: number
+  // On a failed run: when the usage windows the daemon found used up after the
+  // failure have all reset. Unlike an update's `rateLimitResetsAt`, it is not
+  // the agent's own report that a limit stopped the turn.
+  usageFullUntil?: string
   // Present only for a run launched in a checkout the daemon manages for the
   // task, describing that checkout as the run ended. A done without this field
   // says nothing about the checkout.

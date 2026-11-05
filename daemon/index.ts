@@ -144,18 +144,9 @@ function refreshUsage(flow: string): Promise<void> {
   if (!s) return Promise.resolve()
   if (Date.now() - s.triedAt < USAGE_TTL_MS) return Promise.resolve()
   if (s.refreshing) return Promise.resolve()
-  const onStatus = FLOW_MODULES[flow].onStatus
-  if (!onStatus) return Promise.resolve()
   s.refreshing = true
-  s.triedAt = Date.now()
-  return (async () => {
-    const snapshot = await onStatus()
-    if (snapshot) {
-      s.items = snapshot.items as TelemetryItem[]
-      pushUsage(flow)
-      scheduleUsageReset(flow, s, snapshot.refreshAt)
-    }
-  })()
+  return takeUsageSnapshot(flow, s)
+    .then(() => {})
     .catch(() => {
       // A flow hook that throws must not take the daemon's schedule down with
       // it; the last snapshot stands until the next trigger.
@@ -163,6 +154,40 @@ function refreshUsage(flow: string): Promise<void> {
     .finally(() => {
       s.refreshing = false
     })
+}
+
+async function takeUsageSnapshot(
+  flow: string,
+  s: UsageSchedule,
+): Promise<{ fullUntil?: string } | null> {
+  const onStatus = FLOW_MODULES[flow].onStatus
+  if (!onStatus) return null
+  s.triedAt = Date.now()
+  const snapshot = await onStatus()
+  if (snapshot) {
+    s.items = snapshot.items as TelemetryItem[]
+    pushUsage(flow)
+    scheduleUsageReset(flow, s, snapshot.refreshAt)
+  }
+  return snapshot
+}
+
+// A failed run whose flow reported no reset time of its own: look at the flow's
+// usage now, past the TTL floor, since the last snapshot usually predates the
+// turn that used a window up. A run that fails while another's look is still
+// in flight shares it.
+const fullChecks = new Map<string, Promise<string | undefined>>()
+function usageFullUntil(flow: string): Promise<string | undefined> {
+  const s = usageByFlow.get(flow)
+  if (!s) return Promise.resolve(undefined)
+  let check = fullChecks.get(flow)
+  if (!check) {
+    check = takeUsageSnapshot(flow, s)
+      .then((snapshot) => snapshot?.fullUntil, () => undefined)
+      .finally(() => fullChecks.delete(flow))
+    fullChecks.set(flow, check)
+  }
+  return check
 }
 
 // Arm a one-shot refresh just after the flow says its windows reset, so the
@@ -366,6 +391,7 @@ const runManager = createRunManager({
   resolveFilesDir: (msg) => taskFilesDir(FILES_ROOT, msg.project, msg.taskId),
   materialize,
   refreshUsage,
+  usageFullUntil,
   onEmpty: () => {
     drain.check()
     // onEmpty is a "one was removed" nudge, not a promise the map is empty, so

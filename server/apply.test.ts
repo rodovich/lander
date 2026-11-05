@@ -469,6 +469,27 @@ describe('applyDone', () => {
     expect(ask.kind === 'ask' && ask.prompt).toBe('Usage limit reached.')
   })
 
+  it('relays the agent’s own error, and offers a retry when usage resets, for a used-up flow', () => {
+    const t = task()
+    applyDone(
+      t,
+      done({
+        exitCode: 1,
+        stderr: 'Your workspace is out of credits.',
+        usageFullUntil: '2026-01-01T05:00:00.000Z',
+      }),
+      { at: AT, askId: 'ask-x-0' },
+    )
+    const ask = t.items!.find((i) => i.kind === 'ask')!
+    if (ask.kind !== 'ask') throw new Error('no ask')
+    expect(ask.prompt).toBe('The assistant run failed: Your workspace is out of credits.')
+    expect(ask.form.options.map((o) => [o.label, o.at])).toEqual([
+      ['Resend', undefined],
+      ['Retry when usage resets', '2026-01-01T05:00:00.000Z'],
+      ['Relaunch and retry', undefined],
+    ])
+  })
+
   it('records no error detail on a clean or interrupted ride', () => {
     const t = task()
     applyDone(t, done(), { at: AT, askId: 'ask-x-0' })

@@ -606,6 +606,62 @@ describe('daemon run manager', () => {
     expect(refreshUsage).toHaveBeenCalledWith('claude')
   })
 
+  it('sends a failed run’s done with when its flow’s used-up usage resets', async () => {
+    const usageFullUntil = vi.fn(async () => '2026-11-05T10:35:21.000Z')
+    const h = harness({ usageFullUntil })
+    h.manager.startRun(makeStart({ agent: 'codex' }))
+
+    push(h.hosts[0], { kind: 'done', exitCode: 1, stderr: 'Your workspace is out of credits.' })
+    await vi.waitFor(() => expect(h.messages.map((m) => m.type)).toEqual(['done']))
+
+    expect(usageFullUntil).toHaveBeenCalledWith('codex')
+    expect(h.messages[0]).toMatchObject({
+      exitCode: 1,
+      stderr: 'Your workspace is out of credits.',
+      usageFullUntil: '2026-11-05T10:35:21.000Z',
+    })
+  })
+
+  it('checks usage only when the agent’s own run failed without a reset of its own', async () => {
+    const usageFullUntil = vi.fn(async () => undefined)
+    const h = harness({ usageFullUntil })
+    h.manager.startRun(makeStart({ runId: 'ok', agent: 'codex' }))
+    push(h.hosts[0], { kind: 'done', exitCode: 0, stderr: '' })
+    h.manager.startRun(makeStart({ runId: 'limited', agent: 'claude' }))
+    push(h.hosts[1], {
+      kind: 'update',
+      steps: [],
+      blockedIds: [],
+      usageChanged: false,
+      rateLimitResetsAt: '2026-11-05T10:00:00.000Z',
+    })
+    push(h.hosts[1], { kind: 'done', exitCode: 1, stderr: '' })
+    h.manager.startRun(makeStart({ runId: 'unspawned', agent: 'codex' }))
+    h.hosts[2].emit('error', new Error('spawn ENOENT'))
+    await vi.waitFor(() =>
+      expect(h.messages.filter((m) => m.type === 'done')).toHaveLength(3),
+    )
+
+    expect(usageFullUntil).not.toHaveBeenCalled()
+  })
+
+  it('sends the done without a reset when the usage check outlasts its limit', async () => {
+    vi.useFakeTimers()
+    try {
+      const h = harness({ usageFullUntil: () => new Promise(() => {}) })
+      h.manager.startRun(makeStart({ agent: 'codex' }))
+      push(h.hosts[0], { kind: 'done', exitCode: 1, stderr: 'boom' })
+      await vi.advanceTimersByTimeAsync(9_999)
+      expect(h.messages).toEqual([])
+
+      await vi.advanceTimersByTimeAsync(1)
+      expect(h.messages).toMatchObject([{ type: 'done', exitCode: 1, stderr: 'boom' }])
+      expect(h.messages[0]).not.toHaveProperty('usageFullUntil')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('stops every held host on stopAll, naming the shutdown as the cause', async () => {
     const h = harness()
     h.manager.startRun(makeStart({ runId: 'run-1' }))

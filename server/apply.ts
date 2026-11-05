@@ -88,7 +88,10 @@ export type ApplyUpdate = Pick<
 // shutdown, host crash) so the wedge can name the failure.
 export type ApplyDone = Pick<DoneMessage, 'exitCode'> &
   Partial<
-    Pick<DoneMessage, 'interrupted' | 'stderr' | 'cause' | 'idleMs' | 'durationMs'>
+    Pick<
+      DoneMessage,
+      'interrupted' | 'stderr' | 'cause' | 'idleMs' | 'durationMs' | 'usageFullUntil'
+    >
   >
 
 // Side inputs applyDone needs that don't come off the done payload itself: the
@@ -124,6 +127,7 @@ export function wedgeForRetry(
     askId: string
     at: string
     resetsAt?: string
+    usageFullUntil?: string
     prompt?: string
     otherFlows?: string[]
   },
@@ -144,6 +148,7 @@ export function wedgeForRetry(
     id: opts.askId,
     committed: opts.committed,
     ...(opts.resetsAt ? { resetsAt: opts.resetsAt } : {}),
+    ...(opts.usageFullUntil ? { usageFullUntil: opts.usageFullUntil } : {}),
     ...(opts.prompt ? { prompt: opts.prompt } : {}),
     otherFlows: opts.otherFlows,
     at: opts.at,
@@ -370,7 +375,8 @@ export function applyDone(
       committed: turnCommitted(ride, rideItems),
       askId,
       at,
-      ...(rateLimitResetsAt ? { resetsAt: rateLimitResetsAt } : {}),
+      resetsAt: rateLimitResetsAt,
+      usageFullUntil: done.usageFullUntil,
       ...(prompt ? { prompt } : {}),
       otherFlows,
     })

@@ -27,7 +27,7 @@ type BundledFlowModule = {
     ctx: unknown,
     grant: { projectPath: string; rule: string },
   ): Promise<void>
-  onStatus?(): Promise<{ items: unknown[]; refreshAt?: string } | null>
+  onStatus?(): Promise<{ items: unknown[]; refreshAt?: string; fullUntil?: string } | null>
 }
 
 // One registration supplies execution, announcement, capabilities, and hooks.

@@ -150,22 +150,26 @@ export function createAsk(
 // 'retry', task-blocking). A usage-limit wedge (resetsAt present) offers two
 // buttons — retry now, or retry when the limit resets (carrying `at` so
 // answering schedules the wakeup); a generic error offers one, labeled by
-// whether the failed turn committed ("Try again" vs "Resend"). The single place
-// the retry ask's shape is defined, so applyDone, the daemon-outage wedge, and
-// the platform-kill wedge agree. `prompt` overrides the default text so a wedge
-// can name a specific cause (e.g. a platform kill); absent, it derives the
-// usage-limit / generic-error line. `id`/`at` are the caller's (kept
-// injection-friendly for pure tests).
+// whether the failed turn committed ("Try again" vs "Resend"), plus a retry when
+// usage resets if the daemon found the flow's usage used up (`usageFullUntil`).
+// That case keeps the generic wording: lander saw a full window, not a report
+// that the limit stopped this turn. The single place the retry ask's shape is
+// defined, so applyDone, the daemon-outage wedge, and the platform-kill wedge
+// agree. `prompt` overrides the default text so a wedge can name a specific
+// cause (e.g. a platform kill); absent, it derives the usage-limit /
+// generic-error line. `id`/`at` are the caller's (kept injection-friendly for
+// pure tests).
 //
-// Either way the menu offers to relaunch and retry, for when the session itself
+// Every shape's menu offers to relaunch and retry, for when the session itself
 // is what failed (e.g. its transcript expired): on each of `otherFlows`, and on
-// the task's own flow unless that flow's usage limit is what stopped it.
+// the task's own flow unless the agent reported its usage limit stopped it.
 export function createRetryAsk(
   task: AskTask,
   opts: {
     id: string
     committed: boolean
     resetsAt?: string
+    usageFullUntil?: string
     prompt?: string
     otherFlows?: string[]
     at: string
@@ -181,7 +185,12 @@ export function createRetryAsk(
           style: 'primary',
         },
       ]
-    : [{ id: RETRY_NOW, label: opts.committed ? 'Try again' : 'Resend' }]
+    : [
+        { id: RETRY_NOW, label: opts.committed ? 'Try again' : 'Resend' },
+        ...(opts.usageFullUntil
+          ? [{ id: RETRY_AT_RESET, label: 'Retry when usage resets', at: opts.usageFullUntil }]
+          : []),
+      ]
   const relaunch: AskOption[] = [
     ...(opts.resetsAt
       ? []

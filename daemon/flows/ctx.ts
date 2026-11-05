@@ -352,7 +352,7 @@ export type FlowModule = {
   meta: FlowMeta
   onTurn(ctx: Ctx): Promise<TurnResult>
   onGrant?(ctx: unknown, grant: { rule: string; scope: string }): Promise<void>
-  onStatus?(): Promise<{ items: unknown[]; refreshAt?: string } | null>
+  onStatus?(): Promise<{ items: unknown[]; refreshAt?: string; fullUntil?: string } | null>
   resolveLaunchDir?(input: unknown): unknown
 }
 

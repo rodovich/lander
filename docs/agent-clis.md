@@ -71,7 +71,7 @@ model that permissions, restarts, and failure handling are built on.
 | Model | stream `system/init` | app-server `thread/read` | stream `init` |
 | Reasoning effort | not reported | app-server `thread/read` | not reported |
 | Cost | stream `result` | not reported | not reported |
-| Rate-limit retry time | stream `rate_limit_event` | not reported | not reported |
+| Limit retry time | stream `rate_limit_event`, else the usage check after a failed turn | the usage check after a failed turn | the usage check after a failed turn |
 
 Claude's usage endpoint is undocumented and read with the CLI's stored OAuth
 token (`server/usage.ts`). The other two meters come from the CLIs themselves.
@@ -119,6 +119,21 @@ whatever the task's flow.
 `usageSnapshot`: a 60-second floor, a refresh after each turn, a fetch on
 connect, and a timer for just after the soonest window resets. The flow's
 `onStatus` hook owns the content (`daemon/index.ts`, "Usage").
+
+**Retrying at a reset.** When a turn fails, the retry ask can offer to retry when
+usage resets. Claude's stream reports outright that a limit refused the turn
+(`rate_limit_event` with status `rejected`), so its ask reads "Usage limit
+reached." and offers "Retry when the limit resets". Codex and Antigravity report
+nothing lander reads as a limit refusal. So when the agent CLI's run fails
+without such a report, on any flow, the daemon fetches the flow's usage at once,
+past the 60-second floor, since the last snapshot usually predates the turn that
+used a window up. Runs failing together share one fetch, and the run's end waits
+for it for at most 10 seconds. If any window is at 100%, the run's end carries
+the time the last full window resets (`usageFullUntil`). The ask then keeps the
+agent's own error text and adds a "Retry when usage resets" option. A full
+window doesn't prove the limit caused the failure, so lander doesn't say it did.
+No Antigravity turn has yet been seen failing on a limit, so whether its
+`/usage` reads empty at that moment is untested.
 
 ## Claude
 
@@ -169,7 +184,9 @@ turn, which can hold up the end of the turn for up to 10 seconds. Codex reports 
 On a ChatGPT plan its `primary` window has been the 5-hour one and `secondary`
 the weekly one (0.166.0). A turn that hits a
 limit fails with codex's own message (for example "Your workspace is out of
-credits"), and lander offers the generic retry without a scheduled time.
+credits"). On 2026-11-04 an out-of-credits account's `account/rateLimits/read`
+showed the 5-hour window at 100%, the reading the retry ask's reset time comes
+from.
 
 **Stream coverage.** The reducer handles text replies, command executions, file
 changes, web searches, MCP calls, sub-agent waits, failed commands and turns,

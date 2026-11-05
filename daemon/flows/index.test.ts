@@ -1,6 +1,3 @@
-import { readFileSync } from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 import { FLOW_MODULES, announcedFlows, buildFlows, providerCaps } from './index'
 import { runHost } from '../flow-host'
@@ -8,10 +5,6 @@ import type { HostEvent } from '../host-protocol'
 import { ROOT } from '../paths'
 import { goldenInput, settle } from './testCtx'
 import type { AgentLaunchDirInput } from '../agent'
-import { meta as claudeMeta } from './claude'
-import { meta as codexMeta } from './codex'
-
-const HERE = path.dirname(fileURLToPath(import.meta.url))
 
 describe('provider caps', () => {
   it('makes one registration announced, capable, and executable by the host', async () => {
@@ -97,26 +90,14 @@ describe('provider caps', () => {
     ).toEqual({ cwd: '/repo/sub' })
   })
 
-  it('declares rateLimitRetry iff the flow actually emits a reset timestamp', () => {
+  it('declares rateLimitRetry for every flow with a usage snapshot', () => {
     // The capability is advisory — nothing gates on it, because the
-    // scheduled-retry option gates on the *datum* (`resetsAt` present in the
-    // ask), which only a flow with the capability can produce. This is the one
-    // cheap check that keeps the two from disagreeing.
-    //
-    // Asserted against the module's source text rather than a runtime probe:
-    // "can this flow's meter path emit rateLimitResetsAt" is a property over the
-    // whole input space, so any probe would be a hand-picked sample mirroring
-    // the implementation instead of constraining it. Source text is crude but
-    // genuinely falsifiable in both directions — adding the emission to codex,
-    // or removing it from claude, fails this without a meta change.
-    for (const [file, meta] of [
-      ['claude.ts', claudeMeta],
-      ['codex.ts', codexMeta],
-    ] as const) {
-      const src = readFileSync(path.join(HERE, file), 'utf8')
-      const emits = /emit\.meter\(\{[^}]*rateLimitResetsAt/s.test(src)
-      expect(emits).toBe(meta.capabilities.rateLimitRetry)
-    }
+    // scheduled-retry option gates on the *datum* (a reset time present in the
+    // ask). The daemon can fetch one from a flow's usage snapshot when a turn
+    // fails, so every flow with a snapshot can get one.
+    for (const mod of Object.values(FLOW_MODULES))
+      if (mod.meta.capabilities.usageSnapshot && mod.onStatus)
+        expect(mod.meta.capabilities.rateLimitRetry).toBe(true)
   })
 
   it('carries the unsupported-grant reason for a provider that cannot persist one', () => {
