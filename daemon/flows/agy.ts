@@ -197,6 +197,11 @@ export function agyLogRefusals(log: string): { conversation: string; step: numbe
     .map((m) => ({ conversation: m[1], step: Number(m[2]) }))
 }
 
+function agyErrorStep(stderr: string): number | undefined {
+  const m = /^AGY_ERROR:.*"error_id":"[0-9a-f-]{36}-(\d+)(?:-\d+)?"/m.exec(stderr)
+  return m ? Number(m[1]) : undefined
+}
+
 // agy streams a command's result only as the text it gives the model, so the
 // exit code has to be read out of it.
 const COMMAND_RESULT =
@@ -546,6 +551,8 @@ async function reduceAgy(
   let lastText = ''
   let conversationId = sessionId
   let producedOutput = false
+  let lastStepDone = false
+  let maxStep = -1
   let deniedActions: NonNullable<AgyEvent['denied_actions']> = []
   let terminalError: string | undefined
   let stderr = ''
@@ -609,6 +616,9 @@ async function reduceAgy(
     ) {
       ctx.emit.meter({ drivingModel: envelope.init.model })
     } else if (envelope.event === 'step_update') {
+      lastStepDone = event.state === 'DONE'
+      if (typeof event.step_index === 'number')
+        maxStep = Math.max(maxStep, event.step_index)
       if (event.step_type === 'checkpoint') {
         if (event.state === 'DONE' && !seenCheckpoints.has(event.step_index)) {
           flushText()
@@ -713,6 +723,16 @@ async function reduceAgy(
   flushText()
   const exitCode = await child.exit
   await collectStderr
+  // agy repeats any ERROR_MESSAGE step from the conversation's history in
+  // every later result and in AGY_ERROR on stderr.
+  const errorStep = agyErrorStep(stderr)
+  if (
+    exitCode === 0
+      ? lastStepDone
+      : errorStep !== undefined && errorStep < maxStep
+  ) {
+    terminalError = undefined
+  }
   const refusals: AgyRefusal[] = []
   if (deniedActions.length) {
     const logged = agyLogRefusals(readRunLog() ?? '')

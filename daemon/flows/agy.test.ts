@@ -886,6 +886,73 @@ it('does not acknowledge prompt delivery when the provider fails before consumin
   expect(patches(driven.events)).toEqual([])
 })
 
+it('ignores a stale result.error when a turn completes or reprompts past an earlier error step', async () => {
+  const staleError = 'API error (attempt 2): write: broken pipe'
+  const errorResult = (response: string, extra: Record<string, unknown> = {}) =>
+    result({ status: 'ERROR', error: staleError, response, ...extra })
+  const agyErrorStderr = (errorIdSuffix: string) =>
+    `error: ${staleError}\nAGY_ERROR: {"short_error":"${staleError}","retryable":true,"error_id":"6ee398ff-fb0a-4a53-9ff0-ab55b46b2aa1-${errorIdSuffix}"}\n${staleError}\n`
+  const refusedTurn = (errorIdSuffix: string) => {
+    const f = fixture([[
+      init('conv-stale'),
+      toolStep(195, 'run_command', { CommandLine: 'git status' }),
+      toolStep(198, 'run_command', undefined, {
+        state: 'ERROR',
+        tool_info: {
+          parameters: { CommandLine: 'bin/lander view BdcYNltSIS' },
+          error: { message: 'user denied permission to run command' },
+        },
+      }),
+      errorResult('', {
+        denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
+      }),
+    ]])
+    f.exitCode = 3
+    f.stderrChunks = [agyErrorStderr(errorIdSuffix)]
+    return f
+  }
+
+  const completedReply = await driveFlow(fixture([[
+    init('conv-stale'),
+    response(201, 'All done.'),
+    errorResult('All done.'),
+  ]]), flow())
+  expect(completedReply.result).toEqual({ exitCode: 0, stderr: '' })
+
+  const completedTool = await driveFlow(fixture([[
+    init('conv-stale'),
+    toolStep(202, 'run_command', { CommandLine: 'lander land' }),
+    errorResult(''),
+  ]]), flow())
+  expect(completedTool.result).toEqual({ exitCode: 0, stderr: '' })
+
+  const midTurnFailure = await driveFlow(fixture([[
+    init('conv-stale'),
+    response(10, 'Starting tool.'),
+    toolStep(11, 'run_command', { CommandLine: 'git status' }, { state: 'ACTIVE' }),
+    errorResult('Starting tool.'),
+  ]]), flow())
+  expect(midTurnFailure.result).toEqual({ exitCode: 1, stderr: staleError })
+
+  for (const suffix of ['44', '184-2010']) {
+    const refusedWithStaleError = refusedTurn(suffix)
+    refusedWithStaleError.later = [{
+      chunks: [[
+        init('conv-stale'),
+        response(201, 'Completed after reprompt.'),
+        errorResult('Completed after reprompt.'),
+      ]],
+    }]
+    const reprompted = await driveFlow(refusedWithStaleError, flow())
+    expect(reprompted.spawns).toHaveLength(2)
+    expect(reprompted.result).toEqual({ exitCode: 0, stderr: '' })
+  }
+
+  const failedAtRefusal = await driveFlow(refusedTurn('198'), flow())
+  expect(failedAtRefusal.spawns).toHaveLength(1)
+  expect(failedAtRefusal.result.exitCode).toBe(3)
+})
+
 it('emits intermediate text, terminal tool errors, and does not duplicate concatenated result.response', async () => {
   const g = fixture([[
     event('step_update', { step_index: 1, step_type: 'agent_response', text_delta: 'Checking' }),
