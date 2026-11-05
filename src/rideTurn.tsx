@@ -38,9 +38,9 @@ export function PendingRow({
 }
 
 // One assistant turn in the conversation: the bubble around a turn's trace (see
-// TurnTrace), carrying the turn's confirmed denials, the in-flight working
-// spinner, the files it attached, and — when this turn raised the open ask —
-// the ask's form as the turn's footer.
+// TurnTrace), carrying the files the turn attached, its confirmed denials, the
+// in-flight working spinner, and — when this turn raised the open ask — the
+// ask's form as the turn's footer.
 export const RideTurn = memo(function RideTurn({
   ride,
   items,
@@ -100,6 +100,9 @@ export const RideTurn = memo(function RideTurn({
           disclosure={disclosure}
         />
       </div>
+      {files.length > 0 && (
+        <MessageAttachments attachments={files} slug={slug} />
+      )}
       {denied.length > 0 && (
         <BlockedSummary requests={denied} grants={grants} onAllow={onAllow} onRetry={onRetry} />
       )}
@@ -118,9 +121,6 @@ export const RideTurn = memo(function RideTurn({
               ? 'Waiting for background work…'
               : `${taskAgentModelName(agent, ride.usage?.model)} is working…`}
         </PendingRow>
-      )}
-      {files.length > 0 && (
-        <MessageAttachments attachments={files} slug={slug} />
       )}
       {/* The open ask's controls hang off the turn that raised it, as its
           footer — at the very bottom of the bubble, below any prose the agent

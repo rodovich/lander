@@ -343,16 +343,33 @@ describe('RideTurn settled/open footers', () => {
     expect(html.indexOf('notice-text')).toBeGreaterThan(html.indexOf('agent-prose'))
   })
 
-  it('gathers the flow items’ attachments below the turn', () => {
+  it('gathers the flow items’ attachments below the trace, above the blocked summary', () => {
     const html = render([
-      flow('a', 'done', {
+      flow('a', 'agent-prose', {
         attachments: [
           { id: 'blob1', name: 'diff.patch', mime: 'text/plain', size: 42 },
         ],
       }),
+      tool('t1', { status: 'blocked', rule: 'Bash(rm:*)' }),
     ])
-    expect(html).toContain('message-attachments')
     expect(html).toContain('diff.patch')
+    expect(html.indexOf('message-attachments')).toBeGreaterThan(html.indexOf('agent-prose'))
+    expect(html.indexOf('message-attachments')).toBeLessThan(html.indexOf('blocked-summary'))
+  })
+
+  it('shows attachments above the working spinner', () => {
+    const html = render(
+      [
+        flow('a', 'done', {
+          attachments: [
+            { id: 'blob1', name: 'diff.patch', mime: 'text/plain', size: 42 },
+          ],
+        }),
+      ],
+      { ride: settledRide({ endedAt: undefined }) },
+    )
+    expect(html).toContain('diff.patch')
+    expect(html.indexOf('message-attachments')).toBeLessThan(html.indexOf('is working…'))
   })
 
   it('shows every version when one name was attached twice', () => {
