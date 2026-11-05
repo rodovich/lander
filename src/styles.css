@@ -1519,9 +1519,8 @@ body {
   background: var(--selected);
 }
 
-/* The icon buttons in the detail header's title row: the naming sparkle, the
-   two copies, the permission stamp. Muted until hovered, so the row reads as
-   the title with its controls behind it. */
+/* Icon buttons beside text, kept quiet so a row reads as its text with the
+   controls behind it. */
 .title-action {
   display: inline-flex;
   align-items: center;
@@ -1704,12 +1703,24 @@ body {
   grid-column: span 2;
 }
 
-/* Path, lines added, lines removed; a binary file's label spans both counts. */
+/* Lines added, lines removed, path, copy; a binary file's label spans both
+   counts, and a list's head spans the path and copy columns. */
 .checkout-files {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: center;
   gap: 3px 12px;
   font-variant-numeric: tabular-nums;
+}
+
+.checkout-files > .checkout-files-head {
+  grid-column: span 2;
+}
+
+/* Tighter than the field rows' copies, so a file row stays as tall as its
+   text. */
+.checkout-file-copy {
+  padding: 1px;
 }
 
 /* Every list scrolls together under the worktree and branch. */

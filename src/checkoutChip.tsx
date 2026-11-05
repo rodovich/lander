@@ -111,7 +111,7 @@ export function CheckoutChip({ checkout }: { checkout: CheckoutReport }) {
 }
 
 export function CheckoutChanges({ checkout }: { checkout: CheckoutReport }) {
-  const { files, split } = checkout
+  const { path, files, split } = checkout
   const lists: { head: string; files: ChangedFile[] }[] = []
   if (split) {
     const { commits, committed, uncommitted } = split
@@ -130,25 +130,31 @@ export function CheckoutChanges({ checkout }: { checkout: CheckoutReport }) {
   return lists.map((list) => (
     <div key={list.head} className="checkout-popup-section">
       <div className="checkout-files">
-        <span className="checkout-files-head">{list.head}</span>
         <DiffStat {...totals(list.files)} />
+        <span className="checkout-files-head">{list.head}</span>
         {list.files.map((f) => (
-          <FileRow key={f.path} file={f} />
+          <FileRow key={f.path} file={f} worktree={path} />
         ))}
       </div>
     </div>
   ))
 }
 
-function FileRow({ file }: { file: ChangedFile }) {
+function FileRow({ file, worktree }: { file: ChangedFile; worktree: string }) {
   const slash = file.path.lastIndexOf('/') + 1
   return (
     <>
+      <DiffStat added={file.added} removed={file.removed} />
       <code className="checkout-file" title={file.path}>
         <span className="checkout-dir">{file.path.slice(0, slash)}</span>
         {file.path.slice(slash)}
       </code>
-      <DiffStat added={file.added} removed={file.removed} />
+      <CopyButton
+        text={`${worktree}/${file.path}`}
+        label="Copy full path"
+        className="title-action checkout-file-copy"
+        size={12}
+      />
     </>
   )
 }
