@@ -188,7 +188,7 @@ exports[`claude transcript regressions > a turn with a ride still scheduled is r
         "do the thing
 
 <ride-scheduled>
-You have a ride scheduled for 3:00:00 PM or when sibling-1 lands, whichever comes first. It stays scheduled unless you clear it with \`lander ride --clear\`; scheduling another with \`lander ride\` replaces it.
+You have a ride scheduled for 3:00:00 PM or when sibling-1 lands, whichever comes first. Calling \`lander ride\` replaces the scheduled ride; \`lander ride --clear\` clears it.
 </ride-scheduled>
 
 <task-context>
@@ -3957,7 +3957,7 @@ exports[`codex transcript regressions > a turn with a ride still scheduled is re
 do the thing
 
 <ride-scheduled>
-You have a ride scheduled for 3:00:00 PM. It stays scheduled unless you clear it with \`lander ride --clear\`; scheduling another with \`lander ride\` replaces it.
+You have a ride scheduled for 3:00:00 PM. Calling \`lander ride\` replaces the scheduled ride; \`lander ride --clear\` clears it.
 </ride-scheduled>",
       ],
       "command": "codex",

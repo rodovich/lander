@@ -406,9 +406,8 @@ export function buildScheduledRideBlock(ride: ScheduledRide): string {
     return [
       '<ride-scheduled>',
       `You are watching \`${ride.watching.watcher}\`${args ? ` (${args})` : ''}; ` +
-        'it wakes you when it fires. It stays armed unless you clear it with ' +
-        '`lander ride --clear`; scheduling another ride with `lander ride` ' +
-        'replaces it.',
+        'it wakes you once when it fires. Calling `lander ride` replaces the ' +
+        'watch; `lander ride --clear` clears it.',
       '</ride-scheduled>',
     ].join('\n')
   }
@@ -421,9 +420,8 @@ export function buildScheduledRideBlock(ride: ScheduledRide): string {
       ? `for ${ride.at} or ${landing}, whichever comes first`
       : `for ${ride.at ?? landing}`
   const sentence =
-    `You have a ride scheduled ${when}. It stays scheduled unless you clear ` +
-    'it with `lander ride --clear`; scheduling another with `lander ride` ' +
-    'replaces it.'
+    `You have a ride scheduled ${when}. Calling \`lander ride\` replaces the ` +
+    'scheduled ride; `lander ride --clear` clears it.'
   return ['<ride-scheduled>', sentence, '</ride-scheduled>'].join('\n')
 }
 

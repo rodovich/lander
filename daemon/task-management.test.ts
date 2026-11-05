@@ -154,8 +154,8 @@ describe('buildRevivedBlock', () => {
 describe('buildScheduledRideBlock', () => {
   const sentence = (when: string) =>
     '<ride-scheduled>\n' +
-    `You have a ride scheduled ${when}. It stays scheduled unless you clear it ` +
-    'with `lander ride --clear`; scheduling another with `lander ride` replaces it.\n' +
+    `You have a ride scheduled ${when}. Calling \`lander ride\` replaces the ` +
+    'scheduled ride; `lander ride --clear` clears it.\n' +
     '</ride-scheduled>'
 
   it('names the time of a time trigger', () => {
@@ -186,9 +186,9 @@ describe('buildScheduledRideBlock', () => {
       }),
     ).toBe(
       '<ride-scheduled>\n' +
-        'You are watching `file-changed` (path=out.log); it wakes you when it ' +
-        'fires. It stays armed unless you clear it with `lander ride --clear`; ' +
-        'scheduling another ride with `lander ride` replaces it.\n' +
+        'You are watching `file-changed` (path=out.log); it wakes you once when ' +
+        'it fires. Calling `lander ride` replaces the watch; `lander ride --clear` ' +
+        'clears it.\n' +
         '</ride-scheduled>',
     )
   })
