@@ -60,7 +60,7 @@ are erased. `shared/boundary.test.ts` enforces that.
 
 Lander hosts more than one agent CLI, and the boundary that keeps that tractable
 is that **the server and the web client hold no agent-specific knowledge.** Each
-flow — today `claude` and `codex`, plus whatever a daemon announces — declares
+flow — today `claude`, `codex`, and `agy`, plus whatever a daemon announces — declares
 capability metadata. The server and client do not branch on a provider's name:
 instead, the server derives per-task flags from the flow's declaration and serves
 them on the task; the client reads the flags.
@@ -69,6 +69,7 @@ Provider-specific mechanics live in the daemon's bundled flows, so the two secti
 below describe flow behavior rather than a shape the rest of the system knows
 about. When a change needs the server or the client to care about a provider
 difference, that difference belongs in the capability declaration.
+[docs/agent-clis.md](agent-clis.md) describes each flow's integration.
 
 ## Permission mechanics
 

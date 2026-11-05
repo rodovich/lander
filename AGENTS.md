@@ -21,8 +21,8 @@ what you are about to do.
 
 - **[docs/testing.md](docs/testing.md)** — when changing task execution or
   coordination logic, test end-to-end in the running app when possible.
-- **[docs/codex-support.md](docs/codex-support.md)** — the provider adapter
-  layer and the Claude/Codex differences that exist today.
+- **[docs/agent-clis.md](docs/agent-clis.md)** — how lander integrates each
+  agent CLI, the boundaries every flow keeps, and where the flows differ.
 - **[docs/commit-authoring.md](docs/commit-authoring.md)** — author commits,
   their sequence, and their messages with care. Never commit a surface before it
   works end to end.
