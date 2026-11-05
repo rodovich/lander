@@ -156,7 +156,7 @@ export const Conversation = memo(function Conversation({
   const lastReadRef = useRef<ReadUpTo | null>(null)
   function measureRead() {
     const el = messagesRef.current
-    if (!el) return
+    if (!el || !task.items) return
     const limit = el.getBoundingClientRect().bottom + 1
     let lo = 0
     let hi = Math.min(stamps.length, el.children.length)
@@ -251,7 +251,7 @@ export const Conversation = memo(function Conversation({
   // it) falls back to the nearest one, then to the item itself.
   useEffect(() => {
     const el = messagesRef.current
-    if (!el || !reveal) return
+    if (!el || !reveal || !task.items) return
     const target = el.querySelector(
       `[data-item-id="${CSS.escape(reveal.itemId)}"]`,
     )
@@ -265,7 +265,7 @@ export const Conversation = memo(function Conversation({
     onMessagesScroll()
     return paintRanges('text-highlight', ranges)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reveal])
+  }, [reveal, Boolean(task.items)])
 
   function renderEntry(entry: TimelineEntry) {
     if (entry.kind === 'event') {
@@ -390,22 +390,30 @@ export const Conversation = memo(function Conversation({
 
   return (
     <div className="messages" ref={messagesRef} onScroll={onMessagesScroll}>
-      {/* Each entry in a bare wrapper, so the read measurement and the
-          open-at-first-unread scroll can find it by its index. */}
-      {timeline.map((entry) => (
-        <div key={entryKey(entry)} className="timeline-entry">
-          <ErrorBoundary label="this entry">{() => renderEntry(entry)}</ErrorBoundary>
+      {!task.items ? (
+        <div className="placeholder">
+          <div className="spinner" aria-hidden />
         </div>
-      ))}
-      {/* No ride output yet but the task is riding: the assistant has been
-          launched and we're waiting for its first item. The model isn't
-          known until that output arrives, so this stays model-agnostic. */}
-      {task.status === 'riding' && !openRideHasItems && (
-        <div className="message">
-          <PendingRow onPace={pace}>
-            {openR?.compacting ? 'Compacting context…' : `${taskAgentModelName(openR?.flow ?? taskFlowName(task))} is starting…`}
-          </PendingRow>
-        </div>
+      ) : (
+        <>
+          {/* Each entry in a bare wrapper, so the read measurement and the
+              open-at-first-unread scroll can find it by its index. */}
+          {timeline.map((entry) => (
+            <div key={entryKey(entry)} className="timeline-entry">
+              <ErrorBoundary label="this entry">{() => renderEntry(entry)}</ErrorBoundary>
+            </div>
+          ))}
+          {/* No ride output yet but the task is riding: the assistant has been
+              launched and we're waiting for its first item. The model isn't
+              known until that output arrives, so this stays model-agnostic. */}
+          {task.status === 'riding' && !openRideHasItems && (
+            <div className="message">
+              <PendingRow onPace={pace}>
+                {openR?.compacting ? 'Compacting context…' : `${taskAgentModelName(openR?.flow ?? taskFlowName(task))} is starting…`}
+              </PendingRow>
+            </div>
+          )}
+        </>
       )}
     </div>
   )

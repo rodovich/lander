@@ -269,6 +269,19 @@ describe('Conversation timeline dispatch', () => {
 })
 
 describe('Conversation pending rows', () => {
+  it('shows a bare spinner while the task conversation has not loaded yet', () => {
+    const html = render(
+      baseTask({
+        status: 'riding',
+        items: undefined,
+        rides: undefined,
+      }),
+    )
+    expect(html).toContain('class="spinner"')
+    expect(html).not.toContain('is starting…')
+    expect(html).not.toContain('pending-pace')
+  })
+
   it('shows the starting row while a riding task has no ride output yet', () => {
     const html = render(
       baseTask({
