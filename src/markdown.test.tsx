@@ -46,7 +46,7 @@ describe('safeHref', () => {
 describe('Markdown rendering', () => {
   it('puts a copy button in the corner of a fenced code block', () => {
     expect(render('```\nnpm test\n```')).toBe(
-      '<pre class="code-block"><button type="button" class="code-copy" title="Copy code" aria-label="Copy code">' +
+      '<pre class="code-block"><button type="button" class="block-copy" title="Copy code" aria-label="Copy code">' +
         '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
         '<rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="2"></rect>' +
         '<path d="M5 15V5a2 2 0 0 1 2-2h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>' +
@@ -166,23 +166,27 @@ describe('Markdown rendering', () => {
     )
   })
 
+  // Drops each quote's copy button, leaving the quote's structure.
+  const renderQuotes = (text: string) =>
+    render(text).replace(/<blockquote class="quote-block"><button .*?<\/button>/g, '<blockquote>')
+
   it('renders block elements inside a blockquote', () => {
-    expect(render('> #### What\n>\n> one\n> two\n>\n> ----\n>\n> - a\n> - b')).toBe(
+    expect(renderQuotes('> #### What\n>\n> one\n> two\n>\n> ----\n>\n> - a\n> - b')).toBe(
       '<blockquote>\n<h4>What</h4>\n<p>one\ntwo</p>\n<hr/>\n<ul>\n<li>a</li>\n<li>b</li>\n</ul>\n</blockquote>',
     )
   })
 
   it('ends a blockquote when the next line lacks a matching > marker', () => {
-    expect(render('> a quoted line\nfollowed by a reply')).toBe(
+    expect(renderQuotes('> a quoted line\nfollowed by a reply')).toBe(
       '<blockquote>\n<p>a quoted line</p>\n</blockquote>\n<p>followed by a reply</p>',
     )
-    expect(render('> q1\nr1\n> q2\nr2')).toBe(
+    expect(renderQuotes('> q1\nr1\n> q2\nr2')).toBe(
       '<blockquote>\n<p>q1</p>\n</blockquote>\n<p>r1</p>\n<blockquote>\n<p>q2</p>\n</blockquote>\n<p>r2</p>',
     )
-    expect(render('>> a\n> b\nc')).toBe(
+    expect(renderQuotes('>> a\n> b\nc')).toBe(
       '<blockquote>\n<blockquote>\n<p>a</p>\n</blockquote>\n<p>b</p>\n</blockquote>\n<p>c</p>',
     )
-    expect(render('- > quoted\n  reply')).toBe(
+    expect(renderQuotes('- > quoted\n  reply')).toBe(
       '<ul>\n<li>\n<blockquote>\n<p>quoted</p>\n</blockquote>\nreply</li>\n</ul>',
     )
   })

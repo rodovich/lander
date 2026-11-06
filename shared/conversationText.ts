@@ -39,6 +39,15 @@ export function blockquote(block: string): string {
     .join('\n')
 }
 
+// Undoes `blockquote`, and removes one level from a hand-written quote, whose
+// markers CommonMark lets be indented or have no space after them.
+export function unblockquote(quote: string): string {
+  return quote
+    .split('\n')
+    .map((line) => line.replace(/^ {0,3}>[ \t]?/, ''))
+    .join('\n')
+}
+
 function entryBlock(entry: TimelineEntry, expand: boolean): ConversationBlock | null {
   switch (entry.kind) {
     case 'user':

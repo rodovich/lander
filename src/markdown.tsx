@@ -9,8 +9,9 @@ import { gfmTaskListItemFromMarkdown } from 'mdast-util-gfm-task-list-item'
 import { findAndReplace } from 'mdast-util-find-and-replace'
 import type { Processor } from 'unified'
 import type {} from 'remark-parse'
-import type { Root } from 'mdast'
+import type { Root, RootContent } from 'mdast'
 import type { Element, ElementContent } from 'hast'
+import { unblockquote } from '../shared/conversationText'
 import { CopyButton } from './copyButton'
 import { formatTimestamp } from './format'
 import { timed } from './perf'
@@ -148,6 +149,28 @@ function remarkNoLazyContinuation(this: { data: () => object }) {
   ;(data.micromarkExtensions ??= []).push(noLazyContinuation)
 }
 
+// Attach to each blockquote the Markdown it quotes: its source with one level
+// of `>` markers removed, so a nested quote keeps its own. Lines after the
+// first begin with the prefixes of any containers around the quote (an outer
+// quote's `> `, a list item's indent). This assumes those prefixes are as wide
+// on every line as on the first, where they end at the quote's own marker.
+function remarkQuoteSource() {
+  return (tree: Root, file: { value: unknown }) => {
+    const source = String(file.value)
+    const visit = (node: Root | RootContent) => {
+      if (node.type === 'blockquote') {
+        const { start, end } = node.position!
+        const indent = start.column - 1
+        const lines = source.slice(start.offset, end.offset).split('\n')
+        const quoted = unblockquote(lines.map((line, i) => (i ? line.slice(indent) : line)).join('\n'))
+        node.data = { ...node.data, hProperties: { ...node.data?.hProperties, dataQuote: quoted } }
+      }
+      if ('children' in node) node.children.forEach(visit)
+    }
+    visit(tree)
+  }
+}
+
 function textContent(node: ElementContent | Element): string {
   if (node.type === 'text') return node.value
   return 'children' in node ? node.children.map(textContent).join('') : ''
@@ -183,9 +206,22 @@ const components: Components = {
     const text = textContent(node!).replace(/\n$/, '')
     return (
       <pre className="code-block">
-        <CopyButton text={text} label="Copy code" className="code-copy" size={14} />
+        <CopyButton text={text} label="Copy code" className="block-copy" size={14} />
         <code>{text}</code>
       </pre>
+    )
+  },
+  blockquote({ node, children }) {
+    return (
+      <blockquote className="quote-block">
+        <CopyButton
+          text={String(node!.properties.dataQuote)}
+          label="Copy quote"
+          className="block-copy"
+          size={14}
+        />
+        {children}
+      </blockquote>
     )
   },
 }
@@ -212,6 +248,7 @@ export const Markdown = memo(function Markdown({
         remarkPlugins: [
           remarkMessageGfm,
           remarkNoLazyContinuation,
+          remarkQuoteSource,
           [remarkTaskMentions, { linkTask }],
         ],
         urlTransform: safeHref,

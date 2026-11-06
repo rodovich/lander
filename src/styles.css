@@ -1941,6 +1941,17 @@ body {
   color: var(--muted);
 }
 
+/* Padded right like pre.code-block, so wrapped text never runs under the copy
+   button. */
+.message-text blockquote.quote-block {
+  position: relative;
+  padding-right: 36px;
+}
+
+.quote-block > .block-copy {
+  top: 0;
+}
+
 /* Struck-out text is text the author has withdrawn, so it recedes to the same
    grey as a blockquote rather than keeping full contrast behind the line. */
 .message-text del {
@@ -1973,7 +1984,7 @@ body {
   padding-right: 36px;
 }
 
-.code-copy {
+.block-copy {
   position: absolute;
   top: 6px;
   right: 6px;
@@ -1990,12 +2001,13 @@ body {
   transition: opacity 0.15s, color 0.15s, background 0.15s;
 }
 
-.code-block:hover .code-copy,
-.code-copy:focus-visible {
+.code-block:hover > .block-copy,
+.quote-block:hover > .block-copy,
+.block-copy:focus-visible {
   opacity: 1;
 }
 
-.code-copy:hover {
+.block-copy:hover {
   color: var(--riding);
   background: var(--bg-tinted);
 }
