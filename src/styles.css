@@ -1794,8 +1794,12 @@ body {
   position: relative;
 }
 
+:root {
+  --copy-gutter: 28px;
+}
+
 .message-text-wrap .message-text {
-  padding-right: 28px;
+  padding-right: var(--copy-gutter);
 }
 
 .message-text-copy {
@@ -1891,7 +1895,8 @@ body {
 }
 
 .message-text > *:first-child,
-.message-text :is(blockquote, li) > :first-child {
+.message-text :is(blockquote, li) > :first-child,
+.message-text blockquote > .block-copy:first-child + * {
   margin-top: 0;
 }
 
@@ -1941,17 +1946,6 @@ body {
   color: var(--muted);
 }
 
-/* Padded right like pre.code-block, so wrapped text never runs under the copy
-   button. */
-.message-text blockquote.quote-block {
-  position: relative;
-  padding-right: 36px;
-}
-
-.quote-block > .block-copy {
-  top: 0;
-}
-
 /* Struck-out text is text the author has withdrawn, so it recedes to the same
    grey as a blockquote rather than keeping full contrast behind the line. */
 .message-text del {
@@ -1999,6 +1993,41 @@ body {
   border-radius: 4px;
   opacity: 0;
   transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+
+/* A quote's or table's button sits in the block's top-right corner, in a
+   padded gutter, except in a message, where the gutter is the message's margin
+   column under the message's own copy button. There the block is left
+   unpositioned, so the button's containing block is .message-text-wrap, and
+   `top: auto` keeps it level with the block's first line. The block spans the
+   full width and reaches into the margin column, so the cursor stays over it
+   on the way to the button. A block that is the message's first element would
+   share the message button's spot, so its button drops below it. Blocks
+   inside a quote keep their own corner, since one on the quote's first line
+   would put its button on the quote's. */
+:is(.quote-block, .table-block) {
+  position: relative;
+  padding-right: var(--copy-gutter);
+}
+
+:is(.quote-block, .table-block) > .block-copy {
+  top: 0;
+  right: 0;
+}
+
+.message-text-wrap .message-text :is(.quote-block, .table-block):not(.quote-block *) {
+  position: static;
+  width: auto;
+  max-width: none;
+  margin-right: calc(-1 * var(--copy-gutter));
+}
+
+.message-text-wrap .message-text :is(.quote-block, .table-block):not(.quote-block *) > .block-copy {
+  top: auto;
+}
+
+.message-text-wrap .message-text > :is(.quote-block, .table-block):first-child > .block-copy {
+  top: 20px;
 }
 
 :hover > .block-copy,
@@ -2071,16 +2100,9 @@ body {
 }
 
 .message-text .table-block {
-  position: relative;
   width: fit-content;
   max-width: 100%;
   margin: 1em 0;
-  padding-right: 28px;
-}
-
-.table-block > .block-copy {
-  top: 3px;
-  right: 0;
 }
 
 /* Collapsed borders so the rule can sit on the row and run unbroken across it;
