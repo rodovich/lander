@@ -458,12 +458,15 @@ export type AgyRefusal =
   | { in: 'subagent'; action: string; conversation: string }
   | { in: 'unknown'; action: string }
 
-// Only what the agent can't see for itself: that agy ended its turn, and what
-// lander knows of each refusal its own results don't report.
+// What the agent can't see for itself: that agy ended its turn, and what lander
+// knows of each refusal its own results don't report.
 export function agyRepromptMessage(refusals: AgyRefusal[]): string {
   const n = refusals.length
+  const one = n === 1
   const lines = [
-    `[lander] Antigravity ended your turn because it refused ${n === 1 ? 'a call' : `${n} calls`} needing a permission the user has not granted.`,
+    `[lander] Antigravity ended your turn because it refused ${one ? 'a call' : `${n} calls`} needing a permission the user has not granted.` +
+      ` No allow rule covered ${one ? 'that call' : 'those calls'}; your goal may still be fine.` +
+      ` You may reach it with a command the user has already allowed for that purpose, but not by running ${one ? 'the' : 'a'} refused command through another shell, interpreter, script, or wrapper.`,
   ]
   for (const r of refusals) {
     if (r.in === 'turn' && !r.seen)

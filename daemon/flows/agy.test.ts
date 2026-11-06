@@ -778,7 +778,7 @@ it('prompts the agent again with only what it can\'t see, for as long as agy kee
       ]],
     }]
     const driven = await driveFlow(g, flow(undefined, refusalLine('conv-r', 1)))
-    const message = '[lander] Antigravity ended your turn because it refused a call needing a permission the user has not granted.\n- Your run_command call `git push` was refused. Its result says it was canceled.'
+    const message = agyRepromptMessage([{ in: 'turn', tool: 'run_command', input: 'git push', seen: false }])
     expect(driven.spawns).toHaveLength(2)
     expect(driven.spawns[1].args.slice(0, 2)).toEqual(['-p', message])
     expect(driven.spawns[1].args).toEqual(expect.arrayContaining(['--conversation', 'conv-r']))
@@ -821,9 +821,13 @@ it('states each kind of refusal the agent can\'t place for itself, and nothing a
     { in: 'subagent', action: 'RunCommand', conversation: 'sub-1' },
     { in: 'unknown', action: 'WriteToFile' },
   ])).toBe([
-    '[lander] Antigravity ended your turn because it refused 3 calls needing a permission the user has not granted.',
+    '[lander] Antigravity ended your turn because it refused 3 calls needing a permission the user has not granted. No allow rule covered those calls; your goal may still be fine. You may reach it with a command the user has already allowed for that purpose, but not by running a refused command through another shell, interpreter, script, or wrapper.',
     '- A RunCommand call by your subagent (conversation sub-1) was refused. Antigravity stopped the subagent when it ended your turn.',
     '- Antigravity did not say which WriteToFile call it refused.',
+  ].join('\n'))
+  expect(agyRepromptMessage([{ in: 'turn', tool: 'run_command', input: 'git push', seen: false }])).toBe([
+    '[lander] Antigravity ended your turn because it refused a call needing a permission the user has not granted. No allow rule covered that call; your goal may still be fine. You may reach it with a command the user has already allowed for that purpose, but not by running the refused command through another shell, interpreter, script, or wrapper.',
+    '- Your run_command call `git push` was refused. Its result says it was canceled.',
   ].join('\n'))
 })
 
