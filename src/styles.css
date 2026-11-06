@@ -2001,8 +2001,7 @@ body {
   transition: opacity 0.15s, color 0.15s, background 0.15s;
 }
 
-.code-block:hover > .block-copy,
-.quote-block:hover > .block-copy,
+:hover > .block-copy,
 .block-copy:focus-visible {
   opacity: 1;
 }
@@ -2071,12 +2070,24 @@ body {
   margin: 0.6em 0;
 }
 
+.message-text .table-block {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+  margin: 1em 0;
+  padding-right: 28px;
+}
+
+.table-block > .block-copy {
+  top: 3px;
+  right: 0;
+}
+
 /* Collapsed borders so the rule can sit on the row and run unbroken across it;
    the gap between columns is cell padding rather than border-spacing, which the
    rule would have shown through. */
 .message-text table {
   border-collapse: collapse;
-  margin: 1em 0;
   display: block;
   width: max-content;
   max-width: 100%;

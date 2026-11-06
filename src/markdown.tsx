@@ -149,21 +149,23 @@ function remarkNoLazyContinuation(this: { data: () => object }) {
   ;(data.micromarkExtensions ??= []).push(noLazyContinuation)
 }
 
-// Attach to each blockquote the Markdown it quotes: its source with one level
-// of `>` markers removed, so a nested quote keeps its own. Lines after the
-// first begin with the prefixes of any containers around the quote (an outer
-// quote's `> `, a list item's indent). This assumes those prefixes are as wide
-// on every line as on the first, where they end at the quote's own marker.
-function remarkQuoteSource() {
+// Attach to each blockquote and table the Markdown its copy button copies: a
+// table's source, or a quote's with one level of `>` markers removed, so a
+// nested quote keeps its own. Lines after the first begin with the prefixes of
+// any containers around the block (an outer quote's `> `, a list item's
+// indent). This assumes those prefixes are as wide on every line as on the
+// first, where they end at the block's first character.
+function remarkBlockCopySource() {
   return (tree: Root, file: { value: unknown }) => {
     const source = String(file.value)
     const visit = (node: Root | RootContent) => {
-      if (node.type === 'blockquote') {
+      if (node.type === 'blockquote' || node.type === 'table') {
         const { start, end } = node.position!
         const indent = start.column - 1
         const lines = source.slice(start.offset, end.offset).split('\n')
-        const quoted = unblockquote(lines.map((line, i) => (i ? line.slice(indent) : line)).join('\n'))
-        node.data = { ...node.data, hProperties: { ...node.data?.hProperties, dataQuote: quoted } }
+        const markdown = lines.map((line, i) => (i ? line.slice(indent) : line)).join('\n')
+        const dataCopy = node.type === 'blockquote' ? unblockquote(markdown) : markdown
+        node.data = { ...node.data, hProperties: { ...node.data?.hProperties, dataCopy } }
       }
       if ('children' in node) node.children.forEach(visit)
     }
@@ -183,6 +185,10 @@ function ExternalLink({ href, title, children }: { href?: string; title?: string
       {children}
     </a>
   )
+}
+
+function BlockCopy({ text, label }: { text: string; label: string }) {
+  return <CopyButton text={text} label={label} className="block-copy" size={14} />
 }
 
 const components: Components = {
@@ -206,7 +212,7 @@ const components: Components = {
     const text = textContent(node!).replace(/\n$/, '')
     return (
       <pre className="code-block">
-        <CopyButton text={text} label="Copy code" className="block-copy" size={14} />
+        <BlockCopy text={text} label="Copy code" />
         <code>{text}</code>
       </pre>
     )
@@ -214,14 +220,19 @@ const components: Components = {
   blockquote({ node, children }) {
     return (
       <blockquote className="quote-block">
-        <CopyButton
-          text={String(node!.properties.dataQuote)}
-          label="Copy quote"
-          className="block-copy"
-          size={14}
-        />
+        <BlockCopy text={String(node!.properties.dataCopy)} label="Copy quote" />
         {children}
       </blockquote>
+    )
+  },
+  // A table scrolls sideways when it is too wide, so the button sits on a
+  // wrapper that keeps it in view.
+  table({ node, children }) {
+    return (
+      <div className="table-block">
+        <BlockCopy text={String(node!.properties.dataCopy)} label="Copy table" />
+        <table>{children}</table>
+      </div>
     )
   },
 }
@@ -248,7 +259,7 @@ export const Markdown = memo(function Markdown({
         remarkPlugins: [
           remarkMessageGfm,
           remarkNoLazyContinuation,
-          remarkQuoteSource,
+          remarkBlockCopySource,
           [remarkTaskMentions, { linkTask }],
         ],
         urlTransform: safeHref,
