@@ -25,6 +25,18 @@ it('names when the last used-up window resets', () => {
   ).toMatchObject({ fullUntil: SOON })
 })
 
+it('shows no reset for a window nothing has used', () => {
+  const status = usageStatus({
+    session: { utilization: 0, resetsAt: SOON },
+    weekly: { utilization: 32, resetsAt: LATER },
+  })
+  expect(status.items).toMatchObject([
+    { id: 'session', note: undefined },
+    { id: 'weekly', note: expect.stringMatching(/^resets /) },
+  ])
+  expect(status.refreshAt).toBe('2026-11-11T19:34:25.000Z')
+})
+
 it('names no reset while every window has room', () => {
   const status = usageStatus({
     session: { utilization: 99, resetsAt: SOON },

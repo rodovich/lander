@@ -155,7 +155,13 @@ export function usageTelemetry(body: UsageBody): TelemetryItem[] {
 // of the used-up windows resets, the earliest a failed turn's retry could run.
 export type UsageStatus = { items: TelemetryItem[]; refreshAt?: string; fullUntil?: string }
 
-export function usageStatus(body: UsageBody): UsageStatus {
+export function usageStatus(reported: UsageBody): UsageStatus {
+  // A window nothing has used yet has not started, but Codex and Antigravity
+  // still report a reset for it: now plus the window's length, moving with
+  // every check.
+  const started = (w: UsageWindow | null): UsageWindow | null =>
+    w && w.utilization <= 0 ? { ...w, resetsAt: null } : w
+  const body = { session: started(reported.session), weekly: started(reported.weekly) }
   let next: number | undefined
   let full: { at: number; iso: string } | undefined
   for (const w of [body.session, body.weekly]) {
