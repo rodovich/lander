@@ -75,7 +75,7 @@ import {
   deliverQueuedBatch,
   applyRelaunch,
   applyRetryRecovery,
-  relaunchRetryBrief,
+  relaunchBrief,
   applyDueMessages,
   attributedPrompt,
   wakeupNotification,
@@ -4208,7 +4208,7 @@ app.post('/api/:project/tasks/:id/asks/:askId/answer', async (c) => {
       // for then, and a relaunch option hands the failed turn to a fresh session.
       if (ask.origin === 'retry') {
         if (relaunch) {
-          applyRelaunch(t, relaunchRetryBrief(t), now, 'human', relaunch)
+          applyRelaunch(t, relaunchBrief(t.id), now, 'human', relaunch)
           withdrawOpenAsks(t)
         } else applyRetryRecovery(t, { defer, resetsAt: scheduleAt, now, by: 'human' })
         return

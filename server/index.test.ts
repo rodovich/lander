@@ -3610,7 +3610,7 @@ describe('asks', () => {
     )
     expect(res.status).toBe(200)
     const queued = writes.map((w) => w.queued as string[] | undefined).find((q) => q?.length)
-    expect(queued?.[0]).toContain('> do the thing')
+    expect(queued?.[0]).toContain(`lander view ${id} --messages all`)
     const raw = await readRaw(id)
     expect(raw.sessionId).toBeUndefined()
     expect(raw.retry).toBeUndefined()
