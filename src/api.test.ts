@@ -169,17 +169,17 @@ describe('read timeouts', () => {
 
 // A body that isn't the JSON the route promises. The dev proxy answers a request
 // it cannot reach the API server with — every `tsx watch` restart of it — with an
-// empty 500, so this is the ordinary shape of a restart seen from the client, and
+// empty 502, so this is the ordinary shape of a restart seen from the client, and
 // it must read as a sentence about the request rather than as JSON.parse's
 // "Unexpected end of JSON input".
 describe('unreadable bodies', () => {
   const respond = (body: string, init: ResponseInit) =>
     vi.stubGlobal('fetch', async () => new Response(body, init))
 
-  it('names the request and the status when the proxy answers an empty 500', async () => {
-    respond('', { status: 500, statusText: 'Internal Server Error' })
+  it('names the request and the status when the proxy answers an empty 502', async () => {
+    respond('', { status: 502, statusText: 'Bad Gateway' })
     await expect(loadShownTasks(['p'], false)).rejects.toThrow(
-      '/api/p/tasks?view=summary failed: HTTP 500 Internal Server Error',
+      '/api/p/tasks?view=summary failed: HTTP 502 Bad Gateway',
     )
   })
 

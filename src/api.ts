@@ -48,8 +48,7 @@ const unreadable = (url: string, status: number) =>
 // The JSON body of a response, or an error describing why there isn't one. A
 // body that fails to parse is routine rather than hypothetical: the dev proxy
 // answers a request it cannot reach the API server with — every `tsx watch`
-// restart opens a window of those — with an empty 500, and a restart mid-response
-// truncates a 200.
+// restart opens a window of those — with an empty 502.
 async function readJson(
   url: string,
   valid?: (body: Record<string, unknown>) => boolean,
