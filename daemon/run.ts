@@ -46,6 +46,7 @@ export type RunManager = {
   startRun: (msg: StartRunMessage) => void
   interrupt: (runId: string) => void
   resumeFrom: (runId: string, seq: number) => void
+  setServerLinked: (linked: boolean) => void
   ack: (runId: string) => void
   // Stop every spawned run's host and refuse to spawn any more, a pending run's
   // included; resolves once those hosts have closed.
@@ -191,6 +192,18 @@ export function createRunManager({
   // hosts it is stopping have closed, and a host spawned meanwhile would be
   // left running.
   let stoppingAll = false
+  let serverLinked = true
+
+  // A finished run holds the only copy of its `done` and of any updates the
+  // server hasn't applied, so it expires only after a full TTL with the server
+  // connected. An API that cannot boot can stay away far longer than the TTL.
+  function scheduleDrop(runId: string, rec: Run): void {
+    clearTimeout(rec.dropTimer)
+    rec.dropTimer = undefined
+    if (!serverLinked) return
+    rec.dropTimer = setTimeout(() => ack(runId), runBufferTtlMs)
+    rec.dropTimer.unref?.()
+  }
 
   function done(
     runId: string,
@@ -469,11 +482,7 @@ export function createRunManager({
 
     const finish = (doneMsg: DoneMessage): void => {
       rec.done = doneMsg
-      rec.dropTimer = setTimeout(() => {
-        runs.delete(msg.runId)
-        onEmpty()
-      }, runBufferTtlMs)
-      rec.dropTimer.unref?.()
+      scheduleDrop(msg.runId, rec)
       send(doneMsg)
       if (usageFlow) void refreshUsage(usageFlow)
     }
@@ -655,6 +664,11 @@ export function createRunManager({
     if (run.done) send(run.done)
   }
 
+  function setServerLinked(linked: boolean): void {
+    serverLinked = linked
+    for (const [runId, rec] of runs) if (rec.done) scheduleDrop(runId, rec)
+  }
+
   function ack(runId: string): void {
     const run = runs.get(runId)
     if (run?.dropTimer) clearTimeout(run.dropTimer)
@@ -683,6 +697,7 @@ export function createRunManager({
     startRun,
     interrupt,
     resumeFrom,
+    setServerLinked,
     ack,
     stopAll,
     failRun,

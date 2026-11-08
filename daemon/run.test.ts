@@ -926,6 +926,63 @@ describe('daemon run manager', () => {
     })
   })
 
+  describe('a finished run the server has not acked', () => {
+    beforeEach(() => vi.useFakeTimers())
+    afterEach(() => vi.useRealTimers())
+
+    function started() {
+      const h = harness({ runBufferTtlMs: 100 })
+      h.manager.startRun(makeStart())
+      return h
+    }
+    const finish = (h: ReturnType<typeof started>) =>
+      push(h.hosts[0], { kind: 'done', exitCode: 0, stderr: '' })
+
+    it('is dropped after the TTL while the server is linked', () => {
+      const h = started()
+      finish(h)
+      vi.advanceTimersByTime(99)
+      expect(h.manager.heldRunIds()).toEqual(['run-1'])
+      vi.advanceTimersByTime(1)
+      expect(h.manager.heldRunIds()).toEqual([])
+    })
+
+    it('outlasts a server outage longer than the TTL and replays its done', () => {
+      const h = started()
+      h.manager.setServerLinked(false)
+      finish(h)
+      vi.advanceTimersByTime(1_000)
+      h.manager.setServerLinked(true)
+      expect(h.manager.heldRunIds()).toEqual(['run-1'])
+
+      h.messages.length = 0
+      h.manager.resumeFrom('run-1', 0)
+      expect(h.messages).toContainEqual(
+        expect.objectContaining({ type: 'done', exitCode: 0 }),
+      )
+    })
+
+    it('stops the countdown of a run that finished before the link dropped', () => {
+      const h = started()
+      finish(h)
+      vi.advanceTimersByTime(99)
+      h.manager.setServerLinked(false)
+      vi.advanceTimersByTime(1_000)
+      expect(h.manager.heldRunIds()).toEqual(['run-1'])
+    })
+
+    it('expires a full TTL after the link returns if no ack comes', () => {
+      const h = started()
+      finish(h)
+      h.manager.setServerLinked(false)
+      h.manager.setServerLinked(true)
+      vi.advanceTimersByTime(99)
+      expect(h.manager.heldRunIds()).toEqual(['run-1'])
+      vi.advanceTimersByTime(1)
+      expect(h.manager.heldRunIds()).toEqual([])
+    })
+  })
+
   describe('a run still before its spawn', () => {
     function gated(fail = false) {
       let release!: () => void

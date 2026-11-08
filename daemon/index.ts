@@ -394,7 +394,7 @@ const runManager = createRunManager({
     drain.check()
     // onEmpty is a "one was removed" nudge, not a promise the map is empty, so
     // ask before dropping the assertion. A settled-but-unacked run still counts,
-    // which over-holds by at most the reply round trip.
+    // so an API outage keeps the assertion held until the server is back.
     if (runManager.size() === 0) wake.release()
   },
 })
@@ -682,6 +682,7 @@ function connect(): void {
   ws = sock
   sock.addEventListener('open', () => {
     console.log(`connected to ${WS_URL}`)
+    runManager.setServerLinked(true)
     sendRegister()
     // Prime the server's snapshot: re-push the last one we hold (so a reconnect
     // re-fills the server cache immediately), then fetch a fresh one (the boot /
@@ -694,6 +695,7 @@ function connect(): void {
   sock.addEventListener('message', (ev) => onMessage(String(ev.data)))
   sock.addEventListener('close', () => {
     if (ws === sock) ws = null
+    runManager.setServerLinked(false)
     // Always reconnect — including while draining. A server reload drops us
     // mid-drain, and only we still hold our in-flight runs, so we must reconnect
     // and re-announce them (with draining:true) for the server to resume them on
