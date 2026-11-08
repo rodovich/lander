@@ -13,10 +13,50 @@ import {
 } from './daemon'
 import { normalizeProjectPath, projectSlug } from './projects'
 import { clearHookRunState, mintHookCredential } from './hook-runs'
+import { clearAnnouncedFlows, setAnnouncedFlows } from './flows'
 import { observeWrites } from './store'
 import { MAX_ACTION_TEXT } from './task-actions'
 import { TITLE_MAX_CHARS } from './title'
-import type { RevivedMarker, ScheduledRide } from './protocol'
+import type { FlowAnnouncement, RevivedMarker, ScheduledRide } from './protocol'
+
+const TEST_FLOWS: FlowAnnouncement[] = [
+  {
+    scope: 'bundled',
+    meta: {
+      api: 1,
+      name: 'claude',
+      description: 'Drive a task as a Claude Code conversation',
+      driver: true,
+      capabilities: {
+        grants: {
+          task: true,
+          project: true,
+          placeholder: 'e.g. Bash(git:*)',
+        },
+        usageSnapshot: true,
+        rateLimitRetry: true,
+        reportsCost: true,
+      },
+    },
+  },
+  {
+    scope: 'bundled',
+    meta: {
+      api: 1,
+      name: 'codex',
+      description: 'Drive a task as a Codex conversation',
+      driver: true,
+      capabilities: {
+        grants: { task: false, project: false },
+        usageSnapshot: false,
+        rateLimitRetry: false,
+        reportsCost: false,
+      },
+      projectGrantsUnsupportedReason:
+        'Project permission grants are not supported for Codex tasks yet.',
+    },
+  },
+]
 
 const UI_TOKEN = 'test-ui-token'
 const AT = '2026-01-01T00:00:00.000Z'
@@ -137,11 +177,15 @@ async function writesDuring(
 async function createTask(
   title: string,
   projectSlug = slug,
-): Promise<{ id: string; agent: string }> {
+): Promise<{ id: string; flow: string; agent?: string }> {
   const res = await post(`/api/${projectSlug}/tasks`, { title, flow: 'codex' })
   expect(res.status).toBe(201)
-  return (await res.json()) as { id: string; agent: string }
+  return (await res.json()) as { id: string; flow: string; agent?: string }
 }
+
+beforeEach(() => {
+  setAnnouncedFlows(TEST_FLOWS)
+})
 
 beforeAll(async () => {
   originalEnv = { ...process.env }
@@ -180,13 +224,12 @@ afterAll(async () => {
 })
 
 describe('flow registry endpoint', () => {
-  it('serves the legacy flows when no daemon has announced', async () => {
-    // No daemon is connected in this suite, so this is the bootstrap window:
-    // the picker must still have something to render.
+  it('serves an empty list when no daemon has announced', async () => {
+    clearAnnouncedFlows()
     const res = await app.request(`/api/${slug}/flows`)
     expect(res.status).toBe(200)
     const body = (await res.json()) as { flows: { name: string }[] }
-    expect(body.flows.map((f) => f.name)).toEqual(['claude', 'codex'])
+    expect(body.flows).toEqual([])
   })
 
   it('serves each flow’s announced capabilities', async () => {
@@ -753,6 +796,7 @@ describe('the action bound’s reset', () => {
         path.join(tasksDir, `${id}.json`),
         JSON.stringify({
           id,
+          flow: 'claude',
           title: 'Reset target',
           status: 'riding',
           createdAt: AT,
@@ -1046,6 +1090,7 @@ describe('the launch', () => {
       file(),
       JSON.stringify({
         id: ID,
+        flow: 'claude',
         title: 'Reviewed',
         status: 'landed',
         createdAt: AT,
@@ -1148,7 +1193,7 @@ describe('the launch', () => {
 
   it.each([
     ['flow', { flow: 'codex' }, 'codex'],
-    ['legacy agent only', { agent: 'codex' }, 'codex'],
+    ['legacy agent only', { flow: undefined, agent: 'codex' }, 'codex'],
   ])('inherits the target’s provider (%s)', async (_name, over, expected) => {
     await seed(over)
     const body = (await (await launch(cred().token)).json()) as { id: string }
@@ -1811,24 +1856,15 @@ describe('server task provider behavior', () => {
     expect(await res.json()).toMatchObject({ flow: 'claude' })
   })
 
-  it('stores the explicitly selected provider on new tasks', async () => {
+  it('stores the explicitly selected flow on new tasks without a legacy agent field', async () => {
     const task = await createTask('Explicit Codex task')
 
-    expect(task.agent).toBe('codex')
-    const raw = JSON.parse(
-      await readFile(path.join(tasksDir, `${task.id}.json`), 'utf8'),
-    )
-    expect(raw.agent).toBe('codex')
-  })
-
-  it('stores both flow and the legacy agent for a legacy flow', async () => {
-    const task = await createTask('Derived flow task')
+    expect(task.flow).toBe('codex')
+    expect(task.agent).toBeUndefined()
     const res = await app.request(`/api/${slug}/tasks/${task.id}`)
-    expect(await res.json()).toMatchObject({ agent: 'codex', flow: 'codex' })
-    // Both on disk: `flow` is what dispatch reads, `agent` is what a daemon
-    // predating it reads.
+    expect(await res.json()).toMatchObject({ flow: 'codex' })
     expect(await readTaskField(task.id, 'flow')).toBe('codex')
-    expect(await readTaskField(task.id, 'agent')).toBe('codex')
+    expect(await readTaskField(task.id, 'agent')).toBeUndefined()
   })
 
   it('derives a flow for a task stored before the field existed', async () => {
@@ -1967,7 +2003,6 @@ describe('server task provider behavior', () => {
     // Adding or removing a field here IS the breaking change; editing the
     // literal is how you say you meant to make it.
     expect(Object.keys(row).sort()).toEqual([
-      'agent',
       'createdAt',
       'flow',
       'id',
@@ -2217,7 +2252,7 @@ describe('server task provider behavior', () => {
 
     const res = await app.request(`/api/${slug}/tasks/${task.id}`)
     expect(res.status).toBe(200)
-    expect(await res.json()).toMatchObject({ id: task.id, agent: 'codex' })
+    expect(await res.json()).toMatchObject({ id: task.id, flow: 'codex' })
   })
 
   it('delegates project grants to the daemon', async () => {
@@ -2297,34 +2332,6 @@ describe('server task provider behavior', () => {
     }
     expect(await sealedAs('codex')).toBeUndefined()
     expect(await sealedAs('claude')).toBe(path.join(projectDir, 'sub'))
-  })
-
-  it('treats legacy tasks without agent as Claude when delegating project grants', async () => {
-    await mkdir(tasksDir, { recursive: true })
-    await writeFile(
-      path.join(tasksDir, 'legacy-task.json'),
-      JSON.stringify(
-        {
-          id: 'legacy-task',
-          title: 'Legacy task',
-          status: 'paced',
-          createdAt: AT,
-          updatedAt: AT,
-          messages: [],
-        },
-        null,
-        2,
-      ),
-    )
-
-    const res = await post('/api/' + slug + '/tasks/legacy-task/allow', {
-      scope: 'project',
-      rule: 'Bash(npm test)',
-    })
-    expect(res.status).toBe(503)
-    expect(await res.json()).toEqual({
-      error: 'no daemon connected for this project',
-    })
   })
 })
 
@@ -3856,6 +3863,7 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
       path.join(tasksDir, `${id}.json`),
       JSON.stringify({
         id,
+        flow: 'claude',
         title: 'Kill task',
         status: 'riding',
         createdAt: AT,
@@ -3901,7 +3909,13 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
         )
     })
     ws.send(
-      JSON.stringify({ type: 'register', projects: [{ slug }], draining: false, runs: [] }),
+      JSON.stringify({
+        type: 'register',
+        projects: [{ slug }],
+        draining: false,
+        runs: [],
+        flows: TEST_FLOWS,
+      }),
     )
     // The register handler records the slugs we serve — its landing confirms the
     // server routes this project's runs to us.
@@ -4006,6 +4020,7 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
       path.join(tasksDir, `${id}.json`),
       JSON.stringify({
         id,
+        flow: 'claude',
         title: 'Stateful task',
         status: 'idle',
         createdAt: AT,
@@ -4059,6 +4074,7 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
       path.join(tasksDir, `${id}.json`),
       JSON.stringify({
         id,
+        flow: 'claude',
         title: 'Windowed task',
         status: 'idle',
         createdAt: AT,
@@ -4102,6 +4118,7 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
       path.join(tasksDir, `${id}.json`),
       JSON.stringify({
         id,
+        flow: 'claude',
         title: 'Wedged task',
         status: 'wedged',
         createdAt: AT,
@@ -4247,6 +4264,7 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
       path.join(tasksDir, `${id}.json`),
       JSON.stringify({
         id,
+        flow: 'claude',
         title: 'Paced task',
         // Stored `riding` with no open ride IS paced — the collapsed
         // vocabulary. Both triggers armed at once, which `lander ride --after
@@ -4710,6 +4728,7 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
       path.join(tasksDir, `${id}.json`),
       JSON.stringify({
         id,
+        flow: 'claude',
         title: 'Kill task',
         status: 'riding',
         createdAt: AT,
@@ -4912,15 +4931,12 @@ describe('flow dispatch gate', () => {
   }, 20_000)
 
   it('serves the project’s flows with the list, as announced now', async () => {
+    clearAnnouncedFlows()
     const flows = async () =>
       ((await (await app.request(`/api/${slug}/tasks?view=summary`)).json()) as {
         flows: { name: string; capabilities: { grants: unknown } }[]
       }).flows
-    expect((await flows()).find((f) => f.name === 'claude')?.capabilities.grants).toEqual({
-      task: true,
-      project: true,
-      placeholder: 'e.g. Bash(git:*)',
-    })
+    expect(await flows()).toEqual([])
 
     await connect(['claude', 'codex', 'example-flow'])
     const announced = await flows()
@@ -4933,9 +4949,7 @@ describe('flow dispatch gate', () => {
     await waitFor(() => !daemonConnected())
   }, 20_000)
 
-  it('still sends `agent` alongside `flow` for a legacy task', async () => {
-    // The compatibility half: a daemon that predates `flow` reads `agent` and
-    // keeps driving claude and codex.
+  it('dispatches a legacy task whose only provider field is agent when its flow is announced', async () => {
     await connect(['claude', 'codex'])
     const id = 'gate-legacy'
     await seed(id, { agent: 'codex' })
@@ -4946,16 +4960,13 @@ describe('flow dispatch gate', () => {
 
     await waitFor(() => !!startRunFor(id))
     const start = startRunFor(id)!
-    expect(start.agent).toBe('codex')
     expect(start.flow).toBe('codex')
+    expect(start.agent).toBeUndefined()
     ws.close()
     await waitFor(() => !daemonConnected())
   }, 20_000)
 
-  it('dispatches a legacy flow even when the daemon announced nothing', async () => {
-    // The rolled-back-daemon case. Bootstrap entries bypass the gate precisely
-    // because start-run carries `agent` for them, so an old daemon can drive
-    // them — wedging here would be a regression, not safety.
+  it('wedges a legacy task when the daemon announced nothing', async () => {
     await connect([])
     const id = 'gate-legacy-noannounce'
     await seed(id, { agent: 'claude' })
@@ -4964,8 +4975,13 @@ describe('flow dispatch gate', () => {
       (await post(`/api/${slug}/tasks/${id}/messages`, { message: 'go' })).status,
     ).toBe(200)
 
-    await waitFor(() => !!startRunFor(id))
-    expect(startRunFor(id)!.agent).toBe('claude')
+    const raw = await waitForRaw(id, (r) => r.status === 'wedged')
+    const items = raw.items as Record<string, unknown>[]
+    const ask = items.find((i) => i.kind === 'ask' && i.origin === 'retry')
+    expect(ask?.prompt).toBe(
+      "The connected daemon does not provide the 'claude' flow; available: (none).",
+    )
+    expect(startRunFor(id)).toBeUndefined()
     ws.close()
     await waitFor(() => !daemonConnected())
   }, 20_000)

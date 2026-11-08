@@ -193,8 +193,8 @@ describe('taskFlow', () => {
     expect(taskFlow({ agent: 'codex' })).toBe('codex')
   })
 
-  it('falls back to the legacy flow when a task names neither', () => {
-    expect(taskFlow({})).toBe('claude')
+  it('returns empty string when a task names neither', () => {
+    expect(taskFlow({})).toBe('')
   })
 })
 
@@ -202,8 +202,7 @@ describe('publicTask', () => {
   it('derives and serves the flow name', () => {
     expect(publicTask({ id: 's', agent: 'codex' }).flow).toBe('codex')
     expect(publicTask({ id: 's', flow: 'example-flow' }).flow).toBe('example-flow')
-    // A structural fixture with no provider field at all still gets one.
-    expect(publicTask({ id: 's' }).flow).toBe('claude')
+    expect(publicTask({ id: 's' }).flow).toBe('')
   })
 
   it('strips token, runId, runCursor and the retry stash', () => {
@@ -300,12 +299,6 @@ describe('publicTask', () => {
     expect((publicTask({ id: 's', status: 'wedged', items: [], rides: [openR] }) as { status?: string }).status).toBe('wedged')
     expect((publicTask({ id: 's', status: 'landed', items: [] }) as { status?: string }).status).toBe('landed')
   })
-
-  it('serves the flow a task names, its legacy agent, or the legacy default', () => {
-    expect(publicTask({ id: 's', status: 'riding', items: [], flow: 'codex' }).flow).toBe('codex')
-    expect(publicTask({ id: 's', status: 'riding', items: [], agent: 'codex' }).flow).toBe('codex')
-    expect(publicTask({ id: 's', status: 'riding', items: [] }).flow).toBe('claude')
-  })
 })
 
 describe('taskSummary', () => {
@@ -325,6 +318,7 @@ describe('taskSummary', () => {
   it('omits items and rides, and strips everything publicTask strips', () => {
     const out = taskSummary({
       id: 's',
+      flow: 'claude',
       title: 't',
       status: 'riding',
       items: [userItem('hi')],
@@ -1561,7 +1555,7 @@ describe('nextRepeatMessage', () => {
 describe('rides', () => {
   const END = later(5)
   it('startRide opens, openRide finds the last un-ended, closeRide stamps it', () => {
-    const t: { rides?: Ride[] } = {}
+    const t: { rides?: Ride[]; flow?: string } = { flow: 'claude' }
     startRide(t, 'r1', AT)
     expect(openRide(t)).toMatchObject({ id: 'r1', startedAt: AT })
     closeRide(t, 'done', END)

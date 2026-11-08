@@ -202,14 +202,10 @@ export function createRunManager({
   }
 
   function startRun(msg: StartRunMessage): void {
-    // `flow ?? agent` so a start-run from a server that predates the field still
-    // resolves. An unknown name settles the run cleanly rather than throwing —
-    // the server's dispatch gate should make this unreachable, but a daemon
-    // rolled back below the flow the task names would land here.
-    const flow = msg.flow ?? msg.agent
+    const flow = msg.flow
     const known = flow ? caps[flow] : undefined
     if (!known) {
-      done(msg.runId, 1, `unsupported flow: ${flow ?? '(none)'}`)
+      done(msg.runId, 1, `unsupported flow: ${flow || '(none)'}`)
       return
     }
     const activeCaps = known

@@ -1124,7 +1124,7 @@ export function createCtxRuntime(
     assist: async (...args: unknown[]) => {
       const [prompt, ...material] = args.map((a) => String(a))
       if (!prompt) throw new Error('assist: a prompt is required')
-      const provider = start.agent ?? start.flow
+      const provider = start.flow
       if (!isAssistProvider(provider))
         throw new Error(
           `assist: no one-shot provider for flow '${String(provider)}'`,

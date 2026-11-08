@@ -343,7 +343,7 @@ describe('codex session and identity', () => {
         }),
       ],
     ],
-    start: { agent: 'codex', flowState: { sessionId: 'thread-1', ...flowState } },
+    start: { flow: 'codex', flowState: { sessionId: 'thread-1', ...flowState } },
   })
   const TOTAL = { input: 2628, output: 60, cacheRead: 21760, cacheCreation: 0 }
 

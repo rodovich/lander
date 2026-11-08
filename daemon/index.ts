@@ -22,7 +22,6 @@ import {
 } from './flows/index'
 import { scrubProcessEnv } from '../server/secrets'
 import type { TelemetryItem } from '../server/protocol'
-import { isAgentKind } from '../server/agent'
 import type {
   ServerToDaemon,
   RegisteredMessage,
@@ -131,7 +130,6 @@ function pushUsage(flow: string): void {
   if (items)
     send({
       type: 'telemetry',
-      ...(isAgentKind(flow) ? { agent: flow } : {}),
       flow,
       items,
     })
@@ -523,7 +521,7 @@ async function grantProject(
       error: `daemon serves no project for slug ${msg.project}`,
       status: 404,
     }
-  const flowName = msg.flow ?? msg.agent
+  const flowName = msg.flow
   const caps = flowName ? CAPS[flowName] : undefined
   const onGrant = flowName ? FLOW_MODULES[flowName]?.onGrant : undefined
   if (!caps?.projectGrants || !onGrant)

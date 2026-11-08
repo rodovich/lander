@@ -47,7 +47,7 @@ describe('provider caps', () => {
         goldenInput({
           name: 'registry',
           chunks: [],
-          start: { flow: 'synthetic', agent: undefined },
+          start: { flow: 'synthetic' },
         }),
         { emit: (event) => events.push(event), spawn },
       )

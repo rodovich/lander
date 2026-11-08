@@ -26,7 +26,6 @@ import type {
   HookRunReport,
   WatcherRunMessage,
   WatcherOutcome,
-  AgentKind,
   TelemetryItem,
 } from './protocol'
 import { clearAnnouncedFlows, setAnnouncedFlows } from './flows'
@@ -255,9 +254,6 @@ export type ProjectGrantResponse = {
 
 export function requestProjectGrant(input: {
   project: string
-  // Legacy fallback, omitted for a non-legacy flow (there is no AgentKind for
-  // one). The daemon resolves `flow ?? agent`.
-  agent?: AgentKind
   flow: string
   rule: string
   timeoutMs?: number
@@ -267,7 +263,6 @@ export function requestProjectGrant(input: {
       type: 'project-grant',
       requestId,
       project: input.project,
-      ...(input.agent ? { agent: input.agent } : {}),
       flow: input.flow,
       rule: input.rule,
     }),
@@ -625,8 +620,7 @@ export function attachDaemonServer(
           } satisfies WatcherRunResponse)
           break
         case 'telemetry': {
-          const flow = msg.flow ?? msg.agent
-          if (flow) opts.onTelemetry?.(flow, msg.items)
+          if (msg.flow) opts.onTelemetry?.(msg.flow, msg.items)
           break
         }
       }

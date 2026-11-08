@@ -76,7 +76,7 @@ export function goldenInput(g: Golden): HostInput {
       type: 'start-run',
       runId: 'ride-1',
       taskId: 'task-1',
-      agent: 'claude',
+      flow: 'claude',
       project: 'proj',
       prompt: 'do the thing',
       task: {},

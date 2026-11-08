@@ -37,7 +37,7 @@ function makeStart(over: Partial<StartRunMessage> = {}): StartRunMessage {
     type: 'start-run',
     runId: 'run-1',
     taskId: 'task-1',
-    agent: 'codex',
+    flow: 'codex',
     project: 'proj',
     prompt: 'prompt',
     task: {},
@@ -126,7 +126,7 @@ describe('daemon run manager', () => {
 
     h.manager.startRun(
       makeStart({
-        agent: 'codex',
+        flow: 'codex',
         prompt: 'look',
         attachments: [{ id: 'img1', name: 'p.png', mime: 'image/png', size: 2 }],
       }),
@@ -138,7 +138,7 @@ describe('daemon run manager', () => {
     const input = hostInputOf(h.hosts[0])
     expect(input.start).toMatchObject({
       runId: 'run-1',
-      agent: 'codex',
+      flow: 'codex',
       prompt: 'look',
     })
     expect(input.root).toBe('/repo')
@@ -150,7 +150,7 @@ describe('daemon run manager', () => {
 
   it('sets the files dir in the HostInput on a turn carrying no attachments', () => {
     const h = harness()
-    h.manager.startRun(makeStart({ agent: 'codex' }))
+    h.manager.startRun(makeStart({ flow: 'codex' }))
     expect(h.hosts).toHaveLength(1)
     expect(hostInputOf(h.hosts[0]).filesDir).toBe('/files/proj/task-1')
   })
@@ -599,7 +599,7 @@ describe('daemon run manager', () => {
   it('triggers a usage refresh on done for a usage-snapshot flow', () => {
     const refreshUsage = vi.fn()
     const h = harness({ refreshUsage })
-    h.manager.startRun(makeStart({ agent: 'claude' }))
+    h.manager.startRun(makeStart({ flow: 'claude' }))
 
     push(h.hosts[0], { kind: 'done', exitCode: 0, stderr: '' })
 
@@ -609,7 +609,7 @@ describe('daemon run manager', () => {
   it('sends a failed run’s done with when its flow’s used-up usage resets', async () => {
     const usageFullUntil = vi.fn(async () => '2026-11-05T10:35:21.000Z')
     const h = harness({ usageFullUntil })
-    h.manager.startRun(makeStart({ agent: 'codex' }))
+    h.manager.startRun(makeStart({ flow: 'codex' }))
 
     push(h.hosts[0], { kind: 'done', exitCode: 1, stderr: 'Your workspace is out of credits.' })
     await vi.waitFor(() => expect(h.messages.map((m) => m.type)).toEqual(['done']))
@@ -625,9 +625,9 @@ describe('daemon run manager', () => {
   it('checks usage only when the agent’s own run failed without a reset of its own', async () => {
     const usageFullUntil = vi.fn(async () => undefined)
     const h = harness({ usageFullUntil })
-    h.manager.startRun(makeStart({ runId: 'ok', agent: 'codex' }))
+    h.manager.startRun(makeStart({ runId: 'ok', flow: 'codex' }))
     push(h.hosts[0], { kind: 'done', exitCode: 0, stderr: '' })
-    h.manager.startRun(makeStart({ runId: 'limited', agent: 'claude' }))
+    h.manager.startRun(makeStart({ runId: 'limited', flow: 'claude' }))
     push(h.hosts[1], {
       kind: 'update',
       steps: [],
@@ -636,7 +636,7 @@ describe('daemon run manager', () => {
       rateLimitResetsAt: '2026-11-05T10:00:00.000Z',
     })
     push(h.hosts[1], { kind: 'done', exitCode: 1, stderr: '' })
-    h.manager.startRun(makeStart({ runId: 'unspawned', agent: 'codex' }))
+    h.manager.startRun(makeStart({ runId: 'unspawned', flow: 'codex' }))
     h.hosts[2].emit('error', new Error('spawn ENOENT'))
     await vi.waitFor(() =>
       expect(h.messages.filter((m) => m.type === 'done')).toHaveLength(3),
@@ -649,7 +649,7 @@ describe('daemon run manager', () => {
     vi.useFakeTimers()
     try {
       const h = harness({ usageFullUntil: () => new Promise(() => {}) })
-      h.manager.startRun(makeStart({ agent: 'codex' }))
+      h.manager.startRun(makeStart({ flow: 'codex' }))
       push(h.hosts[0], { kind: 'done', exitCode: 1, stderr: 'boom' })
       await vi.advanceTimersByTimeAsync(9_999)
       expect(h.messages).toEqual([])
@@ -703,7 +703,7 @@ describe('daemon run manager', () => {
 
     h.manager.startRun(
       makeStart({
-        agent: 'codex',
+        flow: 'codex',
         attachments: [{ id: 'a', name: 'a', mime: 'text/plain', size: 1 }],
       }),
     )
@@ -941,7 +941,7 @@ describe('daemon run manager', () => {
       })
       h.manager.startRun(
         makeStart({
-          agent: 'codex',
+          flow: 'codex',
           attachments: [{ id: 'a', name: 'a', mime: 'text/plain', size: 1 }],
         }),
       )
@@ -1009,7 +1009,7 @@ describe('daemon run manager', () => {
       })
       h.manager.startRun(
         makeStart({
-          agent: 'codex',
+          flow: 'codex',
           attachments: [{ id: 'a', name: 'a', mime: 'text/plain', size: 1 }],
         }),
       )

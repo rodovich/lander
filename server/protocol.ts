@@ -5,9 +5,6 @@
 // (AttachmentRef below carries a turn's attachments to the daemon.)
 
 import type { Step, Usage } from '../shared/stream'
-import type { AgentKind } from './agent'
-
-export type { AgentKind } from './agent'
 
 // One window of the OAuth usage payload, as the server caches and serves it.
 export type UsageWindow = { utilization: number; resetsAt: string | null }
@@ -128,15 +125,7 @@ export type StartRunMessage = {
   type: 'start-run'
   runId: string
   taskId: string
-  // The provider that should run this turn. LEGACY, and now optional: the server
-  // sends it only when the task's flow IS one of the legacy kinds, so an old
-  // daemon (which reads only this) keeps driving claude and codex tasks. Absent
-  // for any other flow — which is exactly what stops an old daemon from silently
-  // running an unknown flow as claude.
-  agent?: AgentKind
-  // The driver flow that should run this turn. Supersedes `agent`; every daemon
-  // reader resolves `flow ?? agent`. Absent only from a pre-step-4 server.
-  flow?: string
+  flow: string
   // The task's opaque per-flow configuration, echoed from the task and handed to
   // the flow as ctx.task.flowConfig. The server never interprets it.
   flowConfig?: Record<string, unknown>
@@ -201,14 +190,7 @@ export type ProjectGrantMessage = {
   type: 'project-grant'
   requestId: string
   project: string
-  // Legacy, and optional for the same reason as StartRunMessage.agent: once the
-  // route derives from taskFlow(), the server has no legal AgentKind to send for
-  // a non-legacy flow. Latent until C6 (only grants.project flows reach here,
-  // and both are legacy) but it would not typecheck otherwise.
-  agent?: AgentKind
-  // The flow whose onGrant should persist this rule. Readers resolve
-  // `flow ?? agent`.
-  flow?: string
+  flow: string
   rule: string
 }
 
@@ -504,11 +486,6 @@ export type RegisterMessage = {
   // and serves it to the picker; it also gates dispatch on it, so a flow missing
   // here is one the server refuses to dispatch rather than silently running as
   // something else.
-  //
-  // Optional in both directions. Absent from a daemon built before this field
-  // existed, which the server reads as an announcement of NOTHING — correct,
-  // because such a daemon can only run the legacy flows, and those carry
-  // StartRunMessage.agent and bypass the gate.
   flows?: FlowAnnouncement[]
   // The bundled watchers this daemon can run. Absent from an older daemon,
   // which the server reads as none.
@@ -670,14 +647,11 @@ export type ProjectGrantResultMessage = {
 // to any run; the server caches it keyed by flow and serves the items verbatim,
 // never learning what they mean. A flow that publishes nothing (Codex) simply
 // never sends this, so the usage popup leaves it out.
-//
-// `flow` is the cache key. `agent` rides along for a legacy kind until step 5
-// retires them, and a daemon that predates `flow` sends only `agent`, so the
-// server reads `flow ?? agent`.
 export type TelemetryMessage = {
   type: 'telemetry'
+  flow: string
   items: TelemetryItem[]
-} & ({ agent: AgentKind; flow?: string } | { agent?: AgentKind; flow: string })
+}
 
 // One durable-state mutation a flow produces via `ctx.state.set/delete/push/patch`.
 // `path` walks into the opaque flowState tree (creating intermediate objects);

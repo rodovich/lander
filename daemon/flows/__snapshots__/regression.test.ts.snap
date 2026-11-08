@@ -97,7 +97,6 @@ GIT-SNAPSHOT-STUB
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -241,7 +240,6 @@ GIT-SNAPSHOT-STUB
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -381,7 +379,6 @@ GIT-SNAPSHOT-STUB
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -566,7 +563,6 @@ GIT-SNAPSHOT-STUB
           "stderr": "Failed to authenticate: OAuth session expired and could not be refreshed
 [claude-code:unrecognized_model] {}",
         },
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "error",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -723,7 +719,6 @@ GIT-SNAPSHOT-STUB
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -874,7 +869,6 @@ GIT-SNAPSHOT-STUB
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -1074,7 +1068,6 @@ GIT-SNAPSHOT-STUB
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -1254,7 +1247,6 @@ GIT-SNAPSHOT-STUB
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -1382,7 +1374,6 @@ GIT-SNAPSHOT-STUB
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -1525,7 +1516,6 @@ Note: your previous turn ended in sub/dir. Depending how you moved there, that l
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -1666,7 +1656,6 @@ GIT-SNAPSHOT-STUB
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -1829,7 +1818,6 @@ GIT-SNAPSHOT-STUB
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -2007,7 +1995,6 @@ GIT-SNAPSHOT-STUB
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -2191,7 +2178,6 @@ GIT-SNAPSHOT-STUB
         "error": {
           "exitCode": 1,
         },
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "error",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -2324,7 +2310,6 @@ GIT-SNAPSHOT-STUB
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -2469,7 +2454,6 @@ GIT-SNAPSHOT-STUB
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -2613,7 +2597,6 @@ GIT-SNAPSHOT-STUB
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -2754,7 +2737,6 @@ GIT-SNAPSHOT-STUB
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-2",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -2907,7 +2889,6 @@ b.ts",
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -3103,7 +3084,6 @@ b.md",
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -3333,7 +3313,6 @@ GIT-SNAPSHOT-STUB
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -3525,7 +3504,6 @@ GIT-SNAPSHOT-STUB
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -3658,7 +3636,6 @@ exports[`claude transcript regressions > unchanged turn context is not re-sent 1
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -3821,7 +3798,6 @@ GIT-SNAPSHOT-STUB
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -4001,7 +3977,6 @@ You have a ride scheduled for 3:00:00 PM. Calling \`lander ride\` replaces the s
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -4105,7 +4080,6 @@ do the thing",
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -4221,7 +4195,6 @@ b.ts",
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -4397,7 +4370,6 @@ upstream blew up",
           "exitCode": 1,
           "stderr": "upstream blew up",
         },
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "error",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -4498,7 +4470,6 @@ do the thing",
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -4634,7 +4605,6 @@ do the thing",
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -4766,7 +4736,6 @@ To view an image, open its local path with your image-viewing tool:
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -4873,7 +4842,6 @@ do the thing",
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-9",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -5041,7 +5009,6 @@ model refused",
           "exitCode": 1,
           "stderr": "model refused",
         },
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "error",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -5154,7 +5121,6 @@ do the thing",
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -5268,7 +5234,6 @@ To view an image, open its local path with your image-viewing tool:
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -5375,7 +5340,6 @@ do the thing",
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -5484,7 +5448,6 @@ You were landed when this message arrived; the message changed your status to ri
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -5589,7 +5552,6 @@ do the thing",
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-2",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -5737,7 +5699,6 @@ model refused",
           "exitCode": 1,
           "stderr": "model refused",
         },
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "error",
         "startedAt": "2026-01-01T00:00:00.000Z",
@@ -5841,7 +5802,6 @@ do the thing",
     "rides": [
       {
         "endedAt": "2026-01-01T00:00:00.000Z",
-        "flow": "claude",
         "id": "ride-1",
         "outcome": "done",
         "startedAt": "2026-01-01T00:00:00.000Z",

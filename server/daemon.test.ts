@@ -105,7 +105,7 @@ const start = (runId: string): ServerToDaemon => ({
   type: 'start-run',
   runId,
   taskId: `task-${runId}`,
-  agent: 'claude',
+  flow: 'claude',
   project: 'proj',
   prompt: 'prompt',
   task: {},
@@ -289,7 +289,6 @@ describe('daemon transport handoff', () => {
 
     const result = requestProjectGrant({
       project: 'proj',
-      agent: 'codex',
       flow: 'codex',
       rule: 'Bash(npm test)',
       timeoutMs: 1000,
@@ -299,7 +298,7 @@ describe('daemon transport handoff', () => {
     expect(req).toMatchObject({
       type: 'project-grant',
       project: 'proj',
-      agent: 'codex',
+      flow: 'codex',
       rule: 'Bash(npm test)',
     })
     d.send({

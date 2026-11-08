@@ -13,10 +13,9 @@ declares capability metadata (`meta.capabilities`: which grant scopes it
 supports, whether it publishes a usage snapshot, whether it can supply a
 rate-limit reset time, whether it reports cost), and the server and client read
 those flags instead of branching on a flow's name.
-[docs/architecture.md](architecture.md#provider-layering) covers that rule. Two
-exceptions remain in the server: task titles always come from `claude`
-(`server/title.ts`), and the server maps a flow to its `lander assist` provider
-by name.
+[docs/architecture.md](architecture.md#provider-layering) covers that rule. One
+exception remains in the server: task titles always come from `claude`
+(`server/title.ts`).
 
 Provider-specific mechanics live in the daemon: the flow modules
 (`daemon/flows/<name>.ts`) and the helpers they use, such as
@@ -100,15 +99,15 @@ before the spawn, while Codex learns its thread id from the stream.
 
 **Flow selection.** A task runs the flow it was created with: the new-task form's
 pick, `lander launch --flow <name>`, or its parent's flow when `--flow` is
-omitted. Lander resolves the flow from `flow`, then the legacy
-`agent: "claude" | "codex"` field, then `claude`. `lander relaunch --flow <name>`
+omitted. Lander resolves the flow from `flow`, then the legacy `agent` field.
+`lander relaunch --flow <name>`
 moves a task to another flow. That resets the provider session and drops the
 task's allow rules, `flowConfig`, and recorded cwd, which were written for the
 old flow. Each ride records its flow.
 
 **One-shot helpers.** `lander assist` and the flow API's `assist` use
 `claude -p`, `codex exec`, or `agy -p`, chosen by the calling task's flow, which
-the server resolves onto the turn's environment. A call without a supported
+the server passes on the turn's environment. A call without a supported
 provider fails instead of picking a default. Each is clamped read-only by its
 CLI's own mechanism: `--disallowedTools Bash,Edit,Write,NotebookEdit` for Claude,
 `--sandbox read-only` for Codex, and the `lander-assist-readonly` project config

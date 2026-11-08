@@ -281,10 +281,7 @@ export type Task = {
   // keyed by). Distinct from the provider session that backs its turns, which
   // the daemon owns and the client never sees.
   id: string
-  // LEGACY. Present only on claude/codex tasks; a task created with any other
-  // flow has none. Read `flow` instead — the server derives it for every task,
-  // including pre-step-4 ones whose only provider field is this.
-  agent?: 'claude' | 'codex'
+  agent?: string
   // The task's driver flow name, derived server-side by publicTask/taskFlow.
   // Optional on the wire only because a response from a pre-step-4 server
   // wouldn't carry it; the current server always does.

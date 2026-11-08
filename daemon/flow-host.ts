@@ -34,14 +34,14 @@ export function runHost(input: HostInput, deps: RunHostDeps): HostHandle {
     onStderr: deps.onStderr,
   })
 
-  const name = input.start.flow ?? input.start.agent
+  const name = input.start.flow
   const flows = deps.flows ?? buildFlows({ root: ROOT, env: process.env })
   const flow = name ? flows[name] : undefined
   if (!flow) {
     deps.emit({
       kind: 'done',
       exitCode: 1,
-      stderr: `unsupported flow: ${name ?? '(none)'}`,
+      stderr: `unsupported flow: ${name || '(none)'}`,
     })
     return { kill: () => {}, terminate: async () => {} }
   }

@@ -89,6 +89,7 @@ export async function driveLive(
     type: 'start-run',
     runId: `contract-run-${++runSeq}`,
     taskId: 'contract-task',
+    flow: 'contract',
     project: 'contract',
     prompt: opts.prompt,
     task: {

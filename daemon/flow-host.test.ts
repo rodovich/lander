@@ -39,7 +39,7 @@ function makeStart(over: Partial<StartRunMessage> = {}): StartRunMessage {
     type: 'start-run',
     runId: 'run-1',
     taskId: 'task-1',
-    agent: 'codex',
+    flow: 'codex',
     project: 'proj',
     prompt: 'prompt',
     task: {},
@@ -110,10 +110,10 @@ function harness(readProjectDoc: (dir: string) => string | undefined = () => und
 }
 
 describe('flow host selection', () => {
-  it('rejects a missing flow without launching the task agent as a fallback', () => {
+  it('rejects a missing flow', () => {
     const events: HostEvent[] = []
     const spawn = vi.fn()
-    runHost(makeInput({ flow: 'missing', agent: 'codex' }), {
+    runHost(makeInput({ flow: 'missing' }), {
       emit: (event) => events.push(event),
       spawn,
       flows: testFlows(),
@@ -125,7 +125,7 @@ describe('flow host selection', () => {
   it('reports a flow failure without retrying through another executor', async () => {
     const events: HostEvent[] = []
     const spawn = vi.fn()
-    runHost(makeInput({ agent: 'codex' }), {
+    runHost(makeInput({ flow: 'codex' }), {
       emit: (event) => events.push(event),
       spawn,
       flows: { codex: { meta: testFlows().codex.meta, onTurn: async () => { throw new Error('flow failed') } } },
@@ -148,9 +148,6 @@ describe('flow host selection', () => {
     }
     runHost(
       makeInput({
-        // No `agent` at all — exactly what the server sends for a non-legacy
-        // flow independently of the task's legacy agent field.
-        agent: undefined,
         flow: 'synthetic',
         flowConfig: { dryRun: false, attempts: 3 },
       }),
@@ -167,34 +164,15 @@ describe('flow host selection', () => {
     expect(done).toMatchObject({ kind: 'done', exitCode: 0 })
     expect(JSON.stringify(events)).not.toContain('unsupported')
   })
-
-  it('resolves the flow name from `agent` when the server sent no `flow`', async () => {
-    // An old server (pre-C6) sends only `agent`. The fallback keeps it driving.
-    const events: HostEvent[] = []
-    runHost(makeInput({ agent: 'codex', flow: undefined }), {
-      emit: (e) => events.push(e),
-      spawn: (() => {
-        const c = new FakeChild()
-        queueMicrotask(() => {
-          c.stdout.emit('end')
-          c.emit('close', 0)
-        })
-        return c as unknown as ChildProcess
-      }) as never,
-      flows: testFlows(),
-    })
-    await settle()
-    expect(JSON.stringify(events)).not.toContain('unsupported')
-  })
 })
 
 describe('flow host', () => {
   it('spawns the selected provider binary with provider session args', () => {
     const h = harness()
 
-    h.run(makeInput({ agent: 'codex', prompt: 'codex prompt' }))
+    h.run(makeInput({ flow: 'codex', prompt: 'codex prompt' }))
     h.run(
-      makeInput({ runId: 'run-2', agent: 'claude', prompt: 'claude prompt' }),
+      makeInput({ runId: 'run-2', flow: 'claude', prompt: 'claude prompt' }),
     )
 
     expect(h.spawns[0]).toMatchObject({
@@ -271,7 +249,7 @@ describe('flow host', () => {
   it('records the context once claude takes the turn, and sends only parts that changed', async () => {
     const h = harness()
     const start = async (i: number, over: Partial<StartRunMessage>) => {
-      h.run(makeInput({ runId: `run-${i}`, agent: 'claude', prompt: 'follow-up', sessionId: 'sess-1', ...over }))
+      h.run(makeInput({ runId: `run-${i}`, flow: 'claude', prompt: 'follow-up', sessionId: 'sess-1', ...over }))
       h.spawns[i].child.stdout.emit('data', line({ type: 'system', subtype: 'init' }))
       await settle()
       return h.spawns[i].args.at(-1)!
@@ -295,7 +273,7 @@ describe('flow host', () => {
 
   it('forgets what context it sent once claude compacts the conversation', async () => {
     const h = harness()
-    h.run(makeInput({ agent: 'claude', prompt: 'follow-up', sessionId: 'sess-1' }))
+    h.run(makeInput({ flow: 'claude', prompt: 'follow-up', sessionId: 'sess-1' }))
     const child = h.spawns[0].child
     child.stdout.emit('data', line({ type: 'system', subtype: 'init' }))
     child.stdout.emit('data', line({ type: 'system', subtype: 'compact_boundary', compact_metadata: {} }))
@@ -309,7 +287,7 @@ describe('flow host', () => {
 
   it('records nothing for a turn claude never took', () => {
     const h = harness()
-    h.run(makeInput({ agent: 'claude', prompt: 'follow-up', sessionId: 'sess-1' }))
+    h.run(makeInput({ flow: 'claude', prompt: 'follow-up', sessionId: 'sess-1' }))
     expect(turnContextWrites(h.events)).toEqual([])
   })
 
@@ -482,7 +460,7 @@ describe('flow host', () => {
     describe('claude', () => {
       it('carries the doc in the appended system prompt, after lander’s own', () => {
         const h = harness(hasDoc)
-        h.run(makeInput({ agent: 'claude' }))
+        h.run(makeInput({ flow: 'claude' }))
         const appended = appendedSystemPrompt(h)
         expect(appended).toContain(DOC)
         // Lander's instructions precede the repo's.
@@ -494,7 +472,7 @@ describe('flow host', () => {
 
       it('leaves the appended system prompt alone when there is no doc', () => {
         const h = harness()
-        h.run(makeInput({ agent: 'claude' }))
+        h.run(makeInput({ flow: 'claude' }))
         expect(appendedSystemPrompt(h)).not.toContain('<project-instructions>')
       })
 
@@ -505,7 +483,7 @@ describe('flow host', () => {
       it('records no delivery state either way', async () => {
         for (const reader of [hasDoc, () => undefined]) {
           const h = harness(reader)
-          h.run(makeInput({ agent: 'claude' }))
+          h.run(makeInput({ flow: 'claude' }))
           const child = h.spawns[0].child
           child.stdout.emit(
             'data',
@@ -681,7 +659,7 @@ describe('flow host', () => {
   // The async stdout iterator consumes events on the next event-loop turn.
   it('keeps the streamed cache miss on the result event usage replacement', async () => {
     const h = harness()
-    h.run(makeInput({ agent: 'claude' }))
+    h.run(makeInput({ flow: 'claude' }))
     const child = h.spawns[0].child
 
     child.stdout.emit(
@@ -751,7 +729,7 @@ describe('flow host', () => {
     const h = harness()
     h.run(
       makeInput(
-        { agent: 'codex', prompt: 'look' },
+        { flow: 'codex', prompt: 'look' },
         {
           filesDir: '/files/proj/task-1',
           materialized: {
@@ -776,7 +754,7 @@ describe('flow host', () => {
   it('builds the bundled flows when none are injected', async () => {
     const events: HostEvent[] = []
     const spawns: SpawnCall[] = []
-    runHost(makeInput({ agent: 'codex', prompt: 'x' }), {
+    runHost(makeInput({ flow: 'codex', prompt: 'x' }), {
       emit: (e) => events.push(e),
       spawn: (command, args, options) => {
         const child = new FakeChild()

@@ -32,7 +32,7 @@ function makeStart(over: Partial<StartRunMessage> = {}): StartRunMessage {
     type: 'start-run',
     runId: 'run-1',
     taskId: 'task-1',
-    agent: 'claude',
+    flow: 'claude',
     project: 'proj',
     prompt: 'hello',
     task: {},
@@ -708,7 +708,7 @@ process.stdout.write('  ${command} reply  \\n')
     const s = await shim()
     try {
       const h = harness(
-        makeInput({ agent: 'codex', flow: 'codex' }, { cwd: s.dir, root: s.dir }),
+        makeInput({ flow: 'codex' }, { cwd: s.dir, root: s.dir }),
       )
       await runFlow(h, async (ctx) => {
         expect(await ctx.assist('ping')).toBe('codex reply')
@@ -756,10 +756,8 @@ process.stdout.write('  ${command} reply  \\n')
   it('throws naming the flow when that flow declares no one-shot provider', async () => {
     const s = await shim()
     try {
-      // An announced flow is not a provider: it has no `agent`, and nothing
-      // anywhere declares which one-shot it would want.
       const h = harness(
-        makeInput({ agent: undefined, flow: 'example-flow' }, { cwd: s.dir, root: s.dir }),
+        makeInput({ flow: 'example-flow' }, { cwd: s.dir, root: s.dir }),
       )
       let thrown: unknown
       await runFlow(h, async (ctx) => {

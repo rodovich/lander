@@ -32,7 +32,7 @@ const commandDone = (
     },
   })
 
-const codexStart = { agent: 'codex' as const }
+const codexStart = { flow: 'codex' as const }
 
 export const CODEX_GOLDENS: Golden[] = [
   {

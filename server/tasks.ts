@@ -5,7 +5,6 @@
 // server Task type (index.ts passes its Task, which satisfies these shapes).
 
 import path from 'node:path'
-import type { AgentKind } from './agent'
 import type { Step, Usage } from '../shared/stream'
 import type { Attachment } from './attachments'
 import type { RevivedMarker, ScheduledRide } from './protocol'
@@ -14,7 +13,6 @@ import type { ContextAction, ContextDetails } from '../shared/context'
 // recordStatusTransition settles open asks on the crossing. asks.ts imports only
 // types from here, so the runtime edge stays one-way — this module → asks.ts.
 import { withdrawOpenAsks, type Ask, type AskForm } from './asks'
-import { LEGACY_FLOW } from './flows'
 import { isUnread, type ReadableTask } from '../shared/readMarker'
 import { openRide } from '../shared/timeline'
 
@@ -475,7 +473,8 @@ export function startRide(
   id: string,
   at: string,
 ): void {
-  ;(task.rides ??= []).push({ id, startedAt: at, flow: taskFlow(task) })
+  const flow = taskFlow(task)
+  ;(task.rides ??= []).push({ id, startedAt: at, ...(flow ? { flow } : {}) })
 }
 
 // No-ops when no ride is open, so a caller tidying up after a run (the drainer's
@@ -1050,7 +1049,7 @@ export type ScheduledMessage = {
 // migration pass, and no half-migrated window in which a task has neither field
 // or both disagree.
 export function taskFlow(task: { flow?: string; agent?: string }): string {
-  return task.flow ?? task.agent ?? LEGACY_FLOW
+  return task.flow ?? task.agent ?? ''
 }
 
 // Move a task onto another flow, as a relaunch into it does. Rides recorded
@@ -1071,7 +1070,7 @@ export function switchTaskFlow(
 ): void {
   const old = taskFlow(task)
   if (flow === old) return
-  for (const ride of task.rides ?? []) ride.flow ??= old
+  if (old) for (const ride of task.rides ?? []) ride.flow ??= old
   task.flow = flow
   delete task.agent
   delete task.allow

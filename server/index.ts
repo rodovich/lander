@@ -19,7 +19,6 @@ import {
   wedgeForRetry,
 } from './apply'
 import { applyStatePatch } from './flowstate'
-import { isAgentKind } from './agent'
 import {
   attachDaemonServer,
   closeDaemonConnections,
@@ -41,7 +40,6 @@ import {
   watcherRefusal,
 } from './watchers'
 import type {
-  AgentKind,
   CheckoutReport,
   HookSelector,
   RevivedMarker,
@@ -233,10 +231,7 @@ type Task = {
   // keyed by — backfilled from the filename, see backfillIds). Always equals the
   // task's filename stem.
   id: string
-  // LEGACY: the provider field from before `flow`, still written at creation
-  // beside the claude and codex flows; a relaunch into another flow deletes it
-  // (switchTaskFlow). Every reader takes `flow` first.
-  agent?: AgentKind
+  agent?: string
   // The driver flow for this task. Absent on every task created before step 4,
   // which is why taskFlow() is a permanent union-read over both fields rather
   // than a migration: nothing rewrites pre-flip tasks, so the fallback is
@@ -700,16 +695,7 @@ async function runTurn(
   // The token the in-task `lander` CLI sends back to authenticate as this task.
   // Backfilled for tasks created before tokens existed.
   const token = task.token ?? randomUUID()
-  // The flow to drive this turn, derived from the FLOW NAME — never from
-  // task.agent, which backfillAgents may have stamped on a legacy task.
   const flow = taskFlow(task)
-  // `agent` rides along only when the flow IS a legacy kind, so a daemon built
-  // before `flow` existed keeps driving claude and codex. Omitting it for every
-  // other flow is what stops such a daemon from silently running an unknown
-  // flow as claude — it will report `unsupported flow` instead.
-  const agent = isAgentKind(flow) ? flow : undefined
-  const assistProvider =
-    agent ?? (flow === 'agy' ? ('agy' as const) : undefined)
   const landerEnv = {
     PATH: `${LANDER_BIN_DIR}:${process.env.PATH ?? ''}`,
     // The base URL the daemon's agent (and the in-task CLI) use to reach this
@@ -720,7 +706,7 @@ async function runTurn(
     LANDER_PROJECT: project.slug,
     LANDER_TASK: id,
     LANDER_TOKEN: token,
-    ...(assistProvider ? { LANDER_ASSIST_PROVIDER: assistProvider } : {}),
+    ...(flow ? { LANDER_ASSIST_PROVIDER: flow } : {}),
   }
 
   // Wait briefly for a daemon serving this project to be connected (dev launches
@@ -738,16 +724,12 @@ async function runTurn(
         : 'No daemon is connected to run this task.',
     )
 
-  // Refuse to dispatch a flow the current primary hasn't announced. A legacy
-  // flow is exempt: it carries `agent`, so even a daemon that announces nothing
-  // (an old one, or one rolled back below this field) can drive it.
-  //
   // Checked AFTER awaitDaemonServing, so a reconnect blip can't wedge a task
   // that a moment later would have been fine — by the time we are here a daemon
   // has registered, and setAnnouncedFlows runs before the slug set that released
   // us. Failing here is a wedge with a named cause, never a silent run as some
   // other flow.
-  if (!isAgentKind(flow) && !isAnnouncedFlow(flow))
+  if (!isAnnouncedFlow(flow))
     return wedgeUndispatched(
       `The connected daemon does not provide the '${flow}' flow; available: ` +
         `${flowRegistry(project.slug).map((f) => f.name).join(', ') || '(none)'}.`,
@@ -775,9 +757,6 @@ async function runTurn(
     type: 'start-run',
     runId,
     taskId: id,
-    // Both, deliberately: `flow` is what the daemon reads, `agent` is the
-    // legacy-only fallback for a daemon that predates it (undefined otherwise).
-    ...(agent ? { agent } : {}),
     flow,
     ...(task.flowConfig !== undefined ? { flowConfig: task.flowConfig } : {}),
     project: project.slug,
@@ -1704,10 +1683,6 @@ async function runWatch(
 // caches the items and serves them (the tasks poll embeds them, /api/telemetry
 // returns them). The server never learns what the items mean, nor reads any
 // credential — which is what lets it move into a credential-less container later.
-//
-// Keyed by name rather than AgentKind because an adapter-less flow has no agent
-// kind; the wire already reads `msg.flow ?? msg.agent`, and the client has always
-// consumed this as a plain Record<string, …>.
 const telemetryCache = new Map<string, TelemetryItem[]>()
 
 // The shared secret that marks a request as coming from the human's browser
@@ -1977,13 +1952,6 @@ app.get('/api/:project/tasks/:id', async (c) => {
   })
 })
 
-// The driver flows this project can launch a task with, as the new-task picker
-// renders them. Sourced from the registry, which is the announced set unioned
-// with the frozen legacy entries — so everything served here is either something
-// the primary daemon said it can run, or claude/codex (which dispatch carries
-// `agent` for). Nothing offered here can be picked and then wedge on first
-// message.
-//
 // A SIBLING of the /flows/:name resolver below, not a replacement: that one
 // serves the unrelated user command-flow scripts for the `lander flow` CLI. The
 // two notions of "flow" converge in step 6; the different segment count keeps
@@ -2688,9 +2656,6 @@ app.post('/api/:project/tasks', async (c) => {
         400,
       )
     const flow = flowResolution.flow
-    // `agent` is stored only for a legacy flow, so backfillAgents and any
-    // pre-flow daemon still see what they expect. Never stored otherwise.
-    const agent = isAgentKind(flow) ? flow : undefined
 
     const flowConfig = validateFlowConfig(body.flowConfig)
     if ('error' in flowConfig) return c.json({ error: flowConfig.error }, 400)
@@ -2753,9 +2718,6 @@ app.post('/api/:project/tasks', async (c) => {
         : undefined
     const task: Task = {
       id,
-      // Stored only for a legacy flow, so backfillAgents and any pre-flow
-      // daemon still see what they expect. `flow` is the field that matters.
-      ...(agent ? { agent } : {}),
       flow,
       ...(flowConfig.config ? { flowConfig: flowConfig.config } : {}),
       title: title || '…',
@@ -4301,15 +4263,11 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
 
     const task = await readTask(project.dataDir, id)
     if (!task) return c.json({ error: 'task not found' }, 404)
-    // Derived from the flow name, like start-run's — and `agent` sent only for
-    // a legacy kind, since there is no legal AgentKind for any other flow.
     const grantFlow = taskFlow(task)
-    const grantAgent = isAgentKind(grantFlow) ? grantFlow : undefined
 
     if (scope === 'project') {
       const result = await requestProjectGrant({
         project: project.slug,
-        agent: grantAgent,
         flow: grantFlow,
         rule,
       })
