@@ -806,6 +806,22 @@ it('prompts the agent again with only what it can\'t see, for as long as agy kee
   }
 })
 
+it('records the model named in the debug log when the stream names none', async () => {
+  const usage = { input_tokens: 100, output_tokens: 10 }
+  const line = (label: string) =>
+    `I1108 11:46:28.198640       1 model_config_manager.go:375] Propagating selected model override to backend: label="${label}"\n`
+  const rideUsage = async (lines: string[], log: string) => {
+    const g = fixture([lines])
+    const driven = await driveFlow(g, flow(undefined, log))
+    return (applyEvents(goldenInput(g).start, driven.events).rides as { usage: object }[])[0].usage
+  }
+
+  expect(await rideUsage([init('conv-m'), result({ usage })], line('Gemini 4 Argon (Medium)')))
+    .toMatchObject({ input: 100, output: 10, model: 'Gemini 4 Argon (Medium)' })
+  expect(await rideUsage([init('conv-m'), result({ usage })], ''))
+    .not.toHaveProperty('model')
+})
+
 it('records the installed agy version on the ride', async () => {
   const g = fixture([[init('conv-v'), result()]])
   const driven = await driveFlow(g, makeFlow({

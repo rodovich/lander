@@ -236,5 +236,7 @@ agy ends its turn at a call no rule covers instead of letting the agent continue
 without it. The flow passes `--log-file` so it can tell which call was refused,
 including a sub-agent's, then resumes the same conversation in the same ride with
 a message naming the refusals so the agent can choose what to do next.
+The stream names the model only when `--model` is passed, which the flow doesn't,
+so the flow records the display label from the same log once the run has exited.
 Usage is cumulative across a conversation and is differenced per turn as for
 Codex. A `checkpoint` step is agy's context compaction, shown as a context item.

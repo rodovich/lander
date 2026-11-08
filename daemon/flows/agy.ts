@@ -197,6 +197,13 @@ export function agyLogRefusals(log: string): { conversation: string; step: numbe
     .map((m) => ({ conversation: m[1], step: Number(m[2]) }))
 }
 
+// `init` names the model only when `--model` was passed. Otherwise the debug log
+// is the only record of it, as the display label ("Gemini 4 Argon (Medium)")
+// rather than the slug, which can't be derived from the label.
+export function agyLogModel(log: string): string | undefined {
+  return /Propagating selected model override to backend: label="([^"]+)"/.exec(log)?.[1]
+}
+
 function agyErrorStep(stderr: string): number | undefined {
   const m = /^AGY_ERROR:.*"error_id":"[0-9a-f-]{36}-(\d+)(?:-\d+)?"/m.exec(stderr)
   return m ? Number(m[1]) : undefined
@@ -726,6 +733,10 @@ async function reduceAgy(
   flushText()
   const exitCode = await child.exit
   await collectStderr
+  const log = readRunLog() ?? ''
+  const loggedModel = agyLogModel(log)
+  // The server stamps the model onto a ride only in an update that carries usage.
+  if (loggedModel) ctx.emit.meter({ drivingModel: loggedModel, usage: liveUsage })
   // agy repeats any ERROR_MESSAGE step from the conversation's history in
   // every later result and in AGY_ERROR on stderr.
   const errorStep = agyErrorStep(stderr)
@@ -738,7 +749,7 @@ async function reduceAgy(
   }
   const refusals: AgyRefusal[] = []
   if (deniedActions.length) {
-    const logged = agyLogRefusals(readRunLog() ?? '')
+    const logged = agyLogRefusals(log)
     const refusedSteps = new Set(
       logged.filter((r) => r.conversation === conversationId).map((r) => r.step),
     )
