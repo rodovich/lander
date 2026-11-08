@@ -160,18 +160,21 @@ function firstWholeDay(iso: string): number {
   return start === ms ? start : addDays(start, 1)
 }
 
-// Names — flows, models, whatever the records carry — ranked by count over the
-// whole corpus, not the current filter, so a series keeps its place (and so its
-// color) when the project or range changes. Labeled verbatim: nothing here
-// knows one name from another.
-function rankSeries(
-  counts: Map<string, number>,
-): { series: ChartSeries[]; indexOf: (key: string) => number } {
-  const ranked = [...counts.entries()]
+const rankedKeys = (counts: Map<string, number>) =>
+  [...counts.entries()]
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .map(([key]) => key)
+
+// Selection follows the supplied counts; ranks follow the full corpus so
+// filtering can change the named series without changing their colors.
+function rankSeries(
+  counts: Map<string, number>,
+  order?: string[],
+): { series: ChartSeries[]; indexOf: (key: string) => number } {
+  const ranked = rankedKeys(counts)
+  const ranks = new Map((order ?? ranked).map((key, i) => [key, i]))
   const named = ranked.length > MAX_NAMED + 1 ? ranked.slice(0, MAX_NAMED) : ranked
-  const series: ChartSeries[] = named.map((key) => ({ key, label: key }))
+  const series: ChartSeries[] = named.map((key) => ({ key, label: key, rank: ranks.get(key) }))
   const folded = named.length < ranked.length
   if (folded) series.push({ key: OTHER_KEY, label: 'Other', readout: noun('other') })
   const index = new Map(named.map((key, i) => [key, i]))
@@ -234,9 +237,10 @@ export function buildStats(
   const inProject = <T extends { project: string }>(list: T[]) =>
     project === null ? list : list.filter((f) => f.project === project)
   const tasks = inProject(facts.tasks)
-  const turns = inProject(facts.turns).filter(
+  const recordedTurns = facts.turns.filter(
     (t) => Date.parse(t.startedAt) >= Date.parse(facts.recordedSince.turns),
   )
+  const turns = inProject(recordedTurns)
 
   // Launched and landed. A task landed twice in a day lands once that day.
   const taskFacts: Fact[] = []
@@ -257,11 +261,13 @@ export function buildStats(
   )
   const models = rankSeries(
     countBy(
-      facts.turns.filter(
-        (t) => Date.parse(t.startedAt) >= Date.parse(facts.recordedSince.turns),
-      ),
+      turns.filter((t) => {
+        const at = Date.parse(t.startedAt)
+        return at >= Math.max(rangeStart, turnsFrom) && at < buckets[buckets.length - 1].end
+      }),
       (t) => t.model,
     ),
+    rankedKeys(countBy(recordedTurns, (t) => t.model)),
   )
   const unreported = models.series.length
   const modelSeries = [

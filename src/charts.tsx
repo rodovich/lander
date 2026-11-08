@@ -9,6 +9,7 @@ export type Noun = { one: string; other: string }
 
 export type ChartSeries = {
   key: string
+  rank?: number
   // The legend's label, and the readout's word when `readout` is absent.
   label: string
   readout?: Noun

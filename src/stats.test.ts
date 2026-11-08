@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { BarData } from './charts'
-import { buildStats, statsBuckets, type StatsFacts } from './stats'
+import { buildStats, OTHER_KEY, statsBuckets, type StatsFacts } from './stats'
 
 // Each column's values, in order.
 const vals = (data: BarData) => data.columns.map((c) => c.values)
@@ -124,6 +124,69 @@ describe('buildStats', () => {
     )
     expect(view.models.series.map((s) => s.label)).toEqual(['claude-opus-5', 'Not reported'])
     expect(vals(view.models)[6]).toEqual([1, 1])
+  })
+
+  it('selects models from the displayed project and range rather than historical popularity', () => {
+    const f = facts({
+      turns: [
+        ...Array.from({ length: 9 }, (_, i) =>
+          Array.from({ length: 3 }, () => ({
+            project: 'p', flow: 'agent', startedAt: iso(9, 1), model: `old-${i}`,
+          })),
+        ).flat(),
+        ...Array.from({ length: 9 }, (_, i) => ({
+          project: 'elsewhere', flow: 'agent', startedAt: iso(9, 28), model: `other-${i}`,
+        })),
+        { project: 'p', flow: 'agent', startedAt: iso(9, 28), model: 'recent' },
+      ],
+    })
+    const view = buildStats(f, { range: '7d', project: 'p', now: NOW })
+    expect(view.models.series.map((s) => s.label)).toEqual(['recent', 'Not reported'])
+    expect(vals(view.models)[6]).toEqual([1, 0])
+    expect(view.models.series[0].rank).toBe(18)
+
+    const quarter = buildStats(f, { range: '13w', project: 'p', now: NOW })
+    expect(quarter.models.series.some((s) => s.key === 'recent')).toBe(false)
+    expect(quarter.models.series.some((s) => s.key === OTHER_KEY)).toBe(true)
+  })
+
+  it('keeps model ranks when project and range filters reorder the named series', () => {
+    const f = facts({
+      turns: [
+        ...Array.from({ length: 4 }, () => ({
+          project: 'elsewhere', flow: 'agent', startedAt: iso(9, 1), model: 'a',
+        })),
+        { project: 'p', flow: 'agent', startedAt: iso(9, 1), model: 'a' },
+        { project: 'p', flow: 'agent', startedAt: iso(9, 28), model: 'a' },
+        ...Array.from({ length: 2 }, () => ({
+          project: 'p', flow: 'agent', startedAt: iso(9, 28), model: 'b',
+        })),
+      ],
+    })
+    const week = buildStats(f, { range: '7d', project: 'p', now: NOW })
+    const quarter = buildStats(f, { range: '13w', project: null, now: NOW })
+    expect(week.models.series.map((s) => [s.key, s.rank]).slice(0, 2)).toEqual([
+      ['b', 1], ['a', 0],
+    ])
+    expect(quarter.models.series.map((s) => [s.key, s.rank]).slice(0, 2)).toEqual([
+      ['a', 0], ['b', 1],
+    ])
+  })
+
+  it('folds excess visible models while keeping unreported turns separate', () => {
+    const view = buildStats(facts({
+      turns: [
+        ...Array.from({ length: 9 }, (_, i) => ({
+          project: 'p', flow: 'agent', startedAt: iso(9, 28), model: `model-${i}`,
+        })),
+        { project: 'p', flow: 'agent', startedAt: iso(9, 28) },
+      ],
+    }), { range: '7d', project: null, now: NOW })
+    expect(view.models.series.map((s) => s.label)).toEqual([
+      'model-0', 'model-1', 'model-2', 'model-3', 'model-4', 'model-5', 'model-6',
+      'Other', 'Not reported',
+    ])
+    expect(vals(view.models)[6]).toEqual([1, 1, 1, 1, 1, 1, 1, 2, 1])
   })
 
   it('sums working time in hours', () => {

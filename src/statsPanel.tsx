@@ -43,12 +43,13 @@ const UNREPORTED_COLOR = '#c3c2b7'
 
 const taskColor: SeriesColor = (s) => (s.key === 'landed' ? LAND_COLOR : LAUNCH_COLOR)
 const turnColor: SeriesColor = () => TURN_COLOR
-const rankedColor: SeriesColor = (s, i) =>
-  s.key === OTHER_KEY
-    ? OTHER_COLOR
-    : s.key === UNREPORTED_KEY
-      ? UNREPORTED_COLOR
-      : SLOT_COLORS[i % SLOT_COLORS.length]
+const rankedColor: SeriesColor = (s, i) => {
+  if (s.key === OTHER_KEY) return OTHER_COLOR
+  if (s.key === UNREPORTED_KEY) return UNREPORTED_COLOR
+  const rank = s.rank ?? i
+  return SLOT_COLORS[rank] ??
+    `hsl(${(280 + (rank - SLOT_COLORS.length) * 137.508) % 360} 60% 45%)`
+}
 
 export function StatsPanel({
   slug,
