@@ -44,8 +44,21 @@ describe('loadShownTasks request composition', () => {
     ])
   })
 
-  it("returns the flows' capabilities the response carries", async () => {
-    const flows = { claude: { grants: { task: true, project: false } } }
+  it('returns the flows the response carries', async () => {
+    const flows = [
+      {
+        api: 1,
+        name: 'claude',
+        description: 'Claude',
+        driver: true,
+        capabilities: {
+          grants: { task: true, project: false },
+          usageSnapshot: false,
+          rateLimitRetry: false,
+          reportsCost: false,
+        },
+      },
+    ]
     vi.stubGlobal('fetch', async () => ({
       ok: true,
       json: async () => ({ tasks: [], telemetry: {}, flows }),

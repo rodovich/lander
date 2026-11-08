@@ -1,5 +1,5 @@
-import { memo, useEffect, useState } from 'react'
-import { loadFlows, uiHeaders, uploadAttachments } from './api'
+import { memo, useState } from 'react'
+import { uiHeaders, uploadAttachments } from './api'
 import { ComposerPanel } from './composerPanel'
 import { agentDisplayName } from '../shared/agentDisplay'
 import { useSessionState } from './hooks'
@@ -9,6 +9,7 @@ import type { FlowMeta, Task, TaskWithProject } from './types'
 // agent picker, and task creation.
 export const NewTaskForm = memo(function NewTaskForm({
   targetSlug,
+  flows,
   height,
   setError,
   admit,
@@ -16,6 +17,7 @@ export const NewTaskForm = memo(function NewTaskForm({
 }: {
   // The project a new task is created in: the one the navbar has open.
   targetSlug: string
+  flows: FlowMeta[]
   height: number
   setError: (message: string | null) => void
   // Puts the created task into the displayed list from the POST's own answer,
@@ -28,35 +30,18 @@ export const NewTaskForm = memo(function NewTaskForm({
   // different tasks keep independent drafts (localStorage would let them
   // clobber each other).
   const [message, setMessage] = useSessionState('lander:draft:newTask', '')
-  // The picked driver flow's name, session-scoped like the draft. A plain
-  // string, not a closed union: the set is whatever the daemon announced.
-  const [flow, setFlow] = useSessionState<string>('lander:draft:newFlow', 'claude')
+  const [savedFlow, setFlow] = useSessionState<string>('lander:draft:newFlow', '')
+  const driverFlows = flows.filter((f) => f.driver)
+  const flow = driverFlows.some((f) => f.name === savedFlow)
+    ? savedFlow
+    : (driverFlows[0]?.name ?? '')
   // Files attached to the message, held as File objects (not session-persisted
   // — File isn't serializable) and uploaded to the durable store on submit.
   const [newFiles, setNewFiles] = useState<File[]>([])
   const [submitting, setSubmitting] = useState(false)
 
-  // The flows this project can launch, refetched when the target project
-  // changes (step 5 adds project-scoped flows, so the set is per-project even
-  // though every flow is bundled today). Seeded with the legacy pair so the
-  // picker is never empty — on first paint, or if the fetch fails.
-  const [flows, setFlows] = useState<FlowMeta[]>([])
-  useEffect(() => {
-    if (!targetSlug) return
-    let stale = false
-    void loadFlows(targetSlug).then((f) => {
-      if (!stale && f.length) setFlows(f)
-    })
-    return () => {
-      stale = true
-    }
-  }, [targetSlug])
-  const flowOptions: { name: string; description?: string }[] = flows.length
-    ? flows
-    : [{ name: 'claude' }, { name: 'codex' }]
-
   async function createTask() {
-    if (!message.trim() || submitting || !targetSlug) return
+    if (!message.trim() || submitting || !targetSlug || !flow) return
     setSubmitting(true)
     setError(null)
     try {
@@ -104,15 +89,20 @@ export const NewTaskForm = memo(function NewTaskForm({
           <select
             className="new-task-agent"
             value={flow}
+            disabled={!driverFlows.length}
             // No cast: the option values come from the registry, so there is no
             // closed union to assert the string into.
             onChange={(e) => setFlow(e.target.value)}
           >
-            {flowOptions.map((f) => (
-              <option key={f.name} value={f.name} title={f.description}>
-                {agentDisplayName(f.name)}
-              </option>
-            ))}
+            {driverFlows.length ? (
+              driverFlows.map((f) => (
+                <option key={f.name} value={f.name} title={f.description}>
+                  {agentDisplayName(f.name)}
+                </option>
+              ))
+            ) : (
+              <option value="">Waiting for daemon…</option>
+            )}
           </select>
         </div>
       }
@@ -120,7 +110,7 @@ export const NewTaskForm = memo(function NewTaskForm({
         <button
           type="submit"
           className="launch-btn"
-          disabled={submitting || !message.trim()}
+          disabled={submitting || !message.trim() || !flow}
         >
           {submitting ? 'Launching…' : 'Launch'}
         </button>

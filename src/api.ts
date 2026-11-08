@@ -2,7 +2,6 @@ import type { TaskMatches, TaskSearch } from '../shared/conversationSearch'
 import type { StatsFacts } from './stats'
 import { taskKey, type TaskRef } from './taskRef'
 import type {
-  FlowCaps,
   FlowMeta,
   Item,
   ProjectHooks,
@@ -145,22 +144,6 @@ export async function loadAttachment(
   return r.ok ? r.blob() : null
 }
 
-// The driver flows a project can launch a task with, for the new-task picker.
-// Everything served here is dispatchable — the server unions what the daemon
-// announced with the legacy flows — so a picked flow can't wedge on its first
-// message. Returns [] on any failure; the caller falls back to its current
-// options rather than rendering an empty picker.
-export async function loadFlows(slug: string): Promise<FlowMeta[]> {
-  try {
-    const r = await fetch(`/api/${slug}/flows`)
-    const body = await r.json()
-    if (!r.ok) return []
-    return (body.flows ?? []) as FlowMeta[]
-  } catch {
-    return []
-  }
-}
-
 // Every configured project's stats facts; the dashboard narrows and buckets
 // them itself.
 export async function loadStats(): Promise<StatsFacts> {
@@ -168,7 +151,7 @@ export async function loadStats(): Promise<StatsFacts> {
 }
 
 // What a project's tree declares under .lander/hooks/, and each declared
-// version's approval state. Throws on failure — unlike loadFlows, an empty list
+// version's approval state. Throws on failure — an empty list
 // here would be a claim ("this project declares no hooks") rather than a
 // degradation, so the caller shows the error instead.
 export async function loadHooks(slug: string): Promise<ProjectHooks> {
@@ -269,7 +252,7 @@ export async function loadShownTasks(
 ): Promise<{
   tasks: TaskWithProject[]
   telemetry: FlowTelemetry
-  flows: Record<string, FlowCaps>
+  flows: FlowMeta[]
   search: TaskSearchResult | null
 }> {
   const lists = await Promise.all(
@@ -292,7 +275,7 @@ export async function loadShownTasks(
       return {
         tasks: (body.tasks as Task[]).map((t) => ({ ...t, projectSlug: slug })),
         telemetry: (body.telemetry ?? {}) as FlowTelemetry,
-        flows: (body.flows ?? {}) as Record<string, FlowCaps>,
+        flows: Array.isArray(body.flows) ? (body.flows as FlowMeta[]) : [],
         found: found && {
           query: found.query,
           matches: Object.entries(found.matches).map(
@@ -314,8 +297,7 @@ export async function loadShownTasks(
   return {
     tasks: merged,
     telemetry,
-    // Global like telemetry: every project's response carries the same map.
-    flows: lists.map((l) => l.flows).find((f) => Object.keys(f).length > 0) ?? {},
+    flows: lists.map((l) => l.flows).find((f) => f.length > 0) ?? [],
     search:
       found.length > 0
         ? { query: found[0].query, matches: new Map(found.flatMap((f) => f.matches)) }

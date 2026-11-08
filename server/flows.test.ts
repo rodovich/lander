@@ -13,7 +13,6 @@ import {
   BOOTSTRAP_FLOWS,
   clearAnnouncedFlows,
   flowCaps,
-  flowCapsByName,
   flowMeta,
   flowRegistry,
   isAnnouncedFlow,
@@ -108,18 +107,6 @@ describe('flow registry', () => {
       grants: { task: false, project: false },
     })
     expect(flowMeta('never-heard-of-it')).toBeUndefined()
-  })
-
-  it('maps every announced and legacy flow to its capabilities, the announcement winning', () => {
-    setAnnouncedFlows([
-      bundled(meta('example-flow', { grants: { task: true, project: false } })),
-      bundled(meta('claude')),
-    ])
-    expect(flowCapsByName()).toEqual({
-      'example-flow': { grants: { task: true, project: false } },
-      claude: { grants: { task: false, project: false } },
-      codex: { grants: { task: false, project: false } },
-    })
   })
 
   it('gates dispatch on the announcement, not on the bootstrap union', () => {

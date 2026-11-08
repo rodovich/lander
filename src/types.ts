@@ -409,15 +409,8 @@ export type TelemetryItem =
       note?: string
     }
 
-// What a flow can do, as every task-list response serves it by flow name
-// (server/flows.ts's FlowCaps). `grants.task` = task-scope allow rules are
-// honored, `grants.project` = project grants are supported.
 export type FlowCaps = Pick<FlowMeta['capabilities'], 'grants'>
 
-// What a driver flow announces about itself, as GET /api/:project/flows serves
-// it. Mirrors server/protocol.ts's FlowMeta by hand, like TelemetryItem above.
-// The picker renders `name`/`description`; the grant UI reads its flow's
-// grants from the list response's FlowCaps instead.
 export type FlowMeta = {
   api: number
   name: string

@@ -7,7 +7,7 @@ import {
   usageBreakdown,
 } from './taskMeta'
 import type { UsageRow } from './taskMeta'
-import type { Ride, Task, TokenUsage } from './types'
+import type { FlowMeta, Ride, Task, TokenUsage } from './types'
 
 const usage = (over: Partial<TokenUsage> = {}): TokenUsage => ({
   input: 1,
@@ -28,7 +28,20 @@ const withRides = (rides: Ride[]): Task =>
   }) as Task
 
 describe('taskGrants', () => {
-  const flows = { claude: { grants: { task: true, project: true } } }
+  const flows: FlowMeta[] = [
+    {
+      api: 1,
+      name: 'claude',
+      description: 'Claude',
+      driver: true,
+      capabilities: {
+        grants: { task: true, project: true },
+        usageSnapshot: false,
+        rateLimitRetry: false,
+        reportsCost: false,
+      },
+    },
+  ]
   it("reads the task's flow, or its legacy agent", () => {
     const task = (over: Partial<Task>) => ({ ...withRides([]), ...over }) as Task
     expect(taskGrants(flows, task({ flow: 'claude' }))).toEqual({ task: true, project: true })

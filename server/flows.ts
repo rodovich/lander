@@ -146,10 +146,3 @@ export function flowCaps(name: string): FlowCaps {
   if (!meta) return UNKNOWN_FLOW_CAPS
   return { grants: meta.capabilities.grants }
 }
-
-// The list response carries this so the UI can look a task's flow up in it. A
-// flow missing here is one flowCaps would give the floor.
-export function flowCapsByName(): Record<string, FlowCaps> {
-  const names = [...announced.map((f) => f.meta.name), ...BOOTSTRAP_FLOWS.map((m) => m.name)]
-  return Object.fromEntries(names.map((name) => [name, flowCaps(name)]))
-}

@@ -67,7 +67,7 @@ export function App() {
     tasks,
     tasksRef,
     telemetry,
-    flowCaps,
+    flows,
     projects,
     project,
     setProject,
@@ -193,7 +193,7 @@ export function App() {
     onNavigate: leavePanel,
   })
   currentRef.current = current
-  const grants = current ? taskGrants(flowCaps, current) : NO_GRANTS
+  const grants = current ? taskGrants(flows, current) : NO_GRANTS
   useEffect(() => {
     watchTask(current)
   }, [current, watchTask])
@@ -322,6 +322,7 @@ export function App() {
           <ErrorBoundary label="the new task form">
             <NewTaskForm
               targetSlug={project}
+              flows={flows}
               height={newTaskHeight}
               setError={setError}
               admit={admitTask}

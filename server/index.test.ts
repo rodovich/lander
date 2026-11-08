@@ -4911,23 +4911,24 @@ describe('flow dispatch gate', () => {
     await waitFor(() => !daemonConnected())
   }, 20_000)
 
-  it('serves the flows’ capabilities with the list, as announced now', async () => {
+  it('serves the project’s flows with the list, as announced now', async () => {
     const flows = async () =>
       ((await (await app.request(`/api/${slug}/tasks?view=summary`)).json()) as {
-        flows: Record<string, { grants: unknown }>
+        flows: { name: string; capabilities: { grants: unknown } }[]
       }).flows
-    expect((await flows()).claude).toEqual({
-      grants: {
-        task: true,
-        project: true,
-        placeholder: 'e.g. Bash(git:*)',
-      },
+    expect((await flows()).find((f) => f.name === 'claude')?.capabilities.grants).toEqual({
+      task: true,
+      project: true,
+      placeholder: 'e.g. Bash(git:*)',
     })
 
     await connect(['claude', 'codex', 'example-flow'])
     const announced = await flows()
-    expect(announced.claude).toEqual({ grants: { task: false, project: false } })
-    expect(announced['example-flow']).toEqual({ grants: { task: false, project: false } })
+    expect(announced.map((f) => f.name)).toEqual(['claude', 'codex', 'example-flow'])
+    expect(announced.find((f) => f.name === 'claude')?.capabilities.grants).toEqual({
+      task: false,
+      project: false,
+    })
     ws.close()
     await waitFor(() => !daemonConnected())
   }, 20_000)

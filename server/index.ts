@@ -162,7 +162,7 @@ import {
   type Ask,
   type AskForm,
 } from './asks'
-import { flowCaps, flowCapsByName, flowRegistry, isAnnouncedFlow } from './flows'
+import { flowCaps, flowRegistry, isAnnouncedFlow } from './flows'
 import {
   approveHookPairs,
   effectiveApprovals,
@@ -1892,9 +1892,9 @@ app.get('/api/:project/tasks', async (c) => {
     // — decision 6). It's global, not per-project — the same { agent: items } map
     // on every project's response.
     const telemetry = Object.fromEntries(telemetryCache)
-    // So do the flows' capabilities, for the same reason: a daemon's
-    // announcement changes them without changing any task.
-    const flows = flowCapsByName()
+    // So do the project's flows, for the same reason: a daemon's announcement
+    // changes the picker options and grant capabilities without changing any task.
+    const flows = flowRegistry(project.slug)
     // `?view=summary` serves each task without its conversation (see
     // taskSummary). Opt-in: with no param the response is what it always was,
     // so the running client and any third-party caller are unaffected.

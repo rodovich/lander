@@ -841,6 +841,10 @@ body {
   cursor: pointer;
 }
 
+.new-task-agent:disabled {
+  cursor: default;
+}
+
 .task-status.wedged {
   color: var(--wedged);
 }

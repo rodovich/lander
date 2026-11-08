@@ -1,7 +1,7 @@
 import { agentDisplayName, formatAgentModelName } from '../shared/agentDisplay'
 import { formatCost, formatDuration } from './format'
 import { openRide } from '../shared/timeline'
-import type { FlowCaps, Ride, Task, TelemetryItem, TokenUsage } from './types'
+import type { FlowCaps, FlowMeta, Ride, Task, TelemetryItem, TokenUsage } from './types'
 
 export { openRide }
 
@@ -57,15 +57,12 @@ export function ranUnderCurrentFlow(task: Task, ride: Ride): boolean {
 
 export const NO_GRANTS: FlowCaps['grants'] = { task: false, project: false }
 
-// The grant scopes the task's flow supports, from the list response's
-// capabilities by flow. A flow missing there gets none, as the server gives a
-// flow it has never heard of.
 export function taskGrants(
-  flows: Record<string, FlowCaps>,
+  flows: FlowMeta[],
   task: Task,
 ): FlowCaps['grants'] {
   const flow = taskFlowName(task)
-  return (flow && flows[flow]?.grants) || NO_GRANTS
+  return (flow && flows.find((f) => f.name === flow)?.capabilities.grants) || NO_GRANTS
 }
 
 // Token usage summed across every ride of the task. The token counts and dollar
