@@ -461,12 +461,13 @@ export function selectorsFor(trigger: string, by: string): HookSelector[] {
 export async function taskCheckout(
   project: Project,
   id: string,
+  dir = project.dataDir,
 ): Promise<CheckoutHints | null> {
   const task = await readTask<{
     flow?: string
     agent?: string
     cwd?: string
-  }>(project.dataDir, id)
+  }>(dir, id)
   return task ? checkoutHints(id, task) : null
 }
 

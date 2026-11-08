@@ -151,7 +151,7 @@ export type PendingHook = {
   // the timestamp is belt — an id that could recur would silently dedupe a
   // genuine action into a no-op against a pruned action record.
   id: string
-  // landed | unlanded | wedged | unwedged | ride-ended.
+  // landed | unlanded | wedged | unwedged | ride-ended | cleanup.
   trigger: string
   // The principal that caused it: human | agent | task | system. An open set of
   // directory names, not a closed union — adding a principal must not mean
@@ -435,11 +435,25 @@ export function recordRideEnded(
   })
 }
 
+function filterFires(task: HookFireTask, keep: (f: PendingHook) => boolean): void {
+  if (!task.pendingHooks) return
+  task.pendingHooks = task.pendingHooks.filter(keep)
+  if (!task.pendingHooks.length) delete task.pendingHooks
+}
+
+// Settle a task's fires as it is archived. Only a `cleanup` fire survives:
+// the others describe a task that is still in use. A task archived without
+// having landed gets its cleanup fire here; a landed one already has one
+// pending, or has run it.
+export function recordArchiveFires(task: HookFireTask & { status: string }, at: string, by: string): void {
+  filterFires(task, (f) => f.trigger === 'cleanup')
+  if (task.status !== 'landed') recordHookFire(task, { trigger: 'cleanup', by, at })
+}
+
 // Whether a task is done with the checkout the daemon manages for it: landed or
-// archived, with no run or open ride, and — for a landed task — no hook fires
-// left to dispatch, since a `landed` hook reads the task's checkout. (Archive
-// drops pending fires, so an archived task waits on none.) The caller also
-// rules out a live drainer, which only it can see.
+// archived, with no run or open ride, and no hook fires left to dispatch, since
+// a hook reads the task's checkout. The caller also rules out a live drainer,
+// which only it can see.
 export function checkoutReleasable(
   task: {
     status: string
@@ -449,9 +463,8 @@ export function checkoutReleasable(
   },
   { archived }: { archived: boolean },
 ): boolean {
-  if (task.runId || openRide(task)) return false
-  if (archived) return true
-  return task.status === 'landed' && !task.pendingHooks?.length
+  if (task.runId || openRide(task) || task.pendingHooks?.length) return false
+  return archived || task.status === 'landed'
 }
 
 // Open a ride for a run being handed to the daemon: push `{ id, startedAt }`. The
@@ -1407,9 +1420,13 @@ export function recordStatusTransition(
     delete task.watch
     delete task.watchState
     recordHookFire(task, { trigger: 'landed', by, at, ...cause })
+    recordHookFire(task, { trigger: 'cleanup', by, at, ...cause })
   } else if (prev === 'wedged' || prev === 'landed') {
     const eventKind = prev === 'wedged' ? 'unwedged' : 'unlanded'
     pushEventItem(task, { eventKind, title: task.title }, at)
+    // The task is working in its checkout again, so a cleanup still waiting
+    // from the landing would tear down what it is using.
+    if (prev === 'landed') filterFires(task, (f) => f.trigger !== 'cleanup')
     recordHookFire(task, { trigger: eventKind, by, at, ...cause })
     // A revived task's own last act was `lander wedge`/`lander land`, and its
     // resumed session remembers that and nothing else — so left alone it reports

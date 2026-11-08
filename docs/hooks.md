@@ -1,7 +1,8 @@
 # Task hooks
 
 A task hook is a JavaScript module committed to a project's repository that
-lander runs when one of that project's tasks lands, wedges, or ends a ride. Write
+lander runs when one of that project's tasks lands, wedges, ends a ride, or is
+archived. Write
 or change one only when the user asks for it: an approved hook runs unattended,
 as the user, with full access to their machine.
 
@@ -25,6 +26,12 @@ never fires.
 | `wedged` | wedges |
 | `unwedged` | leaves wedged |
 | `ride-ended` | finishes a ride with outcome `done` or `error` (not when interrupted) |
+| `cleanup` | lands, or is archived without having landed — once per landing, and not again when a landed task is archived |
+
+`cleanup` is for tearing down what a task leaves behind, such as per-worktree
+databases. With managed worktrees, the task's worktree is removed only after its
+`cleanup` hooks have run, even when the task is archived. A task revived before
+its `cleanup` hooks run skips them; it fires again on its next landing.
 
 `<by>` is who caused the transition:
 
@@ -125,17 +132,20 @@ without reporting leaves no trace.
 A run that throws or times out is reported, not retried. A body can still run
 more than once for one fire: lander reruns one cut off by a server restart. Make
 side effects safe to repeat; `ctx.hook.fireId` is the same across reruns of one
-fire.
+fire. The exception is an archived task's `cleanup` fire, which a server restart
+before it runs drops.
 
 ## Example
 
-Run a cleanup script in the landed task's checkout, whoever landed it:
-`.lander/hooks/landed/any/cleanup.js`.
+Run a cleanup script in the task's checkout when it lands or is archived,
+whoever did it: `.lander/hooks/cleanup/any/cleanup.js`.
 
 ```js
 export const meta = { api: 1 }
 
 export default async function (ctx) {
+  // A task without a worktree of its own works in the project root.
+  if (ctx.target.cwd === ctx.project.root) return
   const { code, stdout, stderr } = await ctx.spawn('bin/cleanup', [], {
     cwd: ctx.target.cwd,
   })
@@ -143,6 +153,3 @@ export default async function (ctx) {
   if (stdout.trim()) ctx.report(stdout.trim())
 }
 ```
-
-With managed worktrees, a landed task's worktree is removed only after its
-pending hooks have run, so `ctx.target.cwd` still exists here.

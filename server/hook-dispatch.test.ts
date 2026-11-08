@@ -122,6 +122,38 @@ afterEach(async () => {
 })
 
 describe('dispatchPendingHooks', () => {
+  it('runs an archived task’s fire from the archive, reporting onto it there', async () => {
+    const CLEANUP = '.lander/hooks/cleanup/any/drop.js'
+    await mkdir(project.archiveDir, { recursive: true })
+    await writeFile(
+      path.join(project.archiveDir, 't1.json'),
+      JSON.stringify({
+        id: 't1',
+        title: 'T',
+        status: 'riding',
+        createdAt: AT,
+        updatedAt: AT,
+        items: [],
+        pendingHooks: [fire({ trigger: 'cleanup', by: 'human', rideId: undefined, outcome: undefined })],
+      }),
+    )
+    const run = running({ outcome: 'ran', reports: ['dropped'] })
+    await dispatchPendingHooks(project, 't1', {
+      api: 'http://localhost:0',
+      now: () => AT,
+      dir: project.archiveDir,
+      resolve: resolving([outcome({ path: CLEANUP, trigger: 'cleanup', name: 'drop' })]) as never,
+      run: run as never,
+    })
+
+    expect(run.mock.calls[0][0]).toMatchObject({ hook: { path: CLEANUP } })
+    const t = JSON.parse(await readFile(path.join(project.archiveDir, 't1.json'), 'utf8')) as {
+      items: Item[]
+      pendingHooks?: PendingHook[]
+    }
+    expect(t.pendingHooks).toBeUndefined()
+    expect(hookItems(t.items).map((i) => i.text)).toEqual(['dropped'])
+  })
   it('runs an approved hook and clears the fire', async () => {
     await writeTask('t1')
     const run = running({ outcome: 'ran', reports: ['would have nudged'] })

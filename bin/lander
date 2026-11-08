@@ -1368,7 +1368,7 @@ const dieUsage = (verb) => die(`usage: lander ${USAGE[verb]}`)
 // `lander help <topic>` prints docs/<topic>.md whole. Agents in other projects
 // can't open lander's checkout with their file tools, but this process can.
 const HELP_TOPICS = {
-  hooks: 'writing a project hook, when the user wants something run as tasks land, wedge, or end a ride',
+  hooks: 'writing a project hook, when the user wants something run as tasks land, wedge, end a ride, or are archived',
 }
 
 // Print one command's usage or one topic, or the full index for anything else.

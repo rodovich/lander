@@ -92,6 +92,7 @@ import {
   isSealedRun,
   openRide,
   checkoutReleasable,
+  recordArchiveFires,
   pushUserItem,
   pushFlowItem,
   pushEventItem,
@@ -1137,19 +1138,30 @@ async function driveClaimedTask(project: Project, id: string): Promise<void> {
 // Tell the daemon a task is done with its checkout, once nothing can still
 // need it: landed (or archived), no drainer, no run or open ride — archive's
 // own test for a live run, which also holds across a server restart before
-// recovery reclaims the task — and, for a landed task, no hook fires still to
-// dispatch, so a `landed` hook reads the worktree rather than the root it
-// falls back to once the worktree is gone. Archive drops pending fires, so an
-// archived task waits on none.
+// recovery reclaims the task — and no hook fires still to dispatch, so a hook
+// reads the worktree rather than the root it falls back to once the worktree
+// is gone.
 //
 // Called wherever one of those conditions can come true: a status write that
 // lands, an archive, a drainer exiting, a hook dispatch finishing. Sent for
 // every project — the daemon owns whether there is a worktree to remove.
+//
+// An archived task's fires are dispatched here, since the sweep reads only
+// tasks/; the sweep calls back in for the ids in `archivedFires` until they
+// clear.
 async function releaseCheckoutIfAtRest(project: Project, id: string): Promise<void> {
   try {
     if (running.has(taskKey(project.slug, id))) return
     const live = await readTask(project.dataDir, id)
-    const task = live ?? (await readTask(project.archiveDir, id))
+    let task = live ?? (await readTask(project.archiveDir, id))
+    if (!live && task?.pendingHooks?.length) {
+      const ids = archivedFires.get(project.slug) ?? new Set<string>()
+      archivedFires.set(project.slug, ids.add(id))
+      if (!(await dispatchPendingHooks(project, id, { api: hookApi(), dir: project.archiveDir })))
+        return
+      task = await readTask(project.archiveDir, id)
+    }
+    if (live || !task?.pendingHooks?.length) archivedFires.get(project.slug)?.delete(id)
     if (!task || !checkoutReleasable(task, { archived: !live })) return
     sendToDaemon({ type: 'release-checkout', project: project.slug, taskId: id })
   } catch (e) {
@@ -1159,6 +1171,11 @@ async function releaseCheckoutIfAtRest(project: Project, id: string): Promise<vo
     )
   }
 }
+
+// Archived tasks holding a cleanup fire, by project slug. In memory: a server
+// restart while one is pending leaves it undispatched, like a release the
+// daemon never received.
+const archivedFires = new Map<string, Set<string>>()
 
 type LaunchTrigger =
   | { kind: 'time' }
@@ -1478,10 +1495,14 @@ export async function launchScheduled(): Promise<void> {
   }
 }
 
+// The base URL a hook host calls back on.
+function hookApi(): string {
+  return process.env.LANDER_PUBLIC_API?.trim() || `http://localhost:${port}`
+}
+
 async function sweepOnce(): Promise<void> {
   const now = Date.now()
-  const api =
-    process.env.LANDER_PUBLIC_API?.trim() || `http://localhost:${port}`
+  const api = hookApi()
   for (const project of PROJECTS) {
     let names: string[]
     try {
@@ -1571,6 +1592,12 @@ async function sweepOnce(): Promise<void> {
         !watchesInFlight.has(taskKey(project.slug, id))
       )
         void runWatch(project, id, task, task.watch)
+    }
+    for (const id of archivedFires.get(project.slug) ?? []) {
+      if (hookDispatchInFlightFor(project, id) || dispatched >= MAX_HOOK_DISPATCHES_PER_SWEEP)
+        continue
+      dispatched++
+      void releaseCheckoutIfAtRest(project, id)
     }
   }
 }
@@ -3601,6 +3628,7 @@ app.post('/api/:project/tasks/:id/archive', async (c) => {
       .json<{ archived?: unknown }>()
       .catch(() => ({}) as { archived?: unknown })
     const archived = body.archived !== false // default: archive
+    const principal = c.get('principal')
     const fromDir = archived ? project.dataDir : project.archiveDir
     const toDir = archived ? project.archiveDir : project.dataDir
     let task: Task | null = null
@@ -3631,10 +3659,11 @@ app.post('/api/:project/tasks/:id/archive', async (c) => {
         riding = true
         return
       }
-      // Neither sweep reads archived/, so pending hook fires could never run
-      // there, and restoring the task would deliver them long after the event.
-      if (archived && task.pendingHooks?.length) {
-        delete task.pendingHooks
+      // Neither sweep reads archived/, so pending hook fires would wait there
+      // until a restore delivered them long after the event. A cleanup fire is
+      // the exception, dispatched through `archivedFires`.
+      if (archived) {
+        recordArchiveFires(task, new Date().toISOString(), hookBy(principal, project.slug, id))
         await writeTask(path.join(fromDir, `${id}.json`), task)
       }
       await rename(

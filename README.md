@@ -69,7 +69,7 @@ A project may put a `LANDER.md` at its root for conventions that apply to lander
 
 ### Task hooks
 
-A project may commit JavaScript modules under `.lander/hooks/` that lander runs when its tasks land, wedge, or end a ride, once you approve them in the **Hooks** panel. [docs/hooks.md](docs/hooks.md) covers writing one; agents in any project can read it with `lander help hooks`.
+A project may commit JavaScript modules under `.lander/hooks/` that lander runs when its tasks land, wedge, end a ride, or are archived, once you approve them in the **Hooks** panel. [docs/hooks.md](docs/hooks.md) covers writing one; agents in any project can read it with `lander help hooks`.
 
 ### Restart & hot reload
 

@@ -63,6 +63,9 @@ type DispatchDeps = {
   run?: typeof requestHookRun
   // The base URL a host is told to call back on.
   api: string
+  // The pool the task file is in: `project.archiveDir` for an archived task's
+  // cleanup fire.
+  dir?: string
 }
 
 // Mutate one pending entry by id, under the task lock. Keyed by id rather than
@@ -158,14 +161,15 @@ async function dispatchTask(
   const now = deps.now ?? (() => new Date().toISOString())
   const resolve = deps.resolve ?? resolveProjectHooks
   const run = deps.run ?? requestHookRun
-  const file = path.join(project.dataDir, `${id}.json`)
+  const dir = deps.dir ?? project.dataDir
+  const file = path.join(dir, `${id}.json`)
   const lockKey = taskKey(project.slug, id)
 
   const task = await readTask<{
     pendingHooks?: PendingHook[]
     hookOrigin?: { path?: string; projectSlug?: string }
     spawnedBy?: string
-  }>(project.dataDir, id)
+  }>(dir, id)
   if (!task?.pendingHooks?.length) return
 
   for (const entry of [...task.pendingHooks]) {
@@ -173,9 +177,9 @@ async function dispatchTask(
     // the task's own checkout hints. AWAITED: spreading the promise would yield
     // no properties, silently resolve every fire at the project root, and
     // typecheck cleanly, because all three hints are optional.
-    const checkout = await taskCheckout(project, id)
-    // The task file is gone (archived, deleted). Nothing to dispatch for and
-    // nothing to report onto.
+    const checkout = await taskCheckout(project, id, dir)
+    // The task file is gone (moved between pools, deleted). Nothing to
+    // dispatch for and nothing to report onto.
     if (!checkout) return
 
     const resolved = await resolve({
@@ -223,6 +227,7 @@ async function dispatchTask(
         api: deps.api,
         run,
         now,
+        dir,
       })
       if (outcome === 'done') done.add(hook.path)
     }
@@ -254,13 +259,14 @@ async function dispatchOne(
     api: string
     run: typeof requestHookRun
     now: () => string
+    dir: string
   },
 ): Promise<'done' | 'hold'> {
   const lockKey = taskKey(project.slug, id)
   // Read the checkout BEFORE claiming anything: `readTask` can reject on an
   // unreadable file, and a throw between the claim and the try below would leak
   // a live credential and one of only four instance-wide concurrency slots.
-  const checkout = await taskCheckout(project, id)
+  const checkout = await taskCheckout(project, id, deps.dir)
 
   // Refuse a second live run of the same fire, and stay under the instance-wide
   // ceiling on concurrent hosts — each is a full Node process spawned by the
