@@ -192,7 +192,7 @@ describe('buildTaskRows', () => {
       task({
         id: 'unread',
         readThrough: at(1),
-        items: [{ id: 'e1', at: at(0), kind: 'event', eventKind: 'wedged' }],
+        items: [{ id: 'e1', at: at(0), kind: 'event', eventKind: 'notified' }],
       }),
       task({ id: 'read', readThrough: at(0) }),
       task({ id: 'held', readThrough: at(0) }),

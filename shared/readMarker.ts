@@ -25,8 +25,10 @@ export type ReadableTask = {
 //     its landing is;
 //   - a message the human typed is null — it's their own words — and so is a
 //     standalone task action, which is this task acting on another;
-//   - everything else (events, hooks, asks, another task's messages) stamps its
-//     own moment.
+//   - a status change is null, and so is a hook's report of its run, unless
+//     a failing watch wedged the task, when that event is the only sign of it;
+//   - a notification stamps its own moment, as do asks and messages from
+//     another task or a hook.
 export function entryReadStamp(
   entry: TimelineEntry,
   openRideId: string | undefined,
@@ -43,15 +45,19 @@ export function entryReadStamp(
     }
     case 'user':
       return isOwnMessage(entry) ? null : entry.item.at
-    case 'event':
-      return entry.event.at
+    case 'event': {
+      const { eventKind, reason, at } = entry.event
+      return eventKind === 'notified' || (eventKind === 'wedged' && reason)
+        ? at
+        : null
+    }
     case 'task-action':
       // Something this task did to another one, not news about this one.
       return null
     case 'ask':
       return entry.ask.at
     case 'hook':
-      return entry.hook.at
+      return null
   }
 }
 

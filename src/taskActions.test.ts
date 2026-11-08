@@ -53,7 +53,7 @@ describe('availableTaskActions', () => {
   })
 
   it('withholds Mark unread from a task already showing unviewed updates', () => {
-    const items = [{ id: 'e1', at: LATER, kind: 'event', eventKind: 'wedged' }] as TaskWithProject['items']
+    const items = [{ id: 'e1', at: LATER, kind: 'event', eventKind: 'notified' }] as TaskWithProject['items']
     expect(actions({ readThrough: AT, items })).not.toContain('markUnread')
     expect(actions({ readThrough: LATER, items })).toContain('markUnread')
   })

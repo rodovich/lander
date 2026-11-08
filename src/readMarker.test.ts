@@ -6,7 +6,7 @@ import {
   readThroughOf,
   unreadMarker,
 } from './readMarker'
-import type { Item, Ride, Task } from './types'
+import type { EventItem, Item, Ride, Task } from './types'
 
 const t = (n: number) => `2026-08-21T20:0${n}:00.000Z`
 
@@ -70,6 +70,31 @@ describe('readStamps', () => {
       ],
     })
     expect(readStamps(c)).toEqual([null])
+  })
+
+  it('counts notifications and lander’s own wedges, not other status changes', () => {
+    const event = (id: string, eventKind: EventItem['eventKind'], reason?: string): Item =>
+      ({ id, at: t(1), kind: 'event', eventKind, reason })
+    const c = task({
+      items: [
+        event('e1', 'notified'),
+        event('e2', 'wedged', 'watch kept failing'),
+        event('e3', 'wedged'),
+        event('e4', 'landed'),
+        event('e5', 'launched'),
+      ],
+    })
+    expect(readStamps(c)).toEqual([t(1), t(1), null, null, null])
+  })
+
+  it('counts a hook’s nudge but not its report', () => {
+    const c = task({
+      items: [
+        { id: 'n', at: t(1), kind: 'message', role: 'hook', text: 'look' } as Item,
+        { id: 'h', at: t(2), kind: 'hook', outcome: 'ran' } as Item,
+      ],
+    })
+    expect(readStamps(c)).toEqual([t(1), null])
   })
 })
 

@@ -144,7 +144,7 @@ describe('TaskList row badges', () => {
       // readThrough behind the latest event → unread dot.
       task({
         readThrough: at(1),
-        items: [{ id: 'e1', at: at(0), kind: 'event', eventKind: 'wedged' }],
+        items: [{ id: 'e1', at: at(0), kind: 'event', eventKind: 'notified' }],
       }),
     ])
     expect(html).toContain('task-archived-tag')
