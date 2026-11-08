@@ -24,6 +24,8 @@ const TIME_FILTERS: TimeFilter[] = ['today', 'week', 'older', 'any']
 // How many more of a task's search matches each "Show N more" adds.
 const MATCHES_MORE = 20
 
+const SECTION_SCROLL_MS = 150
+
 // A sticky header over a run of tasks: a status, or a date bucket within a
 // status split into dates. Faint rules bracket each contiguous run of task rows
 // around the headers. The header→tasks rule (rule-below) rides on the header so
@@ -185,13 +187,25 @@ export const TaskList = memo(function TaskList({
   // where its section begins. The static anchor always reports its true layout
   // position, so the rect delta to the list top is correct scrolling either way.
   const sectionAnchorRefs = useRef<Map<string, HTMLLIElement>>(new Map())
+  const scrollFrameRef = useRef(0)
   function scrollToStatus(status: string) {
     const anchor = sectionAnchorRefs.current.get(status)
     const list = taskListRef.current
     if (!anchor || !list) return
+    const from = list.scrollTop
     const delta =
       anchor.getBoundingClientRect().top - list.getBoundingClientRect().top
-    list.scrollTo({ top: list.scrollTop + delta, behavior: 'smooth' })
+    // Animated by hand because scrollTo's behavior: 'smooth' can't be given a
+    // duration.
+    cancelAnimationFrame(scrollFrameRef.current)
+    let start: number | undefined
+    const step = (now: number) => {
+      start ??= now
+      const progress = Math.min((now - start) / SECTION_SCROLL_MS, 1)
+      list.scrollTop = from + delta * (1 - (1 - progress) ** 3)
+      if (progress < 1) scrollFrameRef.current = requestAnimationFrame(step)
+    }
+    scrollFrameRef.current = requestAnimationFrame(step)
   }
   const selectedIndex = orderedTasks.findIndex((t) => taskKeyOf(t) === selected)
   const rovingIndex = selectedIndex >= 0 ? selectedIndex : 0
