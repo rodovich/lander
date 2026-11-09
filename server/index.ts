@@ -1142,9 +1142,9 @@ async function releaseCheckoutIfAtRest(project: Project, id: string): Promise<vo
   }
 }
 
-// Tasks whose row started an app that lander is running, as the daemon last
-// reported them.
-let tasksWithApps = new Set<string>()
+// Per project, the tasks whose row started an app that lander is running, as
+// the daemon last reported them.
+let tasksWithApps = new Map<string, string[]>()
 
 function touchApp(project: string, taskId: string, reason: 'activity' | 'ride'): void {
   sendToDaemon({ type: 'app-touch', project, taskId, reason })
@@ -1907,13 +1907,9 @@ app.get('/api/:project/tasks', async (c) => {
       tasks = full.map((t) => publicTask(tag(t)))
       indexed = query ? full.map((t) => ({ id: t.id, index: conversationIndex(t) })) : []
     }
-    tasks = tasks.map((t) =>
-      tasksWithApps.has(taskKey(project.slug, (t as { id: string }).id))
-        ? { ...t, appRunning: true }
-        : t,
-    )
     return c.json({
       tasks,
+      apps: tasksWithApps.get(project.slug) ?? [],
       telemetry,
       flows,
       ...(query
@@ -4701,7 +4697,10 @@ if (process.env.NODE_ENV !== 'test' && process.env.VITEST !== 'true') {
       void recordCleanupFailure(project, taskId, error)
     },
     onApps: (apps) => {
-      tasksWithApps = new Set(apps.map((a) => taskKey(a.project, a.taskId)))
+      const next = new Map<string, string[]>()
+      for (const { project, taskId } of apps)
+        next.set(project, [...(next.get(project) ?? []), taskId])
+      tasksWithApps = next
     },
   })
   console.log(`daemon WS endpoint at ws://localhost:${port}/daemon`)

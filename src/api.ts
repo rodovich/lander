@@ -283,6 +283,8 @@ export async function loadShownTasks(
   search?: TaskSearchRequest,
 ): Promise<{
   tasks: TaskWithProject[]
+  // Keys of the tasks from whose header lander started an app it is running.
+  appTasks: Set<string>
   telemetry: FlowTelemetry
   flows: FlowMeta[]
   search: TaskSearchResult | null
@@ -306,6 +308,9 @@ export async function loadShownTasks(
       const found = body.search as TaskSearch | undefined
       return {
         tasks: (body.tasks as Task[]).map((t) => ({ ...t, projectSlug: slug })),
+        apps: (Array.isArray(body.apps) ? (body.apps as string[]) : []).map((id) =>
+          taskKey(slug, id),
+        ),
         telemetry: (body.telemetry ?? {}) as FlowTelemetry,
         flows: Array.isArray(body.flows) ? (body.flows as FlowMeta[]) : [],
         found: found && {
@@ -328,6 +333,7 @@ export async function loadShownTasks(
   const found = lists.flatMap((l) => (l.found ? [l.found] : []))
   return {
     tasks: merged,
+    appTasks: new Set(lists.flatMap((l) => l.apps)),
     telemetry,
     flows: lists.map((l) => l.flows).find((f) => f.length > 0) ?? [],
     search:

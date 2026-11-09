@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import type { ComponentProps } from 'react'
 import { TaskList } from './taskList'
 import { buildTaskRows } from './taskRows'
+import { taskKeyOf } from './taskRef'
 import type { TaskWithProject } from './types'
 import type { TaskMatches } from '../shared/conversationSearch'
 
@@ -50,6 +51,7 @@ const render = (
       filter={query}
       setFilter={() => {}}
       selected={null}
+      appTasks={new Set()}
       onSelect={() => {}}
       onFocusChange={() => {}}
       onTaskAction={() => {}}
@@ -149,6 +151,14 @@ describe('TaskList row badges', () => {
     ])
     expect(html).toContain('task-archived-tag')
     expect(html).toContain('unseen-dot')
+  })
+
+  it('shows the app icon only on tasks with a running app', () => {
+    const withApp = task()
+    const html = render([withApp, task()], {
+      appTasks: new Set([taskKeyOf(withApp)]),
+    })
+    expect(html.match(/aria-label="App"/g)).toHaveLength(1)
   })
 })
 

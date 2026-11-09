@@ -72,6 +72,8 @@ export const TaskRow = forwardRef<
   {
     task: TaskWithProject
     selected: boolean
+    // Lander is running an app started from this task's header.
+    appRunning: boolean
     // Whether Tab reaches this row (the roving tabindex).
     tabbable: boolean
     // Midnight today, which decides whether the time reads as a clock or a date.
@@ -86,6 +88,7 @@ export const TaskRow = forwardRef<
   {
     task,
     selected,
+    appRunning,
     tabbable,
     todayStart,
     query,
@@ -151,7 +154,7 @@ export const TaskRow = forwardRef<
           )}
           {task.scheduledMessages?.some((m) => m.repeat) && <RepeatIcon />}
           {task.watch && <WatchLabel watch={task.watch} />}
-          {task.appRunning && <AppIcon />}
+          {appRunning && <AppIcon />}
           {task.status === 'riding' && (
             <span className="riding-spinner" aria-label="Riding" />
           )}

@@ -323,7 +323,6 @@ export type Task = {
   // fetched with ?archived=1). Marks the row and swaps the kebab's Archive item
   // for Restore. Absent on active tasks.
   archived?: boolean
-  appRunning?: boolean
   // ISO timestamp a scheduled task is set to launch; present only while the
   // task is paced and waiting for the server's scheduler (or a manual launch).
   scheduledFor?: string

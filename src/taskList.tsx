@@ -109,6 +109,7 @@ export const TaskList = memo(function TaskList({
   filter,
   setFilter,
   selected,
+  appTasks,
   onSelect,
   onFocusChange,
   onTaskAction,
@@ -128,6 +129,7 @@ export const TaskList = memo(function TaskList({
   filter: string
   setFilter: Dispatch<SetStateAction<string>>
   selected: string | null
+  appTasks: Set<string>
   onSelect: (id: string, projectSlug: string) => void
   // Whether DOM focus rests on a row inside the list (see useViewingState).
   onFocusChange: (focused: boolean) => void
@@ -363,6 +365,7 @@ export const TaskList = memo(function TaskList({
                 }}
                 task={task}
                 selected={taskKeyOf(task) === selected}
+                appRunning={appTasks.has(taskKeyOf(task))}
                 tabbable={index === rovingIndex}
                 todayStart={todayStart}
                 query={query}

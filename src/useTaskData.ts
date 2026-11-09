@@ -63,6 +63,7 @@ export function useTaskData(
   // producing flow decides when to refresh; the client just renders the latest
   // snapshot it was handed.
   const [telemetry, setTelemetry] = useState<FlowTelemetry>({})
+  const [appTasks, setAppTasks] = useState<Set<string>>(new Set())
   const [flows, setFlows] = useState<FlowMeta[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   // The project the navbar has open, whose tasks the list shows. Session-scoped
@@ -260,7 +261,7 @@ export function useTaskData(
     const watched = watchedRef.current
     const watchedKey = watched && taskKey(watched.projectSlug, watched.id)
     try {
-      const [{ tasks, telemetry, flows, search }, detail] = await Promise.all([
+      const [{ tasks, appTasks, telemetry, flows, search }, detail] = await Promise.all([
         loadShownTasks([project], archived, searchRequest),
         watched
           ? loadTask(watched.projectSlug, watched.id).then(
@@ -289,6 +290,7 @@ export function useTaskData(
         return mergeTaskRefresh(mutationFence, issuedAt, current, shown)
       })
       setTelemetry(telemetry)
+      setAppTasks(appTasks)
       setFlows(flows)
       setSearch(search)
       hasLoadedRef.current = true
@@ -443,6 +445,7 @@ export function useTaskData(
     tasks,
     tasksRef,
     telemetry,
+    appTasks,
     flows,
     projects,
     project,

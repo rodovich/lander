@@ -67,6 +67,7 @@ export function App() {
     tasks,
     tasksRef,
     telemetry,
+    appTasks,
     flows,
     projects,
     project,
@@ -303,6 +304,7 @@ export function App() {
               filter={filter}
               setFilter={setFilter}
               selected={selected}
+              appTasks={appTasks}
               onSelect={selectTask}
               onFocusChange={setListFocused}
               onTaskAction={runTaskAction}
