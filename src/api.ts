@@ -118,6 +118,12 @@ export async function postAppAction(
   return (body.app ?? null) as AppStatus | null
 }
 
+export function touchApp(slug: string, id: string): void {
+  void fetch(`/api/${slug}/tasks/${id}/app/touch`, { method: 'POST', headers: uiHeaders() }).catch(
+    () => {},
+  )
+}
+
 export async function loadAppLog(slug: string, id: string): Promise<string> {
   const body = await readJson(`/api/${slug}/tasks/${id}/app/log`, undefined, uiHeaders())
   return String(body.text ?? '')

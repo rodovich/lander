@@ -459,6 +459,9 @@ export type ManagedApp = {
   everListened: boolean
   elapsedMs: number
   remainingMs: number
+  // Its task has been riding within the last couple of minutes, so running out
+  // of time won't stop it yet.
+  held: boolean
   logPath: string
 }
 
@@ -490,6 +493,21 @@ export type AppActionResultMessage = {
   app?: AppStatus | null
 }
 
+// Keep an app alive: someone used its task or its link in the browser, or its
+// task is mid-ride.
+export type AppTouchMessage = {
+  type: 'app-touch'
+  project: string
+  taskId: string
+  reason: 'activity' | 'ride'
+}
+
+// Which tasks have an app lander is running, sent whenever that changes.
+export type AppsMessage = {
+  type: 'apps'
+  apps: { project: string; taskId: string }[]
+}
+
 export type AppLogMessage = {
   type: 'app-log'
   requestId: string
@@ -519,6 +537,7 @@ export type AppStatusResultMessage = {
 export type ServerToDaemon =
   | AppStatusMessage
   | AppActionMessage
+  | AppTouchMessage
   | AppLogMessage
   | StartRunMessage
   | ProjectGrantMessage
@@ -770,6 +789,7 @@ export type DaemonToServer =
   | AppStatusResultMessage
   | AppActionResultMessage
   | AppLogResultMessage
+  | AppsMessage
   | CheckoutCleanupFailedMessage
   | UpdateMessage
   | DoneMessage

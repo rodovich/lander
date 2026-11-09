@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { loadAppLog, loadAppStatus, postAppAction } from './api'
+import { loadAppLog, loadAppStatus, postAppAction, touchApp } from './api'
+import { AppIcon } from './appIcon'
 import { CopyButton } from './copyButton'
 import { formatDuration } from './format'
 import { KebabMenu, type MenuItem } from './menus'
@@ -10,17 +11,6 @@ import type { AppAction, AppStatus, ManagedApp } from './types'
 const TICK_MS = 1_000
 const POLL_MS = 15_000
 const SHOW_TIME_LEFT_MS = 30 * 60_000
-
-function AppIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" role="img" aria-label="App">
-      <g stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="1.8" y="2.8" width="12.4" height="10.4" rx="1.6" />
-        <path d="M1.8 6h12.4" />
-      </g>
-    </svg>
-  )
-}
 
 export type AppRowState = AppStatus | null | 'unavailable' | 'checking'
 
@@ -41,9 +31,9 @@ function Action({ label, onClick }: { label: string; onClick: () => void }) {
   )
 }
 
-function AppLink({ url }: { url: string }) {
+function AppLink({ url, onOpen }: { url: string; onOpen?: () => void }) {
   return (
-    <a href={url} target="_blank" rel="noreferrer">
+    <a href={url} target="_blank" rel="noreferrer" onClick={onOpen}>
       {url.replace(/^https?:\/\//, '').replace(/\/$/, '')}
     </a>
   )
@@ -54,11 +44,13 @@ export function AppRowView({
   error,
   onAction = () => {},
   onViewLog = () => {},
+  onOpen,
 }: {
   state: AppRowState
   error?: string
   onAction?: (action: AppAction) => void
   onViewLog?: () => void
+  onOpen?: () => void
 }) {
   if (!state) return null
 
@@ -101,8 +93,8 @@ export function AppRowView({
     if (managed && url)
       return (
         <>
-          <AppLink url={url} />
-          {managed.remainingMs <= SHOW_TIME_LEFT_MS && (
+          <AppLink url={url} onOpen={onOpen} />
+          {!managed.held && managed.remainingMs <= SHOW_TIME_LEFT_MS && (
             <span>({minutesLeft(managed.remainingMs)}m)</span>
           )}
           {menu}
@@ -222,7 +214,12 @@ export function AppRow({ slug, taskId }: { slug: string; taskId: string }) {
       () => (transient() ? TICK_MS : POLL_MS),
     )
     pollRef.current = poll
-    const onShown = () => poll.runNow()
+    // Opening or returning to the task renews its app's lease.
+    touchApp(slug, taskId)
+    const onShown = () => {
+      poll.runNow()
+      if (document.visibilityState === 'visible') touchApp(slug, taskId)
+    }
     window.addEventListener('focus', onShown)
     document.addEventListener('visibilitychange', onShown)
     return () => {
@@ -258,7 +255,13 @@ export function AppRow({ slug, taskId }: { slug: string; taskId: string }) {
 
   return (
     <>
-      <AppRowView state={state} error={error} onAction={act} onViewLog={viewLog} />
+      <AppRowView
+        state={state}
+        error={error}
+        onAction={act}
+        onViewLog={viewLog}
+        onOpen={() => touchApp(slug, taskId)}
+      />
       {log !== undefined && (
         <AppLogModal text={log} path={managedOf(state)?.logPath} onClose={() => setLog(undefined)} />
       )}

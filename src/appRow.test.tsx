@@ -10,6 +10,7 @@ const managed = (over: Partial<ManagedApp>): ManagedApp => ({
   everListened: true,
   elapsedMs: 42_000,
   remainingMs: 72 * 60_000,
+  held: false,
   logPath: '/logs/t1.log',
   ...over,
 })
@@ -74,6 +75,16 @@ describe('AppRowView', () => {
     })
     expect(html(state(72 * 60_000))).not.toContain('m)')
     expect(html(state(10 * 60_000))).toContain('(10m)')
+  })
+
+  it('hides the time left while the task is mid-ride', () => {
+    const row = html({
+      url: URL,
+      listening: true,
+      canStart: true,
+      managed: managed({ remainingMs: 2 * 60_000, held: true }),
+    })
+    expect(row).not.toContain('m)')
   })
 
   it('distinguishes a failed start from an app that exited later', () => {

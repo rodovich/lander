@@ -1,4 +1,5 @@
 import { forwardRef } from 'react'
+import { AppIcon } from './appIcon'
 import { formatHoursMinutes, formatTaskTime } from './format'
 import { HighlightedText } from './highlightedText'
 import { TaskActionsMenu } from './menus'
@@ -150,6 +151,7 @@ export const TaskRow = forwardRef<
           )}
           {task.scheduledMessages?.some((m) => m.repeat) && <RepeatIcon />}
           {task.watch && <WatchLabel watch={task.watch} />}
+          {task.appRunning && <AppIcon />}
           {task.status === 'riding' && (
             <span className="riding-spinner" aria-label="Riding" />
           )}

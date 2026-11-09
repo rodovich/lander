@@ -2183,6 +2183,11 @@ describe('server task provider behavior', () => {
     expect(start.status).toBe(403)
     const log = await app.request(`/api/${slug}/tasks/${task.id}/app/log`, { headers: asTask })
     expect(log.status).toBe(403)
+    const touch = await app.request(`/api/${slug}/tasks/${task.id}/app/touch`, {
+      method: 'POST',
+      headers: asTask,
+    })
+    expect(touch.status).toBe(403)
   })
 
   it('refuses to start an app for a landed task', async () => {

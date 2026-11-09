@@ -1004,6 +1004,7 @@ function claimTaskRun(project: Project, id: string): boolean {
   const key = taskKey(project.slug, id)
   if (running.has(key)) return false
   running.add(key)
+  touchApp(project.slug, id, 'ride')
   return true
 }
 
@@ -1139,6 +1140,14 @@ async function releaseCheckoutIfAtRest(project: Project, id: string): Promise<vo
       e instanceof Error ? e.message : String(e),
     )
   }
+}
+
+// Tasks whose row started an app that lander is running, as the daemon last
+// reported them.
+let tasksWithApps = new Set<string>()
+
+function touchApp(project: string, taskId: string, reason: 'activity' | 'ride'): void {
+  sendToDaemon({ type: 'app-touch', project, taskId, reason })
 }
 
 async function recordCleanupFailure(slug: string, id: string, error: string): Promise<void> {
@@ -1507,6 +1516,8 @@ async function sweepOnce(): Promise<void> {
       // triggers); just gate on there being anything pending.
       if (task.scheduledMessages?.length)
         await deliverScheduledMessages(project, id, now)
+      if (running.has(taskKey(project.slug, id)) || task.runId || openRide(task))
+        touchApp(project.slug, id, 'ride')
       // Dispatch this task's recorded fires. ABOVE the `running` guard below,
       // for the same reason scheduled-message delivery is: `running` holds every
       // task with a live driveTask, including one working through a chain of
@@ -1896,6 +1907,11 @@ app.get('/api/:project/tasks', async (c) => {
       tasks = full.map((t) => publicTask(tag(t)))
       indexed = query ? full.map((t) => ({ id: t.id, index: conversationIndex(t) })) : []
     }
+    tasks = tasks.map((t) =>
+      tasksWithApps.has(taskKey(project.slug, (t as { id: string }).id))
+        ? { ...t, appRunning: true }
+        : t,
+    )
     return c.json({
       tasks,
       telemetry,
@@ -3673,6 +3689,10 @@ app.post('/api/:project/tasks/:id/app/:action', async (c) => {
   const id = c.req.param('id')
   if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
   const action = c.req.param('action')
+  if (action === 'touch') {
+    touchApp(project.slug, id, 'activity')
+    return c.body(null, 204)
+  }
   if (action !== 'start' && action !== 'stop' && action !== 'restart')
     return c.json({ error: 'unknown app action' }, 404)
   if (action !== 'stop') {
@@ -3908,6 +3928,7 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
     const hookToken = c.req.header('x-lander-hook-token')
     if (hookToken !== undefined)
       return nudgeFromHook(c, project, id, file, hookToken, rawMessage, body.key)
+    if (c.get('principal').kind === 'ui') touchApp(project.slug, id, 'activity')
 
     // A task may only message tasks in its own project (the human, via the UI
     // token, may message any). The `lander send` CLI always targets the caller's
@@ -4678,6 +4699,9 @@ if (process.env.NODE_ENV !== 'test' && process.env.VITEST !== 'true') {
     },
     onCheckoutCleanupFailed: ({ project, taskId, error }) => {
       void recordCleanupFailure(project, taskId, error)
+    },
+    onApps: (apps) => {
+      tasksWithApps = new Set(apps.map((a) => taskKey(a.project, a.taskId)))
     },
   })
   console.log(`daemon WS endpoint at ws://localhost:${port}/daemon`)

@@ -32,8 +32,13 @@ export type AppEntry = {
   pid: number
   // Pairs with `pid` to identify the process, since pids get reused.
   processStart: string
+  // The task whose row started it, for the task list's icon.
+  taskId: string
   startedAt: number
   leaseUntil: number
+  // Renewed while any task working in this checkout rides. Until it passes,
+  // running out of lease and the cap don't stop the app.
+  heldUntil?: number
   everListened: boolean
   state: 'running' | 'stopping' | 'exited'
 }
@@ -53,14 +58,19 @@ function managedApp(entry: AppEntry, listening: boolean, logPath: string, now: n
     phase,
     everListened: entry.everListened || listening,
     elapsedMs: now - entry.startedAt,
-    remainingMs: entry.leaseUntil - now,
+    remainingMs: expiresAt(entry) - now,
+    held: isHeld(entry, now),
     logPath,
   }
 }
 
+const expiresAt = (entry: AppEntry) => Math.max(entry.leaseUntil, entry.heldUntil ?? 0)
+const isHeld = (entry: AppEntry, now: number) => (entry.heldUntil ?? 0) > now
+
 export type AppStart = {
   project: string
   key: string
+  taskId: string
   checkout: string
   command: string[]
   leaseMs: number
@@ -187,6 +197,7 @@ export function createAppManager(deps: AppManagerDeps) {
       const entry: AppEntry = {
         project: spec.project,
         key: spec.key,
+        taskId: spec.taskId,
         checkout: spec.checkout,
         pid,
         processStart: start ?? '',
@@ -216,10 +227,11 @@ export function createAppManager(deps: AppManagerDeps) {
     if (url && (await isListening(url))) return { ok: false, reason: 'port-in-use' }
     const result = await launch(spec)
     if (!result.ok) return result
-    const others = read()
-      .filter((a) => a.state === 'running' && idOf(a) !== idOf(spec))
-      .sort((a, b) => a.leaseUntil - b.leaseUntil)
-    for (const app of others.slice(0, Math.max(0, others.length + 1 - deps.maxApps())))
+    const others = read().filter((a) => a.state === 'running' && idOf(a) !== idOf(spec))
+    const evictable = others
+      .filter((a) => !isHeld(a, now()))
+      .sort((a, b) => expiresAt(a) - expiresAt(b))
+    for (const app of evictable.slice(0, Math.max(0, others.length + 1 - deps.maxApps())))
       await stop(app.project, app.key)
     return result
   }
@@ -283,7 +295,7 @@ export function createAppManager(deps: AppManagerDeps) {
       else update(entry, { state: 'exited' })
     } else if (entry.state === 'stopping') {
       signalGroup(entry.pid, 'SIGKILL')
-    } else if (entry.leaseUntil <= now()) {
+    } else if (expiresAt(entry) <= now()) {
       await stop(entry.project, entry.key)
     } else if (!entry.everListened) {
       const url = deps.resolveUrl(entry)
@@ -336,5 +348,22 @@ export function createAppManager(deps: AppManagerDeps) {
       update(entry, { leaseUntil: Math.max(entry.leaseUntil, now() + ms) })
   }
 
-  return { start, stop, stopAll, sweep, extend, get, list: read, logFile, logTail, describe }
+  function hold(project: string, key: string, ms: number): void {
+    const entry = get(project, key)
+    if (entry?.state === 'running') update(entry, { heldUntil: now() + ms })
+  }
+
+  return {
+    start,
+    stop,
+    stopAll,
+    sweep,
+    extend,
+    hold,
+    get,
+    list: read,
+    logFile,
+    logTail,
+    describe,
+  }
 }

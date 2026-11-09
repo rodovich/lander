@@ -34,7 +34,9 @@ import type {
   RegisterMessage,
   AppActionMessage,
   AppLogMessage,
+  AppsMessage,
   AppStatus,
+  AppTouchMessage,
   AppStatusMessage,
   CheckoutCleanupFailedMessage,
   ReleaseCheckoutMessage,
@@ -48,7 +50,7 @@ import { bundledWatcherMetas, runWatcher } from './watchers'
 import { statSync } from 'node:fs'
 import { createAppManager } from './app-manager'
 import { appStatus, appUrl } from './apps'
-import { createProjectOptions } from './config'
+import { createProjectOptions, type AppConfig } from './config'
 import {
   checkoutPath,
   createTaskLocks,
@@ -112,7 +114,8 @@ function send(
     | RegisterMessage
     | TelemetryMessage
     | ReplyMessage
-    | CheckoutCleanupFailedMessage,
+    | CheckoutCleanupFailedMessage
+    | AppsMessage,
 ): void {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
 }
@@ -236,7 +239,11 @@ function isDir(p: string): boolean {
 const projectOptions = createProjectOptions()
 
 const DEFAULT_LEASE_MINUTES = 120
+// Renewed by the server's sweep every 15 seconds while a ride is in progress.
+const RIDE_HOLD_MS = 2 * 60_000
 const APP_SWEEP_MS = 5_000
+
+const leaseMs = (app: AppConfig) => (app.leaseMinutes ?? DEFAULT_LEASE_MINUTES) * 60_000
 const LANDER_HOME = path.join(homedir(), '.lander')
 
 const apps = createAppManager({
@@ -469,6 +476,7 @@ setInterval(() => {
   sweepingApps = true
   apps
     .sweep()
+    .then(() => publishApps())
     .catch((e) => console.error('app sweep failed:', e instanceof Error ? e.message : String(e)))
     .finally(() => {
       sweepingApps = false
@@ -535,6 +543,14 @@ function onMessage(raw: string): void {
     case 'app-log':
       void reply('app-log-result', msg.requestId, () => handleAppLog(msg))
       return
+    case 'app-touch':
+      if (drain.draining()) return
+      try {
+        handleAppTouch(msg)
+      } catch (e) {
+        console.error(`app touch for ${msg.project}/${msg.taskId} failed:`, e)
+      }
+      return
     case 'hook-run':
       return runHookFire(msg)
     // Taken while draining too: a watcher only reads, and is bounded by its budget.
@@ -548,6 +564,7 @@ function onMessage(raw: string): void {
     // daemon we replace (daemon-supervisor.mjs). Unavailable when nothing spawned
     // us with IPC, or once the supervisor has gone.
     case 'registered':
+      if (!drain.draining()) publishApps(true)
       if (process.connected) process.send?.({ type: 'registered' })
       return
   }
@@ -664,14 +681,36 @@ async function handleAppAction(
         project: msg.project,
         key,
         checkout,
+        taskId: msg.taskId,
         command: app.start,
-        leaseMs: (app.leaseMinutes ?? DEFAULT_LEASE_MINUTES) * 60_000,
+        leaseMs: leaseMs(app),
       })
       if (!result.ok)
         return { ok: false, error: result.error ?? START_REFUSALS[result.reason], status: 409 }
     }
+    publishApps()
     return { ok: true, app: await describeApp(msg.project, msg.taskId) }
   })
+}
+
+function handleAppTouch(msg: AppTouchMessage): void {
+  const { app, key } = appContext(msg.project, msg.taskId)
+  if (!app) return
+  if (msg.reason === 'ride') apps.hold(msg.project, key, RIDE_HOLD_MS)
+  else apps.extend(msg.project, key, leaseMs(app))
+}
+
+let publishedApps = ''
+
+function publishApps(force = false): void {
+  const list = apps
+    .list()
+    .filter((a) => a.state !== 'exited')
+    .map((a) => ({ project: a.project, taskId: a.taskId }))
+  const text = JSON.stringify(list)
+  if (!force && text === publishedApps) return
+  publishedApps = text
+  send({ type: 'apps', apps: list })
 }
 
 function handleAppLog(msg: AppLogMessage): ReplyBody<'app-log-result'> {

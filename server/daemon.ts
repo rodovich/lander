@@ -32,6 +32,7 @@ import type {
   AppStatusMessage,
   AppActionMessage,
   AppLogMessage,
+  AppsMessage,
 } from './protocol'
 import { clearAnnouncedFlows, setAnnouncedFlows } from './flows'
 import { setAnnouncedWatchers } from './watchers'
@@ -203,6 +204,7 @@ export function sendToDaemon(msg: ServerToDaemon): boolean {
     msg.type === 'watcher-run' ||
     msg.type === 'app-status' ||
     msg.type === 'app-action' ||
+    msg.type === 'app-touch' ||
     msg.type === 'app-log' ||
     msg.type === 'release-checkout'
   ) {
@@ -506,6 +508,7 @@ type DaemonServerOpts = {
   // adapter-less one has no agent kind to be keyed under.
   onTelemetry?: (flow: string, items: TelemetryItem[]) => void
   onCheckoutCleanupFailed?: (msg: CheckoutCleanupFailedMessage) => void
+  onApps?: (apps: AppsMessage['apps']) => void
 }
 
 // Attach the daemon WS endpoint to the running HTTP server at /daemon. Handles
@@ -694,6 +697,9 @@ export function attachDaemonServer(
         }
         case 'checkout-cleanup-failed':
           opts.onCheckoutCleanupFailed?.(msg)
+          break
+        case 'apps':
+          opts.onApps?.(msg.apps)
           break
       }
     })

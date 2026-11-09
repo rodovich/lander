@@ -51,6 +51,7 @@ describe('app manager', { timeout: 15_000 }, () => {
   const spec = (key: string, command: string, leaseMs = 60_000) => ({
     project: 'proj',
     key,
+    taskId: key,
     checkout: dir,
     command: [command],
     leaseMs,
@@ -70,6 +71,7 @@ describe('app manager', { timeout: 15_000 }, () => {
           {
             project: 'proj',
             key: 't1',
+            taskId: 't1',
             checkout: dir,
             pid: 4242,
             processStart: 'ours',
@@ -214,6 +216,21 @@ describe('app manager', { timeout: 15_000 }, () => {
     entryFile({ state: 'exited' })
     expect(m.describe('proj', 't1', false)?.phase).toBe('failed')
     expect(m.describe('proj', 't1', true)).toBeUndefined()
+  })
+
+  it('keeps an app whose ride is in progress past its lease, and out of the cap', async () => {
+    let clock = 1_000
+    const m = manager({ maxApps: () => 1, now: () => clock })
+    await m.start(spec('riding', sleeper(), 1_000))
+    m.hold('proj', 'riding', 5_000)
+    clock += 2_000
+    await m.sweep()
+    expect(m.get('proj', 'riding')?.state).toBe('running')
+    await m.start(spec('new', sleeper()))
+    expect(m.list().map((a) => a.key).sort()).toEqual(['new', 'riding'])
+    clock += 5_000
+    await m.sweep()
+    expect(m.list().map((a) => a.key)).toEqual(['new'])
   })
 
   it('notes when the port first opens', async () => {
