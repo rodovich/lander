@@ -1605,6 +1605,7 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-height: 18px;
   color: var(--muted);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -1615,8 +1616,28 @@ body {
   text-decoration: none;
 }
 
-.app-row a:hover {
+.app-row a:hover,
+.app-action:hover {
   text-decoration: underline;
+}
+
+.app-row .task-kebab {
+  width: 16px;
+  height: 16px;
+  font-size: 13px;
+}
+
+.app-action {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--riding);
+  font: inherit;
+  cursor: pointer;
+}
+
+.app-error {
+  color: var(--wedged);
 }
 
 /* The worktree chip on its own header row, and its popover. No transform on

@@ -2,6 +2,7 @@ import type { TaskMatches, TaskSearch } from '../shared/conversationSearch'
 import type { StatsFacts } from './stats'
 import { taskKey, type TaskRef } from './taskRef'
 import type {
+  AppAction,
   AppStatus,
   FlowMeta,
   Item,
@@ -53,9 +54,10 @@ const unreadable = (url: string, status: number) =>
 async function readJson(
   url: string,
   valid?: (body: Record<string, unknown>) => boolean,
+  headers?: Record<string, string>,
 ): Promise<Record<string, unknown>> {
   try {
-    const r = await fetch(url, { signal: readTimeout() })
+    const r = await fetch(url, { signal: readTimeout(), headers })
     const body = (await r.json().catch(() => undefined)) as
       | Record<string, unknown>
       | undefined
@@ -100,6 +102,25 @@ export async function loadTaskLinks(etag?: string): Promise<TaskLinkResponse> {
 export async function loadAppStatus(slug: string, id: string): Promise<AppStatus | null> {
   const body = await readJson(`/api/${slug}/tasks/${id}/app`)
   return (body.app ?? null) as AppStatus | null
+}
+
+export async function postAppAction(
+  slug: string,
+  id: string,
+  action: AppAction,
+): Promise<AppStatus | null> {
+  const r = await fetch(`/api/${slug}/tasks/${id}/app/${action}`, {
+    method: 'POST',
+    headers: uiHeaders(),
+  })
+  const body = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(body.error ?? r.statusText)
+  return (body.app ?? null) as AppStatus | null
+}
+
+export async function loadAppLog(slug: string, id: string): Promise<string> {
+  const body = await readJson(`/api/${slug}/tasks/${id}/app/log`, undefined, uiHeaders())
+  return String(body.text ?? '')
 }
 
 // Every browser mutation authenticates with the UI token. The same identity

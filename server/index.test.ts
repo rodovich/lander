@@ -2168,6 +2168,33 @@ describe('server task provider behavior', () => {
     expect(await res.json()).toEqual({ error: 'no daemon connected' })
   })
 
+  it('lets only the browser control an app or read its log', async () => {
+    const task = await createTask('Agent and app')
+    const raw = JSON.parse(await readFile(path.join(tasksDir, `${task.id}.json`), 'utf8'))
+    const asTask = {
+      'x-lander-task': task.id,
+      'x-lander-project': slug,
+      'x-lander-token': raw.token,
+    }
+    const start = await app.request(`/api/${slug}/tasks/${task.id}/app/start`, {
+      method: 'POST',
+      headers: asTask,
+    })
+    expect(start.status).toBe(403)
+    const log = await app.request(`/api/${slug}/tasks/${task.id}/app/log`, { headers: asTask })
+    expect(log.status).toBe(403)
+  })
+
+  it('refuses to start an app for a landed task', async () => {
+    const task = await createTask('Landed app')
+    await writeFile(
+      path.join(tasksDir, `${task.id}.json`),
+      JSON.stringify({ ...task, status: 'landed' }),
+    )
+    const res = await post(`/api/${slug}/tasks/${task.id}/app/start`, {})
+    expect(res.status).toBe(409)
+  })
+
   it('serves a cache-validated global task-link projection', async () => {
     const active = await createTask('Link feed active')
     const archived = await createTask('Link feed archived')

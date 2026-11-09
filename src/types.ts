@@ -37,9 +37,21 @@ export type EventKind =
   | 'notified'
   | 'cleanup-failed'
 
+export type ManagedApp = {
+  phase: 'starting' | 'running' | 'not-responding' | 'failed' | 'stopping'
+  everListened: boolean
+  elapsedMs: number
+  remainingMs: number
+  logPath: string
+}
+
+export type AppAction = 'start' | 'stop' | 'restart'
+
 export type AppStatus = {
   url?: string
   listening: boolean
+  canStart: boolean
+  managed?: ManagedApp
 }
 
 // One option in a choice ask. `at` schedules the answer's delivery for that time

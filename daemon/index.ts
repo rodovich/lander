@@ -32,6 +32,9 @@ import type {
   CheckoutHints,
   ProjectGrantMessage,
   RegisterMessage,
+  AppActionMessage,
+  AppLogMessage,
+  AppStatus,
   AppStatusMessage,
   CheckoutCleanupFailedMessage,
   ReleaseCheckoutMessage,
@@ -43,7 +46,8 @@ import { gitExec, resolveHooks } from './hooks'
 import { createHookRuns, runHook } from './hook-run'
 import { bundledWatcherMetas, runWatcher } from './watchers'
 import { statSync } from 'node:fs'
-import { appStatus } from './apps'
+import { createAppManager } from './app-manager'
+import { appStatus, appUrl } from './apps'
 import { createProjectOptions } from './config'
 import {
   checkoutPath,
@@ -231,6 +235,22 @@ function isDir(p: string): boolean {
 // so turning a project's worktrees on or off applies from its next ride.
 const projectOptions = createProjectOptions()
 
+const DEFAULT_LEASE_MINUTES = 120
+const APP_SWEEP_MS = 5_000
+const LANDER_HOME = path.join(homedir(), '.lander')
+
+const apps = createAppManager({
+  registryFile: path.join(LANDER_HOME, 'apps.json'),
+  logDir: path.join(LANDER_HOME, 'app-logs'),
+  maxApps: () => projectOptions.maxApps(),
+  stopGraceMs: HOST_STOP_GRACE_MS,
+  resolveUrl: ({ project, checkout }) => {
+    const root = pathBySlug.get(project)
+    const app = root ? projectOptions.app(root) : undefined
+    return app ? appUrl(app, checkout) : undefined
+  },
+})
+
 // Create and remove for one task's checkout never interleave.
 const checkoutLock = createTaskLocks()
 const checkoutKey = (project: string, taskId: string) => `${project}\0${taskId}`
@@ -254,9 +274,13 @@ function releaseCheckout(msg: ReleaseCheckoutMessage): void {
   // Whatever the config says now: the path is ours either way, and turning a
   // project's worktrees off must not strand the ones it already has.
   releasesHeld++
-  void checkoutLock(checkoutKey(msg.project, msg.taskId), () =>
-    cleanUpAndRemoveCheckout(root, msg.taskId, projectOptions.cleanup(root)),
-  )
+  void checkoutLock(checkoutKey(msg.project, msg.taskId), async () => {
+    // Before cleanup, which may drop databases the app has open.
+    await apps.stop(msg.project, msg.taskId).catch((e) => {
+      console.error(`could not stop the app for ${msg.project}/${msg.taskId}:`, e)
+    })
+    return cleanUpAndRemoveCheckout(root, msg.taskId, projectOptions.cleanup(root))
+  })
     .then(({ removed, cleanupError }) => {
       if (removed) console.log(`removed worktree for ${msg.project}/${msg.taskId}`)
       if (cleanupError) {
@@ -349,7 +373,7 @@ const FILES_ROOT = process.env.LANDER_FILES_ROOT?.trim() || defaultFilesRoot()
 // server's data layout is not something the daemon knows.
 const HOOK_STATE_ROOT =
   process.env.LANDER_HOOK_STATE_ROOT?.trim() ||
-  path.join(homedir(), '.lander', 'hook-state')
+  path.join(LANDER_HOME, 'hook-state')
 
 function hookStateDir(slug: string): string {
   // The slug is the daemon's own (projectSlug strips everything but
@@ -439,6 +463,18 @@ const drain = createDrain({
   },
 })
 
+let sweepingApps = false
+setInterval(() => {
+  if (sweepingApps || drain.draining() || exiting) return
+  sweepingApps = true
+  apps
+    .sweep()
+    .catch((e) => console.error('app sweep failed:', e instanceof Error ? e.message : String(e)))
+    .finally(() => {
+      sweepingApps = false
+    })
+}, APP_SWEEP_MS).unref()
+
 const reply = createReply(send)
 
 // Handle a message about one run. The server holds no reply open for these, so
@@ -492,6 +528,12 @@ function onMessage(raw: string): void {
       return
     case 'app-status':
       void reply('app-status-result', msg.requestId, () => handleAppStatus(msg))
+      return
+    case 'app-action':
+      void reply('app-action-result', msg.requestId, () => handleAppAction(msg))
+      return
+    case 'app-log':
+      void reply('app-log-result', msg.requestId, () => handleAppLog(msg))
       return
     case 'hook-run':
       return runHookFire(msg)
@@ -578,16 +620,69 @@ async function resolveHooksFor(
   return { ok: true, resolution }
 }
 
+function appContext(project: string, taskId: string) {
+  const root = pathBySlug.get(project)
+  if (!root) throw new Error(`daemon serves no project for slug ${project}`)
+  const worktrees = projectOptions.worktrees(root)
+  return {
+    root,
+    app: projectOptions.app(root),
+    key: worktrees ? taskId : 'root',
+    // Without its own worktree, a task in a worktree project has no app: the
+    // root's env file would name a different checkout's port.
+    checkout: worktrees ? existingCheckout(root, taskId) : root,
+  }
+}
+
+async function describeApp(project: string, taskId: string): Promise<AppStatus | null> {
+  const { app, key, checkout } = appContext(project, taskId)
+  if (!app || !checkout) return null
+  const status = await appStatus(app, checkout)
+  const managed = apps.describe(project, key, status.listening)
+  return { ...status, canStart: !!app.start, ...(managed ? { managed } : {}) }
+}
+
+const START_REFUSALS = {
+  'already-running': 'The app is already running.',
+  'port-in-use': 'Something else is already using the port.',
+  'cannot-start': 'The app could not be started.',
+}
+
+async function handleAppAction(
+  msg: AppActionMessage,
+): Promise<ReplyBody<'app-action-result'>> {
+  if (drain.draining() || exiting)
+    return { ok: false, error: 'lander is restarting; try again', status: 503 }
+  const { app, key, checkout } = appContext(msg.project, msg.taskId)
+  if (!app) return { ok: false, error: 'this project has no app configured', status: 404 }
+  return checkoutLock(checkoutKey(msg.project, key), async () => {
+    if (msg.action !== 'start') await apps.stop(msg.project, key)
+    if (msg.action !== 'stop') {
+      if (!app.start) return { ok: false, error: 'no start command is configured', status: 400 }
+      if (!checkout) return { ok: false, error: 'this task has no worktree', status: 409 }
+      const result = await apps.start({
+        project: msg.project,
+        key,
+        checkout,
+        command: app.start,
+        leaseMs: (app.leaseMinutes ?? DEFAULT_LEASE_MINUTES) * 60_000,
+      })
+      if (!result.ok)
+        return { ok: false, error: result.error ?? START_REFUSALS[result.reason], status: 409 }
+    }
+    return { ok: true, app: await describeApp(msg.project, msg.taskId) }
+  })
+}
+
+function handleAppLog(msg: AppLogMessage): ReplyBody<'app-log-result'> {
+  const { key } = appContext(msg.project, msg.taskId)
+  return { ok: true, text: apps.logTail(msg.project, key) }
+}
+
 async function handleAppStatus(
   msg: AppStatusMessage,
 ): Promise<ReplyBody<'app-status-result'>> {
-  const root = pathBySlug.get(msg.project)
-  if (!root) throw new Error(`daemon serves no project for slug ${msg.project}`)
-  const app = projectOptions.app(root)
-  // Without its own worktree, a task in a worktree project has no app: the
-  // root's env file would name a different checkout's port.
-  const checkout = projectOptions.worktrees(root) ? existingCheckout(root, msg.taskId) : root
-  return { ok: true, app: app && checkout ? await appStatus(app, checkout) : null }
+  return { ok: true, app: await describeApp(msg.project, msg.taskId) }
 }
 
 async function handleWatcherRun(
@@ -669,7 +764,11 @@ function stopChildrenAndExit(): void {
   exiting = true
   hookRuns.killAll()
   setTimeout(() => process.exit(0), STOP_WAIT_CAP_MS).unref()
-  void runManager.stopAll().then(() => process.exit(0))
+  // A draining daemon's apps now belong to its replacement.
+  const stoppingApps = drain.draining()
+    ? Promise.resolve()
+    : apps.stopAll().catch((e) => console.error('could not stop every app:', e))
+  void Promise.all([runManager.stopAll(), stoppingApps]).then(() => process.exit(0))
 }
 process.on('SIGTERM', stopChildrenAndExit)
 process.on('SIGINT', stopChildrenAndExit)

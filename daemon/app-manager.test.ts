@@ -33,7 +33,7 @@ describe('app manager', { timeout: 15_000 }, () => {
     const m = createAppManager({
       registryFile: path.join(dir, 'apps.json'),
       logDir: path.join(dir, 'logs'),
-      maxApps: 3,
+      maxApps: () => 3,
       stopGraceMs: 300,
       resolveUrl: () => undefined,
       ...over,
@@ -167,7 +167,7 @@ describe('app manager', { timeout: 15_000 }, () => {
 
   it('stops the app with the soonest expiry when the cap is reached', async () => {
     let clock = 1_000
-    const m = manager({ maxApps: 2, now: () => clock })
+    const m = manager({ maxApps: () => 2, now: () => clock })
     await m.start(spec('late', sleeper(), 60_000))
     await m.start(spec('soon', sleeper(), 10_000))
     clock += 1
@@ -184,6 +184,36 @@ describe('app manager', { timeout: 15_000 }, () => {
     clock += 1_000
     await m.sweep()
     expect(m.list().map((a) => a.key)).toEqual(['t2'])
+  })
+
+  it('forgets an exited app once its lease has passed', async () => {
+    let clock = 1_000
+    const m = manager({ now: () => clock, processStart: async () => null })
+    entryFile({ state: 'exited', leaseUntil: 2_000 })
+    await m.sweep()
+    expect(m.list()).toHaveLength(1)
+    clock = 2_000
+    await m.sweep()
+    expect(m.list()).toEqual([])
+  })
+
+  it('reads the end of an app’s log', async () => {
+    const m = manager()
+    expect(m.logTail('proj', 't1')).toBe('')
+    await m.start(
+      spec('t1', script('app', 'for i in $(seq 1 300); do echo line$i; done; exec sleep 30')),
+    )
+    await until(() => m.logTail('proj', 't1').includes('line300'))
+    const lines = m.logTail('proj', 't1').split('\n')
+    expect(lines[0]).toBe('line101')
+    expect(lines.at(-1)).toBe('line300')
+  })
+
+  it('shows an exited app as gone once something else listens on its port', async () => {
+    const m = manager({ processStart: async () => null })
+    entryFile({ state: 'exited' })
+    expect(m.describe('proj', 't1', false)?.phase).toBe('failed')
+    expect(m.describe('proj', 't1', true)).toBeUndefined()
   })
 
   it('notes when the port first opens', async () => {
@@ -267,13 +297,13 @@ describe('app manager', { timeout: 15_000 }, () => {
   })
 
   it('does not exceed the cap when starts overlap', async () => {
-    const m = manager({ maxApps: 1 })
+    const m = manager({ maxApps: () => 1 })
     await Promise.all([m.start(spec('a', sleeper())), m.start(spec('b', sleeper()))])
     expect(m.list().filter((a) => a.state === 'running')).toHaveLength(1)
   })
 
   it('leaves other apps running when a start fails', async () => {
-    const m = manager({ maxApps: 1 })
+    const m = manager({ maxApps: () => 1 })
     await m.start(spec('a', sleeper()))
     await m.start(spec('b', path.join(dir, 'missing')))
     expect(m.list().map((a) => a.key)).toEqual(['a'])

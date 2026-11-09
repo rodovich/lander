@@ -32,6 +32,8 @@ import {
   requestProjectGrant,
   requestWatcherRun,
   requestAppStatus,
+  requestAppAction,
+  requestAppLog,
 } from './daemon'
 import {
   announcedWatchers,
@@ -3645,6 +3647,40 @@ app.get('/api/:project/tasks/:id/app', async (c) => {
   const id = c.req.param('id')
   if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
   const result = await requestAppStatus({ project: project.slug, taskId: id })
+  if (!result.ok)
+    return c.json({ error: result.error }, (result.status ?? 500) as ContentfulStatusCode)
+  return c.json({ app: result.app ?? null })
+})
+
+app.get('/api/:project/tasks/:id/app/log', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  if ((await resolvePrincipal(c.req)).kind !== 'ui')
+    return c.json({ error: 'only the browser may read an app log' }, 403)
+  const id = c.req.param('id')
+  if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+  const result = await requestAppLog({ project: project.slug, taskId: id })
+  if (!result.ok)
+    return c.json({ error: result.error }, (result.status ?? 500) as ContentfulStatusCode)
+  return c.json({ text: result.text ?? '' })
+})
+
+app.post('/api/:project/tasks/:id/app/:action', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  if (c.get('principal').kind !== 'ui')
+    return c.json({ error: 'only the browser may control an app' }, 403)
+  const id = c.req.param('id')
+  if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+  const action = c.req.param('action')
+  if (action !== 'start' && action !== 'stop' && action !== 'restart')
+    return c.json({ error: 'unknown app action' }, 404)
+  if (action !== 'stop') {
+    const task = await readTask(project.dataDir, id)
+    if (!task) return c.json({ error: 'task not found' }, 404)
+    if (task.status === 'landed') return c.json({ error: 'task has landed' }, 409)
+  }
+  const result = await requestAppAction({ project: project.slug, taskId: id, action })
   if (!result.ok)
     return c.json({ error: result.error }, (result.status ?? 500) as ContentfulStatusCode)
   return c.json({ app: result.app ?? null })

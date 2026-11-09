@@ -30,6 +30,8 @@ import type {
   CheckoutCleanupFailedMessage,
   AppStatus,
   AppStatusMessage,
+  AppActionMessage,
+  AppLogMessage,
 } from './protocol'
 import { clearAnnouncedFlows, setAnnouncedFlows } from './flows'
 import { setAnnouncedWatchers } from './watchers'
@@ -200,6 +202,8 @@ export function sendToDaemon(msg: ServerToDaemon): boolean {
     msg.type === 'hook-run' ||
     msg.type === 'watcher-run' ||
     msg.type === 'app-status' ||
+    msg.type === 'app-action' ||
+    msg.type === 'app-log' ||
     msg.type === 'release-checkout'
   ) {
     // Not tied to a run, so there is no owner to follow — the primary answers.
@@ -397,6 +401,39 @@ export function requestAppStatus(
     {
       timeoutMs: 5_000,
       onTimeout: { ok: false, error: 'daemon did not answer app status request', status: 504 },
+      onUnsent: { ok: false, error: 'no daemon connected', status: 503 },
+    },
+  )
+}
+
+export function requestAppAction(
+  msg: Omit<AppActionMessage, 'type' | 'requestId'>,
+): Promise<AppStatusResponse> {
+  return askDaemon<AppStatusResponse>(
+    (requestId) => ({ type: 'app-action', requestId, ...msg }),
+    {
+      timeoutMs: 30_000,
+      onTimeout: { ok: false, error: 'daemon did not answer app request', status: 504 },
+      onUnsent: { ok: false, error: 'no daemon connected', status: 503 },
+    },
+  )
+}
+
+export type AppLogResponse = {
+  ok: boolean
+  error?: string
+  status?: number
+  text?: string
+}
+
+export function requestAppLog(
+  msg: Omit<AppLogMessage, 'type' | 'requestId'>,
+): Promise<AppLogResponse> {
+  return askDaemon<AppLogResponse>(
+    (requestId) => ({ type: 'app-log', requestId, ...msg }),
+    {
+      timeoutMs: 5_000,
+      onTimeout: { ok: false, error: 'daemon did not answer app log request', status: 504 },
       onUnsent: { ok: false, error: 'no daemon connected', status: 503 },
     },
   )
@@ -644,14 +681,13 @@ export function attachDaemonServer(
             outcome: msg.outcome,
           } satisfies WatcherRunResponse)
           break
+        case 'app-log-result':
         case 'app-status-result':
-          settleRequest(msg.requestId, {
-            ok: msg.ok,
-            error: msg.error,
-            status: msg.status,
-            app: msg.app,
-          } satisfies AppStatusResponse)
+        case 'app-action-result': {
+          const { type: _type, requestId, ...result } = msg
+          settleRequest(requestId, result)
           break
+        }
         case 'telemetry': {
           if (msg.flow) opts.onTelemetry?.(msg.flow, msg.items)
           break

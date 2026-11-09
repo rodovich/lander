@@ -19,6 +19,9 @@ export type AppConfig = {
   url: string
   // Relative to the checkout.
   envFile?: string
+  // Run in the checkout, without a shell. Absent means lander only links to it.
+  start?: string[]
+  leaseMinutes?: number
 }
 
 export type ProjectConfig = {
@@ -34,7 +37,15 @@ export type ProjectConfig = {
   app?: AppConfig
 }
 
-export type LanderConfig = { projects: ProjectConfig[] }
+export type LanderConfig = { projects: ProjectConfig[]; maxApps?: number }
+
+const DEFAULT_MAX_APPS = 3
+
+const isArgv = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.length > 0 && value.every((arg) => typeof arg === 'string' && arg)
+
+const isPositive = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value > 0
 
 export function configPath(env: NodeJS.ProcessEnv = process.env): string {
   return env.LANDER_CONFIG?.trim() || path.join(homedir(), '.lander', 'config.json')
@@ -64,9 +75,12 @@ export function parseConfig(
   }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw))
     return fail('expected an object')
-  const projects = (raw as { projects?: unknown }).projects
+  const { projects, maxApps } = raw as { projects?: unknown; maxApps?: unknown }
   if (!Array.isArray(projects)) return fail('expected a "projects" array')
+  if (maxApps !== undefined && !(isPositive(maxApps) && Number.isInteger(maxApps)))
+    return fail('maxApps must be a positive integer')
   return {
+    ...(maxApps ? { maxApps: maxApps as number } : {}),
     projects: projects.map((entry, i): ProjectConfig => {
       if (!entry || typeof entry !== 'object' || Array.isArray(entry))
         return fail(`projects[${i}] must be an object`)
@@ -74,20 +88,18 @@ export function parseConfig(
         path?: unknown
         worktrees?: unknown
         cleanup?: unknown
-        app?: { url?: unknown; envFile?: unknown } | null
+        app?: {
+          url?: unknown
+          envFile?: unknown
+          start?: unknown
+          leaseMinutes?: unknown
+        } | null
       }
       if (typeof p !== 'string' || !p.trim())
         return fail(`projects[${i}].path must be a non-empty string`)
       if (worktrees !== undefined && typeof worktrees !== 'boolean')
         return fail(`projects[${i}].worktrees must be true or false`)
-      if (
-        cleanup !== undefined &&
-        !(
-          Array.isArray(cleanup) &&
-          cleanup.length > 0 &&
-          cleanup.every((arg) => typeof arg === 'string' && arg)
-        )
-      )
+      if (cleanup !== undefined && !isArgv(cleanup))
         return fail(`projects[${i}].cleanup must be a non-empty array of non-empty strings`)
       if (app !== undefined) {
         if (!app || typeof app !== 'object' || Array.isArray(app))
@@ -101,6 +113,10 @@ export function parseConfig(
           return fail(`projects[${i}].app.url uses \${...}, which needs an envFile`)
         if (!templated && !/^https?:\/\/./.test(app.url))
           return fail(`projects[${i}].app.url must be an http or https URL`)
+        if (app.start !== undefined && !isArgv(app.start))
+          return fail(`projects[${i}].app.start must be a non-empty array of non-empty strings`)
+        if (app.leaseMinutes !== undefined && !isPositive(app.leaseMinutes))
+          return fail(`projects[${i}].app.leaseMinutes must be a positive number`)
       }
       const [command, ...args] = (cleanup ?? []) as string[]
       return {
@@ -112,6 +128,8 @@ export function parseConfig(
               app: {
                 url: app.url as string,
                 ...(app.envFile ? { envFile: app.envFile as string } : {}),
+                ...(app.start ? { start: app.start as string[] } : {}),
+                ...(app.leaseMinutes ? { leaseMinutes: app.leaseMinutes as number } : {}),
               },
             }
           : {}),
@@ -158,6 +176,7 @@ export function createProjectOptions(
   worktrees(projectPath: string): boolean
   cleanup(projectPath: string): string[] | undefined
   app(projectPath: string): AppConfig | undefined
+  maxApps(): number
 } {
   let mtimeMs: number | undefined
   let config: LanderConfig | undefined
@@ -190,5 +209,6 @@ export function createProjectOptions(
     worktrees: (projectPath) => !!project(projectPath)?.worktrees,
     cleanup: (projectPath) => project(projectPath)?.cleanup,
     app: (projectPath) => project(projectPath)?.app,
+    maxApps: () => current()?.maxApps ?? DEFAULT_MAX_APPS,
   }
 }

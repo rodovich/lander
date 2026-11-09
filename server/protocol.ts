@@ -454,10 +454,56 @@ export type AppStatusMessage = {
   taskId: string
 }
 
+export type ManagedApp = {
+  phase: 'starting' | 'running' | 'not-responding' | 'failed' | 'stopping'
+  everListened: boolean
+  elapsedMs: number
+  remainingMs: number
+  logPath: string
+}
+
 export type AppStatus = {
   // Absent while the URL can't be resolved.
   url?: string
   listening: boolean
+  canStart: boolean
+  // Present when lander started the app.
+  managed?: ManagedApp
+}
+
+export type AppAction = 'start' | 'stop' | 'restart'
+
+export type AppActionMessage = {
+  type: 'app-action'
+  requestId: string
+  project: string
+  taskId: string
+  action: AppAction
+}
+
+export type AppActionResultMessage = {
+  type: 'app-action-result'
+  requestId: string
+  ok: boolean
+  error?: string
+  status?: number
+  app?: AppStatus | null
+}
+
+export type AppLogMessage = {
+  type: 'app-log'
+  requestId: string
+  project: string
+  taskId: string
+}
+
+export type AppLogResultMessage = {
+  type: 'app-log-result'
+  requestId: string
+  ok: boolean
+  error?: string
+  status?: number
+  text?: string
 }
 
 export type AppStatusResultMessage = {
@@ -472,6 +518,8 @@ export type AppStatusResultMessage = {
 
 export type ServerToDaemon =
   | AppStatusMessage
+  | AppActionMessage
+  | AppLogMessage
   | StartRunMessage
   | ProjectGrantMessage
   | InterruptMessage
@@ -720,6 +768,8 @@ export type CheckoutCleanupFailedMessage = {
 export type DaemonToServer =
   | RegisterMessage
   | AppStatusResultMessage
+  | AppActionResultMessage
+  | AppLogResultMessage
   | CheckoutCleanupFailedMessage
   | UpdateMessage
   | DoneMessage

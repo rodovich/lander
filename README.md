@@ -38,6 +38,8 @@ A project entry can also set `"cleanup": ["bin/drop-worktree-dbs"]`, a program a
 
 A project entry can set `"app": { "url": "http://localhost:${PORT}", "envFile": ".env.local" }` to show a link to the app running from a task's checkout. `envFile` is optional and relative to the checkout, and supplies any `${NAME}` in `url`; it is read as text, and nothing is run. The task header shows the link while something is listening on that port.
 
+Add `"start": ["npm", "run", "dev"]` to the `app` block, a program and its arguments, to start the app from the task header. Clicking Start runs that checkout's code, without a shell, and it keeps running after the task's turn ends. Lander stops it after `leaseMinutes` (default 120), when its worktree is removed, or when `npm run dev` stops. A top-level `maxApps` (default 3) limits how many run at once; starting one more stops the one due to end soonest. Its output goes to `~/.lander/app-logs`.
+
 Each project gets a URL slug from its path (e.g. `/Users/me/code/app` → `users-me-code-app`). The sidebar shows a dropdown to switch projects; choosing one pushes its slug into the URL (`/users-me-code-app/`). Visiting `/` redirects to the first project listed.
 
 ## Architecture

@@ -53,6 +53,12 @@ describe('parseConfig', () => {
       '{"projects":[{"path":"/a","worktrees":"yes"}]}',
       /projects\[0\]\.worktrees must be true or false/,
     ],
+    ['{"maxApps":0,"projects":[]}', /maxApps must be a positive integer/],
+    ['{"projects":[{"path":"/a","app":{"url":"http://x","start":"bin/x"}}]}', /app\.start must be/],
+    [
+      '{"projects":[{"path":"/a","app":{"url":"http://x","leaseMinutes":0}}]}',
+      /app\.leaseMinutes must be/,
+    ],
     ['{"projects":[{"path":"/a","app":"x"}]}', /projects\[0\]\.app must be an object/],
     ['{"projects":[{"path":"/a","app":{}}]}', /projects\[0\]\.app\.url must be/],
     [

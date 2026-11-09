@@ -14,7 +14,10 @@
 // the job again as soon as that one settles, never alongside it.
 export type Poll = { stop: () => void; runNow: () => void }
 
-export function startPoll(job: () => Promise<unknown>, delayMs: number): Poll {
+export function startPoll(
+  job: () => Promise<unknown>,
+  delayMs: number | (() => number),
+): Poll {
   let stopped = false
   let running = false
   let again = false
@@ -23,7 +26,7 @@ export function startPoll(job: () => Promise<unknown>, delayMs: number): Poll {
     running = false
     if (stopped) return
     if (again) run()
-    else timer = setTimeout(run, delayMs)
+    else timer = setTimeout(run, typeof delayMs === 'function' ? delayMs() : delayMs)
   }
   const run = () => {
     clearTimeout(timer)

@@ -3,14 +3,26 @@
 // reads it afresh, which lets a replacement daemon take over with no handoff.
 
 import { execFile, spawn } from 'node:child_process'
-import { closeSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import {
+  closeSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs'
 import path from 'node:path'
+import type { ManagedApp } from '../server/protocol'
 import { scrubbedEnv } from '../server/secrets'
 import { isListening as probeListening } from './apps'
 import { isSafePathSegment } from './paths'
 import { signalProcessGroup } from './processes'
 
 const STOP_POLL_MS = 100
+const LOG_TAIL_BYTES = 64 * 1024
+const LOG_TAIL_LINES = 200
 
 export type AppEntry = {
   project: string
@@ -24,6 +36,26 @@ export type AppEntry = {
   leaseUntil: number
   everListened: boolean
   state: 'running' | 'stopping' | 'exited'
+}
+
+function managedApp(entry: AppEntry, listening: boolean, logPath: string, now: number): ManagedApp {
+  const phase =
+    entry.state === 'stopping'
+      ? 'stopping'
+      : entry.state === 'exited'
+        ? 'failed'
+        : listening
+          ? 'running'
+          : entry.everListened
+            ? 'not-responding'
+            : 'starting'
+  return {
+    phase,
+    everListened: entry.everListened || listening,
+    elapsedMs: now - entry.startedAt,
+    remainingMs: entry.leaseUntil - now,
+    logPath,
+  }
 }
 
 export type AppStart = {
@@ -41,7 +73,7 @@ export type StartResult =
 export type AppManagerDeps = {
   registryFile: string
   logDir: string
-  maxApps: number
+  maxApps: () => number
   stopGraceMs: number
   // The URL can appear after start, when setup writes the file it comes from.
   resolveUrl: (entry: Pick<AppEntry, 'project' | 'checkout'>) => string | undefined
@@ -187,7 +219,7 @@ export function createAppManager(deps: AppManagerDeps) {
     const others = read()
       .filter((a) => a.state === 'running' && idOf(a) !== idOf(spec))
       .sort((a, b) => a.leaseUntil - b.leaseUntil)
-    for (const app of others.slice(0, Math.max(0, others.length + 1 - deps.maxApps)))
+    for (const app of others.slice(0, Math.max(0, others.length + 1 - deps.maxApps())))
       await stop(app.project, app.key)
     return result
   }
@@ -260,12 +292,42 @@ export function createAppManager(deps: AppManagerDeps) {
   }
 
   async function sweep(): Promise<void> {
-    for (const entry of read())
-      if (entry.state !== 'exited' && !stopsInFlight.has(idOf(entry))) await sweepEntry(entry)
+    for (const entry of read()) {
+      if (entry.state === 'exited') {
+        if (entry.leaseUntil <= now()) remove(entry)
+      } else if (!stopsInFlight.has(idOf(entry))) await sweepEntry(entry)
+    }
+  }
+
+  function logTail(project: string, key: string): string {
+    let fd: number
+    try {
+      fd = openSync(logFile(project, key), 'r')
+    } catch {
+      return ''
+    }
+    try {
+      const size = fstatSync(fd).size
+      const length = Math.min(size, LOG_TAIL_BYTES)
+      const bytes = Buffer.alloc(length)
+      readSync(fd, bytes, 0, length, size - length)
+      return bytes.toString('utf8').replace(/\n$/, '').split('\n').slice(-LOG_TAIL_LINES).join('\n')
+    } finally {
+      closeSync(fd)
+    }
   }
 
   async function stopAll(): Promise<void> {
-    await Promise.all(read().map((a) => stop(a.project, a.key)))
+    const results = await Promise.allSettled(read().map((a) => stop(a.project, a.key)))
+    for (const r of results) if (r.status === 'rejected') throw r.reason
+  }
+
+  // What the UI shows for an app lander started, or undefined when an exited
+  // entry has been superseded by something listening on its port.
+  function describe(project: string, key: string, listening: boolean): ManagedApp | undefined {
+    const entry = get(project, key)
+    if (!entry || (entry.state === 'exited' && listening)) return undefined
+    return managedApp(entry, listening, logFile(project, key), now())
   }
 
   function extend(project: string, key: string, ms: number): void {
@@ -274,5 +336,5 @@ export function createAppManager(deps: AppManagerDeps) {
       update(entry, { leaseUntil: Math.max(entry.leaseUntil, now() + ms) })
   }
 
-  return { start, stop, stopAll, sweep, extend, get, list: read, logFile }
+  return { start, stop, stopAll, sweep, extend, get, list: read, logFile, logTail, describe }
 }

@@ -52,7 +52,10 @@ export async function isListening(url: string): Promise<boolean> {
   return results.includes(true)
 }
 
-export async function appStatus(app: AppConfig, checkout: string): Promise<AppStatus> {
+export async function appStatus(
+  app: AppConfig,
+  checkout: string,
+): Promise<Pick<AppStatus, 'url' | 'listening'>> {
   const url = appUrl(app, checkout)
   return url ? { url, listening: await isListening(url) } : { listening: false }
 }
