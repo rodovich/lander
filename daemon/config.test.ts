@@ -53,6 +53,14 @@ describe('parseConfig', () => {
       '{"projects":[{"path":"/a","worktrees":"yes"}]}',
       /projects\[0\]\.worktrees must be true or false/,
     ],
+    ['{"projects":[{"path":"/a","app":"x"}]}', /projects\[0\]\.app must be an object/],
+    ['{"projects":[{"path":"/a","app":{}}]}', /projects\[0\]\.app\.url must be/],
+    [
+      '{"projects":[{"path":"/a","app":{"url":"http://x","envFile":1}}]}',
+      /projects\[0\]\.app\.envFile must be/,
+    ],
+    ['{"projects":[{"path":"/a","app":{"url":"ftp://x"}}]}', /app\.url must be an http or https/],
+    ['{"projects":[{"path":"/a","app":{"url":"http://x:${P}"}}]}', /needs an envFile/],
     ['{"projects":[{"path":"/a","cleanup":"bin/x"}]}', /projects\[0\]\.cleanup must be/],
     ['{"projects":[{"path":"/a","cleanup":[]}]}', /projects\[0\]\.cleanup must be/],
     ['{"projects":[{"path":"/a","cleanup":["bin/x",1]}]}', /projects\[0\]\.cleanup must be/],
@@ -107,7 +115,20 @@ describe('reading the file', () => {
       utimesSync(file, tick, tick)
     }
 
-    write(JSON.stringify({ projects: [{ path: '/p', worktrees: true, cleanup: ['bin/x'] }] }))
+    write(
+      JSON.stringify({
+        projects: [
+          {
+            path: '/p',
+            worktrees: true,
+            cleanup: ['bin/x'],
+            app: { url: 'http://localhost:${P}', envFile: '.env' },
+          },
+        ],
+      }),
+    )
+    expect(options.app('/p')).toEqual({ url: 'http://localhost:${P}', envFile: '.env' })
+    expect(options.app('/q')).toBeUndefined()
     expect(options.worktrees('/p')).toBe(true)
     expect(options.cleanup('/p')).toEqual(['bin/x'])
     expect(options.cleanup('/q')).toBeUndefined()

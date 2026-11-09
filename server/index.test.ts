@@ -2162,6 +2162,12 @@ describe('server task provider behavior', () => {
     ).toBeUndefined()
   })
 
+  it('answers an app status request with 503 when no daemon is connected', async () => {
+    const res = await app.request(`/api/${slug}/tasks/any-task/app`)
+    expect(res.status).toBe(503)
+    expect(await res.json()).toEqual({ error: 'no daemon connected' })
+  })
+
   it('serves a cache-validated global task-link projection', async () => {
     const active = await createTask('Link feed active')
     const archived = await createTask('Link feed archived')

@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react'
+import { AppRow } from './appRow'
 import { CheckoutChip } from './checkoutChip'
 import { formatTimestamp } from './format'
 import { GrantControl } from './grants'
@@ -134,6 +135,9 @@ export const DetailHeader = memo(function DetailHeader({
         </div>
       )}
       {task.checkout && <CheckoutChip checkout={task.checkout} />}
+      {!task.archived && task.status !== 'landed' && (
+        <AppRow key={taskKeyOf(task)} slug={task.projectSlug} taskId={task.id} />
+      )}
       <div className="detail-meta">
         <span
           className={

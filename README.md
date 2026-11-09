@@ -36,6 +36,8 @@ A project entry with `"worktrees": true` gives each of its tasks a git worktree 
 
 A project entry can also set `"cleanup": ["bin/drop-worktree-dbs"]`, a program and its arguments, to tear down what a worktree leaves behind. Just before removing a task's worktree, the daemon runs it without a shell, from the project root, with the worktree's path appended. A relative program therefore resolves to the main checkout's copy, not the one the agent could edit. It has 120 seconds. If it fails, the worktree is kept and the error appears on the task's timeline; un-landing and landing the task again, or archiving it, retries.
 
+A project entry can set `"app": { "url": "http://localhost:${PORT}", "envFile": ".env.local" }` to show a link to the app running from a task's checkout. `envFile` is optional and relative to the checkout, and supplies any `${NAME}` in `url`; it is read as text, and nothing is run. The task header shows the link while something is listening on that port.
+
 Each project gets a URL slug from its path (e.g. `/Users/me/code/app` → `users-me-code-app`). The sidebar shows a dropdown to switch projects; choosing one pushes its slug into the URL (`/users-me-code-app/`). Visiting `/` redirects to the first project listed.
 
 ## Architecture

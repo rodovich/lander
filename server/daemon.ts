@@ -28,6 +28,8 @@ import type {
   WatcherOutcome,
   TelemetryItem,
   CheckoutCleanupFailedMessage,
+  AppStatus,
+  AppStatusMessage,
 } from './protocol'
 import { clearAnnouncedFlows, setAnnouncedFlows } from './flows'
 import { setAnnouncedWatchers } from './watchers'
@@ -197,6 +199,7 @@ export function sendToDaemon(msg: ServerToDaemon): boolean {
     msg.type === 'hooks-resolve' ||
     msg.type === 'hook-run' ||
     msg.type === 'watcher-run' ||
+    msg.type === 'app-status' ||
     msg.type === 'release-checkout'
   ) {
     // Not tied to a run, so there is no owner to follow — the primary answers.
@@ -374,6 +377,26 @@ export function requestWatcherRun(
     {
       timeoutMs: waitMs,
       onTimeout: { ok: false, error: 'daemon did not answer watcher request', status: 504 },
+      onUnsent: { ok: false, error: 'no daemon connected', status: 503 },
+    },
+  )
+}
+
+export type AppStatusResponse = {
+  ok: boolean
+  error?: string
+  status?: number
+  app?: AppStatus | null
+}
+
+export function requestAppStatus(
+  msg: Omit<AppStatusMessage, 'type' | 'requestId'>,
+): Promise<AppStatusResponse> {
+  return askDaemon<AppStatusResponse>(
+    (requestId) => ({ type: 'app-status', requestId, ...msg }),
+    {
+      timeoutMs: 5_000,
+      onTimeout: { ok: false, error: 'daemon did not answer app status request', status: 504 },
       onUnsent: { ok: false, error: 'no daemon connected', status: 503 },
     },
   )
@@ -620,6 +643,14 @@ export function attachDaemonServer(
             status: msg.status,
             outcome: msg.outcome,
           } satisfies WatcherRunResponse)
+          break
+        case 'app-status-result':
+          settleRequest(msg.requestId, {
+            ok: msg.ok,
+            error: msg.error,
+            status: msg.status,
+            app: msg.app,
+          } satisfies AppStatusResponse)
           break
         case 'telemetry': {
           if (msg.flow) opts.onTelemetry?.(msg.flow, msg.items)

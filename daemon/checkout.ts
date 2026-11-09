@@ -33,6 +33,11 @@ function isWorktree(dir: string): boolean {
   return existsSync(path.join(dir, '.git'))
 }
 
+export function existingCheckout(root: string, taskId: string): string | undefined {
+  const dir = checkoutPath(root, taskId)
+  return isWorktree(dir) ? dir : undefined
+}
+
 // Runs git in `cwd`, resolving with its stdout.
 export type Git = (cwd: string, args: string[]) => Promise<string>
 

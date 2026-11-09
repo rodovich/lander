@@ -2,6 +2,7 @@ import type { TaskMatches, TaskSearch } from '../shared/conversationSearch'
 import type { StatsFacts } from './stats'
 import { taskKey, type TaskRef } from './taskRef'
 import type {
+  AppStatus,
   FlowMeta,
   Item,
   ProjectHooks,
@@ -94,6 +95,11 @@ export async function loadTaskLinks(etag?: string): Promise<TaskLinkResponse> {
   } catch (e) {
     throw describeTimeout(e, url)
   }
+}
+
+export async function loadAppStatus(slug: string, id: string): Promise<AppStatus | null> {
+  const body = await readJson(`/api/${slug}/tasks/${id}/app`)
+  return (body.app ?? null) as AppStatus | null
 }
 
 // Every browser mutation authenticates with the UI token. The same identity

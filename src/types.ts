@@ -37,6 +37,11 @@ export type EventKind =
   | 'notified'
   | 'cleanup-failed'
 
+export type AppStatus = {
+  url?: string
+  listening: boolean
+}
+
 // One option in a choice ask. `at` schedules the answer's delivery for that time
 // (e.g. "retry when the limit resets"); `value` + `editable` prefill a text the
 // user can amend before answering (e.g. a permission rule).

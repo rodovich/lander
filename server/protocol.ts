@@ -447,7 +447,31 @@ export type ReleaseCheckoutMessage = {
   taskId: string
 }
 
+export type AppStatusMessage = {
+  type: 'app-status'
+  requestId: string
+  project: string
+  taskId: string
+}
+
+export type AppStatus = {
+  // Absent while the URL can't be resolved.
+  url?: string
+  listening: boolean
+}
+
+export type AppStatusResultMessage = {
+  type: 'app-status-result'
+  requestId: string
+  ok: boolean
+  error?: string
+  status?: number
+  // Null when the project configures no app or the task has no checkout.
+  app?: AppStatus | null
+}
+
 export type ServerToDaemon =
+  | AppStatusMessage
   | StartRunMessage
   | ProjectGrantMessage
   | InterruptMessage
@@ -695,6 +719,7 @@ export type CheckoutCleanupFailedMessage = {
 
 export type DaemonToServer =
   | RegisterMessage
+  | AppStatusResultMessage
   | CheckoutCleanupFailedMessage
   | UpdateMessage
   | DoneMessage

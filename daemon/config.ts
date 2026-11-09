@@ -14,6 +14,13 @@ import { readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
 
+export type AppConfig = {
+  // May use ${NAME} from `envFile`.
+  url: string
+  // Relative to the checkout.
+  envFile?: string
+}
+
 export type ProjectConfig = {
   // Absolute and resolved, with `~` expanded.
   path: string
@@ -24,6 +31,7 @@ export type ProjectConfig = {
   // checkout's copy, which matters because it runs unattended and agents can
   // edit the worktree's copy.
   cleanup?: string[]
+  app?: AppConfig
 }
 
 export type LanderConfig = { projects: ProjectConfig[] }
@@ -62,10 +70,11 @@ export function parseConfig(
     projects: projects.map((entry, i): ProjectConfig => {
       if (!entry || typeof entry !== 'object' || Array.isArray(entry))
         return fail(`projects[${i}] must be an object`)
-      const { path: p, worktrees, cleanup } = entry as {
+      const { path: p, worktrees, cleanup, app } = entry as {
         path?: unknown
         worktrees?: unknown
         cleanup?: unknown
+        app?: { url?: unknown; envFile?: unknown } | null
       }
       if (typeof p !== 'string' || !p.trim())
         return fail(`projects[${i}].path must be a non-empty string`)
@@ -80,11 +89,32 @@ export function parseConfig(
         )
       )
         return fail(`projects[${i}].cleanup must be a non-empty array of non-empty strings`)
+      if (app !== undefined) {
+        if (!app || typeof app !== 'object' || Array.isArray(app))
+          return fail(`projects[${i}].app must be an object`)
+        if (typeof app.url !== 'string' || !app.url)
+          return fail(`projects[${i}].app.url must be a non-empty string`)
+        if (app.envFile !== undefined && (typeof app.envFile !== 'string' || !app.envFile))
+          return fail(`projects[${i}].app.envFile must be a non-empty string`)
+        const templated = app.url.includes('${')
+        if (templated && !app.envFile)
+          return fail(`projects[${i}].app.url uses \${...}, which needs an envFile`)
+        if (!templated && !/^https?:\/\/./.test(app.url))
+          return fail(`projects[${i}].app.url must be an http or https URL`)
+      }
       const [command, ...args] = (cleanup ?? []) as string[]
       return {
         path: path.resolve(expandHome(p.trim(), home)),
         worktrees: worktrees === true,
         ...(command ? { cleanup: [expandHome(command, home), ...args] } : {}),
+        ...(app
+          ? {
+              app: {
+                url: app.url as string,
+                ...(app.envFile ? { envFile: app.envFile as string } : {}),
+              },
+            }
+          : {}),
       }
     }),
   }
@@ -127,6 +157,7 @@ export function createProjectOptions(
 ): {
   worktrees(projectPath: string): boolean
   cleanup(projectPath: string): string[] | undefined
+  app(projectPath: string): AppConfig | undefined
 } {
   let mtimeMs: number | undefined
   let config: LanderConfig | undefined
@@ -158,5 +189,6 @@ export function createProjectOptions(
   return {
     worktrees: (projectPath) => !!project(projectPath)?.worktrees,
     cleanup: (projectPath) => project(projectPath)?.cleanup,
+    app: (projectPath) => project(projectPath)?.app,
   }
 }

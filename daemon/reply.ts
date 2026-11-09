@@ -1,4 +1,5 @@
 import type {
+  AppStatusResultMessage,
   HookRunResultMessage,
   HooksResolveResultMessage,
   ProjectGrantResultMessage,
@@ -11,6 +12,7 @@ export type ReplyMessage =
   | HooksResolveResultMessage
   | HookRunResultMessage
   | WatcherRunResultMessage
+  | AppStatusResultMessage
 
 export type ReplyBody<T extends ReplyMessage['type']> = Omit<
   Extract<ReplyMessage, { type: T }>,

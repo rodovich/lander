@@ -31,6 +31,7 @@ import {
   requestResume,
   requestProjectGrant,
   requestWatcherRun,
+  requestAppStatus,
 } from './daemon'
 import {
   announcedWatchers,
@@ -3636,6 +3637,17 @@ app.post('/api/:project/tasks/:id/archive', async (c) => {
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
+})
+
+app.get('/api/:project/tasks/:id/app', async (c) => {
+  const project = PROJECT_BY_SLUG.get(c.req.param('project'))
+  if (!project) return c.json({ error: 'unknown project' }, 404)
+  const id = c.req.param('id')
+  if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
+  const result = await requestAppStatus({ project: project.slug, taskId: id })
+  if (!result.ok)
+    return c.json({ error: result.error }, (result.status ?? 500) as ContentfulStatusCode)
+  return c.json({ app: result.app ?? null })
 })
 
 // Re-title a task from its conversation (its user messages — see below). Unlike

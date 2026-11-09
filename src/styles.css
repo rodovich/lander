@@ -1601,6 +1601,24 @@ body {
   margin-top: 0;
 }
 
+.app-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-row a {
+  color: var(--riding);
+  text-decoration: none;
+}
+
+.app-row a:hover {
+  text-decoration: underline;
+}
+
 /* The worktree chip on its own header row, and its popover. No transform on
    the wrapper: that would contain the fixed popup and throw off its viewport
    coordinates. The wrapper shrinks to the chip so a click beside it counts as

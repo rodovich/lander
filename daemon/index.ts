@@ -32,6 +32,7 @@ import type {
   CheckoutHints,
   ProjectGrantMessage,
   RegisterMessage,
+  AppStatusMessage,
   CheckoutCleanupFailedMessage,
   ReleaseCheckoutMessage,
   TelemetryMessage,
@@ -41,12 +42,14 @@ import { taskApiHeaders } from './task-api'
 import { gitExec, resolveHooks } from './hooks'
 import { createHookRuns, runHook } from './hook-run'
 import { bundledWatcherMetas, runWatcher } from './watchers'
-import { existsSync, statSync } from 'node:fs'
+import { statSync } from 'node:fs'
+import { appStatus } from './apps'
 import { createProjectOptions } from './config'
 import {
   checkoutPath,
   createTaskLocks,
   ensureCheckout,
+  existingCheckout,
   removeCheckout,
   cleanUpAndRemoveCheckout,
 } from './checkout'
@@ -327,8 +330,8 @@ function resolveTaskCwd(
   // The task's own checkout, while there is one to read — which is why a
   // landed task's checkout outlives its pending `landed` fires.
   if (hints.taskId && projectOptions.worktrees(root)) {
-    const checkout = checkoutPath(root, hints.taskId)
-    if (existsSync(path.join(checkout, '.git'))) return { root, cwd: checkout }
+    const checkout = existingCheckout(root, hints.taskId)
+    if (checkout) return { root, cwd: checkout }
   }
   const caps = hints.flow ? CAPS[hints.flow] : undefined
   if (!caps) return { root, cwd: root }
@@ -488,6 +491,9 @@ function onMessage(raw: string): void {
     case 'hooks-resolve':
       void reply('hooks-resolve-result', msg.requestId, () => resolveHooksFor(msg))
       return
+    case 'app-status':
+      void reply('app-status-result', msg.requestId, () => handleAppStatus(msg))
+      return
     case 'hook-run':
       return runHookFire(msg)
     // Taken while draining too: a watcher only reads, and is bounded by its budget.
@@ -571,6 +577,18 @@ async function resolveHooksFor(
     ...(msg.history ? { history: msg.history } : {}),
   })
   return { ok: true, resolution }
+}
+
+async function handleAppStatus(
+  msg: AppStatusMessage,
+): Promise<ReplyBody<'app-status-result'>> {
+  const root = pathBySlug.get(msg.project)
+  if (!root) throw new Error(`daemon serves no project for slug ${msg.project}`)
+  const app = projectOptions.app(root)
+  // Without its own worktree, a task in a worktree project has no app: the
+  // root's env file would name a different checkout's port.
+  const checkout = projectOptions.worktrees(root) ? existingCheckout(root, msg.taskId) : root
+  return { ok: true, app: app && checkout ? await appStatus(app, checkout) : null }
 }
 
 async function handleWatcherRun(
