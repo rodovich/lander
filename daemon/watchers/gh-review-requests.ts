@@ -1,5 +1,5 @@
-import { getJson, iso, timeline, viewer as viewerOf } from './github'
-import { PermanentWatcherError, type BundledWatcher, type WatcherCtx } from './types'
+import { getJson, iso, parseRepo, timeline, viewer as viewerOf } from './github'
+import type { BundledWatcher, WatcherCtx } from './types'
 
 type SearchItem = {
   number: number
@@ -75,8 +75,7 @@ const ghReviewRequests: BundledWatcher = {
     },
   },
   async run(ctx, args, prevState) {
-    if (args.repo && !/^[^/\s]+\/[^/\s]+$/.test(args.repo))
-      throw new PermanentWatcherError(`repo must be owner/repo, not "${args.repo}"`)
+    if (args.repo) parseRepo(args.repo)
     const prev = (prevState as Partial<State> | undefined)?.requested
     const me = await viewerOf(ctx)
     const terms = [

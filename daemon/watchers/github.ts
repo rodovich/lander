@@ -32,6 +32,20 @@ export function iso(time: string): string {
   return new Date(time).toISOString()
 }
 
+export function parsePr(arg: string): { repo: string; number: number } {
+  const m =
+    arg.match(/github\.com\/([^/\s]+\/[^/\s]+)\/pull\/(\d+)/) ??
+    arg.match(/^([^/\s]+\/[^#\s]+)#(\d+)$/)
+  if (!m) throw new PermanentWatcherError(`pr must be owner/repo#123 or a PR URL, not "${arg}"`)
+  return { repo: m[1], number: Number(m[2]) }
+}
+
+export function parseRepo(arg: string): string {
+  if (!/^[^/\s]+\/[^/\s]+$/.test(arg))
+    throw new PermanentWatcherError(`repo must be owner/repo, not "${arg}"`)
+  return arg
+}
+
 export async function getJson<T>(ctx: GitHubCtx, path: string): Promise<T> {
   return (await ctx.github.get(path, { signal: ctx.signal })).body as T
 }

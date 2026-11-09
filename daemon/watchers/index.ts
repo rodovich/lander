@@ -5,12 +5,13 @@
 // be asynchronous and bounded by `ctx.signal`.
 
 import type { WatcherMeta, WatcherOutcome } from '../../server/protocol'
+import ghChecks from './gh-checks'
 import ghPrActivity from './gh-pr-activity'
 import ghReviewRequests from './gh-review-requests'
 import { createGitHub } from './github'
 import { PermanentWatcherError, type BundledWatcher, type WatcherCtx } from './types'
 
-const BUNDLED: BundledWatcher[] = [ghPrActivity, ghReviewRequests]
+const BUNDLED: BundledWatcher[] = [ghChecks, ghPrActivity, ghReviewRequests]
 
 const github = createGitHub()
 

@@ -1,4 +1,4 @@
-import { getJson, iso, timeline, viewer as viewerOf, type Login, type TimelineEvent } from './github'
+import { getJson, iso, parsePr, timeline, viewer as viewerOf, type Login, type TimelineEvent } from './github'
 import { PermanentWatcherError, type BundledWatcher } from './types'
 
 type Pr = {
@@ -27,14 +27,6 @@ const MAX_WAITS = 3
 
 // One thing the other side did, already worded for the wake message.
 type Activity = { id: string; at: string; who: Login; line: string; immediate?: boolean }
-
-function parsePr(arg: string): { repo: string; number: number } {
-  const m =
-    arg.match(/github\.com\/([^/\s]+\/[^/\s]+)\/pull\/(\d+)/) ??
-    arg.match(/^([^/\s]+\/[^#\s]+)#(\d+)$/)
-  if (!m) throw new PermanentWatcherError(`pr must be owner/repo#123 or a PR URL, not "${arg}"`)
-  return { repo: m[1], number: Number(m[2]) }
-}
 
 function activities(events: TimelineEvent[], viewer: string): Activity[] {
   const out: Activity[] = []
