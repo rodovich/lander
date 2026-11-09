@@ -32,6 +32,17 @@ describe('parseConfig', () => {
     ])
   })
 
+  it('keeps a cleanup command, expanding ~ in the program only', () => {
+    const cfg = parseConfig(
+      JSON.stringify({
+        projects: [{ path: '/a', cleanup: ['~/bin/teardown', '~/literal'] }],
+      }),
+      FILE,
+      '/home/me',
+    )
+    expect(cfg.projects[0].cleanup).toEqual(['/home/me/bin/teardown', '~/literal'])
+  })
+
   it.each([
     ['not json', /config\.json: not valid JSON/],
     ['[]', /expected an object/],
@@ -42,6 +53,9 @@ describe('parseConfig', () => {
       '{"projects":[{"path":"/a","worktrees":"yes"}]}',
       /projects\[0\]\.worktrees must be true or false/,
     ],
+    ['{"projects":[{"path":"/a","cleanup":"bin/x"}]}', /projects\[0\]\.cleanup must be/],
+    ['{"projects":[{"path":"/a","cleanup":[]}]}', /projects\[0\]\.cleanup must be/],
+    ['{"projects":[{"path":"/a","cleanup":["bin/x",1]}]}', /projects\[0\]\.cleanup must be/],
   ])('rejects %s, naming the file', (text, message) => {
     expect(() => parseConfig(text, FILE)).toThrow(message)
   })
@@ -93,8 +107,10 @@ describe('reading the file', () => {
       utimesSync(file, tick, tick)
     }
 
-    write(JSON.stringify({ projects: [{ path: '/p', worktrees: true }] }))
+    write(JSON.stringify({ projects: [{ path: '/p', worktrees: true, cleanup: ['bin/x'] }] }))
     expect(options.worktrees('/p')).toBe(true)
+    expect(options.cleanup('/p')).toEqual(['bin/x'])
+    expect(options.cleanup('/q')).toBeUndefined()
     expect(options.worktrees('/p/')).toBe(true)
     expect(options.worktrees('/q')).toBe(false)
 

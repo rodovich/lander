@@ -27,6 +27,7 @@ import type {
   WatcherRunMessage,
   WatcherOutcome,
   TelemetryItem,
+  CheckoutCleanupFailedMessage,
 } from './protocol'
 import { clearAnnouncedFlows, setAnnouncedFlows } from './flows'
 import { setAnnouncedWatchers } from './watchers'
@@ -444,6 +445,7 @@ type DaemonServerOpts = {
   // Keyed by flow name, not AgentKind: the producer is a flow, and an
   // adapter-less one has no agent kind to be keyed under.
   onTelemetry?: (flow: string, items: TelemetryItem[]) => void
+  onCheckoutCleanupFailed?: (msg: CheckoutCleanupFailedMessage) => void
 }
 
 // Attach the daemon WS endpoint to the running HTTP server at /daemon. Handles
@@ -623,6 +625,9 @@ export function attachDaemonServer(
           if (msg.flow) opts.onTelemetry?.(msg.flow, msg.items)
           break
         }
+        case 'checkout-cleanup-failed':
+          opts.onCheckoutCleanupFailed?.(msg)
+          break
       }
     })
 

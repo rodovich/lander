@@ -21,7 +21,6 @@ import {
   startRide,
   closeRide,
   checkoutReleasable,
-  recordArchiveFires,
   nextItemId,
   pushUserItem,
   pushFlowItem,
@@ -980,35 +979,6 @@ describe('checkoutReleasable', () => {
   })
 })
 
-describe('recordArchiveFires', () => {
-  const fire = (trigger: string): PendingHook => ({ id: `f-${trigger}`, trigger, by: 'human', at: 't' })
-  const task = (status: string, pendingHooks?: PendingHook[]) => ({
-    status,
-    items: [] as Item[],
-    pendingHooks,
-  })
-  const fires = (t: { pendingHooks?: PendingHook[] }) =>
-    (t.pendingHooks ?? []).map((f) => `${f.trigger}/${f.by}`)
-
-  it('records a cleanup fire for a task archived without landing, dropping the rest', () => {
-    const t = task('riding', [fire('ride-ended'), fire('wedged')])
-    recordArchiveFires(t, AT, 'task')
-    expect(fires(t)).toEqual(['cleanup/task'])
-  })
-
-  it('keeps a landed task’s pending cleanup fire rather than adding another', () => {
-    const t = task('landed', [fire('landed'), fire('cleanup')])
-    recordArchiveFires(t, AT, 'human')
-    expect(t.pendingHooks).toEqual([fire('cleanup')])
-  })
-
-  it('records nothing for a landed task whose cleanup already ran', () => {
-    const t = task('landed', [fire('landed')])
-    recordArchiveFires(t, AT, 'human')
-    expect(t.pendingHooks).toBeUndefined()
-  })
-})
-
 describe('recordStatusTransition', () => {
   const task = (status: string) => ({ status, title: 'My task', items: [] as Item[] })
   const kinds = (t: { items: Item[] }) =>
@@ -1202,23 +1172,15 @@ describe('the task-hook trigger funnel', () => {
   describe('status crossings', () => {
     it.each([
       ['riding', 'wedged', ['wedged']],
-      ['riding', 'landed', ['landed', 'cleanup']],
+      ['riding', 'landed', ['landed']],
       ['wedged', 'riding', ['unwedged']],
       ['landed', 'riding', ['unlanded']],
-      ['wedged', 'landed', ['landed', 'cleanup']],
+      ['wedged', 'landed', ['landed']],
     ])('records its fires crossing %s → %s', (prev, next, triggers) => {
       const t = task(prev)
       recordStatusTransition(t, next, AT, 'human')
       expect(fires(t)).toEqual(triggers.map((trigger) => `${trigger}/human`))
       expect(t.pendingHooks![0]).toMatchObject({ at: AT })
-    })
-
-    it('drops a pending cleanup fire when a landed task is revived', () => {
-      const t = task('riding')
-      recordStatusTransition(t, 'landed', AT, 'human')
-      t.status = 'landed'
-      recordStatusTransition(t, 'riding', AT, 'human')
-      expect(fires(t)).toEqual(['landed/human', 'unlanded/human'])
     })
 
     // riding↔paced is not a crossing at all (both store as `riding`), and it

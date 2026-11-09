@@ -436,10 +436,11 @@ export type WatcherRunResultMessage = {
 }
 
 // The task is done with its checkout — landed with nothing left to run against
-// it, or archived. The daemon removes the git worktree it manages for the task,
-// if there is one; it owns whether there is, so this is sent for any landing or
-// archive and is a no-op otherwise. Fire-and-forget: a lost one leaves a
-// worktree on disk, which is the whole cost.
+// it, or archived. The daemon runs the project's cleanup command and removes the
+// git worktree it manages for the task, if there is one; it owns whether there
+// is, so this is sent for any landing or archive and is a no-op otherwise.
+// Fire-and-forget: a lost one leaves the worktree and whatever its cleanup would
+// have torn down, until the task is landed or archived again.
 export type ReleaseCheckoutMessage = {
   type: 'release-checkout'
   project: string
@@ -684,8 +685,17 @@ export type HooksResolveResultMessage = {
   resolution?: HooksResolution
 }
 
+// A project's cleanup command failed, so the task's worktree was kept.
+export type CheckoutCleanupFailedMessage = {
+  type: 'checkout-cleanup-failed'
+  project: string
+  taskId: string
+  error: string
+}
+
 export type DaemonToServer =
   | RegisterMessage
+  | CheckoutCleanupFailedMessage
   | UpdateMessage
   | DoneMessage
   | CheckoutMessage

@@ -90,7 +90,6 @@ import {
   isSealedRun,
   openRide,
   checkoutReleasable,
-  recordArchiveFires,
   pushUserItem,
   pushFlowItem,
   pushEventItem,
@@ -1124,23 +1123,11 @@ async function driveClaimedTask(project: Project, id: string): Promise<void> {
 // Called wherever one of those conditions can come true: a status write that
 // lands, an archive, a drainer exiting, a hook dispatch finishing. Sent for
 // every project — the daemon owns whether there is a worktree to remove.
-//
-// An archived task's fires are dispatched here, since the sweep reads only
-// tasks/; the sweep calls back in for the ids in `archivedFires` until they
-// clear.
 async function releaseCheckoutIfAtRest(project: Project, id: string): Promise<void> {
   try {
-    if (running.has(taskKey(project.slug, id))) return
+    if (running.has(taskKey(project.slug, id)) || hookDispatchInFlightFor(project, id)) return
     const live = await readTask(project.dataDir, id)
-    let task = live ?? (await readTask(project.archiveDir, id))
-    if (!live && task?.pendingHooks?.length) {
-      const ids = archivedFires.get(project.slug) ?? new Set<string>()
-      archivedFires.set(project.slug, ids.add(id))
-      if (!(await dispatchPendingHooks(project, id, { api: hookApi(), dir: project.archiveDir })))
-        return
-      task = await readTask(project.archiveDir, id)
-    }
-    if (live || !task?.pendingHooks?.length) archivedFires.get(project.slug)?.delete(id)
+    const task = live ?? (await readTask(project.archiveDir, id))
     if (!task || !checkoutReleasable(task, { archived: !live })) return
     sendToDaemon({ type: 'release-checkout', project: project.slug, taskId: id })
   } catch (e) {
@@ -1151,10 +1138,20 @@ async function releaseCheckoutIfAtRest(project: Project, id: string): Promise<vo
   }
 }
 
-// Archived tasks holding a cleanup fire, by project slug. In memory: a server
-// restart while one is pending leaves it undispatched, like a release the
-// daemon never received.
-const archivedFires = new Map<string, Set<string>>()
+async function recordCleanupFailure(slug: string, id: string, error: string): Promise<void> {
+  const project = PROJECT_BY_SLUG.get(slug)
+  if (!project) return
+  try {
+    await mutateTaskInPools(project, id, (t) => {
+      pushEventItem(t, { eventKind: 'cleanup-failed', reason: error }, new Date().toISOString())
+    })
+  } catch (e) {
+    console.warn(
+      `could not record the failed cleanup for ${slug}/${id}:`,
+      e instanceof Error ? e.message : String(e),
+    )
+  }
+}
 
 type LaunchTrigger =
   | { kind: 'time' }
@@ -1571,12 +1568,6 @@ async function sweepOnce(): Promise<void> {
         !watchesInFlight.has(taskKey(project.slug, id))
       )
         void runWatch(project, id, task, task.watch)
-    }
-    for (const id of archivedFires.get(project.slug) ?? []) {
-      if (hookDispatchInFlightFor(project, id) || dispatched >= MAX_HOOK_DISPATCHES_PER_SWEEP)
-        continue
-      dispatched++
-      void releaseCheckoutIfAtRest(project, id)
     }
   }
 }
@@ -3013,9 +3004,8 @@ async function landFromHook(
       }
 
       // Records the `landed` event and the fire. `byHook` rides onto that fire,
-      // so every OTHER hook still sees the landing — which is what lets one
-      // chain into cleanup — while the hook that landed the target is not woken
-      // by its own landing.
+      // so the other hooks still see the landing, while the hook that landed
+      // the target is not woken by its own landing.
       recordStatusTransition(t, 'landed', now, 'hook', cred.path)
       t.status = 'landed'
       t.updatedAt = now
@@ -3590,7 +3580,6 @@ app.post('/api/:project/tasks/:id/archive', async (c) => {
       .json<{ archived?: unknown }>()
       .catch(() => ({}) as { archived?: unknown })
     const archived = body.archived !== false // default: archive
-    const principal = c.get('principal')
     const fromDir = archived ? project.dataDir : project.archiveDir
     const toDir = archived ? project.archiveDir : project.dataDir
     let task: Task | null = null
@@ -3622,10 +3611,9 @@ app.post('/api/:project/tasks/:id/archive', async (c) => {
         return
       }
       // Neither sweep reads archived/, so pending hook fires would wait there
-      // until a restore delivered them long after the event. A cleanup fire is
-      // the exception, dispatched through `archivedFires`.
-      if (archived) {
-        recordArchiveFires(task, new Date().toISOString(), hookBy(principal, project.slug, id))
+      // until a restore delivered them long after the event.
+      if (archived && task.pendingHooks) {
+        delete task.pendingHooks
         await writeTask(path.join(fromDir, `${id}.json`), task)
       }
       await rename(
@@ -4639,6 +4627,9 @@ if (process.env.NODE_ENV !== 'test' && process.env.VITEST !== 'true') {
     },
     onTelemetry: (agent, items) => {
       telemetryCache.set(agent, items)
+    },
+    onCheckoutCleanupFailed: ({ project, taskId, error }) => {
+      void recordCleanupFailure(project, taskId, error)
     },
   })
   console.log(`daemon WS endpoint at ws://localhost:${port}/daemon`)

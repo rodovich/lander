@@ -35,6 +35,7 @@ export type EventKind =
   | 'renamed'
   | 'relaunched'
   | 'notified'
+  | 'cleanup-failed'
 
 // One option in a choice ask. `at` schedules the answer's delivery for that time
 // (e.g. "retry when the limit resets"); `value` + `editable` prefill a text the
@@ -171,7 +172,8 @@ export type EventItem = ItemCommon & {
   title?: string
   scheduledFor?: string
   awaiting?: { id: string; title: string }[]
-  // Why lander itself wedged the task (a watch that kept failing).
+  // Why lander itself wedged the task (a watch that kept failing), or why a
+  // cleanup command failed.
   reason?: string
   // The user item this event delivered (a relaunch's brief, a wakeup's
   // notification), told inside the

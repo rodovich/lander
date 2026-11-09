@@ -2162,31 +2162,6 @@ describe('server task provider behavior', () => {
     ).toBeUndefined()
   })
 
-  it('keeps only a cleanup fire when a task is archived without landing', async () => {
-    const id = 'tsk-archived-unlanded'
-    await writeFile(
-      path.join(tasksDir, `${id}.json`),
-      JSON.stringify({
-        id,
-        title: 'Archived without landing',
-        status: 'riding',
-        createdAt: AT,
-        updatedAt: AT,
-        shape: 2,
-        rides: [],
-        items: [],
-        pendingHooks: [{ id: 'fire-1-abc', trigger: 'ride-ended', by: 'agent', at: AT }],
-        hookFireSeq: 1,
-      }),
-    )
-    expect((await post(`/api/${slug}/tasks/${id}/archive`, {})).status).toBe(200)
-
-    const fires = (await readTaskField(id, 'pendingHooks', path.join(dataRoot, 'archived'))) as {
-      trigger: string
-    }[]
-    expect(fires.map((f) => f.trigger)).toEqual(['cleanup'])
-  })
-
   it('serves a cache-validated global task-link projection', async () => {
     const active = await createTask('Link feed active')
     const archived = await createTask('Link feed archived')

@@ -26,12 +26,9 @@ never fires.
 | `wedged` | wedges |
 | `unwedged` | leaves wedged |
 | `ride-ended` | finishes a ride with outcome `done` or `error` (not when interrupted) |
-| `cleanup` | lands, or is archived without having landed — once per landing, and not again when a landed task is archived |
 
-`cleanup` is for tearing down what a task leaves behind, such as per-worktree
-databases. With managed worktrees, the task's worktree is removed only after its
-`cleanup` hooks have run, even when the task is archived. A task revived before
-its `cleanup` hooks run skips them; it fires again on its next landing.
+To tear down what a task's worktree leaves behind, such as its databases, use the
+`cleanup` command in lander's config (see the README), not a hook.
 
 `<by>` is who caused the transition:
 
@@ -132,24 +129,18 @@ without reporting leaves no trace.
 A run that throws or times out is reported, not retried. A body can still run
 more than once for one fire: lander reruns one cut off by a server restart. Make
 side effects safe to repeat; `ctx.hook.fireId` is the same across reruns of one
-fire. The exception is an archived task's `cleanup` fire, which a server restart
-before it runs drops.
+fire.
 
 ## Example
 
-Run a cleanup script in the task's checkout when it lands or is archived,
-whoever did it: `.lander/hooks/cleanup/any/cleanup.js`.
+Ask the task to finish what a failed ride left undone, when the ride that ended
+was an error: `.lander/hooks/ride-ended/system/retry.js`.
 
 ```js
 export const meta = { api: 1 }
 
 export default async function (ctx) {
-  // A task without a worktree of its own works in the project root.
-  if (ctx.target.cwd === ctx.project.root) return
-  const { code, stdout, stderr } = await ctx.spawn('bin/cleanup', [], {
-    cwd: ctx.target.cwd,
-  })
-  if (code !== 0) throw new Error(`bin/cleanup exited ${code}: ${stderr}`)
-  if (stdout.trim()) ctx.report(stdout.trim())
+  const { ok } = await ctx.nudge('Your last ride ended in an error. Check where it stopped and continue.')
+  if (ok) ctx.report('asked the task to continue')
 }
 ```

@@ -58,6 +58,8 @@ export type TaskEvent = {
     | 'landed'
     | 'unlanded'
     | 'renamed'
+    // The project's cleanup command failed, so the worktree was kept.
+    | 'cleanup-failed'
     // The divider `lander relaunch` records when it seals the task's assistant
     // session so the next turn mints a fresh provider session (see sealForRelaunch).
     // Recorded twice for a scheduled relaunch: once at arm time carrying
@@ -149,7 +151,7 @@ export type PendingHook = {
   // the timestamp is belt — an id that could recur would silently dedupe a
   // genuine action into a no-op against a pruned action record.
   id: string
-  // landed | unlanded | wedged | unwedged | ride-ended | cleanup.
+  // landed | unlanded | wedged | unwedged | ride-ended.
   trigger: string
   // The principal that caused it: human | agent | task | system. An open set of
   // directory names, not a closed union — adding a principal must not mean
@@ -167,8 +169,8 @@ export type PendingHook = {
   done?: string[]
   // The path of the hook whose own action caused this fire, when one did.
   // Dispatch skips that hook for this entry and no other, which is what lets a
-  // hook-initiated landing chain into cleanup or self-review — the chaining the
-  // design wants — while the hook that landed the target is not woken by its own
+  // hook-initiated landing chain into another hook — the chaining the design
+  // wants — while the hook that landed the target is not woken by its own
   // landing.
   //
   // It covers the status crossings only. `ride-ended` fires are minted by
@@ -433,21 +435,6 @@ export function recordRideEnded(
   })
 }
 
-function filterFires(task: HookFireTask, keep: (f: PendingHook) => boolean): void {
-  if (!task.pendingHooks) return
-  task.pendingHooks = task.pendingHooks.filter(keep)
-  if (!task.pendingHooks.length) delete task.pendingHooks
-}
-
-// Settle a task's fires as it is archived. Only a `cleanup` fire survives:
-// the others describe a task that is still in use. A task archived without
-// having landed gets its cleanup fire here; a landed one already has one
-// pending, or has run it.
-export function recordArchiveFires(task: HookFireTask & { status: string }, at: string, by: string): void {
-  filterFires(task, (f) => f.trigger === 'cleanup')
-  if (task.status !== 'landed') recordHookFire(task, { trigger: 'cleanup', by, at })
-}
-
 // Whether a task is done with the checkout the daemon manages for it: landed or
 // archived, with no run or open ride, and no hook fires left to dispatch, since
 // a hook reads the task's checkout. The caller also rules out a live drainer,
@@ -607,7 +594,8 @@ export type EventItem = ItemCommon & {
   title?: string
   scheduledFor?: string
   awaiting?: { id: string; title: string }[]
-  // Why lander itself wedged the task, when it did (a watch that kept failing).
+  // Why lander itself wedged the task, when it did (a watch that kept failing),
+  // or why a cleanup command failed.
   reason?: string
   // The id of the user item this event delivered — a relaunch's brief, or the
   // notification on a 'notified' (always present there) — which the timeline
@@ -1419,13 +1407,9 @@ export function recordStatusTransition(
     delete task.watch
     delete task.watchState
     recordHookFire(task, { trigger: 'landed', by, at, ...cause })
-    recordHookFire(task, { trigger: 'cleanup', by, at, ...cause })
   } else if (prev === 'wedged' || prev === 'landed') {
     const eventKind = prev === 'wedged' ? 'unwedged' : 'unlanded'
     pushEventItem(task, { eventKind, title: task.title }, at)
-    // The task is working in its checkout again, so a cleanup still waiting
-    // from the landing would tear down what it is using.
-    if (prev === 'landed') filterFires(task, (f) => f.trigger !== 'cleanup')
     recordHookFire(task, { trigger: eventKind, by, at, ...cause })
     // A revived task's own last act was `lander wedge`/`lander land`, and its
     // resumed session remembers that and nothing else — so left alone it reports

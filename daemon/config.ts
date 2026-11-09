@@ -4,7 +4,8 @@
 // repository shared with a team has no say in whether lander runs its agents
 // in worktrees here.
 //
-//   { "projects": [ { "path": "~/code/app", "worktrees": true }, … ] }
+//   { "projects": [ { "path": "~/code/app", "worktrees": true,
+//                     "cleanup": ["bin/teardown", "--quiet"] }, … ] }
 //
 // Read by dev.mjs for the project list, and by the daemon for per-project
 // options. Pure apart from the file read, so the parse is testable on its own.
@@ -18,6 +19,11 @@ export type ProjectConfig = {
   path: string
   // Give each task its own git worktree under `<path>/.worktrees/<task id>`.
   worktrees: boolean
+  // Run from the project root, with the worktree's path appended, before a
+  // task's worktree is removed. A plain relative program resolves to the main
+  // checkout's copy, which matters because it runs unattended and agents can
+  // edit the worktree's copy.
+  cleanup?: string[]
 }
 
 export type LanderConfig = { projects: ProjectConfig[] }
@@ -56,14 +62,29 @@ export function parseConfig(
     projects: projects.map((entry, i): ProjectConfig => {
       if (!entry || typeof entry !== 'object' || Array.isArray(entry))
         return fail(`projects[${i}] must be an object`)
-      const { path: p, worktrees } = entry as { path?: unknown; worktrees?: unknown }
+      const { path: p, worktrees, cleanup } = entry as {
+        path?: unknown
+        worktrees?: unknown
+        cleanup?: unknown
+      }
       if (typeof p !== 'string' || !p.trim())
         return fail(`projects[${i}].path must be a non-empty string`)
       if (worktrees !== undefined && typeof worktrees !== 'boolean')
         return fail(`projects[${i}].worktrees must be true or false`)
+      if (
+        cleanup !== undefined &&
+        !(
+          Array.isArray(cleanup) &&
+          cleanup.length > 0 &&
+          cleanup.every((arg) => typeof arg === 'string' && arg)
+        )
+      )
+        return fail(`projects[${i}].cleanup must be a non-empty array of non-empty strings`)
+      const [command, ...args] = (cleanup ?? []) as string[]
       return {
         path: path.resolve(expandHome(p.trim(), home)),
         worktrees: worktrees === true,
+        ...(command ? { cleanup: [expandHome(command, home), ...args] } : {}),
       }
     }),
   }
@@ -103,7 +124,10 @@ export function devProjectPaths(args: string[], file: string = configPath()): st
 export function createProjectOptions(
   file: string = configPath(),
   log: (msg: string) => void = (msg) => console.error(msg),
-): { worktrees(projectPath: string): boolean } {
+): {
+  worktrees(projectPath: string): boolean
+  cleanup(projectPath: string): string[] | undefined
+} {
   let mtimeMs: number | undefined
   let config: LanderConfig | undefined
 
@@ -126,10 +150,13 @@ export function createProjectOptions(
     return config
   }
 
+  const project = (projectPath: string) => {
+    const resolved = path.resolve(projectPath)
+    return current()?.projects.find((p) => p.path === resolved)
+  }
+
   return {
-    worktrees(projectPath) {
-      const resolved = path.resolve(projectPath)
-      return !!current()?.projects.find((p) => p.path === resolved)?.worktrees
-    },
+    worktrees: (projectPath) => !!project(projectPath)?.worktrees,
+    cleanup: (projectPath) => project(projectPath)?.cleanup,
   }
 }

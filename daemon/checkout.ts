@@ -6,13 +6,14 @@
 //
 // Created detached at whatever the main checkout has checked out, when a ride
 // starts and finds none; removed, branches untouched, when the task is landed or
-// archived. Nothing here knows anything about any particular project.
+// archived. What a project needs done first is its own configured command.
 
 import { execFile } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { lstat, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { ChangedFile, CheckoutReport } from '../server/protocol'
+import { scrubbedEnv } from '../server/secrets'
 
 export const CHECKOUTS_DIR = '.worktrees'
 
@@ -94,6 +95,48 @@ export async function removeCheckout(
   for (const p of nested) await git(root, ['worktree', 'remove', '--force', '--force', p])
   await git(root, ['worktree', 'remove', '--force', '--force', dir])
   return true
+}
+
+const CLEANUP_TIMEOUT_MS = 120_000
+const CLEANUP_ERROR_CHARS = 2_000
+
+function runCleanup(
+  [command, ...args]: string[],
+  root: string,
+  dir: string,
+): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    execFile(
+      command,
+      [...args, dir],
+      {
+        cwd: root,
+        env: scrubbedEnv(),
+        maxBuffer: 1 << 20,
+        timeout: CLEANUP_TIMEOUT_MS,
+        killSignal: 'SIGKILL',
+      },
+      (err, _stdout, stderr) => {
+        if (!err) return resolve(undefined)
+        const why = err.killed ? 'timed out' : String(stderr).trim() || err.message
+        resolve(why.slice(-CLEANUP_ERROR_CHARS))
+      },
+    )
+  })
+}
+
+// A failed cleanup keeps the worktree because a retry may need it to exist.
+export async function cleanUpAndRemoveCheckout(
+  root: string,
+  taskId: string,
+  cleanup: string[] | undefined,
+  git: Git = gitRun,
+): Promise<{ removed: boolean; cleanupError?: string }> {
+  const dir = checkoutPath(root, taskId)
+  if (!existsSync(dir)) return { removed: false }
+  const cleanupError = cleanup && (await runCleanup(cleanup, root, dir))
+  if (cleanupError) return { removed: false, cleanupError }
+  return { removed: await removeCheckout(root, taskId, git) }
 }
 
 function worktreePaths(porcelain: string): string[] {

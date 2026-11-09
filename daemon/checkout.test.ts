@@ -8,6 +8,7 @@ import {
   checkoutPath,
   checkoutReport,
   createTaskLocks,
+  cleanUpAndRemoveCheckout,
   ensureCheckout,
   removeCheckout,
 } from './checkout'
@@ -53,6 +54,47 @@ describe('task checkouts', () => {
   it('refuses a directory in its place that is not a worktree', async () => {
     mkdirSync(path.join(root, '.worktrees', 't1'), { recursive: true })
     await expect(ensureCheckout(root, 't1')).rejects.toThrow(/is not a git worktree/)
+  })
+
+  describe('cleanUpAndRemoveCheckout', () => {
+    const script = (name: string, body: string) => {
+      mkdirSync(path.join(root, 'bin'), { recursive: true })
+      writeFileSync(path.join(root, 'bin', name), `#!/bin/sh\n${body}\n`, { mode: 0o755 })
+      return `bin/${name}`
+    }
+
+    it('runs the cleanup from the project root with the worktree appended, then removes it', async () => {
+      const dir = await ensureCheckout(root, 't1')
+      const log = path.join(root, 'cleanup.log')
+      const command = script('clean', `echo "$PWD $1 $2 $LANDER_DAEMON_TOKEN" > ${log}`)
+      process.env.LANDER_DAEMON_TOKEN = 'secret'
+      try {
+        expect(await cleanUpAndRemoveCheckout(root, 't1', [command, '--quiet'])).toEqual({
+          removed: true,
+        })
+      } finally {
+        delete process.env.LANDER_DAEMON_TOKEN
+      }
+      expect(execFileSync('cat', [log], { encoding: 'utf8' }).trim()).toBe(`${root} --quiet ${dir}`)
+      expect(existsSync(dir)).toBe(false)
+    })
+
+    it('keeps the worktree and says why when the cleanup fails', async () => {
+      const dir = await ensureCheckout(root, 't1')
+      const command = script('clean', 'echo database in use >&2; exit 3')
+      expect(await cleanUpAndRemoveCheckout(root, 't1', [command])).toEqual({
+        removed: false,
+        cleanupError: 'database in use',
+      })
+      expect(existsSync(dir)).toBe(true)
+    })
+
+    it('does not run the cleanup when there is no worktree', async () => {
+      const log = path.join(root, 'cleanup.log')
+      const command = script('clean', `touch ${log}`)
+      expect(await cleanUpAndRemoveCheckout(root, 't1', [command])).toEqual({ removed: false })
+      expect(existsSync(log)).toBe(false)
+    })
   })
 
   it('reports the branch checked out in it', async () => {

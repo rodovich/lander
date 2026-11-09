@@ -32,6 +32,7 @@ import type {
   CheckoutHints,
   ProjectGrantMessage,
   RegisterMessage,
+  CheckoutCleanupFailedMessage,
   ReleaseCheckoutMessage,
   TelemetryMessage,
 } from '../server/protocol'
@@ -47,6 +48,7 @@ import {
   createTaskLocks,
   ensureCheckout,
   removeCheckout,
+  cleanUpAndRemoveCheckout,
 } from './checkout'
 import { homedir } from 'node:os'
 import { createRunManager, type RunManagerMessage, type RunPaths } from './run'
@@ -98,7 +100,12 @@ const CAPS = providerCaps()
 let ws: WebSocket | null = null
 
 function send(
-  msg: RunManagerMessage | RegisterMessage | TelemetryMessage | ReplyMessage,
+  msg:
+    | RunManagerMessage
+    | RegisterMessage
+    | TelemetryMessage
+    | ReplyMessage
+    | CheckoutCleanupFailedMessage,
 ): void {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
 }
@@ -245,10 +252,19 @@ function releaseCheckout(msg: ReleaseCheckoutMessage): void {
   // project's worktrees off must not strand the ones it already has.
   releasesHeld++
   void checkoutLock(checkoutKey(msg.project, msg.taskId), () =>
-    removeCheckout(root, msg.taskId),
+    cleanUpAndRemoveCheckout(root, msg.taskId, projectOptions.cleanup(root)),
   )
-    .then((removed) => {
+    .then(({ removed, cleanupError }) => {
       if (removed) console.log(`removed worktree for ${msg.project}/${msg.taskId}`)
+      if (cleanupError) {
+        console.error(`cleanup failed for ${msg.project}/${msg.taskId}: ${cleanupError}`)
+        send({
+          type: 'checkout-cleanup-failed',
+          project: msg.project,
+          taskId: msg.taskId,
+          error: cleanupError,
+        })
+      }
     })
     .catch((e) => {
       console.error(

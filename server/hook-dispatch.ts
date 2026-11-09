@@ -63,9 +63,6 @@ type DispatchDeps = {
   run?: typeof requestHookRun
   // The base URL a host is told to call back on.
   api: string
-  // The pool the task file is in: `project.archiveDir` for an archived task's
-  // cleanup fire.
-  dir?: string
 }
 
 // Mutate one pending entry by id, under the task lock. Keyed by id rather than
@@ -161,15 +158,14 @@ async function dispatchTask(
   const now = deps.now ?? (() => new Date().toISOString())
   const resolve = deps.resolve ?? resolveProjectHooks
   const run = deps.run ?? requestHookRun
-  const dir = deps.dir ?? project.dataDir
-  const file = path.join(dir, `${id}.json`)
+  const file = path.join(project.dataDir, `${id}.json`)
   const lockKey = taskKey(project.slug, id)
 
   const task = await readTask<{
     pendingHooks?: PendingHook[]
     hookOrigin?: { path?: string; projectSlug?: string }
     spawnedBy?: string
-  }>(dir, id)
+  }>(project.dataDir, id)
   if (!task?.pendingHooks?.length) return
 
   for (const entry of [...task.pendingHooks]) {
@@ -177,7 +173,7 @@ async function dispatchTask(
     // the task's own checkout hints. AWAITED: spreading the promise would yield
     // no properties, silently resolve every fire at the project root, and
     // typecheck cleanly, because all three hints are optional.
-    const checkout = await taskCheckout(project, id, dir)
+    const checkout = await taskCheckout(project, id)
     // The task file is gone (moved between pools, deleted). Nothing to
     // dispatch for and nothing to report onto.
     if (!checkout) return
@@ -195,8 +191,8 @@ async function dispatchTask(
     // Two exemptions, and they are different questions. `hookOrigin` exempts a
     // hook from the whole life of a task it launched; `byHook` exempts it from
     // the single fire its own action caused — so a hook-initiated landing still
-    // reaches every OTHER hook, which is what lets one chain into cleanup or
-    // self-review while not waking the hook that landed the target.
+    // reaches the other hooks selected for it, while not waking the hook that
+    // landed the target.
     const originApplies =
       task.hookOrigin?.projectSlug === project.slug ||
       (task.hookOrigin?.projectSlug === undefined && task.spawnedBy === undefined)
@@ -227,7 +223,6 @@ async function dispatchTask(
         api: deps.api,
         run,
         now,
-        dir,
       })
       if (outcome === 'done') done.add(hook.path)
     }
@@ -259,14 +254,13 @@ async function dispatchOne(
     api: string
     run: typeof requestHookRun
     now: () => string
-    dir: string
   },
 ): Promise<'done' | 'hold'> {
   const lockKey = taskKey(project.slug, id)
   // Read the checkout BEFORE claiming anything: `readTask` can reject on an
   // unreadable file, and a throw between the claim and the try below would leak
   // a live credential and one of only four instance-wide concurrency slots.
-  const checkout = await taskCheckout(project, id, deps.dir)
+  const checkout = await taskCheckout(project, id)
 
   // Refuse a second live run of the same fire, and stay under the instance-wide
   // ceiling on concurrent hosts — each is a full Node process spawned by the

@@ -421,9 +421,8 @@ function buildCtx(input: HookHostInput, reports: string[]) {
     // deletes an armed trigger, which would make "a wrongly landed task is
     // revived by a reply" false in exactly the case a supervisor meets most.
     //
-    // Landing fires a `landed` trigger, so a landing can chain into cleanup or
-    // review; the fire records this hook as its cause, so it does not come back
-    // here.
+    // Landing fires a `landed` trigger, so a landing can chain into review; the
+    // fire records this hook as its cause, so it does not come back here.
     land(opts: { key?: string } = {}): Promise<HookActionResult> {
       return act('land', opts.key, (key) =>
         callServer(run, targetPath, {

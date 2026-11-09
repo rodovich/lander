@@ -17,6 +17,7 @@ export const EVENT_VERB: Record<EventItem['eventKind'], string> = {
   renamed: 'renamed',
   relaunched: 'relaunched',
   notified: 'received a notification',
+  'cleanup-failed': 'cleanup failed',
 }
 
 // A lifecycle event shown inline in the conversation: the task's name (as of
