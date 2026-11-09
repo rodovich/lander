@@ -40,17 +40,22 @@ export function spawnHostProcess(
 // host's group itself.
 export const HOST_STOP_GRACE_MS = 5_000
 
+export function signalProcessGroup(pid: number, signal: NodeJS.Signals): boolean {
+  try {
+    process.kill(-pid, signal)
+    return true
+  } catch {
+    return false
+  }
+}
+
 // SIGKILL a host's whole process group, falling back to the host alone when
 // the group signal isn't available.
 export function killProcessGroup(child: ChildProcess): void {
+  if (child.pid && signalProcessGroup(child.pid, 'SIGKILL')) return
   try {
-    if (child.pid) process.kill(-child.pid, 'SIGKILL')
-    else child.kill('SIGKILL')
-  } catch {
-    try {
-      child.kill('SIGKILL')
-    } catch {}
-  }
+    child.kill('SIGKILL')
+  } catch {}
 }
 
 // Write `input` to a child's stdin and close it, so a child that reads stdin to

@@ -11,7 +11,7 @@
 //          hosts and agent children this process spawns — see server/secrets.ts)
 
 import path from 'node:path'
-import { ROOT, isInside } from './paths'
+import { ROOT, isInside, isSafePathSegment } from './paths'
 import { realpath } from 'node:fs/promises'
 import { projectDirs, projectSlug } from '../server/projects'
 import {
@@ -355,8 +355,7 @@ function hookStateDir(slug: string): string {
   // The slug is the daemon's own (projectSlug strips everything but
   // [A-Za-z0-9._-]), but it reaches a path join, so refuse anything that could
   // walk out of the root rather than trusting provenance.
-  const safe = /^[A-Za-z0-9._-]+$/.test(slug) && slug !== '.' && slug !== '..'
-  return path.join(HOOK_STATE_ROOT, safe ? slug : 'unknown')
+  return path.join(HOOK_STATE_ROOT, isSafePathSegment(slug) ? slug : 'unknown')
 }
 
 // Fetch an attachment's bytes from the server's authed download endpoint,
