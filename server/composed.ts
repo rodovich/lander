@@ -4,7 +4,11 @@ import { randomBytes } from 'node:crypto'
 // fetch by id. One lost to a server restart is composed again.
 const TTL_MS = 24 * 60 * 60 * 1000
 
-type Draft = { message: string; at: number }
+// `managed` marks a message composed to launch a task the composing task will
+// manage, rather than one the user will work with.
+export type ComposedMessage = { message: string; managed?: true }
+
+type Draft = { draft: ComposedMessage; at: number }
 
 export function createComposedStore(now: () => number = Date.now) {
   const drafts = new Map<string, Draft>()
@@ -17,15 +21,15 @@ export function createComposedStore(now: () => number = Date.now) {
   }
 
   return {
-    put(project: string, task: string, message: string): string {
+    put(project: string, task: string, draft: ComposedMessage): string {
       prune()
       const id = randomBytes(6).toString('base64url')
-      drafts.set(key(project, task, id), { message, at: now() })
+      drafts.set(key(project, task, id), { draft, at: now() })
       return id
     },
-    get(project: string, task: string, id: string): string | undefined {
+    get(project: string, task: string, id: string): ComposedMessage | undefined {
       prune()
-      return drafts.get(key(project, task, id))?.message
+      return drafts.get(key(project, task, id))?.draft
     },
   }
 }

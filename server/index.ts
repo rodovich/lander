@@ -181,7 +181,7 @@ import { dispatchPendingHooks, hookDispatchInFlightFor } from './hook-dispatch'
 import { TITLE_MAX_CHARS, generateTitle } from './title'
 import { createSlowLog, fileWriter } from './slow-log'
 import { readStats } from './stats'
-import { createComposedStore } from './composed'
+import { createComposedStore, type ComposedMessage } from './composed'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const LANDER_BIN_DIR = path.join(ROOT, 'bin')
@@ -285,6 +285,9 @@ type Task = {
   // saved before this field existed (treated as "no known spawner").
   spawnedBy?: string
   spawnedByProject?: string
+  // Set when the spawner said it will manage this task rather than leave it to
+  // the user. `--await` sets it too, and unlike `notify`, it outlives the wake.
+  managed?: true
   // The hook that caused this task to exist, and the fire it acted on. Carried
   // ALONGSIDE spawnedBy rather than instead of it: they answer different
   // questions, and a hook-launched task has no spawning task at all — which is
@@ -2586,6 +2589,7 @@ app.post('/api/:project/tasks', async (c) => {
       time?: unknown
       after?: unknown
       await?: unknown
+      managed?: unknown
       flow?: unknown
       flowConfig?: unknown
       attachments?: unknown
@@ -2752,7 +2756,13 @@ app.post('/api/:project/tasks', async (c) => {
       // later land what it launched (see the PATCH land gate). A UI-started task
       // has no spawner.
       ...(principal.kind === 'task'
-        ? { spawnedBy: principal.id, spawnedByProject: principal.slug }
+        ? {
+            spawnedBy: principal.id,
+            spawnedByProject: principal.slug,
+            ...(body.managed === true || body.await === true
+              ? { managed: true as const }
+              : {}),
+          }
         : {}),
       // `--await`: wake the spawner once, when this task first finishes a turn
       // cleanly. Gated on a task principal because the target IS the principal —
@@ -3878,10 +3888,12 @@ app.post('/api/:project/tasks/:id/composed', async (c) => {
   if (!project) return c.json({ error: 'unknown project' }, 404)
   const id = c.req.param('id')
   if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
-  const body = await c.req.json<{ message?: unknown }>()
+  const body = await c.req.json<{ message?: unknown; managed?: unknown }>()
   const message = typeof body.message === 'string' ? body.message : ''
   if (!message.trim()) return c.json({ error: 'message is required' }, 400)
-  return c.json({ id: composed.put(project.slug, id, message) }, 201)
+  const draft: ComposedMessage =
+    body.managed === true ? { message, managed: true } : { message }
+  return c.json({ id: composed.put(project.slug, id, draft) }, 201)
 })
 
 app.get('/api/:project/tasks/:id/composed/:draft', (c) => {
@@ -3889,10 +3901,10 @@ app.get('/api/:project/tasks/:id/composed/:draft', (c) => {
   if (!project) return c.json({ error: 'unknown project' }, 404)
   const id = c.req.param('id')
   if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
-  const message = composed.get(project.slug, id, c.req.param('draft'))
-  if (message === undefined)
+  const draft = composed.get(project.slug, id, c.req.param('draft'))
+  if (draft === undefined)
     return c.json({ error: 'no such composed message; compose it again' }, 404)
-  return c.json({ message })
+  return c.json(draft)
 })
 
 app.post('/api/:project/tasks/:id/messages', async (c) => {

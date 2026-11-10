@@ -52,7 +52,11 @@ function execLander(args: string[]): Promise<{ stdout: string; stderr: string; c
 }
 
 const COMPOSED = '/api/proj/tasks/task-1/composed/'
-const DRAFTS: Record<string, string> = { hi: 'say hi', go: 'go ahead' }
+const DRAFTS: Record<string, { message: string; managed?: true }> = {
+  hi: { message: 'say hi' },
+  go: { message: 'go ahead' },
+  probe: { message: 'run the probe', managed: true },
+}
 
 beforeAll(async () => {
   server = createServer((req, res) => {
@@ -63,7 +67,7 @@ beforeAll(async () => {
         'content-type': 'application/json',
       })
       if (req.method === 'GET' && req.url?.startsWith(COMPOSED)) {
-        res.end(JSON.stringify({ message: DRAFTS[req.url.slice(COMPOSED.length)] }))
+        res.end(JSON.stringify(DRAFTS[req.url.slice(COMPOSED.length)]))
         return
       }
       lastBody = raw ? JSON.parse(raw) : undefined
@@ -164,5 +168,38 @@ describe('lander launch --await', () => {
   it('combines with --after, which still takes its own value', async () => {
     await execLander(['launch', '--await', '--after', 'abc123', '--composed', 'go'])
     expect(lastBody).toMatchObject({ await: true, after: ['abc123'], message: 'go ahead' })
+  })
+})
+
+describe('lander compose --managed', () => {
+  it('composes the message as managed and skips the check against the user request', async () => {
+    const { stdout, code } = await execLander(['compose', '--managed', 'run the probe'])
+    expect(code).toBe(0)
+    expect(lastBody).toMatchObject({ message: 'run the probe', managed: true })
+    expect(stdout).not.toContain('what the user requested')
+  })
+
+  it('composes without managed, and with the check, when the flag is absent', async () => {
+    const { stdout } = await execLander(['compose', 'fix the bug'])
+    expect(lastBody?.message).toBe('fix the bug')
+    expect(lastBody?.managed).not.toBe(true)
+    expect(stdout).toContain('what the user requested')
+  })
+
+  it('launches a managed draft as managed', async () => {
+    await execLander(['launch', '--composed', 'probe'])
+    expect(lastBody).toMatchObject({ managed: true, message: 'run the probe' })
+  })
+
+  it('launches an unmanaged draft without managed', async () => {
+    await execLander(['launch', '--composed', 'hi'])
+    expect(lastBody?.managed).not.toBe(true)
+  })
+
+  it('refuses to send a managed draft, which skipped the check against the user request', async () => {
+    const { stderr, code } = await execLander(['send', 'other-task', '--composed', 'probe'])
+    expect(code).not.toBe(0)
+    expect(stderr).toContain('composed with --managed')
+    expect(lastBody).toBeUndefined()
   })
 })

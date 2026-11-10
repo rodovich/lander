@@ -1837,6 +1837,7 @@ describe('server task provider behavior', () => {
     expect(child.spawnedBy).toBe(parent.id)
   })
 
+
   it('honors an explicit flow over the parent driver', async () => {
     const parent = await createTask('Codex parent')
     const raw = JSON.parse(
@@ -2491,6 +2492,18 @@ describe('acting task coordination history', () => {
     })
     const plainId = ((await plain.json()) as { id: string }).id
     expect((await rawTask(plainId)).notify).toBeUndefined()
+  })
+
+  it.each([
+    ['managed', { managed: true }, true],
+    ['awaited', { await: true }, true],
+    ['independent', {}, undefined],
+  ])('records whether a %s child is managed', async (_label, flags, expected) => {
+    const actor = await createTask('Managing launcher')
+    const child = await launchAs(actor.id, slug, { title: 'Child', ...flags })
+    expect(child.status).toBe(201)
+    const childId = ((await child.json()) as { id: string }).id
+    expect((await rawTask(childId)).managed).toBe(expected)
   })
 
   // A human launching from the UI is not a task, so there is nobody to wake.
