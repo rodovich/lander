@@ -192,9 +192,20 @@ function isAgyDenial(message: string | undefined): boolean {
 // `denied_actions` names only the action kind, so when the stream reports a
 // refused call as a plain DONE, or the call was a subagent's, the debug log is
 // the only record of which call agy refused.
-export function agyLogRefusals(log: string): { conversation: string; step: number }[] {
-  return [...log.matchAll(/Tool confirmation for conversation (\S+) step (\d+) \([^)]*approved=false\)/g)]
-    .map((m) => ({ conversation: m[1], step: Number(m[2]) }))
+export function agyLogRefusals(log: string): { conversation: string; step: number; at: number }[] {
+  return [...log.matchAll(/^[IWEF](\d{4} [\d:.]+) .*Tool confirmation for conversation (\S+) step (\d+) \([^)]*approved=false\)/gm)]
+    .map((m) => ({ conversation: m[2], step: Number(m[3]), at: glogTime(m[1]) }))
+}
+
+// glog stamps a line with local month, day and time but no year:
+// "1110 12:34:03.332264".
+function glogTime(stamp: string): number {
+  const [, month, day, h, min, s, frac] = /^(\d\d)(\d\d) (\d\d):(\d\d):(\d\d)\.(\d+)$/.exec(stamp) ?? []
+  const now = new Date()
+  const at = (year: number) =>
+    new Date(year, Number(month) - 1, Number(day), Number(h), Number(min), Number(s), Number(frac?.slice(0, 3).padEnd(3, '0'))).getTime()
+  const sameYear = at(now.getFullYear())
+  return sameYear > now.getTime() + 86_400_000 ? at(now.getFullYear() - 1) : sameYear
 }
 
 // `init` names the model only when `--model` was passed. Otherwise the debug log
@@ -470,8 +481,11 @@ export type AgyRefusal =
 export function agyRepromptMessage(refusals: AgyRefusal[]): string {
   const n = refusals.length
   const one = n === 1
+  const opening = refusals.every((r) => r.in === 'subagent')
+    ? 'Your turn ended after Antigravity refused'
+    : 'Antigravity ended your turn because it refused'
   const lines = [
-    `[lander] Antigravity ended your turn because it refused ${one ? 'a call' : `${n} calls`} needing a permission the user has not granted.` +
+    `[lander] ${opening} ${one ? 'a call' : `${n} calls`} needing a permission the user has not granted.` +
       ` No allow rule covered ${one ? 'that call' : 'those calls'}; your goal may still be fine.` +
       ` You may reach it with a command the user has already allowed for that purpose, but not by running ${one ? 'the' : 'a'} refused command through another shell, interpreter, script, or wrapper.`,
   ]
@@ -479,7 +493,7 @@ export function agyRepromptMessage(refusals: AgyRefusal[]): string {
     if (r.in === 'turn' && !r.seen)
       lines.push(`- Your ${r.tool} call \`${r.input}\` was refused. Its result says it was canceled.`)
     else if (r.in === 'subagent')
-      lines.push(`- A ${r.action} call by your subagent (conversation ${r.conversation}) was refused. Antigravity stopped the subagent when it ended your turn.`)
+      lines.push(`- A ${r.action} call by your subagent (conversation ${r.conversation}) was refused.`)
     else if (r.in === 'unknown')
       lines.push(`- Antigravity did not say which ${r.action} call it refused.`)
   }
@@ -563,6 +577,7 @@ async function reduceAgy(
   let producedOutput = false
   let lastStepDone = false
   let maxStep = -1
+  let lastToolAt = -Infinity
   let deniedActions: NonNullable<AgyEvent['denied_actions']> = []
   let terminalError: string | undefined
   let stderr = ''
@@ -685,6 +700,7 @@ async function reduceAgy(
           entry = { handle, name, input: call.input, action: ruleInfo?.action }
           tools.set(event.step_index, entry)
         }
+        lastToolAt = Date.now()
         if (event.state !== 'ACTIVE') {
           const command = entry.name === 'run_command' && info?.output !== undefined
             ? agyCommandResult(info.output)
@@ -753,9 +769,7 @@ async function reduceAgy(
     const refusedSteps = new Set(
       logged.filter((r) => r.conversation === conversationId).map((r) => r.step),
     )
-    const subagents = logged
-      .filter((r) => r.conversation !== conversationId)
-      .map((r) => r.conversation)
+    const subagents = logged.filter((r) => r.conversation !== conversationId)
     const recorded = [...tools].reverse()
     for (const denied of deniedActions) {
       const action =
@@ -771,7 +785,10 @@ async function reduceAgy(
         refusals.push({ in: 'turn', tool: target.name, input: target.input, seen: !!target.denied })
       } else if (subagent) {
         ctx.emit.notice(`Antigravity refused a ${name} call in a subagent.`)
-        refusals.push({ in: 'subagent', action: name, conversation: subagent })
+        // agy lists a subagent's refusal in the turn's result even when the
+        // parent kept working after it.
+        if (subagent.at > lastToolAt)
+          refusals.push({ in: 'subagent', action: name, conversation: subagent.conversation })
       } else {
         ctx.emit.notice(
           `Antigravity denied a ${name} call this turn without saying which one.`,

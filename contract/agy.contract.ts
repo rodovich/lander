@@ -281,8 +281,30 @@ describe.skipIf(!VERSION)(`agy contract (${VERSION})`, () => {
       { action: 'command', display_name: 'RunCommand' },
     ])
     expect(agyLogRefusals(readFileSync(logFile, 'utf8'))).toEqual([
-      { conversation: step.conversation_id, step: step.step_index },
+      { conversation: step.conversation_id, step: step.step_index, at: expect.any(Number) },
     ])
+  })
+
+  it('lets the turn run on past a subagent\'s refusal without prompting the agent again', async () => {
+    const root = testRoot()
+    const after = path.join(root, 'after.txt')
+    const turn = await driveLive(flow, {
+      root,
+      prompt: [
+        'Do these steps in order and continue to the next step whatever happens.',
+        '1. Start one subagent whose only task is to call run_command with CommandLine "echo subagent-probe" and then report what happened.',
+        '2. Wait until that subagent has reported back or is no longer active, checking with manage_subagents.',
+        `3. Call write_to_file yourself to create ${after} with content "after".`,
+        '4. Reply "done".',
+      ].join('\n'),
+    })
+
+    const items = (turn.task.items ?? []) as { kind: string; text?: string }[]
+    expect(items.filter((it) => it.kind === 'notice').map((it) => it.text)).toContain(
+      'Antigravity refused a RunCommand call in a subagent.',
+    )
+    expect(existsSync(after)).toBe(true)
+    expect(items.filter((it) => it.kind === 'reprompt')).toEqual([])
   })
 
   it('finishes a command when it moves to the background, and reports its kill on manage_task', async () => {

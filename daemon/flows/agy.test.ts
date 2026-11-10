@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import {
+  agyLogRefusals,
   agyUsageBody,
   agyProjectFile,
   agyProjectId,
@@ -36,8 +37,12 @@ const flow = (doc: string | undefined = 'Project instructions', log?: string) =>
   geminiConfigDir,
   readAgyLog: () => log,
 })
-const refusalLine = (conversation: string, step: number) =>
-  `I1019 11:03:49.944734     920 server.go:2611] Tool confirmation for conversation ${conversation} step ${step} (type=*gemini_coder_go_proto.Step_Generic approved=false)\n`
+const glogStamp = (at: Date) => {
+  const pad = (n: number, width = 2) => String(n).padStart(width, '0')
+  return `${pad(at.getMonth() + 1)}${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}.${pad(at.getMilliseconds(), 3)}000`
+}
+const refusalLine = (conversation: string, step: number, at = new Date(2026, 9, 19, 11, 3, 49, 944)) =>
+  `I${glogStamp(at)}     920 server.go:2611] Tool confirmation for conversation ${conversation} step ${step} (type=*gemini_coder_go_proto.Step_Generic approved=false)\n`
 const fixture = (
   chunks: string[][] = [],
   flowState?: Record<string, unknown>,
@@ -708,19 +713,6 @@ it('marks refused tool calls blocked from their denial error or agy\'s log, pres
       },
     ])
 
-    const itemsSubagent = await turnItems([
-      init('conv-3'),
-      toolStep(2, 'invoke_subagent', { Subagents: [{ TypeName: 'self', Role: 'Probe Runner' }] }),
-      result({
-        response: 'Waiting for the subagent.',
-        denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
-      }),
-    ], refusalLine('sub-conv', 2))
-    expect(notices(itemsSubagent)).toEqual([
-      'Antigravity refused a RunCommand call in a subagent.',
-    ])
-    expect(blockedRequests(itemsSubagent)).toEqual([])
-
     const deniedBeforeLaterCommands = fixture([[
       init('conv-4'),
       ...[
@@ -806,6 +798,62 @@ it('prompts the agent again with only what it can\'t see, for as long as agy kee
   }
 })
 
+it('prompts the agent again for a subagent\'s refusal only when it made no call after it', async () => {
+  const env = { LANDER_API: 'http://api.test', LANDER_PROJECT: 'proj', LANDER_TASK: 'task-1', LANDER_TOKEN: 'tok' }
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, statusText: 'OK', json: async () => ({}) }) as Response))
+  const refusedAt = new Date(2026, 9, 19, 11, 3, 49, 944)
+  vi.useFakeTimers({ toFake: ['Date'] })
+  try {
+    const drive = async (callsAt: Date) => {
+      vi.setSystemTime(callsAt)
+      const g = fixture([[
+        init('conv-s'),
+        toolStep(2, 'invoke_subagent', { Subagents: [{ TypeName: 'self', Role: 'Probe Runner' }] }),
+        toolStep(3, 'manage_subagents', { Action: 'list' }),
+        result({
+          response: 'Done',
+          denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
+        }),
+      ]])
+      g.start = { ...g.start, env }
+      g.later = [{ chunks: [[result({ response: 'Done' })]] }]
+      const driven = await driveFlow(g, flow(undefined, refusalLine('sub-conv', 2, refusedAt)))
+      const items = (applyEvents(goldenInput(g).start, driven.events).items ?? []) as (BlockedItem & { text?: string })[]
+      return { spawns: driven.spawns, kinds: items.map((it) => it.kind), items }
+    }
+
+    const carriedOn = await drive(new Date(refusedAt.getTime() + 1000))
+    expect(carriedOn.spawns).toHaveLength(1)
+    expect(carriedOn.kinds).not.toContain('reprompt')
+    expect(carriedOn.items).toContainEqual(expect.objectContaining({
+      kind: 'notice', text: 'Antigravity refused a RunCommand call in a subagent.',
+    }))
+    expect(blockedRequests(carriedOn.items)).toEqual([])
+
+    const stopped = await drive(new Date(refusedAt.getTime() - 1000))
+    expect(stopped.spawns).toHaveLength(2)
+    expect(stopped.spawns[1].args.slice(0, 2)).toEqual([
+      '-p', agyRepromptMessage([{ in: 'subagent', action: 'RunCommand', conversation: 'sub-conv' }]),
+    ])
+  } finally {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  }
+})
+
+it('dates a refusal logged before New Year in the year before', () => {
+  const refusedAt = new Date(2026, 11, 31, 23, 59, 58, 944)
+  vi.useFakeTimers({ toFake: ['Date'] })
+  try {
+    vi.setSystemTime(new Date(2027, 0, 1, 0, 0, 5))
+    expect(agyLogRefusals(refusalLine('conv-y', 4, refusedAt))).toEqual([
+      { conversation: 'conv-y', step: 4, at: refusedAt.getTime() },
+    ])
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
 it('records the model named in the debug log when the stream names none', async () => {
   const usage = { input_tokens: 100, output_tokens: 10 }
   const line = (label: string) =>
@@ -838,8 +886,12 @@ it('states each kind of refusal the agent can\'t place for itself, and nothing a
     { in: 'unknown', action: 'WriteToFile' },
   ])).toBe([
     '[lander] Antigravity ended your turn because it refused 3 calls needing a permission the user has not granted. No allow rule covered those calls; your goal may still be fine. You may reach it with a command the user has already allowed for that purpose, but not by running a refused command through another shell, interpreter, script, or wrapper.',
-    '- A RunCommand call by your subagent (conversation sub-1) was refused. Antigravity stopped the subagent when it ended your turn.',
+    '- A RunCommand call by your subagent (conversation sub-1) was refused.',
     '- Antigravity did not say which WriteToFile call it refused.',
+  ].join('\n'))
+  expect(agyRepromptMessage([{ in: 'subagent', action: 'RunCommand', conversation: 'sub-1' }])).toBe([
+    '[lander] Your turn ended after Antigravity refused a call needing a permission the user has not granted. No allow rule covered that call; your goal may still be fine. You may reach it with a command the user has already allowed for that purpose, but not by running the refused command through another shell, interpreter, script, or wrapper.',
+    '- A RunCommand call by your subagent (conversation sub-1) was refused.',
   ].join('\n'))
   expect(agyRepromptMessage([{ in: 'turn', tool: 'run_command', input: 'git push', seen: false }])).toBe([
     '[lander] Antigravity ended your turn because it refused a call needing a permission the user has not granted. No allow rule covered that call; your goal may still be fine. You may reach it with a command the user has already allowed for that purpose, but not by running the refused command through another shell, interpreter, script, or wrapper.',
