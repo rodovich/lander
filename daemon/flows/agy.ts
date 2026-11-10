@@ -223,7 +223,7 @@ function agyErrorStep(stderr: string): number | undefined {
 // agy streams a command's result only as the text it gives the model, so the
 // exit code has to be read out of it.
 const COMMAND_RESULT =
-  /^(?:The tool's output was truncated[^\n]*\n\nHere is a preview[^\n]*\n)?Command exited with code (\d+)\.\n\n(?:No output from the command\.|Command output:\n([\s\S]*))$/
+  /^(?:The tool's output was truncated[^\n]*\n\nHere is a preview[^\n]*\n)?(?:Created At: [^\n]*\n)?(?:Completed At: [^\n]*\n)?Command exited with code (\d+)\.\n\n(?:No output from the command\.|Command output:\n([\s\S]*))$/
 
 function agyCommandResult(text: string): { exitCode: number; output: string } | undefined {
   const m = COMMAND_RESULT.exec(text)

@@ -316,18 +316,24 @@ it('shows a command\'s output without agy\'s exit-code header, and fails it on a
     done(2, 'Command exited with code 3.\n\nCommand output:\nout\r\nerr\r\n'),
     done(3, 'Command exited with code 0.\n\nNo output from the command.'),
     done(4, 'The tool\'s output was truncated due to being too long. You can find the full output in a file at file:///brain/c/.system_generated/steps/6/output.txt.\n\nHere is a preview with the middle of the output truncated:\nCommand exited with code 0.\n\nCommand output:\n1\r\n2\r\n3\r\n4\r\n\n<truncated 19049 of 28939 bytes from the middle of the output>\n\n5000\r\n'),
+    // agy 1.5.5 and later
+    done(5, 'Created At: 2026-11-10T13:06:08-06:00\nCompleted At: 2026-11-10T13:06:10-06:00\nCommand exited with code 3.\n\nCommand output:\nexit-probe\r\n'),
+    done(6, 'Created At: 2026-11-10T13:06:18-06:00\nCompleted At: 2026-11-10T13:06:18-06:00\nCommand exited with code 0.\n\nNo output from the command.'),
+    done(7, 'The tool\'s output was truncated due to being too long. You can find the full output in a file at file:///brain/c/.system_generated/steps/6/output.txt.\n\nHere is a preview with the middle of the output truncated:\nCreated At: 2026-11-10T13:06:24-06:00\nCompleted At: 2026-11-10T13:06:25-06:00\nCommand exited with code 0.\n\nCommand output:\n1\r\n2\r\n3\r\n4\r\n\n<truncated 19049 of 28939 bytes from the middle of the output>\n\n5000\r\n'),
     result(),
   ]])
   const driven = await driveFlow(g, flow())
   const items = (applyEvents(goldenInput(g).start, driven.events).items ?? []) as { kind: string; status?: string; output?: string }[]
   const tools = items.filter((it) => it.kind === 'tool')
-  expect(tools.slice(0, 3).map((it) => [it.status, it.output])).toEqual([
+  expect(tools.map((it) => [it.status, it.output])).toEqual([
     ['ok', 'lander-ok'],
     ['failed', 'Exit code 3\nout\r\nerr'],
     ['ok', undefined],
+    ['ok', expect.stringMatching(/^1\r\n2\r\n/)],
+    ['failed', 'Exit code 3\nexit-probe'],
+    ['ok', undefined],
+    ['ok', expect.stringMatching(/^1\r\n2\r\n/)],
   ])
-  expect(tools[3].status).toBe('ok')
-  expect(tools[3].output).toMatch(/^1\r\n2\r\n/)
 })
 
 it('formats tool inputs, permission rules, file-edit diffs, subagent summaries, and truncated outputs', async () => {
