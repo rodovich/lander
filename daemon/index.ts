@@ -61,6 +61,7 @@ import {
 } from './checkout'
 import { homedir } from 'node:os'
 import { createRunManager, type RunManagerMessage, type RunPaths } from './run'
+import type { TaskApp } from './host-protocol'
 import { createDrain } from './drain'
 import { HOST_STOP_GRACE_MS } from './processes'
 import { createWakeHold } from './power'
@@ -325,12 +326,14 @@ function releaseCheckout(msg: ReleaseCheckoutMessage): void {
 function resolveRunPaths(msg: StartRunMessage, caps: ProviderCaps): RunPaths {
   const root = pathBySlug.get(msg.project)
   if (!root) throw new Error(`daemon serves no project for slug ${msg.project}`)
+  const app = runningApp(msg.project, msg.taskId)
+  const withApp = app ? { app } : {}
   if (projectOptions.worktrees(root)) {
     const checkout = checkoutPath(root, msg.taskId)
-    return { root, cwd: checkout, checkout }
+    return { root, cwd: checkout, checkout, ...withApp }
   }
   const launch = caps.resolveLaunchDir({ root, recordedCwd: msg.recordedCwd, isDir })
-  return { root, cwd: launch.cwd }
+  return { root, cwd: launch.cwd, ...withApp }
 }
 
 // Which checkout a hook resolution reads, or a watcher works in. The tree
@@ -589,6 +592,18 @@ function startRun(msg: StartRunMessage): void {
   // would land squarely in it.
   wake.hold()
   runManager.startRun(msg)
+}
+
+// From the registry rather than the port, so a turn never waits on it. An app
+// still starting counts, because the agent should leave it alone either way.
+function runningApp(project: string, taskId: string): TaskApp | undefined {
+  try {
+    const url = apps.runningUrl(project, appContext(project, taskId).key)
+    return url ? { url } : undefined
+  } catch (e) {
+    console.error(`could not describe the app for ${project}/${taskId}:`, e)
+    return undefined
+  }
 }
 
 async function grantProject(

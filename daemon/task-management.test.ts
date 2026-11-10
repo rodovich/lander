@@ -10,6 +10,7 @@ import {
   deliveryDigest,
   fillTaskPrompt,
   prepareUserMessagePrompt,
+  taskContextParts,
   watchersPart,
 } from './task-management'
 
@@ -91,6 +92,49 @@ describe('watchersPart', () => {
     expect(prepareUserMessagePrompt(ctx, opts).prompt).not.toContain('`gh-pr-activity`')
     ctx.task.watchers = []
     expect(prepareUserMessagePrompt(ctx, opts).prompt).toContain('No watchers are enabled anymore')
+  })
+})
+
+describe('the app part', () => {
+  it('says nothing about an app that was never reported running', () => {
+    expect(changedContextParts([], undefined, undefined).send).toEqual([])
+    expect(changedContextParts([], 's', {}).send).toEqual([])
+  })
+
+  it('is among the parts a Claude turn gets', () => {
+    const parts = taskContextParts(
+      { cwd: '/repo', root: '/repo', app: { url: 'http://localhost:5173' } },
+      () => undefined,
+    )
+    expect(parts.map((p) => p.key)).toEqual(['app'])
+  })
+
+  it('tells the agent about a running app, then once that it has stopped', () => {
+    const store: Record<string, unknown> = {}
+    const ctx: {
+      task: { taskId: string; root: string; app?: { url: string } }
+      turn: { prompts: string[] }
+      state: { get: (p: string[]) => unknown; set: (p: string[], v: unknown) => void }
+    } = {
+      task: { taskId: 't1', root: '/repo', app: { url: 'http://localhost:3860' } },
+      turn: { prompts: ['go'] },
+      state: {
+        get: (p) => store[p[0]],
+        set: (p, v) => void (store[p[0]] = v),
+      },
+    }
+    const opts = { sessionId: 'thread-1', taskPromptTemplate: TEMPLATE, readProjectDoc: () => undefined }
+    const running = prepareUserMessagePrompt(ctx, opts)
+    expect(running.prompt).toContain(
+      "This checkout's app is running at http://localhost:3860, started by the user through lander.",
+    )
+    running.commitDelivered()
+    expect(prepareUserMessagePrompt(ctx, opts).prompt).not.toContain('localhost:3860')
+    delete ctx.task.app
+    const stopped = prepareUserMessagePrompt(ctx, opts)
+    expect(stopped.prompt).toContain('is no longer running')
+    stopped.commitDelivered()
+    expect(prepareUserMessagePrompt(ctx, opts).prompt).not.toContain('no longer running')
   })
 })
 

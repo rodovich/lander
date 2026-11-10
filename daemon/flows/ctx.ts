@@ -33,7 +33,7 @@ import type {
   WatcherMeta,
 } from '../../server/protocol'
 import type { Step, Usage } from '../../shared/stream'
-import type { HostEvent, HostInput, SpawnLike } from '../host-protocol'
+import type { HostEvent, HostInput, SpawnLike, TaskApp } from '../host-protocol'
 import type { ContextUpdate } from '../../shared/context'
 import { isAssistProvider, runAssist } from '../assist'
 import { taskApiHeaders } from '../task-api'
@@ -154,6 +154,7 @@ export type CtxTask = {
   recordedCwd?: string
   allow?: string[]
   watchers?: WatcherMeta[]
+  app?: TaskApp
   // The run env (LANDER_API/TOKEN/TASK…). The flow merges this into its child
   // env; ctx.spawn merges the result over process.env.
   env: Record<string, string>
@@ -458,7 +459,7 @@ export function createCtxRuntime(
   input: HostInput,
   deps: CtxRuntimeDeps,
 ): CtxRuntime {
-  const { start, root, cwd, checkout, materialized } = input
+  const { start, root, cwd, checkout, app, materialized } = input
   const emitEvent = deps.emit
   const now = deps.now ?? (() => new Date().toISOString())
   const spawnFn = deps.spawn ?? nodeSpawn
@@ -1060,6 +1061,7 @@ export function createCtxRuntime(
         : {}),
       ...(start.task.allow !== undefined ? { allow: start.task.allow } : {}),
       ...(start.task.watchers !== undefined ? { watchers: start.task.watchers } : {}),
+      ...(app !== undefined ? { app } : {}),
       env: start.env,
       // The task's opaque per-flow config, echoed by the server from the task
       // and handed to the flow verbatim. Absent when the task carries none.

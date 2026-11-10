@@ -5,6 +5,8 @@ import type { StartRunMessage, StatePatchOp } from '../server/protocol'
 import type { Step, Usage } from '../shared/stream'
 import type { MaterializedFiles } from './attachments'
 
+export type TaskApp = { url: string }
+
 export type HostInput = {
   start: StartRunMessage
   root: string
@@ -12,6 +14,9 @@ export type HostInput = {
   // The git worktree the daemon manages for this task, when its project enables
   // them — also `cwd`, since the run launches inside it. Absent otherwise.
   checkout?: string
+  // The app lander is running from where the task works, its worktree or the
+  // project root, which the agent is told about.
+  app?: TaskApp
   // LANDER_FILES_DIR — the persistent per-task store, resolved daemon-side (a pure
   // function of project/task, with the just-materialized dir as a fallback).
   filesDir?: string

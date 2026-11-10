@@ -348,6 +348,11 @@ export function createAppManager(deps: AppManagerDeps) {
       update(entry, { leaseUntil: Math.max(entry.leaseUntil, now() + ms) })
   }
 
+  function runningUrl(project: string, key: string): string | undefined {
+    const entry = get(project, key)
+    return entry?.state === 'running' ? deps.resolveUrl(entry) : undefined
+  }
+
   function hold(project: string, key: string, ms: number): void {
     const entry = get(project, key)
     if (entry?.state === 'running') update(entry, { heldUntil: now() + ms })
@@ -360,6 +365,7 @@ export function createAppManager(deps: AppManagerDeps) {
     sweep,
     extend,
     hold,
+    runningUrl,
     get,
     list: read,
     logFile,

@@ -16,7 +16,7 @@ import type {
 import type { MaterializedFiles } from './attachments'
 import { checkoutReport as readCheckoutReport, gitWithin } from './checkout'
 import { ROOT } from './paths'
-import type { HostEvent, HostInput } from './host-protocol'
+import type { HostEvent, HostInput, TaskApp } from './host-protocol'
 import {
   endStdin,
   HOST_STOP_GRACE_MS,
@@ -95,6 +95,7 @@ export type RunPaths = {
   root: string
   cwd: string
   checkout?: string
+  app?: TaskApp
 }
 
 export type RunManagerOptions = {
@@ -329,6 +330,7 @@ export function createRunManager({
       root: paths.root,
       cwd: paths.cwd,
       ...(paths.checkout ? { checkout: paths.checkout } : {}),
+      ...(paths.app ? { app: paths.app } : {}),
       filesDir,
       materialized,
     }

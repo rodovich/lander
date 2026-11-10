@@ -67,7 +67,10 @@ export function resolveProjectDoc(
 export type ContextPart = { key: string; text: string; everyTurn?: true }
 
 export function taskContextParts(
-  task: Pick<Ctx['task'], 'allow' | 'cwd' | 'recordedCwd' | 'checkout' | 'root' | 'watchers'>,
+  task: Pick<
+    Ctx['task'],
+    'allow' | 'cwd' | 'recordedCwd' | 'checkout' | 'root' | 'watchers' | 'app'
+  >,
   gitContext: (cwd: string) => string | undefined,
 ): ContextPart[] {
   const parts: ContextPart[] = []
@@ -100,9 +103,24 @@ export function taskContextParts(
       text: manualCdHint(task.root, task.recordedCwd),
       everyTurn: true,
     })
-  const watchers = watchersPart(task)
-  if (watchers) parts.push(watchers)
+  parts.push(...sharedParts(task))
   return parts
+}
+
+// The parts every flow's prompt draws on, whichever way the flow builds it.
+function sharedParts(task: Pick<Ctx['task'], 'watchers' | 'app'>): ContextPart[] {
+  return [watchersPart(task), appPart(task)].filter((p) => p !== undefined)
+}
+
+function appPart(task: Pick<Ctx['task'], 'app'>): ContextPart | undefined {
+  if (!task.app) return undefined
+  return {
+    key: 'app',
+    text:
+      `This checkout's app is running at ${task.app.url}, started by the user through ` +
+      'lander. Use it rather than starting another copy. If it needs restarting, ask ' +
+      'the user to restart it from the task header.',
+  }
 }
 
 // The watchers the user has enabled, with what each takes.
@@ -139,6 +157,7 @@ function manualCdHint(root: string, recordedCwd: string): string {
 // just stops being sent.
 const GONE: Record<string, string> = {
   watchers: 'No watchers are enabled anymore; `lander ride --watch` will refuse.',
+  app: "The app the user started through lander for this checkout is no longer running.",
 }
 
 // A record in its older form, the whole block as one string, counts as none.
@@ -198,7 +217,7 @@ export function turnPromptParts(
 
 export function prepareUserMessagePrompt(
   ctx: {
-    task: Pick<Ctx['task'], 'taskId' | 'root' | 'checkout' | 'watchers'>
+    task: Pick<Ctx['task'], 'taskId' | 'root' | 'checkout' | 'watchers' | 'app'>
     turn: Parameters<typeof turnPromptParts>[0]
     state: Pick<Ctx['state'], 'get' | 'set'>
   },
@@ -227,9 +246,8 @@ export function prepareUserMessagePrompt(
   const sendDoc =
     docDigest !== undefined &&
     shouldDeliver(sessionId, ctx.state.get(['landerDoc']), docDigest)
-  const watchers = watchersPart(ctx.task)
   const context = changedContextParts(
-    watchers ? [watchers] : [],
+    sharedParts(ctx.task),
     sessionId,
     ctx.state.get(['contextParts']),
   )
