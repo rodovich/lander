@@ -36,9 +36,20 @@ A project entry with `"worktrees": true` gives each of its tasks a git worktree 
 
 A project entry can also set `"cleanup": ["bin/drop-worktree-dbs"]`, a program and its arguments, to tear down what a worktree leaves behind. Just before removing a task's worktree, the daemon runs it without a shell, from the project root, with the worktree's path appended. A relative program therefore resolves to the main checkout's copy, not the one the agent could edit. It has 120 seconds. If it fails, the worktree is kept and the error appears on the task's timeline; un-landing and landing the task again, or archiving it, retries.
 
-A project entry can set `"app": { "url": "http://localhost:${PORT}", "envFile": ".env.local" }` to show a link to the app running from a task's checkout. `envFile` is optional and relative to the checkout, and supplies any `${NAME}` in `url`; it is read as text, and nothing is run. The task header shows the link while something is listening on that port.
+A project entry can set `"app": { "url": "http://localhost:${PORT}", "envFile": ".env.local" }` to show a link to the app running from a task's checkout. `envFile` is optional and relative to the checkout, and supplies any `${NAME}` in `url`; it is read as text, and nothing is run. The task header shows the link while something is listening on that port, on tasks that haven't landed or been archived.
 
-Add `"start": ["npm", "run", "dev"]` to the `app` block, a program and its arguments, to start the app from the task header. Clicking Start runs that checkout's code, without a shell, and it keeps running after the task's turn ends. Lander stops it after `leaseMinutes` (default 120), when its worktree is removed, or when `npm run dev` stops. The lease starts again whenever you open or return to the task, click the app's link, or send the task a message, and an app isn't stopped while its task is in the middle of a ride. A top-level `maxApps` (default 3) limits how many run at once; starting one more stops the one due to end soonest, skipping any whose task is mid-ride. The task list shows the app icon on the task that started each running app. Its output goes to `~/.lander/app-logs`.
+Add `"start": ["npm", "run", "dev"]` to the `app` block, a program and its arguments, to start the app from the task header. Clicking Start runs that checkout's code, without a shell, and it keeps running after the task's turn ends. Lander stops it after `leaseMinutes` (default 120), when its worktree is removed, or when `npm run dev` stops. The lease starts again whenever you open or return to the task, click the app's link, or send the task a message, and an app isn't stopped while its task is in the middle of a ride. A top-level `maxApps` (default 3) limits how many run at once; starting one more stops the one due to end soonest, skipping any whose task is mid-ride. The task list shows the app icon on the task that started each running app. Its output goes to `~/.lander/app-logs`, and View log in the row's menu shows the end of it.
+
+For Start to work well, a project's app should:
+
+- get a URL that stays the same for a checkout, readable from a file without running anything;
+- use a port no other live checkout of the project uses, counting stopped checkouts whose ports are reserved;
+- bind exactly that port, failing rather than moving to another when it's taken;
+- run in the foreground, need no input, and exit with its children on SIGTERM;
+- be safe to start again;
+- start shared services, such as a database container, outside its own process group, so Stop leaves them running.
+
+A project with a single checkout only needs the last four.
 
 Each project gets a URL slug from its path (e.g. `/Users/me/code/app` → `users-me-code-app`). The sidebar shows a dropdown to switch projects; choosing one pushes its slug into the URL (`/users-me-code-app/`). Visiting `/` redirects to the first project listed.
 
