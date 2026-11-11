@@ -390,13 +390,12 @@ async function readComposed(verb, id, pos) {
 }
 
 async function launchTask(rest) {
-  const o = { project: PROJECT, files: [] }
+  const o = { files: [] }
   const pos = []
   let composed
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i]
-    if (a === '--project') o.project = rest[++i]
-    else if (a === '--title') o.title = rest[++i]
+    if (a === '--title') o.title = rest[++i]
     else if (a === '--date') o.date = rest[++i]
     else if (a === '--time') o.time = Number(rest[++i])
     else if (a === '--after') o.after = rest[++i]
@@ -424,11 +423,11 @@ async function launchTask(rest) {
   // whichever trigger comes first.
   o.after = resolveAfter(o.after)
   // Upload any --attach paths first so the opening message references them.
-  if (o.files.length) o.attachments = await uploadAttachments(o.project, o.files)
+  if (o.files.length) o.attachments = await uploadAttachments(PROJECT, o.files)
   // --title sets the name directly; without it the server asks haiku. --date or
   // --time defers the launch (a date/time the server parses, or N minutes from
   // now) and the server runs the task then.
-  const task = await call(o.project, '/tasks', {
+  const task = await call(PROJECT, '/tasks', {
     method: 'POST',
     body: JSON.stringify(o),
   })
@@ -1144,7 +1143,6 @@ function makeLander(inputs) {
     async launch(message, opts = {}) {
       if (!message?.trim()) die('lander.launch: a message is required')
       const o = {
-        project: opts.project ?? PROJECT,
         message,
         title: opts.title,
         date: opts.date,
@@ -1159,8 +1157,8 @@ function makeLander(inputs) {
       validateSchedule(o)
       o.after = resolveAfter(opts.after)
       if (opts.files?.length)
-        o.attachments = await uploadAttachments(o.project, opts.files)
-      const task = await call(o.project, '/tasks', {
+        o.attachments = await uploadAttachments(PROJECT, opts.files)
+      const task = await call(PROJECT, '/tasks', {
         method: 'POST',
         body: JSON.stringify(o),
       })
@@ -1353,7 +1351,7 @@ const USAGE = {
   land: 'land [id…]',
   compose: 'compose [--managed] <message|->',
   launch:
-    'launch --composed <message id> [--title <t>] [--project <slug>] [--date <when>|--time <min>] [--after <ids>] [--flow <name>] [--key <k> <v>]… [--attach <paths…>]',
+    'launch --composed <message id> [--title <t>] [--date <when>|--time <min>] [--after <ids>] [--flow <name>] [--key <k> <v>]… [--attach <paths…>]',
   list: 'list [--status <s>] [--since <when>] [--until <when>] [--text <terms>] [--archived] [--json]',
   view: 'view <id> [--expand] [--messages <N|all>] [--clip <N|all>] [--json]',
   send: 'send <task id> --composed <message id> [--date <when>|--time <min>] [--after <ids>] [--await] [--attach <paths…>]',
