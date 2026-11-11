@@ -15,6 +15,13 @@ export function taskRefFromPath(pathname = window.location.pathname): TaskRef | 
   return parts.length === 2 ? { projectSlug: parts[0], id: parts[1] } : null
 }
 
+export function taskRefFromQuery(search: string): TaskRef | null {
+  const params = new URLSearchParams(search)
+  const projectSlug = params.get('project')
+  const id = params.get('task')
+  return projectSlug && id ? { projectSlug, id } : null
+}
+
 export function taskHref(projectSlug: string, id: string): string {
   return `/${projectSlug}/${id}`
 }

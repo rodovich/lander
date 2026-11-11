@@ -18,7 +18,7 @@ import { useFencedTasks } from './useFencedTasks'
 // The gap between one poll's answer and the next poll's question. Measured
 // from the answer (see startPoll), so this is the cadence at rest and the
 // floor under load — never a schedule that keeps firing into a backlog.
-const POLL_GAP_MS = 2000
+export const POLL_GAP_MS = 2000
 // The project list changes only when someone edits the config, and a reload
 // picks it up at once, so it is polled far less often.
 const PROJECTS_POLL_GAP_MS = 30_000

@@ -5,6 +5,7 @@ import {
   taskKey,
   taskKeyOf,
   taskRefFromPath,
+  taskRefFromQuery,
 } from './taskRef'
 import type { TaskLink } from './types'
 
@@ -18,6 +19,17 @@ describe('task references', () => {
       >[0]),
     ).toBe('two/same')
   })
+
+  it('reads a task reference from a query', () => {
+    expect(taskRefFromQuery('?project=proj&task=t1')).toEqual({ projectSlug: 'proj', id: 't1' })
+  })
+
+  it.each(['', '?project=proj', '?task=t1', '?project=&task=t1'])(
+    'finds no task reference in %j',
+    (search) => {
+      expect(taskRefFromQuery(search)).toBeNull()
+    },
+  )
 
   it('round-trips exact task routes', () => {
     expect(taskHref('project', 'task')).toBe('/project/task')

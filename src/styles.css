@@ -1589,6 +1589,29 @@ body {
   align-items: baseline;
 }
 
+.detail.embed {
+  flex: 1;
+}
+
+.embed-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-tinted);
+}
+
+.embed-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: inherit;
+}
+
 /* The list layout stacks the time under the status with a small offset; in
    the header's single row that offset would knock it out of line. */
 .task-watch {

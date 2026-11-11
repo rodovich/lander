@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { readFileSync } from 'node:fs'
+import { framePolicy } from './viteFramePolicy'
 
 // Serve the dev UI over HTTPS when the localhost cert/key are present under
 // data/ssl (symlinks to easel's shared self-signed cert; gitignored via data/).
@@ -21,8 +22,10 @@ try {
   console.warn('dev server: data/ssl/localhost.{crt,key} not found; serving http')
 }
 
+export const API = 'http://localhost:6181'
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), framePolicy(API)],
   server: {
     port: 41414,
     strictPort: true,
@@ -31,7 +34,7 @@ export default defineConfig({
     // any page on a localhost origin read them.
     cors: false,
     proxy: {
-      '/api': 'http://localhost:6181',
+      '/api': API,
     },
   },
 })
