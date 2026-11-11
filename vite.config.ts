@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type UserConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { framePolicy } from './viteFramePolicy'
 import { localhostCert, WEB_PORT } from './webOrigin'
@@ -15,19 +15,21 @@ const https = localhostCert()
 if (https) console.log('dev server: https via data/ssl/localhost.{crt,key}')
 else console.warn('dev server: data/ssl/localhost.{crt,key} not found; serving http')
 
-export const API = 'http://localhost:6181'
-
-export default defineConfig({
-  plugins: [react(), framePolicy(API)],
-  server: {
-    port: WEB_PORT,
-    strictPort: true,
-    https,
-    // Modules served here carry the UI token inlined, and Vite's default lets
-    // any page on a localhost origin read them.
-    cors: false,
-    proxy: {
-      '/api': API,
+export function webConfig(api = 'http://localhost:6181'): UserConfig {
+  return {
+    plugins: [react(), framePolicy(api)],
+    server: {
+      port: WEB_PORT,
+      strictPort: true,
+      https,
+      // Modules served here carry the UI token inlined, and Vite's default lets
+      // any page on a localhost origin read them.
+      cors: false,
+      proxy: {
+        '/api': api,
+      },
     },
-  },
-})
+  }
+}
+
+export default defineConfig(webConfig())
