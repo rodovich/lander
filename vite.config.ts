@@ -27,6 +27,9 @@ export default defineConfig({
     port: 41414,
     strictPort: true,
     https,
+    // Modules served here carry the UI token inlined, and Vite's default lets
+    // any page on a localhost origin read them.
+    cors: false,
     proxy: {
       '/api': 'http://localhost:6181',
     },
