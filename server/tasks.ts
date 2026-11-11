@@ -513,10 +513,16 @@ export type TaskSender = {
   via: 'launch' | 'send' | 'notify' | 'relaunch'
 }
 
-// Lander itself, telling a task why it is awake: the time it set came, the
-// tasks it awaited landed, or a restart cut off its previous ride.
+// How much of one closing message a wake carries. A cap because a closing message
+// can be thousands of words and a wake is a note, not a transcript; the reader can
+// always `lander view`.
+export const NOTIFY_TEXT_MAX_CHARS = 2000
+
+// Lander itself, telling a task that the time it set came, the tasks it awaited
+// landed, a restart cut off its previous ride, a watch fired, or its managed
+// children have results for it.
 export type LanderSender =
-  | { lander: 'time' | 'await' | 'restart' }
+  | { lander: 'time' | 'await' | 'restart' | 'children' }
   | { lander: 'watch'; watcher: string; args: Record<string, string> }
 
 // A prompt item as the agent receives it: a message from another task with its
@@ -769,8 +775,9 @@ export function pushEventPrompt(
   text: string,
   at: string,
   from: TaskSender | LanderSender,
+  attachments?: Attachment[],
 ): MessageItem {
-  const item = pushUserItem(task, text, at, { from })
+  const item = pushUserItem(task, text, at, { from, attachments })
   event.message = item.id
   return item
 }
@@ -1122,6 +1129,7 @@ export function publicTask<T extends object>(
   | 'hookActionsResetAt'
   | 'hookActions'
   | 'watchState'
+  | 'childrenSeen'
 > & { flow: string } {
   const {
     token: _t,
@@ -1146,6 +1154,8 @@ export function publicTask<T extends object>(
     hookActions: _ha,
     // Each watcher's private state, which means nothing to a reader.
     watchState: _ws,
+    // What this task has read from its children, which only delivery reads.
+    childrenSeen: _cs,
     // Tasks saved while read-only tasks existed still carry the edit flag. No
     // code reads it, and served as `false` it would misreport the task's access.
     allowEdits: _ae,
@@ -1163,6 +1173,7 @@ export function publicTask<T extends object>(
     hookActionsResetAt?: unknown
     hookActions?: unknown
     watchState?: unknown
+    childrenSeen?: unknown
     allowEdits?: unknown
     queued?: string[]
     items?: Item[]
@@ -1209,6 +1220,7 @@ export function publicTask<T extends object>(
   | 'hookActionsResetAt'
   | 'hookActions'
   | 'watchState'
+  | 'childrenSeen'
   > & { flow: string }
 }
 
@@ -2032,9 +2044,9 @@ export function deliverQueuedBatch(
 }
 
 // The tasks waiting to be woken once, when a task next finishes a turn cleanly:
-// its launcher (`launch --await`) and any task whose `send --await` it has read.
-// A bare id is the shape from before `send` could arm a wake, when only the launcher
-// could wait; a task armed then can still be on disk unfired.
+// any task whose `send --await` it has read. A launcher can also be here on a task
+// armed before launching could no longer wait, as a bare id or in a list, if it is
+// still on disk unfired.
 export type NotifyArming = string | string[]
 
 export function armNotify(task: { notify?: NotifyArming }, to: string): void {

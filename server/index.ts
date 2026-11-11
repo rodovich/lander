@@ -113,6 +113,7 @@ import {
   type Watch,
   clearScheduledTime,
   asList,
+  NOTIFY_TEXT_MAX_CHARS,
   type NotifyArming,
   type PendingNotifies,
   type ScheduledMessage,
@@ -182,6 +183,7 @@ import { TITLE_MAX_CHARS, generateTitle } from './title'
 import { createSlowLog, fileWriter } from './slow-log'
 import { readStats } from './stats'
 import { createComposedStore, type ComposedMessage } from './composed'
+import { childResults, wakeDue, type Family, type FamilyTask } from './managed'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const LANDER_BIN_DIR = path.join(ROOT, 'bin')
@@ -286,8 +288,11 @@ type Task = {
   spawnedBy?: string
   spawnedByProject?: string
   // Set when the spawner said it will manage this task rather than leave it to
-  // the user. `--await` sets it too, and unlike `notify`, it outlives the wake.
+  // the user, which delivers this task's results to the spawner (managed.ts).
   managed?: true
+  // For a task with managed children: the end time of the latest ride of each
+  // child that this task has read or been delivered, by child id.
+  childrenSeen?: Record<string, string>
   // The hook that caused this task to exist, and the fire it acted on. Carried
   // ALONGSIDE spawnedBy rather than instead of it: they answer different
   // questions, and a hook-launched task has no spawning task at all — which is
@@ -369,16 +374,15 @@ type Task = {
   // leaves the watch, as it leaves an await.
   watch?: Watch
   watchState?: Record<string, unknown>
-  // The tasks to wake once, when THIS task next finishes a turn cleanly: the
-  // launcher, armed at creation by `lander launch --await`, and any task whose
-  // `lander send --await` this task has read (deliverQueuedBatch). Each names
+  // The tasks to wake once, when THIS task next finishes a turn cleanly: any
+  // task whose `lander send --await` this task has read (deliverQueuedBatch). Each names
   // the task that asked, so a notification is always "tell the task that asked
   // me", never an arbitrary target a caller could point at a stranger. Consumed
   // by applyDone, which moves it to `pendingNotify`; absent when nobody waits.
   //
   // This is the counterpart to `waitingFor`, not a replacement: an await resumes
   // the waiter when a CONDITION holds and is satisfied only by landing, while a
-  // notify tells the launcher its child has spoken and leaves it to decide. A
+  // notify tells the asker this task has spoken and leaves it to decide. A
   // notify that arrives mid-job costs one turn; an await that fires mid-job
   // resumes the waiter on unfinished work for good.
   notify?: NotifyArming
@@ -1063,14 +1067,17 @@ async function driveClaimedTask(project: Project, id: string): Promise<void> {
       let batch: string[] = []
       let atts: Attachment[] = []
       let revived: RevivedMarker | undefined
+      const children = await readManagedChildren(project, id)
       await mutateTask(file, (t) => {
         if (t.queued && t.queued.length) {
           // A message queued during a turn that ended wedged or landed still gets
           // its turn, so the drain records the crossing out of the wedge or land.
           // `system` loses the sender: one crossing covers a batch that can mix
           // senders.
-          recordStatusTransition(t, 'riding', new Date().toISOString(), 'system')
+          const at = new Date().toISOString()
+          recordStatusTransition(t, 'riding', at, 'system')
           t.status = 'riding'
+          queueChildResults(t, children, at)
           batch = t.queued
           // Gather the attachments off the trailing user items this batch is made
           // of, under the same lock, so the run carries exactly this turn's files.
@@ -1339,16 +1346,8 @@ async function deliverScheduledMessages(
   if (claimed) void driveClaimedTask(project, id)
 }
 
-// How much of the child's closing message rides along. The point of carrying it
-// at all is that the launcher learns the OUTCOME without spending a turn to go
-// read it: a bare "your child finished" wake costs the turn it was meant to
-// save. A cap because a closing message can be thousands of words and this is a
-// courtesy note, not a transcript; the launcher can always `lander view`.
-const NOTIFY_TEXT_MAX_CHARS = 2000
-
-// Deliver a task's fired `--await`s: wake each task that asked (its launcher, or
-// a task that sent it a `send --await`) with the closing message of the turn
-// that fired it. Clears `pendingNotify` whatever the outcome — a notification is
+// Deliver a task's fired `--await`s: wake each task that asked with the closing
+// message of the turn that fired it. Clears `pendingNotify` whatever the outcome — a notification is
 // a courtesy, and one that cannot be delivered (target landed, archived, or gone)
 // must not be retried on every sweep for the life of the instance.
 //
@@ -1365,13 +1364,16 @@ async function deliverNotification(
   // into a permanent per-sweep write, and leaves a crash between the two writes
   // able to wake a task twice. Read under the same lock that clears them, so one
   // appended after the sweep's read is delivered rather than lost.
-  const deliveries: { to: string; message: ScheduledMessage }[] = []
+  const deliveries: { to: string; message: ScheduledMessage; answer?: ManagedAnswer }[] = []
   await mutateTask(path.join(project.dataDir, `${notifierId}.json`), (t) => {
     for (const pending of asList(t.pendingNotify)) {
       const item = lastFlowItem(t, pending.rideId)
       const closing = item?.text?.trim() ?? ''
       deliveries.push({
         to: pending.to,
+        ...(t.managed && t.spawnedBy === pending.to
+          ? { answer: managedAnswer(t, pending.at) }
+          : {}),
         message: {
           text:
             closing.length > NOTIFY_TEXT_MAX_CHARS
@@ -1384,8 +1386,102 @@ async function deliverNotification(
     }
     delete t.pendingNotify
   }).catch(() => {})
-  for (const { to, message } of deliveries)
-    if (to !== notifierId) await wakeNotified(project, to, message)
+  for (const { to, message, answer } of deliveries)
+    if (to !== notifierId) await wakeNotified(project, to, message, answer)
+}
+
+type ManagedAnswer = { child: string; endedAt: string; previousEndedAt: string }
+
+function managedAnswer(child: Task, endedAt: string): ManagedAnswer {
+  const earlier = (child.rides ?? []).filter((r) => r.endedAt && r.endedAt < endedAt)
+  return { child: child.id, endedAt, previousEndedAt: earlier.at(-1)?.endedAt ?? '' }
+}
+
+// Each project's managed children by parent, rebuilt by every sweep. A turn that
+// starts between sweeps can miss a new child, or all of them just after a restart;
+// what it missed stays unread, for a later turn or wake.
+const managedChildren = new Map<string, Map<string, string[]>>()
+
+async function readManagedChildren(project: Project, parent: string): Promise<Task[]> {
+  const ids = managedChildren.get(project.slug)?.get(parent) ?? []
+  const tasks = await Promise.all(ids.map((id) => readTask(project.dataDir, id)))
+  return tasks.filter((t): t is Task => !!t)
+}
+
+function markChildrenSeen(t: Task, seen: Record<string, string>): void {
+  for (const [child, at] of Object.entries(seen))
+    if (at > (t.childrenSeen?.[child] ?? '')) (t.childrenSeen ??= {})[child] = at
+}
+
+function queueChildResults(t: Task, children: FamilyTask[], at: string): boolean {
+  const results = childResults(t, children)
+  if (!results) return false
+  const event = pushEventItem(t, { eventKind: 'notified', title: t.title }, at)
+  const item = pushEventPrompt(
+    t,
+    event,
+    results.text,
+    at,
+    { lander: 'children' },
+    results.attachments,
+  )
+  ;(t.queued ??= []).push(attributedPrompt(item))
+  markChildrenSeen(t, results.seen)
+  return true
+}
+
+async function readFamily(
+  project: Project,
+  parent: string,
+  edges: Map<string, string[]>,
+  awaitingAnswer: Set<string>,
+): Promise<Family> {
+  const tasks = new Map<string, Task>()
+  const pending = [parent]
+  for (let id = pending.pop(); id !== undefined; id = pending.pop()) {
+    const task = await readTask(project.dataDir, id)
+    if (!task) continue
+    tasks.set(id, task)
+    pending.push(...(edges.get(id) ?? []))
+  }
+  return {
+    tasks,
+    childrenOf: (id) => edges.get(id) ?? [],
+    driving: (id) => running.has(taskKey(project.slug, id)),
+    awaitingAnswer,
+  }
+}
+
+async function deliverChildResults(
+  project: Project,
+  parent: string,
+  edges: Map<string, string[]>,
+  awaitingAnswer: Set<string>,
+): Promise<void> {
+  const family = await readFamily(project, parent, edges, awaitingAnswer)
+  if (!wakeDue(parent, family)) return
+  const children = (edges.get(parent) ?? []).flatMap((id) => family.tasks.get(id) ?? [])
+  let drive = false
+  let claimed = false
+  await mutateTask(path.join(project.dataDir, `${parent}.json`), (t) => {
+    if (t.status !== 'riding' || t.runId || openRide(t) || t.queued?.length) return
+    const at = new Date().toISOString()
+    drive = queueChildResults(t, children, at)
+    if (drive) t.updatedAt = at
+  }, () => {
+    if (drive) claimed = claimTaskRun(project, parent)
+  }).catch(() => {})
+  if (claimed) void driveClaimedTask(project, parent)
+}
+
+// The tasks whose `send --await` to this task has an answer on the way. A deferred
+// send doesn't count, any more than a child's own scheduled ride does.
+function collectAwaitingAnswer(task: Task, active: boolean, waiting: Set<string>): void {
+  for (const pending of asList(task.pendingNotify)) waiting.add(pending.to)
+  if (active) for (const to of asList(task.notify)) waiting.add(to)
+  for (const item of userItems(task))
+    if (item.notify && !item.deliveredIn && item.from && 'task' in item.from)
+      waiting.add(item.from.task)
 }
 
 // The record holds the notifying task's closing words alone; the agent reads them
@@ -1394,6 +1490,7 @@ async function wakeNotified(
   project: Project,
   to: string,
   message: ScheduledMessage,
+  answer?: ManagedAnswer,
 ): Promise<void> {
   const target = await readTask(project.dataDir, to)
   // A landed target is deliberately not revived. Landing is terminal and the
@@ -1406,6 +1503,9 @@ async function wakeNotified(
   let claimed = false
   await mutateTask(path.join(project.dataDir, `${to}.json`), (t) => {
     if (t.status === 'landed') return
+    const seen = answer ? (t.childrenSeen?.[answer.child] ?? '') : ''
+    // The parent has read this answer, or been delivered it, in the meantime.
+    if (answer && seen >= answer.endedAt) return
     const at = new Date().toISOString()
     // Treated as a message from another task (POST /messages carries the
     // reasoning). A notified task has always run, so only its time can go.
@@ -1420,6 +1520,10 @@ async function wakeNotified(
       'system',
     )
     applyDueMessages(t, [message], at)
+    // Seen is a high-water mark, so an unread earlier ride holds it back, and
+    // this answer is repeated when that ride is delivered.
+    if (answer && seen >= answer.previousEndedAt)
+      markChildrenSeen(t, { [answer.child]: answer.endedAt })
     t.status = 'riding'
     t.updatedAt = at
     drive = true
@@ -1502,6 +1606,8 @@ async function sweepOnce(): Promise<void> {
       continue
     }
     let dispatched = 0
+    const edges = new Map<string, string[]>()
+    const awaitingAnswer = new Set<string>()
     for (const name of names) {
       if (!name.endsWith('.json')) continue
       const id = name.slice(0, -'.json'.length)
@@ -1513,6 +1619,16 @@ async function sweepOnce(): Promise<void> {
       } catch {
         continue
       }
+      if (task.managed && task.spawnedBy)
+        edges.set(task.spawnedBy, [...(edges.get(task.spawnedBy) ?? []), id])
+      collectAwaitingAnswer(
+        task,
+        running.has(taskKey(project.slug, id)) ||
+          !!task.runId ||
+          !!openRide(task) ||
+          !!task.queued?.length,
+        awaitingAnswer,
+      )
       // Deliver due scheduled messages first — independent of the task's own
       // scheduled launch, and even while it's running (delivery just enqueues).
       // Let deliverScheduledMessages decide due-ness (it weighs time and await
@@ -1586,6 +1702,10 @@ async function sweepOnce(): Promise<void> {
       )
         void runWatch(project, id, task, task.watch)
     }
+    // After the whole pass, since what it delivered changes who has settled.
+    managedChildren.set(project.slug, edges)
+    for (const parent of edges.keys())
+      await deliverChildResults(project, parent, edges, awaitingAnswer)
   }
 }
 
@@ -1950,16 +2070,39 @@ app.get('/api/:project/tasks/:id', async (c) => {
           }
         : {}),
     })
-  return withMutationLock(taskKey(project.slug, id), async () => {
+  let viewed: Task | undefined
+  const response = await withMutationLock(taskKey(project.slug, id), async () => {
     const task = await readTask(project.dataDir, id)
-    if (task) return respond(task)
+    if (task) {
+      viewed = task
+      return respond(task)
+    }
     // Fall back to the archive under the same lock as pool moves, so restore
     // cannot slip between the two probes and manufacture a false 404.
     const archived = await readTask(project.archiveDir, id)
     if (archived) return respond({ ...archived, archived: true })
     return c.json({ error: 'task not found' }, 404)
   })
+  if (viewed?.managed)
+    await recordParentView(project, viewed, await resolvePrincipal(c.req))
+  return response
 })
+
+// A parent's view counts as reading every ride of the child that had ended by
+// then, whatever part of it the caller went on to print.
+async function recordParentView(
+  project: Project,
+  child: Task,
+  viewer: Principal,
+): Promise<void> {
+  if (viewer.kind !== 'task' || viewer.slug !== project.slug) return
+  if (viewer.id !== child.spawnedBy) return
+  const endedAt = child.rides?.filter((r) => r.endedAt).at(-1)?.endedAt
+  if (!endedAt) return
+  await mutateTask(path.join(project.dataDir, `${viewer.id}.json`), (t) => {
+    markChildrenSeen(t, { [child.id]: endedAt })
+  }).catch(() => {})
+}
 
 // A SIBLING of the /flows/:name resolver below, not a replacement: that one
 // serves the unrelated user command-flow scripts for the `lander flow` CLI. The
@@ -2588,7 +2731,6 @@ app.post('/api/:project/tasks', async (c) => {
       date?: unknown
       time?: unknown
       after?: unknown
-      await?: unknown
       managed?: unknown
       flow?: unknown
       flowConfig?: unknown
@@ -2759,19 +2901,8 @@ app.post('/api/:project/tasks', async (c) => {
         ? {
             spawnedBy: principal.id,
             spawnedByProject: principal.slug,
-            ...(body.managed === true || body.await === true
-              ? { managed: true as const }
-              : {}),
+            ...(body.managed === true ? { managed: true as const } : {}),
           }
-        : {}),
-      // `--await`: wake the spawner once, when this task first finishes a turn
-      // cleanly. Gated on a task principal because the target IS the principal —
-      // there is nobody to wake when a human launches from the UI, and a hook's
-      // launch has no spawning task at all (see hookOrigin below). Silently
-      // ignored rather than rejected in those cases: the flag is a request for a
-      // courtesy that does not apply, not a malformed launch.
-      ...(body.await === true && principal.kind === 'task'
-        ? { notify: [principal.id] }
         : {}),
       // The hook that caused this task, or the one inherited from the task that
       // spawned it — so the exemption covers a chain and not just its head. A

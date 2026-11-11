@@ -13,6 +13,7 @@ import { attributedPrompt, type EventItem, type Item, type MessageItem } from '.
 const AT = '2026-01-01T00:00:00.000Z'
 const LATE = '2099-01-01T00:00:00.000Z'
 
+let app: (typeof import('./index'))['app']
 let launchScheduled: (typeof import('./index'))['launchScheduled']
 let projectDir: string
 let dataDirRoot: string
@@ -110,7 +111,7 @@ beforeAll(async () => {
   await mkdir(tasksDir, { recursive: true })
   // Importing the module does not start the scheduler (main() is gated on
   // NODE_ENV), so the test drives one pass itself.
-  ;({ launchScheduled } = await import('./index'))
+  ;({ app, launchScheduled } = await import('./index'))
 })
 
 afterAll(async () => {
@@ -245,6 +246,116 @@ describe('a deferred message to a task with a ride scheduled', () => {
     await launchScheduled()
 
     expect((await readRaw('launch-holder')).scheduledMessages).toHaveLength(1)
+  })
+})
+
+describe('a managed child', () => {
+  const managedBy = (parent: string) => ({ spawnedBy: parent, managed: true })
+  const childPrompts = async (id: string) =>
+    ((await readRaw(id)).items as MessageItem[]).filter(
+      (i) => i.role === 'user' && i.from && 'lander' in i.from && i.from.lander === 'children',
+    )
+
+  it('wakes an idle parent once with its results', async () => {
+    await seed('deliver-parent', {})
+    await seed('deliver-child', managedBy('deliver-parent'))
+
+    await launchScheduled()
+
+    expect(await lastPrompt('deliver-parent')).toContain('on it')
+    await expectNotified('deliver-parent', 'children')
+    expect((await readRaw('deliver-parent')).childrenSeen).toEqual({ 'deliver-child': AT })
+  })
+
+  it('waits while a sibling is still riding', async () => {
+    await seed('barrier-parent', {})
+    await seed('barrier-done', managedBy('barrier-parent'))
+    await seed('barrier-riding', {
+      ...managedBy('barrier-parent'),
+      rides: [{ id: 'r0', startedAt: AT }],
+    })
+
+    await launchScheduled()
+
+    expect(await childPrompts('barrier-parent')).toHaveLength(0)
+  })
+
+  it('leaves a wedged parent wedged, and reaches its next turn', async () => {
+    await seed('wedged-parent', { status: 'wedged' })
+    await seed('wedged-child', managedBy('wedged-parent'))
+
+    await launchScheduled()
+    expect(await childPrompts('wedged-parent')).toHaveLength(0)
+    expect((await readRaw('wedged-parent')).status).toBe('wedged')
+
+    const raw = await readRaw('wedged-parent')
+    await writeFile(
+      path.join(tasksDir, 'wedged-parent.json'),
+      JSON.stringify({ ...raw, scheduledMessages: [{ text: 'carry on', deliverAt: AT }] }),
+    )
+    await launchScheduled()
+    await vi.waitFor(async () => {
+      expect(await childPrompts('wedged-parent')).toHaveLength(1)
+    })
+  })
+
+  it('counts a `send --await` answer as seen, so it is not delivered twice', async () => {
+    await seed('answer-parent', {})
+    await seed('answer-child', {
+      ...managedBy('answer-parent'),
+      pendingNotify: [{ to: 'answer-parent', at: AT, rideId: 'r0' }],
+    })
+
+    await launchScheduled()
+
+    expect(await lastPrompt('answer-parent')).toBe('answer-child finished a turn:\n\non it')
+    expect((await readRaw('answer-parent')).childrenSeen).toEqual({ 'answer-child': AT })
+    expect(await childPrompts('answer-parent')).toHaveLength(0)
+  })
+
+  it('does not repeat a `send --await` answer a turn already delivered', async () => {
+    await seed('repeat-parent', { childrenSeen: { 'repeat-child': AT } })
+    await seed('repeat-child', {
+      ...managedBy('repeat-parent'),
+      pendingNotify: [{ to: 'repeat-parent', at: AT, rideId: 'r0' }],
+    })
+
+    await launchScheduled()
+
+    expect(await lastPrompt('repeat-parent')).toBe('go')
+  })
+
+  it('leaves earlier unread rides to be delivered after a `send --await` answer', async () => {
+    const LATER = '2026-01-01T00:01:00.000Z'
+    await seed('earlier-parent', {})
+    await seed('earlier-child', {
+      ...managedBy('earlier-parent'),
+      rides: [
+        { id: 'r0', startedAt: AT, endedAt: AT, outcome: 'done' },
+        { id: 'r1', startedAt: LATER, endedAt: LATER, outcome: 'done' },
+      ],
+      pendingNotify: [{ to: 'earlier-parent', at: LATER, rideId: 'r1' }],
+    })
+
+    await launchScheduled()
+
+    expect((await readRaw('earlier-parent')).childrenSeen).toBeUndefined()
+  })
+
+  it('counts a view by its parent as seen, and nobody else’s', async () => {
+    const slug = projectSlug(projectDir)
+    await seed('viewing-parent', { token: 'parent-token', status: 'landed' })
+    await seed('viewing-stranger', { token: 'stranger-token', status: 'landed' })
+    await seed('viewed-child', managedBy('viewing-parent'))
+    const view = (task: string, token: string) =>
+      app.request(`/api/${slug}/tasks/viewed-child`, {
+        headers: { 'x-lander-task': task, 'x-lander-project': slug, 'x-lander-token': token },
+      })
+
+    await view('viewing-stranger', 'stranger-token')
+    expect((await readRaw('viewing-stranger')).childrenSeen).toBeUndefined()
+    await view('viewing-parent', 'parent-token')
+    expect((await readRaw('viewing-parent')).childrenSeen).toEqual({ 'viewed-child': AT })
   })
 })
 

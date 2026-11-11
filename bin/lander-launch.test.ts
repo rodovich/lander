@@ -149,25 +149,12 @@ describe('lander launch --flow', () => {
   })
 })
 
-// `--await` is a bare flag with no target — the server arms it against the
-// calling task. Covered here because bin/ is outside tsconfig's `include`, so
-// nothing else would catch it consuming the next argv token as a value.
 describe('lander launch --await', () => {
-  it('posts await:true without swallowing the message', async () => {
-    const { stdout, code } = await execLander(['launch', '--await', '--composed', 'hi'])
-    expect(code).toBe(0)
-    expect(stdout.trim()).toBe('new-task')
-    expect(lastBody).toMatchObject({ await: true, message: 'say hi' })
-  })
-
-  it('omits await entirely when the flag is absent', async () => {
-    await execLander(['launch', '--composed', 'hi'])
-    expect('await' in lastBody!).toBe(false)
-  })
-
-  it('combines with --after, which still takes its own value', async () => {
-    await execLander(['launch', '--await', '--after', 'abc123', '--composed', 'go'])
-    expect(lastBody).toMatchObject({ await: true, after: ['abc123'], message: 'go ahead' })
+  it('is refused, spawning nothing', async () => {
+    const { stderr, code } = await execLander(['launch', '--await', '--composed', 'hi'])
+    expect(code).not.toBe(0)
+    expect(stderr).toContain('unexpected argument "--await"')
+    expect(lastBody).toBeUndefined()
   })
 })
 

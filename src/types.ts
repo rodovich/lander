@@ -154,7 +154,7 @@ export type MessageItem = ItemCommon & {
   from?:
     | { hook: string; path: string; fireId: string }
     | { task: string; via: 'launch' | 'send' | 'notify' | 'relaunch' }
-    | { lander: 'time' | 'await' | 'restart' }
+    | { lander: 'time' | 'await' | 'restart' | 'children' }
     | { lander: 'watch'; watcher: string; args: Record<string, string> }
   attachments?: Attachment[]
   // Set on a user message once a queued batch delivers it: the ride that
