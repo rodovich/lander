@@ -13,5 +13,5 @@
     "noEmit": true,
     "types": ["node", "vite/client"]
   },
-  "include": ["src", "shared", "server", "daemon", "flow", "bench", "replay", "contract", "vite.config.ts", "vite.config.test.ts", "webTestServer.ts", "vitest.contract.config.ts"]
+  "include": ["src", "shared", "server", "daemon", "flow", "bench", "replay", "contract", "browser", "vite.config.ts", "vite.config.test.ts", "webTestServer.ts", "vitest.contract.config.ts", "vitest.browser.config.ts"]
 }
