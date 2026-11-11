@@ -319,6 +319,14 @@ function resolveAfter(value, { self } = {}) {
   return ids
 }
 
+// Agents write `--` before an id that starts with `-`, as Unix tools take it,
+// and often put options after the id (`view -- -abc --json`). So `--` can't
+// end option parsing here; it is dropped instead. The commands that take it
+// read any argument that is neither a flag nor a flag's value as an operand.
+function dropDashDash(args) {
+  return args.filter((a) => a !== '--')
+}
+
 // A single token shaped like a CLI flag (`-h`, `--help`, a mistyped `--titel`)
 // rather than prose: a leading dash or two, then a letter, then word chars —
 // and no whitespace. launch/send/relaunch reject it as their *whole* message,
@@ -861,6 +869,8 @@ async function sendTask(args) {
     // Takes no target, as on `launch`: the server wakes the sending task.
     else if (a === '--await') o.await = true
     else if (a === '--composed') o.composed = args[++i]
+    // Not dropDashDash: here a `--` also has to end an --attach list.
+    else if (a === '--') pos.push(args[++i])
     // --attach is variadic: consume following args up to the next --flag.
     else if (a === '--attach')
       while (i + 1 < args.length && !args[i + 1].startsWith('--'))
@@ -927,7 +937,9 @@ async function archiveTask(args) {
 // worth confirming.
 async function landTask(args) {
   if (!args.length) return setStatus('landed', { quiet: true })
-  for (const id of args) {
+  const ids = dropDashDash(args)
+  if (!ids.length) dieUsage('land')
+  for (const id of ids) {
     await call(PROJECT, `/tasks/${id}`, {
       method: 'PATCH',
       body: JSON.stringify({ status: 'landed' }),
@@ -1415,9 +1427,9 @@ const run = {
   compose: () => composeMessage(rest),
   launch: () => launchTask(rest),
   list: () => listTasks(rest),
-  view: () => viewTask(rest),
+  view: () => viewTask(dropDashDash(rest)),
   send: () => sendTask(rest),
-  archive: () => archiveTask(rest),
+  archive: () => archiveTask(dropDashDash(rest)),
   assist: () => assist(rest),
   attachment: () => attachmentCommand(rest),
   flow: () => runFlow(rest),

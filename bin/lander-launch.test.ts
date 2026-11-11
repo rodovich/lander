@@ -23,6 +23,7 @@ const LANDER_BIN = path.join(BIN_DIR, 'lander')
 let server: Server
 let port: number
 let lastBody: Record<string, unknown> | undefined
+let lastUrl: string | undefined
 
 function execLander(args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
   return new Promise((resolve) => {
@@ -71,6 +72,7 @@ beforeAll(async () => {
         return
       }
       lastBody = raw ? JSON.parse(raw) : undefined
+      lastUrl = req.url
       res.end(JSON.stringify({ id: 'new-task' }))
     })
   })
@@ -84,6 +86,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   lastBody = undefined
+  lastUrl = undefined
 })
 
 describe('lander launch --flow', () => {
@@ -155,6 +158,15 @@ describe('lander launch --await', () => {
     expect(code).not.toBe(0)
     expect(stderr).toContain('unexpected argument "--await"')
     expect(lastBody).toBeUndefined()
+  })
+})
+
+describe('lander send --', () => {
+  it('sends to the id after a `--`, with options on either side', async () => {
+    const { code } = await execLander(['send', '--', '-target', '--composed', 'hi'])
+    expect(code).toBe(0)
+    expect(lastUrl).toBe('/api/proj/tasks/-target/messages')
+    expect(lastBody?.message).toBe('say hi')
   })
 })
 

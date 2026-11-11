@@ -2081,7 +2081,7 @@ app.get('/api/:project/tasks/:id', async (c) => {
     // cannot slip between the two probes and manufacture a false 404.
     const archived = await readTask(project.archiveDir, id)
     if (archived) return respond({ ...archived, archived: true })
-    return c.json({ error: 'task not found' }, 404)
+    return c.json({ error: noTask(id) }, 404)
   })
   if (viewed?.managed)
     await recordParentView(project, viewed, await resolvePrincipal(c.req))
@@ -2159,7 +2159,7 @@ app.get('/api/:project/hooks', async (c) => {
   if (taskId) {
     if (!TASK_ID.test(taskId)) return c.json({ error: 'invalid task id' }, 400)
     checkout = await taskCheckout(project, taskId)
-    if (!checkout) return c.json({ error: 'task not found' }, 404)
+    if (!checkout) return c.json({ error: await noSuchTask(project, taskId) }, 404)
   }
 
   const result = await resolveProjectHooks({
@@ -2439,7 +2439,7 @@ app.post('/api/:project/tasks/:id/attachments', async (c) => {
     if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
     const file = path.join(project.dataDir, `${id}.json`)
     if (!(await readTask(project.dataDir, id)))
-      return c.json({ error: 'task not found' }, 404)
+      return c.json({ error: await noSuchTask(project, id) }, 404)
 
     const principal = c.get('principal')
     if (principal.kind !== 'ui' && !isSelfPrincipal(principal, project, id))
@@ -2586,6 +2586,17 @@ function resolveRepeat(body: {
   return { repeat }
 }
 
+// The error for an id that names no task. Naming the id shows a caller what was
+// looked up (a stray `--`, a typo), and "in this project" because a task can't
+// reach tasks in other projects.
+const noTask = (id: string) => `no task ${id} in this project`
+
+// For a route that reads only the active pool, which would otherwise report an
+// archived task as missing.
+async function noSuchTask(project: Project, id: string): Promise<string> {
+  return (await readTask(project.archiveDir, id)) ? `task ${id} is archived` : noTask(id)
+}
+
 // Validate an `after` body field (`--after`): the ids a task or a scheduled
 // message waits on. Each must be a real task in this project, because a missing
 // id counts as landed, so a typo would wake the waiter at once.
@@ -2602,7 +2613,7 @@ async function resolveAfter(
     if (!TASK_ID.test(id)) return { error: `invalid --after task id: ${id}` }
     if (selfId && id === selfId) return { error: 'a task cannot wait on itself' }
     if (!(await readTask(project.dataDir, id)))
-      return { error: `--after task not found: ${id}` }
+      return { error: `--after: ${await noSuchTask(project, id)}` }
   }
   // Guard against a deadlock cycle: if any awaited task already waits (directly
   // or transitively) on the awaiter, these edges would close a loop in which
@@ -3189,7 +3200,7 @@ app.patch('/api/:project/tasks/:id', async (c) => {
     try {
       task = JSON.parse(await readFile(file, 'utf8')) as Task
     } catch {
-      return c.json({ error: 'task not found' }, 404)
+      return c.json({ error: await noSuchTask(project, id) }, 404)
     }
 
     const body = await c.req.json<{
@@ -3342,7 +3353,7 @@ app.post('/api/:project/tasks/:id/launch', async (c) => {
       noteHumanContact(t, principal, new Date().toISOString())
     }).catch(() => {})
     const task = await readTask(project.dataDir, id)
-    if (!task) return c.json({ error: 'task not found' }, 404)
+    if (!task) return c.json({ error: await noSuchTask(project, id) }, 404)
     return c.json(publicTask(task))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
@@ -3373,7 +3384,7 @@ app.post('/api/:project/tasks/:id/ride', async (c) => {
     if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
     const file = path.join(project.dataDir, `${id}.json`)
     if (!(await readTask(project.dataDir, id)))
-      return c.json({ error: 'task not found' }, 404)
+      return c.json({ error: await noSuchTask(project, id) }, 404)
 
     const principal = c.get('principal')
     if (principal.kind !== 'ui' && !isSelfPrincipal(principal, project, id))
@@ -3409,7 +3420,7 @@ app.post('/api/:project/tasks/:id/ride', async (c) => {
         t.updatedAt = new Date().toISOString()
       })
       const task = await readTask(project.dataDir, id)
-      if (!task) return c.json({ error: 'task not found' }, 404)
+      if (!task) return c.json({ error: await noSuchTask(project, id) }, 404)
       return c.json({ ...publicTask(task), cleared })
     }
 
@@ -3424,7 +3435,7 @@ app.post('/api/:project/tasks/:id/ride', async (c) => {
       const refusal = await watcherRefusal(WATCHERS_FILE, watch.watcher)
       if (refusal) return c.json({ error: refusal.message }, 400)
       const task = await readTask(project.dataDir, id)
-      if (!task) return c.json({ error: 'task not found' }, 404)
+      if (!task) return c.json({ error: await noSuchTask(project, id) }, 404)
       // The first run happens now, outside the task's lock, so the arming turn's
       // streamed updates don't queue behind a watcher that takes its whole budget.
       const res = await watcherRunRequest(project, id, task, watch)
@@ -3450,7 +3461,7 @@ app.post('/api/:project/tasks/:id/ride', async (c) => {
       })
       if (landed) return c.json({ error: 'the task landed; no watch armed' }, 409)
       const armed = await readTask(project.dataDir, id)
-      if (!armed) return c.json({ error: 'task not found' }, 404)
+      if (!armed) return c.json({ error: await noSuchTask(project, id) }, 404)
       return c.json(
         outcome.kind === 'fired'
           ? { ...publicTask(armed), fired: true, message: outcome.message }
@@ -3502,7 +3513,7 @@ app.post('/api/:project/tasks/:id/ride', async (c) => {
       t.updatedAt = at
     })
     const task = await readTask(project.dataDir, id)
-    if (!task) return c.json({ error: 'task not found' }, 404)
+    if (!task) return c.json({ error: await noSuchTask(project, id) }, 404)
     return c.json(publicTask(task))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
@@ -3545,7 +3556,7 @@ app.post('/api/:project/tasks/:id/relaunch', async (c) => {
     if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
     const file = path.join(project.dataDir, `${id}.json`)
     if (!(await readTask(project.dataDir, id)))
-      return c.json({ error: 'task not found' }, 404)
+      return c.json({ error: await noSuchTask(project, id) }, 404)
 
     const principal = c.get('principal')
     if (
@@ -3587,7 +3598,7 @@ app.post('/api/:project/tasks/:id/relaunch', async (c) => {
         t.updatedAt = new Date().toISOString()
       })
       const task = await readTask(project.dataDir, id)
-      if (!task) return c.json({ error: 'task not found' }, 404)
+      if (!task) return c.json({ error: await noSuchTask(project, id) }, 404)
       return c.json({ ...publicTask(task), cleared })
     }
 
@@ -3627,7 +3638,7 @@ app.post('/api/:project/tasks/:id/relaunch', async (c) => {
         armScheduledRelaunch(t, { text: rawMessage, deliverAt, waitFor, repeat, flow }, at)
       })
       const armed = await readTask(project.dataDir, id)
-      if (!armed) return c.json({ error: 'task not found' }, 404)
+      if (!armed) return c.json({ error: await noSuchTask(project, id) }, 404)
       return c.json(publicTask(armed))
     }
 
@@ -3654,7 +3665,7 @@ app.post('/api/:project/tasks/:id/relaunch', async (c) => {
     if (relaunchClaimed) void driveClaimedTask(project, id)
 
     const updated = await readTask(project.dataDir, id)
-    if (!updated) return c.json({ error: 'task not found' }, 404)
+    if (!updated) return c.json({ error: await noSuchTask(project, id) }, 404)
     return c.json(publicTask(updated))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
@@ -3681,7 +3692,7 @@ app.post('/api/:project/tasks/:id/cwd', async (c) => {
     if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
     const file = path.join(project.dataDir, `${id}.json`)
     if (!(await readTask(project.dataDir, id)))
-      return c.json({ error: 'task not found' }, 404)
+      return c.json({ error: await noSuchTask(project, id) }, 404)
 
     const principal = c.get('principal')
     if (
@@ -3713,7 +3724,7 @@ app.post('/api/:project/tasks/:id/cwd', async (c) => {
       t.cwd = cwd
     })
     const task = await readTask(project.dataDir, id)
-    if (!task) return c.json({ error: 'task not found' }, 404)
+    if (!task) return c.json({ error: await noSuchTask(project, id) }, 404)
     return c.json(publicTask(task))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
@@ -3780,7 +3791,11 @@ app.post('/api/:project/tasks/:id/archive', async (c) => {
     })
     if (missing)
       return c.json(
-        { error: archived ? 'task not found' : 'archived task not found' },
+        {
+          error: archived
+            ? await noSuchTask(project, id)
+            : `no archived task ${id} in this project`,
+        },
         404,
       )
     if (conflict)
@@ -3834,7 +3849,7 @@ app.post('/api/:project/tasks/:id/app/:action', async (c) => {
     return c.json({ error: 'unknown app action' }, 404)
   if (action !== 'stop') {
     const task = await readTask(project.dataDir, id)
-    if (!task) return c.json({ error: 'task not found' }, 404)
+    if (!task) return c.json({ error: await noSuchTask(project, id) }, 404)
     if (task.status === 'landed') return c.json({ error: 'task has landed' }, 409)
   }
   const result = await requestAppAction({ project: project.slug, taskId: id, action })
@@ -3855,7 +3870,7 @@ app.post('/api/:project/tasks/:id/retitle', async (c) => {
     const file = path.join(project.dataDir, `${id}.json`)
 
     const task = await readTask(project.dataDir, id)
-    if (!task) return c.json({ error: 'task not found' }, 404)
+    if (!task) return c.json({ error: await noSuchTask(project, id) }, 404)
 
     // Title from the user's own messages only. The goal lives in what the user
     // asked for; the assistant's replies are execution detail that dominates the
@@ -4047,7 +4062,7 @@ app.post('/api/:project/tasks/:id/messages', async (c) => {
     const file = path.join(project.dataDir, `${id}.json`)
 
     const task = await readTask(project.dataDir, id)
-    if (!task) return c.json({ error: 'task not found' }, 404)
+    if (!task) return c.json({ error: await noSuchTask(project, id) }, 404)
 
     const body = await c.req.json<{
       message?: unknown
@@ -4260,7 +4275,7 @@ app.post('/api/:project/tasks/:id/asks', async (c) => {
     if (!TASK_ID.test(id)) return c.json({ error: 'invalid task id' }, 400)
     const file = path.join(project.dataDir, `${id}.json`)
     if (!(await readTask(project.dataDir, id)))
-      return c.json({ error: 'task not found' }, 404)
+      return c.json({ error: await noSuchTask(project, id) }, 404)
 
     const principal = c.get('principal')
     if (
@@ -4346,7 +4361,7 @@ app.post('/api/:project/tasks/:id/asks/:askId/answer', async (c) => {
     const askId = c.req.param('askId')
     const file = path.join(project.dataDir, `${id}.json`)
     if (!(await readTask(project.dataDir, id)))
-      return c.json({ error: 'task not found' }, 404)
+      return c.json({ error: await noSuchTask(project, id) }, 404)
 
     if (c.get('principal').kind !== 'ui')
       return c.json({ error: 'not authorized to answer' }, 403)
@@ -4458,7 +4473,7 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
     if (!rule) return c.json({ error: 'rule is required' }, 400)
 
     const task = await readTask(project.dataDir, id)
-    if (!task) return c.json({ error: 'task not found' }, 404)
+    if (!task) return c.json({ error: await noSuchTask(project, id) }, 404)
     const grantFlow = taskFlow(task)
 
     if (scope === 'project') {
@@ -4498,7 +4513,7 @@ app.post('/api/:project/tasks/:id/allow', async (c) => {
           noteHumanContact(t, { kind: 'ui' }, new Date().toISOString())
         })
       } catch {
-        return c.json({ error: 'task not found' }, 404)
+        return c.json({ error: await noSuchTask(project, id) }, 404)
       }
     }
     return c.json({ ok: true, rule, scope })
@@ -4525,7 +4540,7 @@ app.post('/api/:project/tasks/:id/seen', async (c) => {
     const updated = await mutateTaskInPools(project, id, (t) => {
         if (!t.readThrough || at > t.readThrough) t.readThrough = at
       })
-    if (!updated) return c.json({ error: 'task not found' }, 404)
+    if (!updated) return c.json({ error: noTask(id) }, 404)
     return c.json(publicTask(updated))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
@@ -4551,7 +4566,7 @@ app.post('/api/:project/tasks/:id/unread', async (c) => {
     const updated = await mutateTaskInPools(project, id, (t) => {
         t.readThrough = at
       })
-    if (!updated) return c.json({ error: 'task not found' }, 404)
+    if (!updated) return c.json({ error: noTask(id) }, 404)
     return c.json(publicTask(updated))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)

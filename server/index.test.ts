@@ -2140,6 +2140,18 @@ describe('server task provider behavior', () => {
     expect(await res.json()).toMatchObject({ id: task.id, archived: true })
   })
 
+  it('names a missing id, and says when the task it names is archived', async () => {
+    const missing = await app.request(`/api/${slug}/tasks/no-such-task`)
+    expect(missing.status).toBe(404)
+    expect(await missing.json()).toEqual({ error: 'no task no-such-task in this project' })
+
+    const task = await createTask('Archived, so not messageable')
+    expect((await post(`/api/${slug}/tasks/${task.id}/archive`, {})).status).toBe(200)
+    const sent = await post(`/api/${slug}/tasks/${task.id}/messages`, { message: 'hello' })
+    expect(sent.status).toBe(404)
+    expect(await sent.json()).toEqual({ error: `task ${task.id} is archived` })
+  })
+
   it('drops pending hook fires when a task is archived', async () => {
     const id = 'tsk-archived-with-fires'
     await writeFile(

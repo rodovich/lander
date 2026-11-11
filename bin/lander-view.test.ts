@@ -88,6 +88,15 @@ describe('lander view', () => {
     expect(lastUrl).toBe('/api/proj/tasks/child-1?conversation=expanded')
   })
 
+  it('takes the id after a `--`, with options on either side', async () => {
+    await execLander(['view', '--', '-child-1'])
+    expect(lastUrl).toBe('/api/proj/tasks/-child-1?conversation=folded')
+    await execLander(['view', '--', '-child-1', '--expand'])
+    expect(lastUrl).toBe('/api/proj/tasks/-child-1?conversation=expanded')
+    await execLander(['view', '--expand', '--', '-child-1'])
+    expect(lastUrl).toBe('/api/proj/tasks/-child-1?conversation=expanded')
+  })
+
   it('clips only when asked', async () => {
     const out = await execLander(['view', 'child-1', '--messages', '1', '--clip', '20'])
     expect(out).toContain('assistant:\nStarting.\n\n[2 steps,…')
