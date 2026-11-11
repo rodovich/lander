@@ -777,6 +777,21 @@ describe('deliverQueuedBatch', () => {
     expect(ids(t)).toEqual(['f-a1', 'f-a2', 'u-F1', 'u-F2'])
   })
 
+  it.each([
+    ['moves a notification’s event with it', 'notified', ['u-typed', 'e', 'u-note']],
+    ['leaves a relaunch divider in place', 'relaunched', ['e', 'u-typed', 'u-note']],
+  ] as const)('%s', (_label, eventKind, order) => {
+    const t: { items: Item[] } = {
+      items: [
+        userItem('typed', AT),
+        { id: 'e', at: later(1), kind: 'event', eventKind, message: 'u-note' },
+        userItem('note', later(1)),
+      ],
+    }
+    deliverQueuedBatch(t, 2, 'rB')
+    expect(ids(t)).toEqual(order)
+  })
+
   it('arms the sender of a `--await` message alongside the launcher', () => {
     const t: { items: Item[]; notify?: NotifyArming } = {
       items: [

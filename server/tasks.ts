@@ -2037,9 +2037,22 @@ export function deliverQueuedBatch(
   for (const u of moving)
     if (u.notify && u.from && 'task' in u.from) armNotify(task, u.from.task)
   if (moving.length && task.items) {
-    const movingSet = new Set<Item>(moving)
-    task.items = task.items.filter((it) => !movingSet.has(it))
-    for (const u of moving) task.items.push(u)
+    // A notification's event moves with it, so the note it is told under stays in
+    // delivery order among the batch's other messages. A relaunch divider stays
+    // put: it marks where the session changed.
+    const noteOf = new Map(
+      task.items.flatMap((it) =>
+        it.kind === 'event' && it.eventKind === 'notified' && it.message
+          ? [[it.message, it]]
+          : [],
+      ),
+    )
+    const moved = moving.flatMap((u): Item[] => {
+      const note = noteOf.get(u.id)
+      return note ? [note, u] : [u]
+    })
+    const movedSet = new Set(moved)
+    task.items = [...task.items.filter((it) => !movedSet.has(it)), ...moved]
   }
 }
 

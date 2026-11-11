@@ -29,7 +29,7 @@ function task(id: string, rides: RideSpec[] = [], over: Partial<FamilyTask> = {}
       ...(r.open ? {} : { endedAt: at, outcome: r.outcome ?? 'done' }),
     }
   })
-  return { id, title: id, status: 'riding', rides: built as never, items, ...over }
+  return { id, status: 'riding', rides: built as never, items, ...over }
 }
 
 const fromParent = { task: 'P', via: 'launch' }

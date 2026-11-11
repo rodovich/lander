@@ -297,6 +297,11 @@ describe('a managed child', () => {
     await vi.waitFor(async () => {
       expect(await childPrompts('wedged-parent')).toHaveLength(1)
     })
+    const items = (await readRaw('wedged-parent')).items as Item[]
+    const typed = items.findIndex((i) => i.kind === 'message' && i.text === 'carry on')
+    const note = items.findIndex((i) => i.kind === 'event' && i.eventKind === 'notified')
+    expect(typed).toBeGreaterThanOrEqual(0)
+    expect(note).toBeGreaterThan(typed)
   })
 
   it('counts a `send --await` answer as seen, so it is not delivered twice', async () => {

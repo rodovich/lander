@@ -19,7 +19,6 @@ import {
 
 export type FamilyTask = PendingTriggers & {
   id: string
-  title: string
   status: string
   runId?: string
   queued?: string[]
@@ -148,7 +147,7 @@ export function childResults(
         `(${omitted} other ${omitted === 1 ? 'turn' : 'turns'} not shown; \`lander view ${child.id} --messages all\` has them.)`,
       )
     sections.push(
-      `${child.id} "${child.title}" [${publicTaskStatus(child)}]:\n${parts.join('\n\n')}`,
+      `${child.id} [${publicTaskStatus(child)}]:\n${parts.join('\n\n')}`,
     )
     attachments.push(...kept.flatMap((r) => rideAttachments(child, r.id)))
     seen[child.id] = last.endedAt
