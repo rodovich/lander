@@ -73,6 +73,7 @@ export type AppStart = {
   taskId: string
   checkout: string
   command: string[]
+  env?: Record<string, string>
   leaseMs: number
 }
 
@@ -166,12 +167,13 @@ export function createAppManager(deps: AppManagerDeps) {
     return start === entry.processStart ? 'ours' : 'other'
   }
 
-  function spawned(command: string, args: string[], cwd: string, fd: number): Promise<number> {
+  function spawned(spec: AppStart, fd: number): Promise<number> {
+    const [command, ...args] = spec.command
     return new Promise((resolve, reject) => {
       const child = spawn(command, args, {
-        cwd,
+        cwd: spec.checkout,
         detached: true,
-        env: scrubbedEnv(),
+        env: { ...scrubbedEnv(), ...spec.env },
         stdio: ['ignore', fd, fd],
       })
       child.once('error', reject)
@@ -183,14 +185,13 @@ export function createAppManager(deps: AppManagerDeps) {
   }
 
   async function launch(spec: AppStart): Promise<StartResult> {
-    const [command, ...args] = spec.command
     let pid: number | undefined
     let fd: number | undefined
     try {
       const log = logFile(spec.project, spec.key)
       mkdirSync(path.dirname(log), { recursive: true })
       fd = openSync(log, 'w')
-      pid = await spawned(command, args, spec.checkout, fd)
+      pid = await spawned(spec, fd)
       const start = await processStart(pid)
       if (start === undefined) throw new Error('could not identify the started process')
       const startedAt = now()

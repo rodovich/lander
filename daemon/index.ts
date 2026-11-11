@@ -49,7 +49,8 @@ import { createHookRuns, runHook } from './hook-run'
 import { bundledWatcherMetas, runWatcher } from './watchers'
 import { statSync } from 'node:fs'
 import { createAppManager } from './app-manager'
-import { appStatus, appUrl } from './apps'
+import { webOrigin } from '../webOrigin'
+import { appStatus, appUrl, embedUrl } from './apps'
 import { createProjectOptions, type AppConfig } from './config'
 import {
   checkoutPath,
@@ -698,6 +699,7 @@ async function handleAppAction(
         checkout,
         taskId: msg.taskId,
         command: app.start,
+        env: { LANDER_EMBED_URL: embedUrl(webOrigin(), msg.project, msg.taskId) },
         leaseMs: leaseMs(app),
       })
       if (!result.ok)

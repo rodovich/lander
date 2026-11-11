@@ -3,11 +3,20 @@ import net from 'node:net'
 import { networkInterfaces, tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { appStatus, appUrl, isListening } from './apps'
+import { taskRefFromQuery } from '../src/taskRef'
+import { appStatus, appUrl, embedUrl, isListening } from './apps'
 
 const hasIpv6Loopback = Object.values(networkInterfaces())
   .flat()
   .some((i) => i?.address === '::1')
+
+describe('embedUrl', () => {
+  it('names the task in a form the embed page reads back', () => {
+    const url = new URL(embedUrl('https://localhost:41414', 'proj', 't1'))
+    expect(url.origin + url.pathname).toBe('https://localhost:41414/embed.html')
+    expect(taskRefFromQuery(url.search)).toEqual({ projectSlug: 'proj', id: 't1' })
+  })
+})
 
 describe('appUrl', () => {
   let dir: string

@@ -29,6 +29,10 @@ export function appUrl(app: AppConfig, checkout: string): string | undefined {
   return ['http:', 'https:'].includes(new URL(text).protocol) ? text : undefined
 }
 
+export function embedUrl(webOrigin: string, project: string, taskId: string): string {
+  return `${webOrigin}/embed.html?${new URLSearchParams({ project, task: taskId })}`
+}
+
 function canConnect(host: string, port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = net.connect({ host, port })

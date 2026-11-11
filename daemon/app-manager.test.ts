@@ -98,6 +98,18 @@ describe('app manager', { timeout: 15_000 }, () => {
     expect(readFileSync(log, 'utf8').trim()).toBe(`${dir} []`)
   })
 
+  it('gives the app the environment asked for its start', async () => {
+    const m = manager()
+    const result = await m.start({
+      ...spec('t1', script('app', 'echo "[$APP_TASK]"; exec sleep 30')),
+      env: { APP_TASK: 'task t1' },
+    })
+    expect(result.ok).toBe(true)
+    const log = m.logFile('proj', 't1')
+    await until(() => readFileSync(log, 'utf8').includes('['))
+    expect(readFileSync(log, 'utf8').trim()).toBe('[task t1]')
+  })
+
   it('lets a new manager find and stop an app the previous one started', async () => {
     const first = manager()
     const result = await first.start(spec('t1', sleeper()))
