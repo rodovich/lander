@@ -12,21 +12,8 @@ import type { TaskLinkResolver } from './markdown'
 import { startPoll, type Poll } from './poll'
 import { MonotonicRequestGate } from './requestOrder'
 import { taskHref, taskKey, taskKeyOf, type TaskRef } from './taskRef'
-import {
-  admitTask as admitToFence,
-  beginTaskPatch,
-  createTaskMutationFence,
-  insertTask,
-  mergeTaskRefresh,
-  patchTask,
-  removeTask,
-  replaceTask,
-  settleTaskPatch,
-  settleTaskRemoval,
-  type TaskMutationHandle,
-  type TaskPatch,
-} from './taskMutationFence'
 import type { FlowMeta, Project, TaskLink, TaskView, TaskWithProject } from './types'
+import { useFencedTasks } from './useFencedTasks'
 
 // The gap between one poll's answer and the next poll's question. Measured
 // from the answer (see startPoll), so this is the cadence at rest and the
@@ -54,7 +41,7 @@ export function useTaskData(
   initialProjectSlug = '',
   query = '',
 ) {
-  const [tasks, setTasks] = useState<TaskWithProject[]>([])
+  const { admit, beginRefresh, ...fencedTasks } = useFencedTasks()
   // Active + archived links across every configured project, independent of
   // the displayed project filter and carrying no conversation data.
   const [taskLinks, setTaskLinks] = useState<TaskLink[]>([])
@@ -71,64 +58,10 @@ export function useTaskData(
   // project list once it loads (see the /api/projects effect).
   const [project, setProject] = useSessionState('lander:project', '')
 
-  // Latest tasks readable from timer callbacks that outlive the render that
-  // scheduled them (the seen-marker dwell timer marks a task seen 2s later).
-  const tasksRef = useRef(tasks)
-  tasksRef.current = tasks
-
   // Whether the first tasks load has landed, for effects that must hold off
   // until then (the URL sync, which would otherwise clobber a deep link).
   const hasLoadedRef = useRef(false)
 
-  // Task writes are optimistic while the displayed-list poll runs
-  // independently. Fence only the task being written: stale snapshots cannot
-  // roll it back, while changes to every other task still land normally. The
-  // fenced operations below (patch, removal, admit) and the poll's merge are
-  // the only writers of `tasks`; setTasks stays private so no optimistic write
-  // can skip the fence.
-  const taskMutationFenceRef = useRef(createTaskMutationFence())
-  const beginTaskMutation = useCallback(
-    (task: TaskWithProject, patch: TaskPatch): TaskMutationHandle => {
-      const handle = beginTaskPatch(taskMutationFenceRef.current, task, patch)
-      setTasks((prev) => patchTask(prev, handle.key, patch))
-      return handle
-    },
-    [],
-  )
-  const finishTaskMutation = useCallback(
-    (handle: TaskMutationHandle, updated?: TaskWithProject) => {
-      const replacement = settleTaskPatch(
-        taskMutationFenceRef.current,
-        handle,
-        updated,
-      )
-      if (replacement)
-        setTasks((prev) => replaceTask(prev, handle.key, replacement))
-    },
-    [],
-  )
-  // The same fence for a write that takes a task out of the displayed list (an
-  // archive or restore): drop the row at once, keep polls that predate the
-  // write from bringing it back, and reinstate it if the write fails.
-  const beginTaskRemoval = useCallback(
-    (task: TaskWithProject): TaskMutationHandle => {
-      const handle = beginTaskPatch(taskMutationFenceRef.current, task, 'removed')
-      setTasks((prev) => removeTask(prev, handle.key))
-      return handle
-    },
-    [],
-  )
-  const finishTaskRemoval = useCallback(
-    (handle: TaskMutationHandle, succeeded: boolean) => {
-      const reinstated = settleTaskRemoval(
-        taskMutationFenceRef.current,
-        handle,
-        succeeded,
-      )
-      if (reinstated) setTasks((prev) => insertTask(prev, reinstated))
-    },
-    [],
-  )
   // Poll the project list, which changes when the server restarts onto an
   // edited config. Reconcile the open project against each new list: on the
   // first load the routed task's project wins, then the session-restored pick
@@ -169,16 +102,13 @@ export function useTaskData(
   // — but only into a list that would carry it: a task created in a project
   // that isn't open, or while the archived pool is displayed, is one the next
   // poll would rightly omit, so admitting it would paint a row that vanishes
-  // two seconds later. The fence boundary is set outside the state updater: an
-  // updater may run twice under StrictMode, and the clock must advance exactly
-  // once per admit.
+  // two seconds later.
   const admitTask = useCallback(
     (task: TaskWithProject) => {
       if (archived || task.projectSlug !== project) return
-      admitToFence(taskMutationFenceRef.current, task)
-      setTasks((prev) => insertTask(prev, task))
+      admit(task)
     },
-    [project, archived],
+    [project, archived, admit],
   )
 
   // The task whose conversation is on screen. The list arrives as summaries,
@@ -255,8 +185,7 @@ export function useTaskData(
     const epoch = epochRef.current
     const requestOrder = refreshOrderRef.current
     const request = requestOrder.begin()
-    const mutationFence = taskMutationFenceRef.current
-    const issuedAt = mutationFence.clock
+    const commitRefresh = beginRefresh()
     const searchRequest = searchRequestRef.current
     const watched = watchedRef.current
     const watchedKey = watched && taskKey(watched.projectSlug, watched.id)
@@ -276,18 +205,17 @@ export function useTaskData(
         !requestOrder.settle(request)
       )
         return null
-      setTasks((current) => {
+      commitRefresh((current) => {
         // A failed detail keeps the conversation already on screen under the
         // fresh summary, rather than blanking the open task for a cycle.
         const prev = current.find((c) => taskKeyOf(c) === watchedKey)
-        const shown = tasks.map((t) =>
+        return tasks.map((t) =>
           !detail || taskKeyOf(t) !== watchedKey
             ? t
             : 'task' in detail
               ? detail.task
               : { ...t, items: prev?.items, rides: prev?.rides },
         )
-        return mergeTaskRefresh(mutationFence, issuedAt, current, shown)
       })
       setTelemetry(telemetry)
       setAppTasks(appTasks)
@@ -442,8 +370,7 @@ export function useTaskData(
   )
 
   return {
-    tasks,
-    tasksRef,
+    ...fencedTasks,
     telemetry,
     appTasks,
     flows,
@@ -454,10 +381,6 @@ export function useTaskData(
     watchTask,
     search,
     requestMatches,
-    beginTaskMutation,
-    finishTaskMutation,
-    beginTaskRemoval,
-    finishTaskRemoval,
     admitTask,
     hasLoadedRef,
     resolveTaskLink,

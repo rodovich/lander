@@ -13,6 +13,10 @@ export function statusClass(status: string | undefined): string {
   return status && TINTED.has(status) ? ` ${status}` : ''
 }
 
+export function TaskStatus({ status }: { status: string }) {
+  return <span className={`task-status${statusClass(status)}`}>{status}</span>
+}
+
 // A link to another task, tinted by that task's current status: the chip worn
 // by an awaited task on a lifecycle event and by the subject of a task action
 // alike. The caller resolves the title, because which one is right differs —

@@ -7,6 +7,7 @@ import { CopyConversationButton, CopyIdButton, TaskActionsMenu } from './menus'
 import { availableTaskActions } from './taskActions'
 import type { TaskAction } from './taskActions'
 import { taskKeyOf } from './taskRef'
+import { TaskStatus } from './timelineNote'
 import type { FlowCaps, TaskWithProject } from './types'
 
 function SparkleIcon() {
@@ -139,17 +140,7 @@ export const DetailHeader = memo(function DetailHeader({
         <AppRow key={taskKeyOf(task)} slug={task.projectSlug} taskId={task.id} />
       )}
       <div className="detail-meta">
-        <span
-          className={
-            'task-status' +
-            (task.status === 'wedged' ? ' wedged' : '') +
-            (task.status === 'riding' ? ' riding' : '') +
-            (task.status === 'paced' ? ' paced' : '') +
-            (task.status === 'landed' ? ' landed' : '')
-          }
-        >
-          {task.status}
-        </span>
+        <TaskStatus status={task.status} />
         <span className="task-time">
           {formatTimestamp(task.updatedAt ?? task.createdAt)}
         </span>
