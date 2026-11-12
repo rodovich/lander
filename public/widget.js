@@ -18,12 +18,12 @@
       :host {
         all: initial;
         position: fixed;
-        right: 16px;
+        left: 16px;
         bottom: 16px;
         z-index: 2147483647;
         display: flex;
         flex-direction: column;
-        align-items: flex-end;
+        align-items: flex-start;
         gap: 8px;
         font: 13px -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
       }

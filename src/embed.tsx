@@ -138,7 +138,9 @@ export function EmbedTask({ taskRef }: { taskRef: TaskRef }) {
             onTaskAction={runTaskAction}
             onRetry={tryAgain}
           />
-          {draft && <Composer task={task} height={COMPOSER_HEIGHT} draft={draft} />}
+          {draft && (
+            <Composer task={task} height={COMPOSER_HEIGHT} draft={draft} showUsage={false} />
+          )}
         </ErrorBoundary>
       )}
     </EmbedPane>

@@ -5,16 +5,18 @@ import type { TaskWithProject } from './types'
 import type { ReplyDraft } from './useReplyDrafts'
 
 // The reply bar under the open conversation: the task's draft and its
-// attachments, sending, and the corner usage readout. The draft itself lives
-// above (see useReplyDrafts), so closing the task doesn't lose it.
+// attachments, sending, and, unless hidden, the corner usage readout. The draft
+// itself lives above (see useReplyDrafts), so closing the task doesn't lose it.
 export const Composer = memo(function Composer({
   task,
   height,
   draft,
+  showUsage = true,
 }: {
   task: TaskWithProject
   height: number
   draft: ReplyDraft
+  showUsage?: boolean
 }) {
   const composerRef = useRef<HTMLTextAreaElement>(null)
 
@@ -41,7 +43,7 @@ export const Composer = memo(function Composer({
       onAddFiles={draft.addFiles}
       onKeepFiles={draft.keepFiles}
       showAttach={!task.archived}
-      actions={<UsageReadout task={task} />}
+      actions={showUsage && <UsageReadout task={task} />}
     />
   )
 })
