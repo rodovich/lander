@@ -61,7 +61,8 @@ export const gitRun: Git = gitWithin(0)
 
 // Make sure the task's checkout exists. `-f` overrides only a registered entry
 // whose directory has gone missing (deleted by hand); with `--detach` there is no
-// branch for it to steal.
+// branch for it to steal. `--quiet` keeps git's status and progress lines out of stderr,
+// which becomes the error a failed ride reports and is shown from its first line.
 export async function ensureCheckout(
   root: string,
   taskId: string,
@@ -72,7 +73,7 @@ export async function ensureCheckout(
     if (isWorktree(dir)) return dir
     throw new Error(`${dir} exists but is not a git worktree; move it aside to let this task run`)
   }
-  await git(root, ['worktree', 'add', '-f', '--detach', dir])
+  await git(root, ['worktree', 'add', '--quiet', '-f', '--detach', dir])
   return dir
 }
 
