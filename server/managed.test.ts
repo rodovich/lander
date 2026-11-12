@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { childResults, settled, wakeDue, type Family, type FamilyTask } from './managed'
+import { CHILD_RESULTS_MAX_CHARS, childResults, settled, wakeDue, type Family, type FamilyTask } from './managed'
 
 const AT = (n: number) => new Date(Date.UTC(2026, 0, 1, 0, 0, n)).toISOString()
 
@@ -81,6 +81,23 @@ describe('childResults', () => {
   it('marks a partial reply from a ride that was cut short', () => {
     const a = task('A', [{ from: fromParent, text: 'Let me start by', outcome: 'interrupted' }])
     expect(childResults(task('P'), [a])!.text).toContain('cut short: interrupted')
+  })
+
+  it('counts unread messages in place of replies too long to include', () => {
+    const long = 'x'.repeat(CHILD_RESULTS_MAX_CHARS)
+    const a = task('A', [
+      { from: fromParent, text: 'seen' },
+      { from: null, text: 'by the user' },
+      { from: fromParent, text: long },
+    ])
+    const b = task('B', [{ from: fromParent, text: 'short' }])
+    const parent = task('P', [], { childrenSeen: { A: a.rides![0].endedAt! } })
+    const r = childResults(parent, [a, b])!
+    expect(r.text).not.toContain(long)
+    expect(r.text).toContain('lander view <id> --messages <N>')
+    expect(r.text).toMatch(/^A \[paced\]: 4 messages, [\d,]+ characters$/m)
+    expect(r.text).toMatch(/^B \[paced\]: 1 message, 5 characters$/m)
+    expect(r.seen).toEqual({ A: a.rides![2].endedAt, B: b.rides![0].endedAt })
   })
 
   it('leaves out a ride still running', () => {

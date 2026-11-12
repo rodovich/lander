@@ -99,6 +99,27 @@ export function openRide<R extends { endedAt?: string } = Ride>(task: {
   return undefined
 }
 
+export function entryRide(entry: TimelineEntry): string | undefined {
+  switch (entry.kind) {
+    case 'ride':
+      return entry.ride.id
+    case 'user':
+      return entry.item.deliveredIn
+    case 'event':
+      return entry.message?.deliveredIn
+    case 'hook':
+      return entry.hook.ride
+    case 'task-action':
+      return entry.action.ride
+    case 'ask':
+      return entry.ask.rideId
+  }
+}
+
+export function entryMessage(entry: TimelineEntry): MessageItem | undefined {
+  return entry.kind === 'user' ? entry.item : entry.kind === 'event' ? entry.message : undefined
+}
+
 export function buildTimeline(
   task: { items?: Item[]; rides?: Ride[] },
   now: string,

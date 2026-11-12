@@ -17,10 +17,17 @@ export function conversationText(
   task: { items?: Item[]; rides?: Ride[] },
   opts: { expand: boolean },
 ): ConversationBlock[] {
+  return conversationEntries(task, opts).map(({ block }) => block)
+}
+
+export function conversationEntries(
+  task: { items?: Item[]; rides?: Ride[] },
+  opts: { expand: boolean },
+): { entry: TimelineEntry; block: ConversationBlock }[] {
   // `now` only dates a running turn's entry, which no block shows.
   return buildTimeline(task, '').items.flatMap((entry) => {
     const block = entryBlock(entry, opts.expand)
-    return block?.text.trim() ? [block] : []
+    return block?.text.trim() ? [{ entry, block }] : []
   })
 }
 
