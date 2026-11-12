@@ -13,7 +13,8 @@ import {
   type Ride,
 } from './tasks'
 
-// Delivering a managed child's results to the task that launched it. Computed
+// Delivering a managed child's results to the task that launched it, and a
+// `send --await` answer to the task that asked. Managed delivery is computed
 // from current state on each pass, because a parent's turn ending and a child's
 // ride ending are writes to two files and can land in either order.
 
@@ -116,25 +117,30 @@ function rideText(child: FamilyTask, ride: Ride): string {
   return ride.outcome === 'done' ? text : `(This turn was cut short: ${ride.outcome}.)\n${text}`
 }
 
-// Past this many characters of replies, the parent gets a count of each child's
+// Past this many characters of replies, the reader gets a count of each task's
 // unread messages instead of the replies, and reads what it needs with
 // `lander view`.
-export const CHILD_RESULTS_MAX_CHARS = 6000
+export const REPLIES_MAX_CHARS = 6000
 
-function fromParent(parent: FamilyTask, entry: TimelineEntry): boolean {
-  const from = entryMessage(entry)?.from
-  return !!from && 'task' in from && from.task === parent.id
+function fitOrCount(lead: string, replies: string, counts: () => string[]): string {
+  return replies.length > REPLIES_MAX_CHARS
+    ? `${lead}. \`lander view <id> --messages <N>\` shows a task's last N messages.\n\n${counts().join('\n')}`
+    : `${lead}:\n\n${replies}`
 }
 
-// The messages `lander view` shows from the first one the parent hasn't seen,
-// not counting the parent's own messages that start them: it wrote those, and a
-// launch brief can be far longer than the reply.
-function unreadMessages(parent: FamilyTask, child: FamilyTask, rides: Ride[]) {
+function sentBy(reader: string, entry: TimelineEntry): boolean {
+  const from = entryMessage(entry)?.from
+  return !!from && 'task' in from && from.task === reader
+}
+
+// The messages `lander view` shows from the first one in `rides` or after
+// `seen`, not counting the reader's own messages that start them: it wrote
+// those, and a launch brief can be far longer than the reply.
+function unreadMessages(reader: string, task: FamilyTask, rides: Ride[], seen: string) {
   const unseen = new Set(rides.map((r) => r.id))
-  const seen = parent.childrenSeen?.[child.id] ?? ''
-  const entries = conversationEntries(child, { expand: false })
+  const entries = conversationEntries(task, { expand: false })
   const first = entries.findIndex(({ entry }) => {
-    if (fromParent(parent, entry)) return false
+    if (sentBy(reader, entry)) return false
     const ride = entryRide(entry)
     return ride ? unseen.has(ride) : entry.at > seen
   })
@@ -145,20 +151,32 @@ function unreadMessages(parent: FamilyTask, child: FamilyTask, rides: Ride[]) {
   }
 }
 
-function childHeader(child: FamilyTask): string {
-  return `${child.id} [${publicTaskStatus(child)}]:`
+function taskHeader(task: FamilyTask): string {
+  return `${task.id} [${publicTaskStatus(task)}]:`
 }
 
-function countLine(parent: FamilyTask, child: FamilyTask, rides: Ride[]): string {
-  const { count, chars } = unreadMessages(parent, child, rides)
-  return `${childHeader(child)} ${count} ${count === 1 ? 'message' : 'messages'}, ${chars.toLocaleString('en-US')} characters`
+function countLine(reader: string, task: FamilyTask, rides: Ride[], seen: string): string {
+  const { count, chars } = unreadMessages(reader, task, rides, seen)
+  return `${taskHeader(task)} ${count} ${count === 1 ? 'message' : 'messages'}, ${chars.toLocaleString('en-US')} characters`
 }
 
-export type ChildResults = {
-  text: string
-  attachments: Attachment[]
-  seen: Record<string, string>
+export type Notice = { text: string; attachments: Attachment[] }
+
+// What a task that sent `send --await` is told when the turn answering it ends.
+export function answerNotice(asker: string, task: FamilyTask, ride: Ride): Notice {
+  const rides = task.rides ?? []
+  const seen = rides.slice(0, rides.indexOf(ride)).at(-1)?.endedAt ?? ''
+  return {
+    text: fitOrCount(
+      `${task.id} replied to the message you sent with --await`,
+      `${taskHeader(task)}\n${rideText(task, ride)}`,
+      () => [countLine(asker, task, [ride], seen)],
+    ),
+    attachments: rideAttachments(task, ride.id),
+  }
 }
+
+export type ChildResults = Notice & { seen: Record<string, string> }
 
 export function childResults(
   parent: FamilyTask,
@@ -182,15 +200,18 @@ export function childResults(
         0,
         `(${omitted} other ${omitted === 1 ? 'turn' : 'turns'} not shown; \`lander view ${child.id} --messages all\` has them.)`,
       )
-    sections.push(`${childHeader(child)}\n${parts.join('\n\n')}`)
+    sections.push(`${taskHeader(child)}\n${parts.join('\n\n')}`)
     attachments.push(...kept.flatMap((r) => rideAttachments(child, r.id)))
     seen[child.id] = last.endedAt
   }
   if (!sections.length) return undefined
-  const replies = sections.join('\n\n')
-  const text =
-    replies.length > CHILD_RESULTS_MAX_CHARS
-      ? `Tasks you manage have messages you have not read. \`lander view <id> --messages <N>\` shows a task's last N messages.\n\n${unread.map(([child, rides]) => countLine(parent, child, rides)).join('\n')}`
-      : `Results from tasks you manage that you have not read:\n\n${replies}`
+  const text = fitOrCount(
+    'Tasks you manage have messages you have not read',
+    sections.join('\n\n'),
+    () =>
+      unread.map(([child, rides]) =>
+        countLine(parent.id, child, rides, parent.childrenSeen?.[child.id] ?? ''),
+      ),
+  )
   return { text, attachments, seen }
 }

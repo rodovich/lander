@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CHILD_RESULTS_MAX_CHARS, childResults, settled, wakeDue, type Family, type FamilyTask } from './managed'
+import { REPLIES_MAX_CHARS, childResults, settled, wakeDue, type Family, type FamilyTask } from './managed'
 
 const AT = (n: number) => new Date(Date.UTC(2026, 0, 1, 0, 0, n)).toISOString()
 
@@ -84,7 +84,7 @@ describe('childResults', () => {
   })
 
   it('counts unread messages in place of replies too long to include', () => {
-    const long = 'x'.repeat(CHILD_RESULTS_MAX_CHARS)
+    const long = 'x'.repeat(REPLIES_MAX_CHARS)
     const a = task('A', [
       { from: fromParent, text: 'seen' },
       { from: null, text: 'by the user' },

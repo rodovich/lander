@@ -505,24 +505,20 @@ type ItemCommon = {
 export type HookSender = { hook: string; path: string; fireId: string }
 
 // A task that put a message in a task's conversation, and how: its `lander
-// launch` opening message, a `lander send`, or the `--await` wake carrying its
-// closing message to another task — or its `lander relaunch` brief to its own
-// next session. Named by id alone, because none of them may cross a project.
+// launch` opening message, a `lander send`, or its `lander relaunch` brief to its
+// own next session. Named by id alone, because none of them may cross a project.
+// `notify` is an `--await` answer as records before lander delivered those
+// itself attribute it: the answering task's closing message, under its name.
 export type TaskSender = {
   task: string
   via: 'launch' | 'send' | 'notify' | 'relaunch'
 }
 
-// How much of one closing message a wake carries. A cap because a closing message
-// can be thousands of words and a wake is a note, not a transcript; the reader can
-// always `lander view`.
-export const NOTIFY_TEXT_MAX_CHARS = 2000
-
 // Lander itself, telling a task that the time it set came, the tasks it awaited
-// landed, a restart cut off its previous ride, a watch fired, or its managed
-// children have results for it.
+// landed, a restart cut off its previous ride, a watch fired, its managed
+// children have results for it, or a task answered its `send --await`.
 export type LanderSender =
-  | { lander: 'time' | 'await' | 'restart' | 'children' }
+  | { lander: 'time' | 'await' | 'restart' | 'children' | 'answer' }
   | { lander: 'watch'; watcher: string; args: Record<string, string> }
 
 // A prompt item as the agent receives it: a message from another task with its
@@ -542,9 +538,9 @@ export function attributedPrompt(m: {
   // A relaunch brief is the task's own words to its next session, which knows
   // from its prompt that a relaunch is how it starts; there is no one to name.
   if (via === 'relaunch') return m.text
-  // A `--await` wake says "finished a turn" rather than "is done": a clean
-  // turn-end is not a claim that the work is complete, and the launcher has to
-  // decide that for itself.
+  // An `--await` answer from an older record, under the answering task's name,
+  // re-sent by a retry. It says "finished a turn" rather than "is done": a clean
+  // turn-end is not a claim that the work is complete.
   return m.text ? `${task} finished a turn:\n\n${m.text}` : `${task} finished a turn.`
 }
 
@@ -606,7 +602,7 @@ export type EventItem = ItemCommon & {
   // The id of the user item this event delivered — a relaunch's brief, or the
   // notification on a 'notified' (always present there) — which the timeline
   // tells inside the event's note rather than as the user speaking. Set by
-  // pushEventPrompt in the mutation that writes both.
+  // queueEventPrompt in the mutation that writes both.
   message?: string
 }
 
@@ -765,21 +761,22 @@ export function pushUserItem(
   return item
 }
 
-// Append the prompt a lifecycle event delivers, and point the event at it, so the
-// two are told as one note. Written in the event's own mutation, so the pairing
-// is recorded rather than inferred from adjacency, which a queued message's move
-// to the tail on delivery would break (deliverQueuedBatch).
-export function pushEventPrompt(
-  task: { items?: Item[] },
+// Append the prompt a lifecycle event delivers, queue it for the next turn, and
+// point the event at it, so the two are told as one note. Written in the event's
+// own mutation, so the pairing is recorded rather than inferred from adjacency,
+// which a queued message's move to the tail on delivery would break
+// (deliverQueuedBatch).
+export function queueEventPrompt(
+  task: { items?: Item[]; queued?: string[] },
   event: EventItem,
   text: string,
   at: string,
   from: TaskSender | LanderSender,
   attachments?: Attachment[],
-): MessageItem {
+): void {
   const item = pushUserItem(task, text, at, { from, attachments })
   event.message = item.id
-  return item
+  ;(task.queued ??= []).push(attributedPrompt(item))
 }
 
 // Append a flow (assistant/host) message item to a ride.
@@ -1513,7 +1510,7 @@ export function clearTaskThread(task: ThreadStateTask): void {
 // `flow`, when given, is the flow the fresh session runs under.
 //
 // The caller owns the message/queue/status for the next turn, and links the
-// returned divider to the message it appends (pushEventPrompt).
+// returned divider to the message it appends (queueEventPrompt).
 export function sealForRelaunch(
   task: {
     sessionId?: string
@@ -1599,11 +1596,10 @@ export function applyRelaunch(
     by,
   )
   const divider = sealForRelaunch(task, at, flow)
-  const item = pushEventPrompt(task, divider, message, at, {
+  queueEventPrompt(task, divider, message, at, {
     task: task.id,
     via: 'relaunch',
   })
-  ;(task.queued ??= []).push(attributedPrompt(item))
   task.status = 'riding'
   task.updatedAt = at
   delete task.retry
@@ -1670,11 +1666,10 @@ export function applyDueMessages(
   // Each relaunch brief gets its own divider to be told under. Several due in
   // one sweep seal an already-sealed session, which is harmless.
   for (const m of relaunch) {
-    const item = pushEventPrompt(task, sealForRelaunch(task, at, m.flow), m.text, at, {
+    queueEventPrompt(task, sealForRelaunch(task, at, m.flow), m.text, at, {
       task: task.id,
       via: 'relaunch',
     })
-    ;(task.queued ??= []).push(attributedPrompt(item))
   }
   for (const m of rest) {
     pushUserItem(task, m.text, at, {

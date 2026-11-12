@@ -81,7 +81,7 @@ import {
   attributedPrompt,
   wakeupNotification,
   INTERRUPTED_NOTIFICATION,
-  pushEventPrompt,
+  queueEventPrompt,
   taskSessionId,
   setTaskSessionId,
   taskTurnContext,
@@ -113,7 +113,6 @@ import {
   type Watch,
   clearScheduledTime,
   asList,
-  NOTIFY_TEXT_MAX_CHARS,
   type NotifyArming,
   type PendingNotifies,
   type ScheduledMessage,
@@ -183,7 +182,14 @@ import { TITLE_MAX_CHARS, generateTitle } from './title'
 import { createSlowLog, fileWriter } from './slow-log'
 import { readStats } from './stats'
 import { createComposedStore, type ComposedMessage } from './composed'
-import { childResults, wakeDue, type Family, type FamilyTask } from './managed'
+import {
+  answerNotice,
+  childResults,
+  wakeDue,
+  type Family,
+  type FamilyTask,
+  type Notice,
+} from './managed'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const LANDER_BIN_DIR = path.join(ROOT, 'bin')
@@ -1257,7 +1263,7 @@ async function launchTask(
           ? watchNotification(watch, fire.message)
           : wakeupNotification(at, fired ? landed : undefined)
       const event = pushEventItem(t, { eventKind: 'notified', title: t.title }, at)
-      ;(t.queued ??= []).push(attributedPrompt(pushEventPrompt(t, event, text, at, from)))
+      queueEventPrompt(t, event, text, at, from)
     } else {
       pushEventItem(t, { eventKind: 'launched', title: t.title }, at)
       if (prompted) {
@@ -1346,15 +1352,14 @@ async function deliverScheduledMessages(
   if (claimed) void driveClaimedTask(project, id)
 }
 
-// Deliver a task's fired `--await`s: wake each task that asked with the closing
-// message of the turn that fired it. Clears `pendingNotify` whatever the outcome — a notification is
+// Deliver a task's fired `--await`s: wake each task that asked with lander's
+// notice of the turn that fired it. Clears `pendingNotify` whatever the outcome — a notification is
 // a courtesy, and one that cannot be delivered (target landed, archived, or gone)
 // must not be retried on every sweep for the life of the instance.
 //
-// The delivery is shaped exactly like a scheduled message rather than going out
-// through POST /messages: the sender is the scheduler, not the notifying task,
-// which is waiting by now and may never ride again — so there is no principal to
-// authenticate and nothing to send from.
+// Lander is the sender, as for managed children's results, so the notice can
+// say how to read a reply too long to include without putting words in the
+// answering task's mouth.
 async function deliverNotification(
   project: Project,
   notifierId: string,
@@ -1364,30 +1369,25 @@ async function deliverNotification(
   // into a permanent per-sweep write, and leaves a crash between the two writes
   // able to wake a task twice. Read under the same lock that clears them, so one
   // appended after the sweep's read is delivered rather than lost.
-  const deliveries: { to: string; message: ScheduledMessage; answer?: ManagedAnswer }[] = []
+  const deliveries: { to: string; notice: Notice; answer?: ManagedAnswer }[] = []
   await mutateTask(path.join(project.dataDir, `${notifierId}.json`), (t) => {
     for (const pending of asList(t.pendingNotify)) {
-      const item = lastFlowItem(t, pending.rideId)
-      const closing = item?.text?.trim() ?? ''
+      const ride = pending.rideId
+        ? t.rides?.find((r) => r.id === pending.rideId)
+        : t.rides?.at(-1)
+      if (!ride) continue
       deliveries.push({
         to: pending.to,
         ...(t.managed && t.spawnedBy === pending.to
           ? { answer: managedAnswer(t, pending.at) }
           : {}),
-        message: {
-          text:
-            closing.length > NOTIFY_TEXT_MAX_CHARS
-              ? `${closing.slice(0, NOTIFY_TEXT_MAX_CHARS)}…`
-              : closing,
-          attachments: item?.rideId ? rideAttachments(t, item.rideId) : [],
-          from: { task: notifierId, via: 'notify' },
-        },
+        notice: answerNotice(pending.to, t, ride),
       })
     }
     delete t.pendingNotify
   }).catch(() => {})
-  for (const { to, message, answer } of deliveries)
-    if (to !== notifierId) await wakeNotified(project, to, message, answer)
+  for (const { to, notice, answer } of deliveries)
+    if (to !== notifierId) await wakeNotified(project, to, notice, answer)
 }
 
 type ManagedAnswer = { child: string; endedAt: string; previousEndedAt: string }
@@ -1417,15 +1417,7 @@ function queueChildResults(t: Task, children: FamilyTask[], at: string): boolean
   const results = childResults(t, children)
   if (!results) return false
   const event = pushEventItem(t, { eventKind: 'notified', title: t.title }, at)
-  const item = pushEventPrompt(
-    t,
-    event,
-    results.text,
-    at,
-    { lander: 'children' },
-    results.attachments,
-  )
-  ;(t.queued ??= []).push(attributedPrompt(item))
+  queueEventPrompt(t, event, results.text, at, { lander: 'children' }, results.attachments)
   markChildrenSeen(t, results.seen)
   return true
 }
@@ -1484,12 +1476,10 @@ function collectAwaitingAnswer(task: Task, active: boolean, waiting: Set<string>
       waiting.add(item.from.task)
 }
 
-// The record holds the notifying task's closing words alone; the agent reads them
-// under the "finished a turn" header attributedPrompt composes.
 async function wakeNotified(
   project: Project,
   to: string,
-  message: ScheduledMessage,
+  notice: Notice,
   answer?: ManagedAnswer,
 ): Promise<void> {
   const target = await readTask(project.dataDir, to)
@@ -1519,7 +1509,8 @@ async function wakeNotified(
       new Date(Date.parse(at) - 1).toISOString(),
       'system',
     )
-    applyDueMessages(t, [message], at)
+    const event = pushEventItem(t, { eventKind: 'notified', title: t.title }, at)
+    queueEventPrompt(t, event, notice.text, at, { lander: 'answer' }, notice.attachments)
     // Seen is a high-water mark, so an unread earlier ride holds it back, and
     // this answer is repeated when that ride is delivered.
     if (answer && seen >= answer.previousEndedAt)
@@ -4689,9 +4680,7 @@ export async function recoverQueues(): Promise<void> {
             const at = new Date().toISOString()
             const { text, from } = INTERRUPTED_NOTIFICATION
             const event = pushEventItem(t, { eventKind: 'notified', title: t.title }, at)
-            ;(t.queued ??= []).push(
-              attributedPrompt(pushEventPrompt(t, event, text, at, from)),
-            )
+            queueEventPrompt(t, event, text, at, from)
             t.updatedAt = at
           } else {
             // The opening run died before any reply. Replay the original opening

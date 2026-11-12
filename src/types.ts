@@ -148,13 +148,13 @@ export type MessageItem = ItemCommon & {
   role: 'user' | 'flow' | 'hook'
   text: string
   // Who spoke, when it was not the task's human: the hook on a `hook` message,
-  // or on a `user` message the task that launched, messaged, or `--await`-woke
-  // this one — or this task itself, briefing its next session in a relaunch —
-  // or lander, notifying the task why it woke.
+  // or on a `user` message the task that launched or messaged this one (or, in
+  // older records, `--await`-woke it) — or this task itself, briefing its next
+  // session in a relaunch — or lander, notifying the task why it woke.
   from?:
     | { hook: string; path: string; fireId: string }
     | { task: string; via: 'launch' | 'send' | 'notify' | 'relaunch' }
-    | { lander: 'time' | 'await' | 'restart' | 'children' }
+    | { lander: 'time' | 'await' | 'restart' | 'children' | 'answer' }
     | { lander: 'watch'; watcher: string; args: Record<string, string> }
   attachments?: Attachment[]
   // Set on a user message once a queued batch delivers it: the ride that

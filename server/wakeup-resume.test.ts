@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { REPLIES_MAX_CHARS } from './managed'
 import { normalizeProjectPath, projectSlug } from './projects'
 import { observeWrites } from './store'
 import { attributedPrompt, type EventItem, type Item, type MessageItem } from './tasks'
@@ -49,6 +50,9 @@ function seed(id: string, extra: Record<string, unknown>): Promise<void> {
     }),
   )
 }
+
+const replied = (id: string, text: string) =>
+  `${id} replied to the message you sent with --await:\n\n${id} [paced]:\n${text}`
 
 async function readRaw(id: string): Promise<Record<string, unknown>> {
   return JSON.parse(await readFile(path.join(tasksDir, `${id}.json`), 'utf8'))
@@ -313,7 +317,7 @@ describe('a managed child', () => {
 
     await launchScheduled()
 
-    expect(await lastPrompt('answer-parent')).toBe('answer-child finished a turn:\n\non it')
+    expect(await lastPrompt('answer-parent')).toBe(replied('answer-child', 'on it'))
     expect((await readRaw('answer-parent')).childrenSeen).toEqual({ 'answer-child': AT })
     expect(await childPrompts('answer-parent')).toHaveLength(0)
   })
@@ -380,15 +384,11 @@ describe('a notify delivery', () => {
     const writes = await writesDuring('notify-launcher', launchScheduled)
 
     const raw = await readRaw('notify-launcher')
-    // The message arrived, carrying the child's closing text.
-    expect(await lastPrompt('notify-launcher')).toBe(
-      'notify-child finished a turn:\n\non it',
-    )
-    // From the child, not the launcher's human: the record holds the child's
-    // words alone, and the header above is composed for the agent.
+    // From lander: the child didn't write the notice around its words.
+    expect(await lastPrompt('notify-launcher')).toBe(replied('notify-child', 'on it'))
     expect((raw.items as { text?: string; from?: unknown }[]).at(-1)).toMatchObject({
-      text: 'on it',
-      from: { task: 'notify-child', via: 'notify' },
+      text: replied('notify-child', 'on it'),
+      from: { lander: 'answer' },
     })
     // Nothing cleared, so nothing to tell the woken turn it lost.
     expect(raw.scheduledFor).toBe(LATE)
@@ -407,8 +407,8 @@ describe('a notify delivery', () => {
     await launchScheduled()
 
     await vi.waitFor(async () => {
-      expect(await lastPrompt('notify-plain-launcher')).toContain(
-        'finished a turn',
+      expect(await lastPrompt('notify-plain-launcher')).toBe(
+        replied('notify-plain-child', 'on it'),
       )
     })
     expect((await readRaw('notify-plain-launcher')).revived).toBeUndefined()
@@ -425,7 +425,7 @@ describe('a notify delivery', () => {
     await launchScheduled()
 
     expect(await lastPrompt('notify-legacy-launcher')).toBe(
-      'notify-legacy-child finished a turn:\n\non it',
+      replied('notify-legacy-child', 'on it'),
     )
     expect((await readRaw('notify-legacy-child')).pendingNotify).toBeUndefined()
   })
@@ -455,10 +455,10 @@ describe('a notify delivery', () => {
     await launchScheduled()
 
     expect(await lastPrompt('notify-many-launcher')).toBe(
-      'notify-many-child finished a turn:\n\nfirst',
+      replied('notify-many-child', 'first'),
     )
     expect(await lastPrompt('notify-many-sender')).toBe(
-      'notify-many-child finished a turn:\n\nsecond',
+      replied('notify-many-child', 'second'),
     )
     expect((await readRaw('notify-many-child')).pendingNotify).toBeUndefined()
   })
@@ -496,8 +496,36 @@ describe('a notify delivery', () => {
 
     const items = (await readRaw('notify-files-launcher')).items as MessageItem[]
     expect(items.filter((i) => i.role === 'user').at(-1)).toMatchObject({
-      text: 'done',
+      text: replied('notify-files-child', 'done'),
       attachments: [file('a'), file('b')],
     })
+  })
+
+  it('says how to read a reply too long to include', async () => {
+    const long = 'x'.repeat(REPLIES_MAX_CHARS)
+    await seed('notify-long-launcher', {})
+    await seed('notify-long-child', {
+      items: [
+        { id: 'u0', at: AT, kind: 'message', role: 'user', text: 'go' },
+        { id: 'f0', at: AT, rideId: 'r0', kind: 'message', role: 'flow', text: 'earlier' },
+        {
+          id: 'u1', at: AT, kind: 'message', role: 'user', text: 'and?',
+          deliveredIn: 'r1', from: { task: 'notify-long-launcher', via: 'send' },
+        },
+        { id: 'f1', at: AT, rideId: 'r1', kind: 'message', role: 'flow', text: long },
+      ],
+      rides: [
+        { id: 'r0', startedAt: AT, endedAt: AT, outcome: 'done' },
+        { id: 'r1', startedAt: AT, endedAt: AT, outcome: 'done' },
+      ],
+      pendingNotify: [{ to: 'notify-long-launcher', at: AT, rideId: 'r1' }],
+    })
+
+    await launchScheduled()
+
+    const prompt = await lastPrompt('notify-long-launcher')
+    expect(prompt).not.toContain(long)
+    expect(prompt).toContain('`lander view <id> --messages <N>`')
+    expect(prompt).toMatch(/^notify-long-child \[paced\]: 1 message, [\d,]+ characters$/m)
   })
 })
