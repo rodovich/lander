@@ -142,8 +142,8 @@ config over plain HTTP against a stand-in API (both from `webTestServer.ts`),
 with a throwaway app page on another origin, so it needs neither the running
 stack nor a real app. The framing policy's decisions and the CORS setting are
 checked without a browser by `vite.config.test.ts`, under `npm test`. When a
-change touches `public/widget.js`, the embed page, or the framing policy, run the
-browser suite before committing.
+change touches `widget/` or the embed page, run the browser suite before
+committing.
 
 ## Probes
 

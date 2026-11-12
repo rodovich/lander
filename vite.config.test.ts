@@ -53,6 +53,17 @@ describe('the web server', { timeout: 30_000 }, () => {
     expect(entry.status).toBe(200)
   })
 
+  it('serves the widget as one classic script, with its styles inside', async () => {
+    const { url } = await serve()
+    const response = await fetch(`${url}widget.js`)
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toBe('text/javascript')
+    const script = await response.text()
+    expect(script).toContain('z-index: 2147483647')
+    // A function body, like a classic script, can't hold import or export statements.
+    expect(() => new Function(script)).not.toThrow()
+  })
+
   it.each([
     ['has no app', () => Response.json({ app: null })],
     ['is unknown', () => Response.json({ error: 'task not found' }, { status: 404 })],

@@ -1,5 +1,5 @@
 import type { Plugin } from 'vite'
-import { taskKey, taskRefFromQuery } from './src/taskRef'
+import { taskKey, taskRefFromQuery } from '../src/taskRef'
 
 const SAME_ORIGIN = "'self'"
 

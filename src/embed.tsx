@@ -16,6 +16,7 @@ import { useReplyDrafts } from './useReplyDrafts'
 import { useTaskActions } from './useTaskActions'
 import { POLL_GAP_MS } from './useTaskData'
 import { useTimelineDisclosure } from './useTimelineDisclosure'
+import type { EmbedMessage, WidgetMessage } from '../widget/messages'
 
 const COMPOSER_HEIGHT = 130
 const NO_LINKS: TaskLink[] = []
@@ -103,6 +104,10 @@ function useEmbeddedTask(taskRef: TaskRef, onPollError: (message: string | null)
 // two talk only through these messages.
 const isFramed = () => window.parent !== window
 
+// Sent to any origin, since the frame doesn't know the page's, and only a page
+// lander lets frame the task can receive it.
+const tellWidget = (message: EmbedMessage) => window.parent.postMessage(message, '*')
+
 // Whether the widget's panel is open, and whether it's in view, as the widget
 // reports them. The frame's own focus can't decide either: the panel is read
 // without being clicked into, and a closed panel's frame still runs.
@@ -110,17 +115,17 @@ function useWidgetView(): { open: boolean; active: boolean } {
   const [view, setView] = useState({ open: false, active: false })
   useEffect(() => {
     if (!isFramed()) return
-    const onMessage = (event: MessageEvent) => {
+    const onMessage = (event: MessageEvent<WidgetMessage | undefined>) => {
       if (event.source === window.parent && event.data?.type === 'lander-widget-view')
         setView({ open: event.data.open === true, active: event.data.active === true })
     }
     // Focus leaving this frame for another window fires nothing on the page
     // around it, so this tells the widget to look again.
-    const onFocusChange = () => window.parent.postMessage({ type: 'lander-embed-focus' }, '*')
+    const onFocusChange = () => tellWidget({ type: 'lander-embed-focus' })
     window.addEventListener('message', onMessage)
     window.addEventListener('focus', onFocusChange)
     window.addEventListener('blur', onFocusChange)
-    window.parent.postMessage({ type: 'lander-embed-ready' }, '*')
+    tellWidget({ type: 'lander-embed-ready' })
     return () => {
       window.removeEventListener('message', onMessage)
       window.removeEventListener('focus', onFocusChange)
@@ -130,13 +135,12 @@ function useWidgetView(): { open: boolean; active: boolean } {
   return view
 }
 
-// What the widget's button shows. Sent to any origin, since the frame doesn't
-// know the page's, and only a page lander lets frame the task can receive it.
+// What the widget's button shows.
 function useReportToWidget(task: TaskWithProject | null) {
   const unread = task ? isUnread(task) : false
   const riding = task?.status === 'riding'
   useEffect(() => {
-    if (isFramed()) window.parent.postMessage({ type: 'lander-task-state', unread, riding }, '*')
+    if (isFramed()) tellWidget({ type: 'lander-task-state', unread, riding })
   }, [unread, riding])
 }
 

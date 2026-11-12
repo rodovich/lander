@@ -1,7 +1,8 @@
 import { defineConfig, type UserConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { framePolicy } from './viteFramePolicy'
 import { localhostCert, WEB_PORT } from './webOrigin'
+import { framePolicy } from './widget/viteFramePolicy'
+import { widgetScript } from './widget/viteWidgetScript'
 
 // Serve the dev UI over HTTPS when the localhost cert/key are present under
 // data/ssl (symlinks to easel's shared self-signed cert; gitignored via data/).
@@ -17,7 +18,7 @@ else console.warn('dev server: data/ssl/localhost.{crt,key} not found; serving h
 
 export function webConfig(api = 'http://localhost:6181'): UserConfig {
   return {
-    plugins: [react(), framePolicy(api)],
+    plugins: [react(), framePolicy(api), widgetScript()],
     server: {
       port: WEB_PORT,
       strictPort: true,

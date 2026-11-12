@@ -61,14 +61,15 @@ are erased. `shared/boundary.test.ts` enforces that.
 ## The app widget
 
 The widget puts one task's conversation inside the app lander started for it.
-Four pieces make it up:
+Four pieces make it up. All but the embed page, which shares the main UI's
+components from `src/`, live in `widget/`.
 
 - **The embed page.** `embed.html` (entry `src/embedMain.tsx`, component
   `src/embed.tsx`) shows the task named by its `?project=&task=` query: the
   conversation and the reply box, without the list, the header's controls, the
   usage readout, or permission grants. Its `<base target="_blank">` sends every
   link out of the frame, since every other lander page refuses to be framed.
-- **The framing policy.** `viteFramePolicy.ts` sets `frame-ancestors` on every
+- **The framing policy.** `widget/viteFramePolicy.ts` sets `frame-ancestors` on every
   response the web server sends outside `/api/`: `'self'`, except on the embed
   page, where it is the origin of the task's app URL from
   `GET .../tasks/:id/app`. Any other answer stays `'self'`, except that a lookup
@@ -81,13 +82,16 @@ Four pieces make it up:
 - **`LANDER_EMBED_URL`.** The daemon adds the embed page's address to the
   environment of an app it starts (`embedUrl` in `daemon/apps.ts`), with the
   web server's scheme and port from `webOrigin.ts`.
-- **The loader.** `public/widget.js` is a classic script, so the app needs no
-  CORS from lander. It reads the embed page's address from its own
+- **The loader.** `widget/main.ts`, with its styles in `widget/widget.css`, is
+  served at `/widget.js` as a classic script, so the app needs no CORS from
+  lander. The web server bundles it into one IIFE on each request
+  (`widget/viteWidgetScript.ts`), so it is current without a watch. It reads the embed page's address from its own
   `data-embed-url`, builds a button and a panel in a shadow root on a
   `<lander-widget>` element at the largest z-index, and frames the embed page
   as soon as it loads, with `allow="clipboard-write"` so copy buttons work.
 
-The loader and the embed page talk only through `postMessage`:
+The loader and the embed page talk only through `postMessage`, in the messages
+`widget/messages.ts` types for both:
 
 | Message | From → to | Meaning |
 |---|---|---|
@@ -100,7 +104,8 @@ The embed sends its messages to any origin, since it doesn't know the page's and
 only the task's app may frame it; the widget sends to lander's origin only. The
 widget accepts messages only from its frame's window and lander's origin, and the
 embed accepts `lander-widget-view` only from its parent. `vite.config.test.ts`
-covers the framing policy's decisions and the CORS setting under `npm test`;
+covers the framing policy's decisions, the CORS setting, and that `/widget.js`
+is a classic script under `npm test`;
 `browser/widget.test.ts` covers the widget in Chrome (see
 [testing](testing.md#browser-tests)).
 
