@@ -8,7 +8,6 @@ import { startPoll } from './poll'
 import { MonotonicRequestGate } from './requestOrder'
 import { NO_GRANTS } from './taskMeta'
 import { taskHref, taskKeyOf, type TaskRef } from './taskRef'
-import { TaskStatus } from './timelineNote'
 import type { TaskLink, TaskWithProject } from './types'
 import { useFencedTasks } from './useFencedTasks'
 import { useReadMarker, useViewingState } from './useReadMarker'
@@ -62,7 +61,6 @@ export function EmbedPane({
             <span className="embed-title-text">{task.title}</span>
             <OpenInNewIcon />
           </a>
-          <TaskStatus status={task.status} />
         </div>
       )}
       {error && <div className="error">{error}</div>}

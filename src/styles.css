@@ -1574,9 +1574,6 @@ body {
 
 .embed-header {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
   padding: 12px 28px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-tinted);
