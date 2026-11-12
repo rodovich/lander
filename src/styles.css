@@ -1,23 +1,4 @@
-:root {
-  --bg: #fcfaf8;
-  --fg: rgba(17, 0, 0, 0.85);
-  --muted: rgba(17, 0, 0, 0.55);
-  --border: rgba(17, 0, 0, 0.12);
-  --border-secondary: rgba(17, 0, 0, 0.06);
-  --bg-tinted: rgba(17, 0, 0, 0.03);
-  --selected: rgba(17, 0, 0, 0.06);
-  /* The tone the app's drop shadows are cast in — the same near-black the
-     borders and text are tinted with, at the alpha those shadows already use. */
-  --shadow: rgba(17, 0, 0, 0.16);
-  /* Task-status palette. Beyond the surfaces that carry a status (pills, count
-     chips, section headers, timeline labels, status action buttons), these now
-     double as the app's general accents: riding is the UI accent (focus rings,
-     links, copy-button hovers), wedged the danger/error tone, and landed the
-     positive tone (diff additions, low usage). */
-  --wedged: #dd6644;
-  --landed: #229966;
-  --riding: #6644ee;
-}
+@import './tokens.css';
 
 * {
   box-sizing: border-box;
@@ -2173,12 +2154,6 @@ body {
   border-radius: 50%;
   opacity: 0.5;
   animation: spin 0.7s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 /* A note in the conversation timeline — a lifecycle transition of this task, or

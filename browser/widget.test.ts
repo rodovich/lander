@@ -179,6 +179,8 @@ describe('the widget in an app’s page', () => {
     task = UNREAD_TASK
     const page = await openApp()
     await expect.poll(() => buttonClasses(page), WAIT).toContain('unread')
+    const ring = await toggle(page).evaluate((el) => getComputedStyle(el, '::after').borderColor)
+    expect(ring).toBe('rgb(102, 68, 238)')
     await page.waitForTimeout(READ_DWELL_MS + 1500)
     expect(seen).toBe(0)
 

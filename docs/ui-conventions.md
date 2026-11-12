@@ -1,7 +1,8 @@
 # UI and CSS conventions
 
 The web client is plain React with one hand-written stylesheet, `src/styles.css`.
-No CSS-in-JS, no CSS modules, no utility framework, no preprocessor. Components
+Its custom properties and keyframes live in `src/tokens.css`, which the app
+widget's shadow-root stylesheet, `widget/widget.css`, imports too. No CSS-in-JS, no CSS modules, no utility framework, no preprocessor. Components
 carry `className` strings that match selectors in that file. Keep it that way: the
 value of a single readable stylesheet is that any rule can be found by grepping
 the class name, and that stops being true the moment styling has two homes.
