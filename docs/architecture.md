@@ -19,7 +19,7 @@ running lander needs; this file is the level a person changing it needs.
 - `POST /api/:project/attachments` — upload one or more files (multipart) to the project's durable blob store, returning their refs (`{id, name, mime, size}`). `GET /api/:project/attachments/:id` streams a stored file's bytes. Both require an identified caller (the browser's UI token or a task's `LANDER_TOKEN`).
 - `POST /api/:project/tasks/:id/attachments` — attach a file a task produced to the turn it is riding (multipart `file` + optional `name`), recording the ref on the generating flow item. Only the task itself (or the human) may post: a ref on task T's turn is a claim about what T produced. No read route of its own — the ref carries a blob id, served by the project-scoped download above.
 - `POST /api/:project/tasks/:id/allow` — grant a permission rule (a denied one from the per-turn blocked summary, or one authored proactively from the header grant control). `{ rule, scope }`: `scope: "task"` (when the flow's `grants.task` is true, e.g. Claude) appends `rule` to the task's `allow` list, and `scope: "project"` (when `grants.project` is true, e.g. Claude and Antigravity) routes the rule to the flow's `onGrant` handler on the daemon. Unsupported scopes are omitted in the UI and rejected with `400`. Human-only.
-- `GET /api/:project/tasks/:id/app` — the app for the task's checkout, asked of the daemon, which owns apps: `{ app: null }` when the project configures none or the task's worktree is gone, else `{ url?, listening, canStart, managed? }`, where `managed` describes an app lander started (phase, time left, whether a ride is holding it, log path). Nothing about apps is stored on the server.
+- `GET /api/:project/tasks/:id/app` — the app for the task's checkout, asked of the daemon, which owns apps: `{ app: null }` when the project configures none or the task's worktree is gone, else `{ url?, listening, canStart, managed? }`, where `managed` describes an app lander started (phase, time left, whether a ride is holding it, log path). Nothing about apps is stored on the server. The web server's framing policy reads `app.url` from this response (see [The app widget](#the-app-widget)).
 - `POST /api/:project/tasks/:id/app/:action` — `start`, `stop` or `restart` the app (answering with its status), or `touch` to renew its lease. `start` and `restart` refuse a landed task. Browser-only, since starting runs the checkout's code. `GET .../app/log` returns the end of the app's output, also browser-only.
 - `POST /api/:project/tasks/:id/archive` — `{ archived }` (default `true`) moves the task's JSON between `tasks/` and `archived/`. Archiving takes a task out of the list (and out of the scheduler's and recovery's view, which only scan `tasks/`); `{ archived: false }` restores it. A `riding` task can't be archived — it has a live run the reducer must keep reattaching to — so the call `409`s until it comes to rest.
 
@@ -57,6 +57,52 @@ rendering of a conversation, so `lander view` folds a turn exactly as the UI
 does. Because the same modules load in the browser and under Node, they import
 nothing at runtime but each other; they may name the client's item types, which
 are erased. `shared/boundary.test.ts` enforces that.
+
+## The app widget
+
+The widget puts one task's conversation inside the app lander started for it.
+Four pieces make it up:
+
+- **The embed page.** `embed.html` (entry `src/embedMain.tsx`, component
+  `src/embed.tsx`) shows the task named by its `?project=&task=` query: the
+  conversation and the reply box, without the list, the header's controls, the
+  usage readout, or permission grants. Its `<base target="_blank">` sends every
+  link out of the frame, since every other lander page refuses to be framed.
+- **The framing policy.** `viteFramePolicy.ts` sets `frame-ancestors` on every
+  response the web server sends outside `/api/`: `'self'`, except on the embed
+  page, where it is the origin of the task's app URL from
+  `GET .../tasks/:id/app`. Any other answer stays `'self'`, except that a lookup
+  that fails (no connection, a 5xx, or a body that isn't JSON, as while the API
+  or daemon restarts) falls back on the last origin a lookup confirmed for that
+  task, because a refused frame can't retry on its own. The
+  web server also sends no CORS headers (`cors: false` in `vite.config.ts`): its
+  modules carry the UI token inlined, and Vite's default lets any localhost page
+  read them.
+- **`LANDER_EMBED_URL`.** The daemon adds the embed page's address to the
+  environment of an app it starts (`embedUrl` in `daemon/apps.ts`), with the
+  web server's scheme and port from `webOrigin.ts`.
+- **The loader.** `public/widget.js` is a classic script, so the app needs no
+  CORS from lander. It reads the embed page's address from its own
+  `data-embed-url`, builds a button and a panel in a shadow root on a
+  `<lander-widget>` element at the largest z-index, and frames the embed page
+  as soon as it loads, with `allow="clipboard-write"` so copy buttons work.
+
+The loader and the embed page talk only through `postMessage`:
+
+| Message | From → to | Meaning |
+|---|---|---|
+| `lander-embed-ready` | embed → widget | The embed is listening; send it the current state. |
+| `lander-widget-active` `{ active }` | widget → embed | Whether the panel is open and the page visible and focused. When framed, the embed advances the read marker only while this is true, never on its own focus. |
+| `lander-embed-focus` | embed → widget | Focus entered or left the frame; recompute `active`, since focus leaving the frame for another window fires nothing on the page. |
+| `lander-task-state` `{ unread, riding }` | embed → widget | What the button shows. |
+
+The embed sends its messages to any origin, since it doesn't know the page's and
+only the task's app may frame it; the widget sends to lander's origin only. The
+widget accepts messages only from its frame's window and lander's origin, and the
+embed accepts `lander-widget-active` only from its parent. `vite.config.test.ts`
+covers the framing policy's decisions and the CORS setting under `npm test`;
+`browser/widget.test.ts` covers the widget in Chrome (see
+[testing](testing.md#browser-tests)).
 
 ## Provider layering
 

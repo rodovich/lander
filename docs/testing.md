@@ -131,6 +131,20 @@ CLIs by `npm run test:contract` (see [contract/README.md](../contract/README.md)
 When a change rests on such an assumption, add or extend a contract test for it,
 and run the suite when a CLI updates.
 
+## Browser tests
+
+What only a browser decides — whether it honors the embed page's framing policy,
+what a cross-origin frame may do, how the widget sits on a page — is checked in
+the installed Google Chrome, driven headless through `playwright-core`, by the
+suite under `browser/`. It is kept out of `npm test`; a task runs it with
+`npm test -- --config vitest.browser.config.ts`. Each run serves lander's web
+config over plain HTTP against a stand-in API (both from `webTestServer.ts`),
+with a throwaway app page on another origin, so it needs neither the running
+stack nor a real app. The framing policy's decisions and the CORS setting are
+checked without a browser by `vite.config.test.ts`, under `npm test`. When a
+change touches `public/widget.js`, the embed page, or the framing policy, run the
+browser suite before committing.
+
 ## Probes
 
 Some claims about the running stack cannot be settled by reading code or running

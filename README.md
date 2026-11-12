@@ -51,6 +51,16 @@ For Start to work well, a project's app should:
 
 A project with a single checkout only needs the last four.
 
+An app that lander starts (or restarts) also gets `LANDER_EMBED_URL` in its environment: the address of a page showing the conversation of the task whose Start launched it. To put that task inside the app, have the server render this tag into the app's pages, just before `</body>`, whenever the variable is set, in development only. `widget.js` is served from the same origin as the variable's URL, so take it from there rather than writing `https://localhost:41414`, which is `http` when lander has no certificate. It must be a classic script, not a module, and in the HTML the server sends, not a tag rendered later by client-side code.
+
+```html
+<script src="(LANDER_EMBED_URL's origin)/widget.js" data-embed-url="(LANDER_EMBED_URL)"></script>
+```
+
+The widget is lander's icon in the page's lower-left corner. It's ringed in lander's riding color while the task has something unread, with a turning arc instead while the task rides, and clicking it opens the task's conversation and reply box over the page. The panel's open state is kept per browser tab, across reloads and the app's other pages, and it marks the conversation read only while it's open and the page is in front. An app started outside lander gets no variable, and so no widget.
+
+Lander lets pages of exactly one origin show the conversation in a frame: the origin of the project's app `url` for that task's checkout, so open the app at that address (`localhost` and `127.0.0.1` are different origins). Every other lander page refuses to be framed. If the app sends a Content-Security-Policy, it must allow lander's origin for scripts, frames, and images, and inline styles, which the widget uses inside its shadow root. A Permissions-Policy that withholds `clipboard-write` stops the widget's copy buttons.
+
 Each project gets a URL slug from its path (e.g. `/Users/me/code/app` → `users-me-code-app`). The sidebar shows a dropdown to switch projects; choosing one pushes its slug into the URL (`/users-me-code-app/`). Visiting `/` redirects to the first project listed.
 
 ## Architecture
@@ -59,7 +69,7 @@ Each project gets a URL slug from its path (e.g. `/Users/me/code/app` → `users
 
 | Part | Stack | Port | Role |
 |------|-------|------|------|
-| Web | React 18 + Vite | 41414 | SPA, proxies `/api` → 6181 |
+| Web | React 19 + Vite | 41414 | SPA and the app widget's page and script, proxies `/api` → 6181 |
 | API | Hono on `@hono/node-server` | 6181 | Task CRUD, scheduling, and daemon coordination |
 | Daemon | Node host process | — | Owns flow hosts, agent subprocesses (`claude`/`codex`/`agy`), stream reduction, and each flow's usage polling |
 
@@ -150,10 +160,12 @@ Attaching the same name twice yields two chips, not one: every blob is immutable
 
 Every mutation to the local API requires authentication. Missing or invalid browser/task credentials receive `401`; authenticated callers must also satisfy each operation's authorization rules. The server identifies two **principals** from request headers:
 
-- **The human** — the browser sends a shared UI secret (`X-Lander-UI-Token`). `dev.mjs` mints it once, persists it under `data/.ui-token` (gitignored, mode 0600), inlines it into the client as `VITE_LANDER_UI_TOKEN`, and passes it to the API as `LANDER_UI_TOKEN`. Each goes to the one process that needs it, never onto the shared environment the three processes inherit, and the daemon drops its own copy once it has read it — otherwise the value reaches every task's shell, where presenting it would resolve as the human (`server/secrets.ts`). This narrows the default blast radius rather than making the secret unobtainable: it is still a file a same-user task can read, still served to the browser by the Vite dev server, and still visible in a process's exec-time environment. The human may grant anything.
+- **The human** — the browser sends a shared UI secret (`X-Lander-UI-Token`). `dev.mjs` mints it once, persists it under `data/.ui-token` (gitignored, mode 0600), inlines it into the client as `VITE_LANDER_UI_TOKEN`, and passes it to the API as `LANDER_UI_TOKEN`. Each goes to the one process that needs it, never onto the shared environment the three processes inherit, and the daemon drops its own copy once it has read it — otherwise the value reaches every task's shell, where presenting it would resolve as the human (`server/secrets.ts`). This narrows the default blast radius rather than making the secret unobtainable: it is still a file a same-user task can read, still served to the browser by the Vite dev server (to pages of its own origin only, since the dev server sends no CORS headers), and still visible in a process's exec-time environment. The human may grant anything.
 - **A task** — the `lander` CLI sends its `LANDER_TOKEN` plus its task id/project (`X-Lander-Token`/`X-Lander-Task`/`X-Lander-Project`); the server matches the token against the task's stored secret. A task may set, replace, or clear only its own ride schedule; launching a scheduled task early is browser-only. A task **cannot** add tool rules to itself or anyone else: `POST /tasks/:id/allow` is human only. Tokens are never returned over HTTP, so one task can't read another's to impersonate it.
 
 Hook callbacks authenticate separately with short-lived credentials scoped to their project and target; those credentials grant no access to other mutations.
+
+The app widget's page acts as the human too: it can reply to its task and use the conversation's controls. Lander lets only the app's origin frame it, but that origin serves whatever code the task's checkout holds, and agents edit that code.
 
 This is best-effort for a single-user local tool: a fully adversarial task running as the same user could still read `data/.ui-token` off disk. It blocks the realistic failure mode — an agent escalating itself or a child via the documented API — not a determined local attacker.
 
@@ -203,7 +215,7 @@ export default async function (lander) {
 
 ### Frontend (`src/`)
 
-`App.tsx` holds the layout and the shared state; the panes are their own modules — the task list, project menu, new-task form, conversation, and composer. A sidebar (task list + new-task form) sits beside a detail pane (message thread + reply composer). Enter submits, Shift/Option+Enter for newlines; an agent-specific "`<Agent>` is working…" indicator shows while a turn is in flight.
+`App.tsx` holds the layout and the shared state; the panes are their own modules — the task list, project menu, new-task form, conversation, and composer. A sidebar (task list + new-task form) sits beside a detail pane (message thread + reply composer). Enter submits, Shift/Option+Enter for newlines; an agent-specific "`<Agent>` is working…" indicator shows while a turn is in flight. A second entry point, `embed.html` (`src/embedMain.tsx` → `src/embed.tsx`), shows one task's conversation and composer for the app widget.
 
 Each task row carries a **kebab (⋮) menu** with the status actions — **Wedge** / **Un-wedge** / **Land** / **Un-land** / **Launch** — plus **Archive**. Un-wedge and Un-land clear that status without waking the task. Only the items that would be both visible *and* enabled for the row's status appear (e.g. a landed task offers Wedge/Un-land/Archive but not Land; a riding task can't be archived), so the menu never shows a dead option. The menu is `position: fixed`, anchored to the kebab's live rect, so the scrolling list can't clip it, and arrow keys move between items. Archived tasks are hidden by default; the project dropdown has a **Show archived** toggle that merges them in (each row dimmed and tagged `archived`), where the kebab offers only **Restore**.
 
