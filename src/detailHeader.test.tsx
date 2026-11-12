@@ -33,6 +33,8 @@ const render = (
       generateTitle={async () => {}}
       allowTool={async () => true}
       onRetry={async () => true}
+      todayStart={0}
+      onOpenTask={() => {}}
       {...over}
     />,
   )
@@ -84,5 +86,16 @@ describe('DetailHeader', () => {
     expect(render(baseTask(), { retitling: 'proj/other' })).not.toContain(
       'disabled=""',
     )
+  })
+
+  it('counts the tasks it manages, and links to the task that manages it', () => {
+    const kids = [baseTask({ id: 'k1', status: 'riding' }), baseTask({ id: 'k2' })]
+    const html = render(baseTask(), {
+      subtasks: kids,
+      parent: baseTask({ id: 'boss', title: 'Migrate watchers' }),
+    })
+    expect(html).toContain('aria-label="2 subtasks, working"')
+    expect(html).toContain('href="/proj/boss"')
+    expect(render(baseTask())).not.toContain('subtasks')
   })
 })

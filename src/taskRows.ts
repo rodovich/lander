@@ -1,6 +1,6 @@
 import { dateCategory } from './format'
 import { isUnread } from './readMarker'
-import { taskKeyOf } from './taskRef'
+import { taskKey, taskKeyOf } from './taskRef'
 import type { TaskMatches } from '../shared/conversationSearch'
 import type {
   DateCategory,
@@ -61,6 +61,30 @@ export type TaskListShape = {
   // The search box's query, which titles and match excerpts are highlighted
   // against ('' when not searching).
   query: string
+  families: Families
+}
+
+// Which of the given tasks a task launched to manage, and the reverse, by task
+// key.
+export type Families = {
+  childrenOf: Map<string, TaskWithProject[]>
+  parentOf: Map<string, TaskWithProject>
+}
+
+export function taskFamilies(tasks: TaskWithProject[]): Families {
+  const byKey = new Map(tasks.map((t) => [taskKeyOf(t), t]))
+  const childrenOf = new Map<string, TaskWithProject[]>()
+  const parentOf = new Map<string, TaskWithProject>()
+  for (const child of tasks) {
+    if (!child.managed || !child.spawnedBy) continue
+    const parent = byKey.get(taskKey(child.projectSlug, child.spawnedBy))
+    if (!parent) continue
+    const parentKey = taskKeyOf(parent)
+    childrenOf.set(parentKey, [...(childrenOf.get(parentKey) ?? []), child])
+    parentOf.set(taskKeyOf(child), parent)
+  }
+  for (const children of childrenOf.values()) children.sort(compareTasks)
+  return { childrenOf, parentOf }
 }
 
 // Group tasks by status — wedged (needs the user) first, then riding,
@@ -83,6 +107,14 @@ function byRecency(a: TaskWithProject, b: TaskWithProject): number {
   return l === r ? 0 : r - l
 }
 
+// The list's order: status groups, then most recent first.
+export function compareTasks(a: TaskWithProject, b: TaskWithProject): number {
+  return (
+    (STATUS_RANK[a.status] ?? 3) - (STATUS_RANK[b.status] ?? 3) ||
+    byRecency(a, b)
+  )
+}
+
 export function buildTaskRows(
   tasks: TaskWithProject[],
   opts: {
@@ -102,6 +134,7 @@ export function buildTaskRows(
 ): TaskListShape {
   const { view, timeFilter, query, stickyUnread, now } = opts
   const conversationHits = query ? opts.matches : null
+  const families = taskFamilies(tasks)
 
   // The update-time bound the time filter imposes, in ms (local time), or null
   // for 'any'. 'today'/'week' keep tasks at or after the start of today / this
@@ -116,7 +149,7 @@ export function buildTaskRows(
 
   // Filter by time window, then by title and conversation (case-insensitive),
   // before grouping.
-  const matchedTasks = tasks.filter((t) => {
+  const filteredTasks = tasks.filter((t) => {
     if (timeCutoff != null) {
       const ts = Date.parse(t.updatedAt ?? t.createdAt)
       if (!Number.isNaN(ts)) {
@@ -132,6 +165,11 @@ export function buildTaskRows(
       conversationHits?.has(taskKeyOf(t)) === true
     )
   })
+  // A managed child belongs among its parent's subtasks rather than in the
+  // list, unless a search is looking for it.
+  const matchedTasks = query
+    ? filteredTasks
+    : filteredTasks.filter((t) => !families.parentOf.has(taskKeyOf(t)))
 
   // Sort into status groups, most recent first within each. The order is
   // established here rather than inherited from the caller: the displayed list
@@ -139,11 +177,7 @@ export function buildTaskRows(
   // freshly-updated task back in its old slot, and the date bucketing below
   // depends on recency order. Out of order, a status can reopen a bucket it
   // already closed and emit a second subheader carrying the same row key.
-  const orderedTasks = [...matchedTasks].sort(
-    (a, b) =>
-      (STATUS_RANK[a.status] ?? 3) - (STATUS_RANK[b.status] ?? 3) ||
-      byRecency(a, b),
-  )
+  const orderedTasks = [...matchedTasks].sort(compareTasks)
 
   const todayStart = new Date(
     now.getFullYear(),
@@ -222,5 +256,5 @@ export function buildTaskRows(
     ) as [string, number][]
   })()
 
-  return { orderedTasks, taskRows, statusCounts, todayStart, query }
+  return { orderedTasks, taskRows, statusCounts, todayStart, query, families }
 }

@@ -53,6 +53,46 @@ const tags = (shape: ReturnType<typeof buildTaskRows>) =>
         : r.task.id,
   )
 
+describe('managed children', () => {
+  const parent = () => task({ id: 'boss', status: 'paced' })
+  const child = (over: Partial<TaskWithProject>) =>
+    task({ spawnedBy: 'boss', managed: true, ...over })
+
+  it('leaves them out of the list, under their parent in list order', () => {
+    const shape = build([
+      parent(),
+      child({ id: 'old', status: 'landed', updatedAt: at(1) }),
+      child({ id: 'busy', status: 'riding' }),
+      child({ id: 'new', status: 'landed', updatedAt: at(0) }),
+    ])
+    expect(tags(shape)).toEqual(['s:paced', 'boss'])
+    expect(shape.families.childrenOf.get('proj/boss')?.map((t) => t.id)).toEqual([
+      'busy',
+      'new',
+      'old',
+    ])
+  })
+
+  it('leaves out a wedged one too, but lists them while searching', () => {
+    const tasks = [parent(), child({ id: 'stuck', status: 'wedged' }), child({ id: 'busy', status: 'riding', title: 'busy one' })]
+    expect(tags(build(tasks))).toEqual(['s:paced', 'boss'])
+    expect(tags(build(tasks, { query: 'busy' }))).toEqual(['s:riding', 'busy'])
+  })
+
+  it('lists a handed-off child, or one whose parent is not loaded', () => {
+    const tasks = [
+      parent(),
+      task({ id: 'handed', spawnedBy: 'boss' }),
+      child({ id: 'orphan', spawnedBy: 'gone' }),
+    ]
+    expect(tags(build(tasks)).filter((t) => !t.startsWith('s:')).sort()).toEqual([
+      'boss',
+      'handed',
+      'orphan',
+    ])
+  })
+})
+
 describe('buildTaskRows', () => {
   it('orders status groups wedged, riding, paced, landed', () => {
     const shape = build([

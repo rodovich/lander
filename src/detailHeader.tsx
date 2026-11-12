@@ -8,7 +8,8 @@ import { CopyConversationButton, CopyIdButton, TaskActionsMenu } from './menus'
 import { availableTaskActions } from './taskActions'
 import type { TaskAction } from './taskActions'
 import { taskKeyOf } from './taskRef'
-import { TaskStatus } from './timelineNote'
+import { SubtasksChip } from './subtasks'
+import { TaskChip, TaskStatus } from './timelineNote'
 import type { FlowCaps, TaskWithProject } from './types'
 
 function SparkleIcon() {
@@ -43,8 +44,18 @@ export const DetailHeader = memo(function DetailHeader({
   generateTitle,
   allowTool,
   onRetry,
+  subtasks,
+  parent,
+  todayStart,
+  onOpenTask,
 }: {
   task: TaskWithProject
+  // The tasks this one launched to manage, in list order, and the task that
+  // launched this one to manage it.
+  subtasks?: TaskWithProject[]
+  parent?: TaskWithProject
+  todayStart: number
+  onOpenTask: (id: string, projectSlug: string) => void
   // What the task's flow lets the grant control offer.
   grants: FlowCaps['grants']
   retitling: string | null
@@ -140,9 +151,21 @@ export const DetailHeader = memo(function DetailHeader({
       )}
       <div className="detail-meta">
         <TaskStatus status={task.status} />
+        <SubtasksChip subtasks={subtasks} todayStart={todayStart} onOpen={onOpenTask} />
         <span className="task-time">
           {formatTimestamp(task.updatedAt ?? task.createdAt)}
         </span>
+        {parent && (
+          <span className="task-parent">
+            in{' '}
+            <TaskChip
+              id={parent.id}
+              slug={parent.projectSlug}
+              title={parent.title}
+              status={parent.status}
+            />
+          </span>
+        )}
       </div>
     </div>
   )

@@ -359,6 +359,10 @@ export type Task = {
   // enables them), as of its last turn. Absent for a task that has never run in
   // one.
   checkout?: CheckoutReport
+  // The task that launched this one, and whether it launched it to manage
+  // rather than to hand to the user.
+  spawnedBy?: string
+  managed?: true
 }
 
 // Mirrors server/protocol.ts.

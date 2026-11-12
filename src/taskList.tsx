@@ -143,7 +143,7 @@ export const TaskList = memo(function TaskList({
   // Opt-in profiling (see perf.ts): count re-renders of the list pane
   // separately from App's own churn.
   tick('TaskList.render')
-  const { orderedTasks, taskRows, statusCounts, todayStart, query } = shape
+  const { orderedTasks, taskRows, statusCounts, todayStart, query, families } = shape
 
   const searchInputRef = useRef<HTMLInputElement>(null)
 
@@ -366,6 +366,9 @@ export const TaskList = memo(function TaskList({
                 task={task}
                 selected={taskKeyOf(task) === selected}
                 appRunning={appTasks.has(taskKeyOf(task))}
+                subtasks={families.childrenOf.get(taskKeyOf(task))}
+                parent={families.parentOf.get(taskKeyOf(task))}
+                onOpenTask={onSelect}
                 tabbable={index === rovingIndex}
                 todayStart={todayStart}
                 query={query}

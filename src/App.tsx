@@ -173,7 +173,7 @@ export function App() {
       }),
     [tasks, view, timeFilter, query, search, stickyUnread],
   )
-  const { orderedTasks } = listShape
+  const { orderedTasks, families } = listShape
 
   // Picking a task, or following a link or the back button to one, is how you
   // leave a navbar panel; it shares the pane.
@@ -359,6 +359,10 @@ export function App() {
                   generateTitle={generateTitle}
                   allowTool={allowTool}
                   onRetry={tryAgain}
+                  subtasks={families.childrenOf.get(taskKeyOf(current))}
+                  parent={families.parentOf.get(taskKeyOf(current))}
+                  todayStart={listShape.todayStart}
+                  onOpenTask={selectTask}
                 />
                 <Conversation
                   task={current}

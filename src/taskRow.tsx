@@ -6,6 +6,7 @@ import { TaskActionsMenu } from './menus'
 import { availableTaskActions } from './taskActions'
 import type { TaskAction } from './taskActions'
 import { isUnread } from './readMarker'
+import { SubtasksChip } from './subtasks'
 import type { TaskWithProject } from './types'
 
 // A clock face: the task has something armed to fire later.
@@ -74,6 +75,11 @@ export const TaskRow = forwardRef<
     selected: boolean
     // Lander is running an app started from this task's header.
     appRunning: boolean
+    // The tasks this one launched to manage, in list order.
+    subtasks?: TaskWithProject[]
+    // The task that launched this one to manage it.
+    parent?: TaskWithProject
+    onOpenTask: (id: string, projectSlug: string) => void
     // Whether Tab reaches this row (the roving tabindex).
     tabbable: boolean
     // Midnight today, which decides whether the time reads as a clock or a date.
@@ -89,6 +95,9 @@ export const TaskRow = forwardRef<
     task,
     selected,
     appRunning,
+    subtasks,
+    parent,
+    onOpenTask,
     tabbable,
     todayStart,
     query,
@@ -158,6 +167,8 @@ export const TaskRow = forwardRef<
           {task.status === 'riding' && (
             <span className="riding-spinner" aria-label="Riding" />
           )}
+          <SubtasksChip subtasks={subtasks} todayStart={todayStart} onOpen={onOpenTask} />
+          {parent && <span className="task-parent">in {parent.title}</span>}
         </div>
       </div>
       <TaskActionsMenu actions={availableTaskActions(task)} onAction={onAction} />

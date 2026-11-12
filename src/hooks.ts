@@ -160,7 +160,7 @@ export function useAnchoredPosition(open: boolean, gap: number) {
   // Until the first layout pass sets a real position, keep the mounted popup
   // hidden so its unplaced frame never flashes at the top-left.
   const popupStyle: CSSProperties = style ?? { visibility: 'hidden', top: 0, left: 0 }
-  return { triggerRef, popupRef, popupStyle }
+  return { triggerRef, popupRef, popupStyle, positioned: style !== null }
 }
 
 // A fixed-anchored popup (placed by useAnchoredPosition) that owns its open
@@ -169,7 +169,7 @@ export function useAnchoredPosition(open: boolean, gap: number) {
 export function useAnchoredPopup({ gap = 6 }: { gap?: number } = {}) {
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
-  const { triggerRef, popupRef, popupStyle } = useAnchoredPosition(open, gap)
+  const { triggerRef, popupRef, popupStyle, positioned } = useAnchoredPosition(open, gap)
 
   useEffect(() => {
     if (!open) return
@@ -188,5 +188,5 @@ export function useAnchoredPopup({ gap = 6 }: { gap?: number } = {}) {
     }
   }, [open])
 
-  return { open, setOpen, containerRef, triggerRef, popupRef, popupStyle }
+  return { open, setOpen, containerRef, triggerRef, popupRef, popupStyle, positioned }
 }

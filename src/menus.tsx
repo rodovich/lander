@@ -59,8 +59,9 @@ export type MenuItem = {
 // nor the detail header can clip it, and it flips above the trigger when there
 // isn't room below. Clicks and keys are kept from bubbling, because a menu on a
 // task row sits inside a row that selects on click and moves focus on arrows.
-function ActionsMenu({
+export function ActionsMenu({
   className = 'task-menu',
+  popupClassName,
   trigger,
   triggerLabel,
   compact,
@@ -68,6 +69,7 @@ function ActionsMenu({
   autoFocusTrigger,
 }: {
   className?: string
+  popupClassName?: string
   trigger?: { className: string; content: React.ReactNode }
   // Names the trigger for assistive tech.
   triggerLabel: string
@@ -75,15 +77,16 @@ function ActionsMenu({
   items: MenuItem[]
   autoFocusTrigger?: boolean
 }) {
-  const { open, setOpen, containerRef, triggerRef, popupRef, popupStyle } =
+  const { open, setOpen, containerRef, triggerRef, popupRef, popupStyle, positioned } =
     useAnchoredPopup({ gap: 4 })
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
 
   // Move focus into the menu once it opens, so the arrow keys (and Escape) have
-  // somewhere to start.
+  // somewhere to start. The popup is hidden until it has been positioned, and a
+  // hidden item can't take focus.
   useEffect(() => {
-    if (open) itemRefs.current[0]?.focus()
-  }, [open])
+    if (positioned) itemRefs.current[0]?.focus()
+  }, [positioned])
 
   // Roving arrow-key navigation within the open menu. Each key is stopped from
   // bubbling to the row's own key handler (which would move row focus or select
@@ -166,7 +169,7 @@ function ActionsMenu({
       {open && (
         <div
           ref={popupRef}
-          className="task-menu-popup"
+          className={'task-menu-popup' + (popupClassName ? ` ${popupClassName}` : '')}
           role="menu"
           style={popupStyle}
           onClick={(e) => e.stopPropagation()}
