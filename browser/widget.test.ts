@@ -204,6 +204,28 @@ describe('the widget in an app’s page', () => {
     expect(await inView('Later message 29.')).toBe(false)
   })
 
+  it('never shows the conversation scrolled to the top on the way to the first unread message', async () => {
+    task = LONG_UNREAD_TASK
+    const page = await openApp()
+    await expect.poll(() => buttonClasses(page), WAIT).toContain('unread')
+    type Sampled = { scrolls: number[] }
+    const content = embedded(page).locator('html')
+    await content.evaluate(() => {
+      const samples: number[] = []
+      ;(window as unknown as Sampled).scrolls = samples
+      const sample = () => {
+        const pane = document.querySelector('.messages')
+        if (pane) samples.push(pane.scrollTop)
+        requestAnimationFrame(sample)
+      }
+      requestAnimationFrame(sample)
+    })
+    await toggle(page).click()
+    const scrolls = () => content.evaluate(() => (window as unknown as Sampled).scrolls)
+    await expect.poll(async () => (await scrolls()).length, WAIT).toBeGreaterThan(10)
+    expect(await scrolls()).not.toContain(0)
+  })
+
   it('turns an arc around the button while the task rides', async () => {
     task = { ...TASK, status: 'riding' }
     const page = await openApp()

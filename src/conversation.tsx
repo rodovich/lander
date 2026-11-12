@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { AskForm } from './asks'
 import { MessageAttachments } from './attachments'
 import { ErrorBoundary } from './errorBoundary'
@@ -207,7 +207,8 @@ export const Conversation = memo(function Conversation({
     openR ? 1 : 0
   }`
 
-  useEffect(() => {
+  // Before paint, so the pane is never drawn where it was before the scroll.
+  useLayoutEffect(() => {
     const el = messagesRef.current
     if (!el || !task.items) return
     const key = taskKeyOf(task)
@@ -233,7 +234,8 @@ export const Conversation = memo(function Conversation({
 
   // Re-measure what's read whenever the entries change (the pin above may have
   // moved them, or something new landed on screen) or the pane resizes.
-  // Declared after the pin so it measures where the pin left the pane.
+  // A passive effect runs after the pin's layout effect, so this measures where
+  // the pin left the pane.
   useEffect(() => measureReadRef.current(), [stamps])
   useEffect(() => {
     const el = messagesRef.current
@@ -245,8 +247,9 @@ export const Conversation = memo(function Conversation({
 
   // Bring a search match into view: scroll its occurrence a third of the way
   // down the pane and paint every occurrence in its item, until the reveal
-  // changes or the task does. Declared after the pin above so that, on the
-  // switch a match's click makes, it scrolls after the pin's own scroll. An
+  // changes or the task does. As a passive effect it runs after the pin's
+  // layout effect, so on the switch a match's click makes, it scrolls after
+  // the pin's own scroll. An
   // occurrence the rendered text no longer holds (markdown can split or drop
   // it) falls back to the nearest one, then to the item itself.
   useEffect(() => {
