@@ -6,6 +6,7 @@ import { ErrorBoundary } from './errorBoundary'
 import { DEFAULT_VIEW } from './format'
 import { startPoll } from './poll'
 import { MonotonicRequestGate } from './requestOrder'
+import { isUnread } from './readMarker'
 import { NO_GRANTS } from './taskMeta'
 import { taskHref, taskKeyOf, type TaskRef } from './taskRef'
 import type { TaskLink, TaskWithProject } from './types'
@@ -98,6 +99,47 @@ function useEmbeddedTask(taskRef: TaskRef, onPollError: (message: string | null)
   return { ...fencedTasks, refresh: load }
 }
 
+// The widget's panel holds this page in a frame of another origin, and the
+// two talk only through these messages.
+const isFramed = () => window.parent !== window
+
+// Whether the widget has the panel in view, as it reports. The frame's own
+// focus can't decide that: the panel is read without being clicked into, and a
+// closed panel's frame still runs.
+function useWidgetActive(): boolean {
+  const [active, setActive] = useState(false)
+  useEffect(() => {
+    if (!isFramed()) return
+    const onMessage = (event: MessageEvent) => {
+      if (event.source === window.parent && event.data?.type === 'lander-widget-active')
+        setActive(event.data.active === true)
+    }
+    // Focus leaving this frame for another window fires nothing on the page
+    // around it, so this tells the widget to look again.
+    const onFocusChange = () => window.parent.postMessage({ type: 'lander-embed-focus' }, '*')
+    window.addEventListener('message', onMessage)
+    window.addEventListener('focus', onFocusChange)
+    window.addEventListener('blur', onFocusChange)
+    window.parent.postMessage({ type: 'lander-embed-ready' }, '*')
+    return () => {
+      window.removeEventListener('message', onMessage)
+      window.removeEventListener('focus', onFocusChange)
+      window.removeEventListener('blur', onFocusChange)
+    }
+  }, [])
+  return active
+}
+
+// What the widget's button shows. Sent to any origin, since the frame doesn't
+// know the page's, and only a page lander lets frame the task can receive it.
+function useReportToWidget(task: TaskWithProject | null) {
+  const unread = task ? isUnread(task) : false
+  const riding = task?.status === 'riding'
+  useEffect(() => {
+    if (isFramed()) window.parent.postMessage({ type: 'lander-task-state', unread, riding }, '*')
+  }, [unread, riding])
+}
+
 export function EmbedTask({ taskRef }: { taskRef: TaskRef }) {
   const [error, setError] = useState<string | null>(null)
   const [pollError, setPollError] = useState<string | null>(null)
@@ -110,7 +152,14 @@ export function EmbedTask({ taskRef }: { taskRef: TaskRef }) {
   const { markSeen, runTaskAction, allowTool, tryAgain, answerAsk, answeringBy } =
     useTaskActions({ currentRef, refresh, setError, ...fencedTasks })
   const { readUpTo, setReadUpTo, tabActive } = useViewingState(DEFAULT_VIEW, tasks)
-  useReadMarker({ current: task, readUpTo, tabActive, markSeen })
+  const widgetActive = useWidgetActive()
+  useReadMarker({
+    current: task,
+    readUpTo,
+    tabActive: isFramed() ? widgetActive : tabActive,
+    markSeen,
+  })
+  useReportToWidget(task)
   const disclosure = useTimelineDisclosure(task)
   const draft = useReplyDrafts(task, {
     setError,

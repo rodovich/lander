@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { embedUrl } from '../daemon/apps'
+import { READ_DWELL_MS } from '../src/useReadMarker'
 import { serveApi, serveWeb, type TestServer } from '../webTestServer'
 
 const TASK = {
@@ -23,6 +24,24 @@ const TASK = {
   rides: [],
 }
 
+// TASK after a turn the viewer hasn't read yet.
+const UNREAD_TASK = {
+  ...TASK,
+  readThrough: '2026-11-10T00:00:00.000Z',
+  items: [
+    ...TASK.items,
+    {
+      id: 'f1',
+      at: '2026-11-10T00:00:30.000Z',
+      rideId: 'r1',
+      kind: 'message',
+      role: 'flow',
+      text: 'Moved the banner below the toolbar.',
+    },
+  ],
+  rides: [{ id: 'r1', startedAt: '2026-11-10T00:00:10.000Z', endedAt: '2026-11-10T00:01:00.000Z' }],
+}
+
 describe('the widget in an app’s page', () => {
   let api: TestServer
   let lander: TestServer
@@ -32,15 +51,22 @@ describe('the widget in an app’s page', () => {
   let contexts: BrowserContext[] = []
   // The app the API names as the task's, which may frame the embed page.
   let framingOrigin: string
+  // The task as the API serves it. Marking it seen reads it through the end.
+  let task: Record<string, unknown>
+  let seen: number
 
   beforeAll(async () => {
-    api = await serveApi((path) =>
-      path === '/api/proj/tasks/t1'
-        ? Response.json(TASK)
-        : path === '/api/proj/tasks/t1/app'
-          ? Response.json({ app: { url: `${framingOrigin}/` } })
-          : Response.json({ error: 'not found' }, { status: 404 }),
-    )
+    api = await serveApi((path) => {
+      if (path === '/api/proj/tasks/t1') return Response.json(task)
+      if (path === '/api/proj/tasks/t1/app')
+        return Response.json({ app: { url: `${framingOrigin}/` } })
+      if (path === '/api/proj/tasks/t1/seen') {
+        seen++
+        task = { ...task, readThrough: '2026-11-10T00:01:00.000Z' }
+        return Response.json(task)
+      }
+      return Response.json({ error: 'not found' }, { status: 404 })
+    })
     lander = await serveWeb(api.url, { entries: ['embed.html'] })
     const embed = embedUrl(lander.url.replace(/\/$/, ''), 'proj', 't1').replaceAll('&', '&amp;')
     app = http.createServer((_req, res) => {
@@ -59,6 +85,8 @@ describe('the widget in an app’s page', () => {
 
   beforeEach(() => {
     framingOrigin = appOrigin
+    task = TASK
+    seen = 0
   })
 
   afterEach(async () => {
@@ -73,10 +101,11 @@ describe('the widget in an app’s page', () => {
     if (app) await new Promise<void>((closed) => app.close(() => closed()))
   })
 
-  async function openApp(): Promise<Page> {
+  async function openApp(beforeLoad?: (page: Page) => void): Promise<Page> {
     const context = await browser.newContext()
     contexts.push(context)
     const page = await context.newPage()
+    beforeLoad?.(page)
     await page.goto(appOrigin)
     return page
   }
@@ -124,13 +153,37 @@ describe('the widget in an app’s page', () => {
     await expect.poll(clipboard).toBe('The banner overlaps the toolbar.')
   })
 
+  const WAIT = { timeout: 10_000 }
+  const buttonClasses = (page: Page) => toggle(page).evaluate((el) => [...el.classList])
+
+  it('rings the button while the task is unread, and marks it read only once the panel shows it', async () => {
+    task = UNREAD_TASK
+    const page = await openApp()
+    await expect.poll(() => buttonClasses(page), WAIT).toContain('unread')
+    await page.waitForTimeout(READ_DWELL_MS + 1500)
+    expect(seen).toBe(0)
+
+    await toggle(page).click()
+    await expect.poll(() => seen, WAIT).toBeGreaterThan(0)
+    await expect.poll(() => buttonClasses(page), WAIT).not.toContain('unread')
+  })
+
+  it('turns an arc around the button while the task rides', async () => {
+    task = { ...TASK, status: 'riding' }
+    const page = await openApp()
+    await expect.poll(() => buttonClasses(page), WAIT).toContain('riding')
+    task = TASK
+    await expect.poll(() => buttonClasses(page), WAIT).not.toContain('riding')
+  })
+
   it('is refused by the browser when the task’s app is somewhere else', async () => {
     framingOrigin = 'http://localhost:1'
-    const page = await openApp()
-    const refused = page.waitForEvent('console', (message) =>
-      message.text().includes('frame-ancestors'),
-    )
-    await toggle(page).click()
+    let refused: Promise<unknown> | undefined
+    await openApp((page) => {
+      refused = page.waitForEvent('console', (message) =>
+        message.text().includes('frame-ancestors'),
+      )
+    })
     await refused
   })
 })

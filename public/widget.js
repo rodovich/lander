@@ -26,6 +26,7 @@
         align-items: flex-start;
         gap: 8px;
         font: 13px -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+        --riding: #6644ee;
       }
       .panel {
         width: min(420px, calc(100vw - 32px));
@@ -46,6 +47,7 @@
         border: 0;
       }
       .toggle {
+        position: relative;
         display: flex;
         padding: 8px;
         border: 1px solid rgba(17, 0, 0, 0.12);
@@ -60,6 +62,29 @@
         width: 20px;
         height: 20px;
       }
+      /* lander's riding color: a ring while the task is unread, and a turning
+         arc, like lander's spinners, while it rides. */
+      .toggle::after {
+        content: '';
+        position: absolute;
+        inset: -3px;
+        border: 2px solid transparent;
+        border-radius: 50%;
+        pointer-events: none;
+      }
+      .toggle.unread::after {
+        border-color: var(--riding);
+      }
+      .toggle.riding::after {
+        border-color: transparent;
+        border-top-color: var(--riding);
+        animation: lander-spin 0.7s linear infinite;
+      }
+      @keyframes lander-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
     </style>
     <div class="panel" hidden></div>
     <button type="button" class="toggle" aria-label="lander" aria-expanded="false">
@@ -69,22 +94,47 @@
   const panel = root.querySelector('.panel')
   const toggle = root.querySelector('.toggle')
 
-  // The frame is made on first open and kept while closed, so closing and
-  // reopening doesn't reload the conversation.
+  // The frame runs from the start, closed or not, so the button can show the
+  // task's state, and closing the panel only hides it.
+  const frame = document.createElement('iframe')
+  frame.title = 'lander task'
+  // A cross-origin frame can write to the clipboard only if its embedder
+  // delegates the permission.
+  frame.allow = 'clipboard-write'
+  frame.src = embedUrl
+  panel.append(frame)
+  const embedOrigin = new URL(embedUrl).origin
+  let embedReady = false
+
+  // The embed marks the task read only while this is true.
+  function reportActive() {
+    if (!embedReady) return
+    const active = !panel.hidden && !document.hidden && document.hasFocus()
+    frame.contentWindow.postMessage({ type: 'lander-widget-active', active }, embedOrigin)
+  }
+
   function setOpen(open) {
-    if (open && !panel.firstChild) {
-      const frame = document.createElement('iframe')
-      frame.title = 'lander task'
-      // A cross-origin frame can write to the clipboard only if its embedder
-      // delegates the permission.
-      frame.allow = 'clipboard-write'
-      frame.src = embedUrl
-      panel.append(frame)
-    }
     panel.hidden = !open
     toggle.setAttribute('aria-expanded', String(open))
     sessionStorage.setItem(OPEN_KEY, open ? 'true' : '')
+    reportActive()
   }
+
+  window.addEventListener('message', (event) => {
+    if (event.source !== frame.contentWindow || event.origin !== embedOrigin) return
+    if (event.data?.type === 'lander-embed-ready') {
+      embedReady = true
+      reportActive()
+    } else if (event.data?.type === 'lander-embed-focus') setTimeout(reportActive)
+    else if (event.data?.type === 'lander-task-state') {
+      toggle.classList.toggle('unread', event.data.unread === true)
+      toggle.classList.toggle('riding', event.data.riding === true)
+    }
+  })
+  window.addEventListener('focus', reportActive)
+  // Clicking into the frame blurs this window before focus lands in the frame.
+  window.addEventListener('blur', () => setTimeout(reportActive))
+  document.addEventListener('visibilitychange', reportActive)
 
   toggle.addEventListener('click', () => setOpen(panel.hidden))
   document.body.append(host)
