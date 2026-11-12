@@ -75,6 +75,9 @@
     if (open && !panel.firstChild) {
       const frame = document.createElement('iframe')
       frame.title = 'lander task'
+      // A cross-origin frame can write to the clipboard only if its embedder
+      // delegates the permission.
+      frame.allow = 'clipboard-write'
       frame.src = embedUrl
       panel.append(frame)
     }

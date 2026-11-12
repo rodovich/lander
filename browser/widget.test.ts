@@ -11,7 +11,15 @@ const TASK = {
   status: 'paced',
   createdAt: '2026-11-10T00:00:00.000Z',
   updatedAt: '2026-11-10T00:00:00.000Z',
-  items: [],
+  items: [
+    {
+      id: 'm1',
+      at: '2026-11-10T00:00:00.000Z',
+      kind: 'message',
+      role: 'user',
+      text: 'The banner overlaps the toolbar.',
+    },
+  ],
   rides: [],
 }
 
@@ -75,8 +83,8 @@ describe('the widget in an app’s page', () => {
 
   const toggle = (page: Page) => page.getByRole('button', { name: 'lander' })
   const frame = (page: Page) => page.locator('lander-widget iframe')
-  const embeddedTitle = (page: Page) =>
-    page.frameLocator('lander-widget iframe').getByText('Fix the banner')
+  const embedded = (page: Page) => page.frameLocator('lander-widget iframe')
+  const embeddedTitle = (page: Page) => embedded(page).getByText('Fix the banner')
 
   async function openWidget(): Promise<Page> {
     const page = await openApp()
@@ -104,6 +112,16 @@ describe('the widget in an app’s page', () => {
     await toggle(page).click()
     await embeddedTitle(page).waitFor()
     expect(await frame(page).getAttribute('data-mark')).toBe('first')
+  })
+
+  it('copies a message’s text from inside the frame', async () => {
+    const page = await openWidget()
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+    const clipboard = () => page.evaluate(() => navigator.clipboard.readText())
+    await page.evaluate(() => navigator.clipboard.writeText(''))
+    await embedded(page).getByText('The banner overlaps the toolbar.').hover()
+    await embedded(page).getByRole('button', { name: 'Copy message text' }).click()
+    await expect.poll(clipboard).toBe('The banner overlaps the toolbar.')
   })
 
   it('is refused by the browser when the task’s app is somewhere else', async () => {
