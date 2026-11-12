@@ -42,6 +42,25 @@ const UNREAD_TASK = {
   rides: [{ id: 'r1', startedAt: '2026-11-10T00:00:10.000Z', endedAt: '2026-11-10T00:01:00.000Z' }],
 }
 
+// UNREAD_TASK between enough earlier and later messages to fill the panel
+// several times over on each side.
+const ownMessages = (name: string, at: string) =>
+  Array.from({ length: 30 }, (_, i) => ({
+    id: `${name}${i}`,
+    at,
+    kind: 'message',
+    role: 'user',
+    text: `${name} message ${i}.`,
+  }))
+const LONG_UNREAD_TASK = {
+  ...UNREAD_TASK,
+  items: [
+    ...ownMessages('Earlier', '2026-11-10T00:00:00.000Z'),
+    ...UNREAD_TASK.items,
+    ...ownMessages('Later', '2026-11-10T00:02:00.000Z'),
+  ],
+}
+
 describe('the widget in an app’s page', () => {
   let api: TestServer
   let lander: TestServer
@@ -166,6 +185,23 @@ describe('the widget in an app’s page', () => {
     await toggle(page).click()
     await expect.poll(() => seen, WAIT).toBeGreaterThan(0)
     await expect.poll(() => buttonClasses(page), WAIT).not.toContain('unread')
+  })
+
+  it('opens the panel at the first unread message', async () => {
+    task = LONG_UNREAD_TASK
+    const page = await openApp()
+    await expect.poll(() => buttonClasses(page), WAIT).toContain('unread')
+    await toggle(page).click()
+    const inView = (text: string) =>
+      embedded(page)
+        .getByText(text, { exact: true })
+        .evaluate((el) => {
+          const box = el.getBoundingClientRect()
+          return box.bottom > 0 && box.top < window.innerHeight
+        })
+    await expect.poll(() => inView('Moved the banner below the toolbar.'), WAIT).toBe(true)
+    expect(await inView('Earlier message 0.')).toBe(false)
+    expect(await inView('Later message 29.')).toBe(false)
   })
 
   it('turns an arc around the button while the task rides', async () => {

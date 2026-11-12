@@ -106,35 +106,37 @@
   const embedOrigin = new URL(embedUrl).origin
   let embedReady = false
 
-  // The embed marks the task read only while this is true.
-  function reportActive() {
+  // The embed shows the conversation only while the panel is open, and marks
+  // the task read only while it's also in view.
+  function reportView() {
     if (!embedReady) return
-    const active = !panel.hidden && !document.hidden && document.hasFocus()
-    frame.contentWindow.postMessage({ type: 'lander-widget-active', active }, embedOrigin)
+    const open = !panel.hidden
+    const active = open && !document.hidden && document.hasFocus()
+    frame.contentWindow.postMessage({ type: 'lander-widget-view', open, active }, embedOrigin)
   }
 
   function setOpen(open) {
     panel.hidden = !open
     toggle.setAttribute('aria-expanded', String(open))
     sessionStorage.setItem(OPEN_KEY, open ? 'true' : '')
-    reportActive()
+    reportView()
   }
 
   window.addEventListener('message', (event) => {
     if (event.source !== frame.contentWindow || event.origin !== embedOrigin) return
     if (event.data?.type === 'lander-embed-ready') {
       embedReady = true
-      reportActive()
-    } else if (event.data?.type === 'lander-embed-focus') setTimeout(reportActive)
+      reportView()
+    } else if (event.data?.type === 'lander-embed-focus') setTimeout(reportView)
     else if (event.data?.type === 'lander-task-state') {
       toggle.classList.toggle('unread', event.data.unread === true)
       toggle.classList.toggle('riding', event.data.riding === true)
     }
   })
-  window.addEventListener('focus', reportActive)
+  window.addEventListener('focus', reportView)
   // Clicking into the frame blurs this window before focus lands in the frame.
-  window.addEventListener('blur', () => setTimeout(reportActive))
-  document.addEventListener('visibilitychange', reportActive)
+  window.addEventListener('blur', () => setTimeout(reportView))
+  document.addEventListener('visibilitychange', reportView)
 
   toggle.addEventListener('click', () => setOpen(panel.hidden))
   document.body.append(host)

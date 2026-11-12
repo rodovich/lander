@@ -103,16 +103,16 @@ function useEmbeddedTask(taskRef: TaskRef, onPollError: (message: string | null)
 // two talk only through these messages.
 const isFramed = () => window.parent !== window
 
-// Whether the widget has the panel in view, as it reports. The frame's own
-// focus can't decide that: the panel is read without being clicked into, and a
-// closed panel's frame still runs.
-function useWidgetActive(): boolean {
-  const [active, setActive] = useState(false)
+// Whether the widget's panel is open, and whether it's in view, as the widget
+// reports them. The frame's own focus can't decide either: the panel is read
+// without being clicked into, and a closed panel's frame still runs.
+function useWidgetView(): { open: boolean; active: boolean } {
+  const [view, setView] = useState({ open: false, active: false })
   useEffect(() => {
     if (!isFramed()) return
     const onMessage = (event: MessageEvent) => {
-      if (event.source === window.parent && event.data?.type === 'lander-widget-active')
-        setActive(event.data.active === true)
+      if (event.source === window.parent && event.data?.type === 'lander-widget-view')
+        setView({ open: event.data.open === true, active: event.data.active === true })
     }
     // Focus leaving this frame for another window fires nothing on the page
     // around it, so this tells the widget to look again.
@@ -127,7 +127,7 @@ function useWidgetActive(): boolean {
       window.removeEventListener('blur', onFocusChange)
     }
   }, [])
-  return active
+  return view
 }
 
 // What the widget's button shows. Sent to any origin, since the frame doesn't
@@ -152,11 +152,12 @@ export function EmbedTask({ taskRef }: { taskRef: TaskRef }) {
   const { markSeen, runTaskAction, allowTool, tryAgain, answerAsk, answeringBy } =
     useTaskActions({ currentRef, refresh, setError, ...fencedTasks })
   const { readUpTo, setReadUpTo, tabActive } = useViewingState(DEFAULT_VIEW, tasks)
-  const widgetActive = useWidgetActive()
+  const widget = useWidgetView()
+  const framed = isFramed()
   useReadMarker({
     current: task,
     readUpTo,
-    tabActive: isFramed() ? widgetActive : tabActive,
+    tabActive: framed ? widget.active : tabActive,
     markSeen,
   })
   useReportToWidget(task)
@@ -173,7 +174,9 @@ export function EmbedTask({ taskRef }: { taskRef: TaskRef }) {
     <EmbedPane task={task} error={error ?? pollError}>
       {task && (
         <ErrorBoundary label="this task">
-          <Conversation
+          {/* Rendered only while the panel is open, so each opening lays it out
+              and scrolls to the first unread entry, as opening a task does. */}
+          {(!framed || widget.open) && <Conversation
             task={task}
             grants={NO_GRANTS}
             disclosure={disclosure}
@@ -184,7 +187,7 @@ export function EmbedTask({ taskRef }: { taskRef: TaskRef }) {
             answerAsk={answerAsk}
             onTaskAction={runTaskAction}
             onRetry={tryAgain}
-          />
+          />}
           {draft && (
             <Composer task={task} height={COMPOSER_HEIGHT} draft={draft} showUsage={false} />
           )}

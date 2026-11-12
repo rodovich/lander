@@ -92,14 +92,14 @@ The loader and the embed page talk only through `postMessage`:
 | Message | From → to | Meaning |
 |---|---|---|
 | `lander-embed-ready` | embed → widget | The embed is listening; send it the current state. |
-| `lander-widget-active` `{ active }` | widget → embed | Whether the panel is open and the page visible and focused. When framed, the embed advances the read marker only while this is true, never on its own focus. |
+| `lander-widget-view` `{ open, active }` | widget → embed | Whether the panel is open, and whether it's also in view (the page visible and focused). When framed, the embed renders the conversation only while `open`, so each opening scrolls to the first unread entry as opening a task does, and it advances the read marker only while `active`, never on its own focus. |
 | `lander-embed-focus` | embed → widget | Focus entered or left the frame; recompute `active`, since focus leaving the frame for another window fires nothing on the page. |
 | `lander-task-state` `{ unread, riding }` | embed → widget | What the button shows. |
 
 The embed sends its messages to any origin, since it doesn't know the page's and
 only the task's app may frame it; the widget sends to lander's origin only. The
 widget accepts messages only from its frame's window and lander's origin, and the
-embed accepts `lander-widget-active` only from its parent. `vite.config.test.ts`
+embed accepts `lander-widget-view` only from its parent. `vite.config.test.ts`
 covers the framing policy's decisions and the CORS setting under `npm test`;
 `browser/widget.test.ts` covers the widget in Chrome (see
 [testing](testing.md#browser-tests)).
