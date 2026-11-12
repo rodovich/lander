@@ -31,7 +31,7 @@ describe('EmbedPane', () => {
   it('shows the conversation under a link to the task in full lander, with its status', () => {
     const pane = html({ task, error: null })
     expect(pane).toContain('href="/proj/t1"')
-    expect(pane).toContain('>Fix the banner</a>')
+    expect(pane).toContain('Fix the banner')
     expect(pane).toContain('task-status wedged')
     expect(pane).toContain('the conversation')
   })

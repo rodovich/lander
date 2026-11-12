@@ -1,8 +1,10 @@
 // The lander widget. An app's page loads this as a classic script, so it needs
 // no CORS from lander, with its task's embed page in `data-embed-url`.
 ;(() => {
-  const embedUrl = document.currentScript.dataset.embedUrl
+  const script = document.currentScript
+  const embedUrl = script.dataset.embedUrl
   if (!embedUrl) throw new Error('lander widget: the script tag has no data-embed-url')
+  const iconUrl = new URL('/favicon.svg', script.src)
 
   const OPEN_KEY = 'lander-widget-open'
   // The page's styles reach only this element, which no ordinary page rule
@@ -44,18 +46,25 @@
         border: 0;
       }
       .toggle {
-        padding: 6px 12px;
+        display: flex;
+        padding: 8px;
         border: 1px solid rgba(17, 0, 0, 0.12);
-        border-radius: 999px;
+        border-radius: 50%;
         background: #fcfaf8;
         color: rgba(17, 0, 0, 0.85);
         font: inherit;
         cursor: pointer;
         box-shadow: 0 2px 8px rgba(17, 0, 0, 0.16);
       }
+      .toggle img {
+        width: 20px;
+        height: 20px;
+      }
     </style>
     <div class="panel" hidden></div>
-    <button type="button" class="toggle" aria-expanded="false">lander</button>
+    <button type="button" class="toggle" aria-label="lander" aria-expanded="false">
+      <img alt="" src="${iconUrl}" />
+    </button>
   `
   const panel = root.querySelector('.panel')
   const toggle = root.querySelector('.toggle')

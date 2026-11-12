@@ -21,6 +21,26 @@ const COMPOSER_HEIGHT = 130
 const NO_LINKS: TaskLink[] = []
 const noop = () => {}
 
+function OpenInNewIcon() {
+  return (
+    <svg
+      className="embed-title-icon"
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M6 3H3.5A1.5 1.5 0 0 0 2 4.5v8A1.5 1.5 0 0 0 3.5 14h8a1.5 1.5 0 0 0 1.5-1.5V10" />
+      <path d="M9 2h5v5M14 2 7.5 8.5" />
+    </svg>
+  )
+}
+
 export function EmbedPane({
   task,
   error,
@@ -34,8 +54,13 @@ export function EmbedPane({
     <div className="detail embed">
       {task && (
         <div className="embed-header">
-          <a className="embed-title" href={taskHref(task.projectSlug, task.id)}>
-            {task.title}
+          <a
+            className="embed-title"
+            href={taskHref(task.projectSlug, task.id)}
+            title="Open in lander"
+          >
+            <span className="embed-title-text">{task.title}</span>
+            <OpenInNewIcon />
           </a>
           <TaskStatus status={task.status} />
         </div>
