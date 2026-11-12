@@ -188,7 +188,7 @@ function ExternalLink({ href, title, children }: { href?: string; title?: string
 }
 
 function BlockCopy({ text, label }: { text: string; label: string }) {
-  return <CopyButton text={text} label={label} className="block-copy" size={14} />
+  return <CopyButton text={text} label={label} className="block-copy" compact size={14} />
 }
 
 const components: Components = {

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { IconButton } from './iconButton'
 
 // The checkmark every copy button flips to for a moment after a successful
 // copy, so the click registers.
@@ -40,6 +41,7 @@ export function CopyButton({
   text,
   label,
   className,
+  compact,
   icon = CLIPBOARD_ICON,
   size = 15,
 }: {
@@ -47,7 +49,8 @@ export function CopyButton({
   // Both the tooltip and the accessible name, which becomes "Copied" while the
   // checkmark is showing.
   label: string
-  className: string
+  className?: string
+  compact?: boolean
   icon?: React.ReactNode
   size?: number
 }) {
@@ -64,16 +67,16 @@ export function CopyButton({
     }
   }
   return (
-    <button
-      type="button"
+    <IconButton
+      label={copied ? 'Copied' : label}
+      title={label}
+      compact={compact}
       className={className}
       onClick={copy}
-      title={label}
-      aria-label={copied ? 'Copied' : label}
     >
       <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
         {copied ? CHECK_ICON : icon}
       </svg>
-    </button>
+    </IconButton>
   )
 }

@@ -1,4 +1,5 @@
 import { useRef } from 'react'
+import { CloseIcon, IconButton } from './iconButton'
 
 // The paperclip control shown below a composer opens the file browser, then
 // shows the picked filename (single) or "N files" with an ✕ to clear. Its parent
@@ -17,16 +18,14 @@ export function AttachButton({
   const inputRef = useRef<HTMLInputElement>(null)
   return (
     <span className="attach">
-      <button
-        type="button"
-        className="title-action"
+      <IconButton
+        label="Attach files"
         title="Attach files or drop them here"
-        aria-label="Attach files"
         disabled={disabled}
         onClick={() => inputRef.current?.click()}
       >
         <PaperclipIcon />
-      </button>
+      </IconButton>
       <input
         ref={inputRef}
         type="file"
@@ -44,16 +43,14 @@ export function AttachButton({
           <span className="attach-names" title={files.map((f) => f.name).join(', ')}>
             {files.length === 1 ? files[0].name : `${files.length} files`}
           </span>
-          <button
-            type="button"
-            className="attach-clear"
-            title="Clear attachments"
-            aria-label="Clear attachments"
+          <IconButton
+            compact
+            label="Clear attachments"
             disabled={disabled}
             onClick={onClear}
           >
-            ✕
-          </button>
+            <CloseIcon size={12} />
+          </IconButton>
         </span>
       )}
     </span>

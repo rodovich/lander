@@ -3,6 +3,7 @@ import { AppRow } from './appRow'
 import { CheckoutChip } from './checkoutChip'
 import { formatTimestamp } from './format'
 import { GrantControl } from './grants'
+import { IconButton } from './iconButton'
 import { CopyConversationButton, CopyIdButton, TaskActionsMenu } from './menus'
 import { availableTaskActions } from './taskActions'
 import type { TaskAction } from './taskActions'
@@ -109,15 +110,13 @@ export const DetailHeader = memo(function DetailHeader({
           >
             {task.title}
           </h1>
-          <button
-            className="title-action"
-            title="Regenerate title"
-            aria-label="Regenerate title"
+          <IconButton
+            label="Regenerate title"
             disabled={retitling === taskKeyOf(task)}
             onClick={() => void generateTitle()}
           >
             <SparkleIcon />
-          </button>
+          </IconButton>
           <CopyIdButton id={task.id} />
           {!task.archived && (
             <GrantControl

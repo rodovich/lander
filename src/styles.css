@@ -625,32 +625,6 @@ body {
   flex-shrink: 0;
 }
 
-.task-kebab {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  background: none;
-  color: var(--muted);
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.task-kebab:hover {
-  background: var(--selected);
-  color: var(--fg);
-}
-
-.task-kebab:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 2px var(--riding);
-}
-
 /* Fixed-positioned (anchored to the kebab's live rect) so the scrolling task
    list never clips it; useAnchoredPosition keeps it inside the window. */
 .task-menu-popup {
@@ -781,31 +755,15 @@ body {
    slot into the chip's right padding, not toward the label, so the chip stays
    the trigger's size. */
 .filter-chip-clear {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 19px;
-  height: 19px;
   margin: -3px -6px -3px 0;
-  padding: 0;
-  border: none;
   border-radius: 50%;
-  background: none;
-  color: inherit;
-  cursor: pointer;
-}
-
-.filter-chip-clear:hover {
-  background: var(--border);
-  color: var(--fg);
 }
 
 .filter-menu-trigger:hover {
   background: var(--selected);
 }
 
-.filter-menu-trigger:focus-visible,
-.filter-chip-clear:focus-visible {
+.filter-menu-trigger:focus-visible {
   outline: none;
   box-shadow: inset 0 0 0 2px var(--riding);
 }
@@ -1025,18 +983,6 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 160px;
-}
-.attach .attach-clear {
-  padding: 0 2px;
-  border: none;
-  background: none;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1;
-  cursor: pointer;
-}
-.attach .attach-clear:hover:not(:disabled) {
-  color: var(--fg);
 }
 
 /* Attachment chips shown beside a user message's text. */
@@ -1497,9 +1443,8 @@ body {
   background: var(--selected);
 }
 
-/* Icon buttons beside text, kept quiet so a row reads as its text with the
-   controls behind it. */
-.title-action {
+/* Kept quiet so a row reads as its text with the controls behind it. */
+.icon-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1513,12 +1458,21 @@ body {
   opacity: 0.6;
 }
 
-.title-action:hover:not(:disabled) {
+.icon-button.compact {
+  padding: 1px;
+}
+
+.icon-button:hover:not(:disabled) {
   opacity: 1;
   background: var(--selected);
 }
 
-.title-action:disabled {
+.icon-button:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--riding);
+}
+
+.icon-button:disabled {
   opacity: 0.35;
   cursor: default;
 }
@@ -1530,7 +1484,7 @@ body {
 }
 
 /* Keep the sparkle visible and pulsing while haiku is naming the task. */
-.title-row .title-action:disabled {
+.title-row .icon-button:disabled {
   opacity: 0.6;
   cursor: default;
   animation: title-pulse 1s ease-in-out infinite;
@@ -1635,12 +1589,6 @@ body {
 .app-row a:hover,
 .app-action:hover {
   text-decoration: underline;
-}
-
-.app-row .task-kebab {
-  width: 16px;
-  height: 16px;
-  font-size: 13px;
 }
 
 .app-action {
@@ -1776,12 +1724,6 @@ body {
   grid-column: span 2;
 }
 
-/* Tighter than the field rows' copies, so a file row stays as tall as its
-   text. */
-.checkout-file-copy {
-  padding: 1px;
-}
-
 /* Every list scrolls together under the worktree and branch. */
 .checkout-changes {
   max-height: 50vh;
@@ -1865,27 +1807,17 @@ body {
   position: absolute;
   top: 0;
   right: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px;
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  border-radius: 4px;
   opacity: 0;
-  transition: opacity 0.15s, color 0.15s, background 0.15s;
+  transition: opacity 0.15s, background 0.15s;
 }
 
-.message-text-wrap:hover .message-text-copy,
+.message-text-wrap:hover .message-text-copy {
+  opacity: 0.6;
+}
+
+.message-text-copy:hover:not(:disabled),
 .message-text-copy:focus-visible {
   opacity: 1;
-}
-
-.message-text-copy:hover {
-  color: var(--riding);
-  background: var(--selected);
 }
 
 .message-role {
@@ -2041,17 +1973,8 @@ body {
   position: absolute;
   top: 6px;
   right: 6px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px;
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  border-radius: 4px;
   opacity: 0;
-  transition: opacity 0.15s, color 0.15s, background 0.15s;
+  transition: opacity 0.15s, background 0.15s;
 }
 
 /* A quote's or table's button sits in the block's top-right corner, in a
@@ -2089,14 +2012,13 @@ body {
   top: 20px;
 }
 
-:hover > .block-copy,
-.block-copy:focus-visible {
-  opacity: 1;
+:hover > .block-copy {
+  opacity: 0.6;
 }
 
-.block-copy:hover {
-  color: var(--riding);
-  background: var(--bg-tinted);
+.block-copy:hover:not(:disabled),
+.block-copy:focus-visible {
+  opacity: 1;
 }
 
 .message-text pre code {
@@ -2812,27 +2734,6 @@ body {
 .rule-row-menu {
   position: relative;
   flex-shrink: 0;
-}
-
-.rule-row-kebab {
-  padding: 2px 6px;
-  border: none;
-  border-radius: 4px;
-  background: none;
-  color: var(--muted);
-  font-size: 15px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.rule-row-kebab:hover:not(:disabled) {
-  background: var(--selected);
-  color: var(--fg);
-}
-
-.rule-row-kebab:disabled {
-  opacity: 0.35;
-  cursor: default;
 }
 
 /* The two-scope grant menu, fixed-anchored to a row's kebab (top/left set inline

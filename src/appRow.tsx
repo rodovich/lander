@@ -57,6 +57,7 @@ export function AppRowView({
   const menu = (
     <KebabMenu
       label="App actions"
+      compact
       items={[
         { key: 'restart', label: 'Restart', onSelect: () => onAction('restart') },
         { key: 'stop', label: 'Stop', onSelect: () => onAction('stop') },
@@ -165,7 +166,7 @@ function AppLogModal({
         </div>
         <div className="attachment-preview-foot">
           <span className="attachment-preview-meta">{path}</span>
-          {path && <CopyButton text={path} label="Copy log path" className="title-action" size={13} />}
+          {path && <CopyButton text={path} label="Copy log path" size={13} />}
         </div>
       </div>
     </div>,

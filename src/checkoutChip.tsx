@@ -83,19 +83,14 @@ export function CheckoutChip({ checkout }: { checkout: CheckoutReport }) {
             <code className="checkout-value" title={path}>
               {path}
             </code>
-            <CopyButton text={path} label="Copy worktree path" className="title-action" size={13} />
+            <CopyButton text={path} label="Copy worktree path" size={13} />
             <span className="checkout-label">Branch</span>
             {branch ? (
               <>
                 <code className="checkout-value" title={branch}>
                   {branch}
                 </code>
-                <CopyButton
-                  text={branch}
-                  label="Copy branch name"
-                  className="title-action"
-                  size={13}
-                />
+                <CopyButton text={branch} label="Copy branch name" size={13} />
               </>
             ) : (
               <span className="checkout-value checkout-detached">detached</span>
@@ -152,7 +147,7 @@ function FileRow({ file, worktree }: { file: ChangedFile; worktree: string }) {
       <CopyButton
         text={`${worktree}/${file.path}`}
         label="Copy full path"
-        className="title-action checkout-file-copy"
+        compact
         size={12}
       />
     </>

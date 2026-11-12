@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAnchoredPopup, useAnchoredPosition } from './hooks'
+import { IconButton, KebabIcon } from './iconButton'
 import type { BlockedRequest } from './permissions'
 import type { FlowCaps, Task } from './types'
 
@@ -133,18 +134,18 @@ export function RuleRow({
         </span>
       ) : (
         <div className="rule-row-menu">
-          <button
+          <IconButton
             ref={kebabRef}
-            type="button"
-            className="rule-row-kebab"
+            compact
+            label="Grant scope"
+            title={null}
             aria-haspopup="menu"
             aria-expanded={menuOpen}
-            aria-label="Grant scope"
             disabled={!committed || (!canGrantTask && !canGrantProject)}
             onClick={onToggleMenu}
           >
-            ⋮
-          </button>
+            <KebabIcon size={13} />
+          </IconButton>
           {menuOpen && (
             <div
               ref={menuRef}
@@ -202,7 +203,9 @@ function RulePopup({
   onRetry,
 }: {
   className: string
-  trigger: { className: string; label?: string; content: React.ReactNode }
+  trigger:
+    | { className: string; content: React.ReactNode }
+    | { label: string; content: React.ReactNode }
   // Above the rows.
   head?: React.ReactNode
   // Seeded rows, one per rule.
@@ -256,20 +259,24 @@ function RulePopup({
     />
   )
 
+  const triggerProps = {
+    ref: triggerRef,
+    'aria-haspopup': 'dialog' as const,
+    'aria-expanded': open,
+    onClick: () => setOpen((o) => !o),
+  }
+
   return (
     <div className={className} ref={containerRef}>
-      <button
-        ref={triggerRef}
-        type="button"
-        className={trigger.className}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        title={trigger.label}
-        aria-label={trigger.label}
-        onClick={() => setOpen((o) => !o)}
-      >
-        {trigger.content}
-      </button>
+      {'className' in trigger ? (
+        <button type="button" className={trigger.className} {...triggerProps}>
+          {trigger.content}
+        </button>
+      ) : (
+        <IconButton label={trigger.label} {...triggerProps}>
+          {trigger.content}
+        </IconButton>
+      )}
       {open && (
         <div ref={popupRef} className="rule-popup" style={popupStyle}>
           {head}
@@ -404,7 +411,7 @@ export function GrantControl({
   return (
     <RulePopup
       className="grant-control"
-      trigger={{ className: 'title-action', label: 'Permissions', content: <StampIcon /> }}
+      trigger={{ label: 'Permissions', content: <StampIcon /> }}
       head={
         <>
           {canGrantTask && <GrantedRules rules={allow ?? []} />}

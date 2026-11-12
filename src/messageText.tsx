@@ -28,6 +28,7 @@ export const MessageText = memo(function MessageText({
         text={text}
         label="Copy message text"
         className="message-text-copy"
+        compact
         size={14}
       />
     </div>

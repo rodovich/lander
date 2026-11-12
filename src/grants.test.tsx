@@ -46,7 +46,7 @@ describe('RuleRow', () => {
   it('shows the rule read-only with a kebab by default', () => {
     const html = render()
     expect(html).toContain('Bash(git push)')
-    expect(html).toContain('rule-row-kebab')
+    expect(html).toContain('aria-label="Grant scope"')
     // Menu is closed, so no scope items yet.
     expect(html).not.toContain('Allow in task')
   })
@@ -81,7 +81,7 @@ describe('RuleRow', () => {
   it('shows a checkmark and no kebab once granted', () => {
     const html = render({ granted: grantedAs })
     expect(html).toContain('rule-row-granted')
-    expect(html).not.toContain('rule-row-kebab')
+    expect(html).not.toContain('aria-label="Grant scope"')
   })
 
   it('renders the rule read-only (not click-to-edit) once granted', () => {
@@ -163,7 +163,7 @@ describe('GrantedRules', () => {
     expect(html).toContain('WebFetch(https://x)')
     // Read-only: no click-to-edit, no kebab to grant them again.
     expect(html).toContain('rule-row-rule readonly')
-    expect(html).not.toContain('rule-row-kebab')
+    expect(html).not.toContain('aria-label="Grant scope"')
   })
 
   it('renders nothing when the task has no rules', () => {

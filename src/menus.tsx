@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { CopyButton } from './copyButton'
 import { useAnchoredPopup } from './hooks'
+import { CloseIcon, IconButton, KebabIcon } from './iconButton'
 import type { TaskAction, TaskActionOption } from './taskActions'
 
 // Copies a task's id, styled to sit beside the title's sparkle and fade in with
@@ -11,7 +12,6 @@ export function CopyIdButton({ id }: { id: string }) {
     <CopyButton
       text={id}
       label="Copy task ID"
-      className="title-action"
       icon={
         <g
           stroke="currentColor"
@@ -36,7 +36,7 @@ export function CopyConversationButton({ markdown }: { markdown: () => string })
     <CopyButton
       text={markdown}
       label="Copy conversation as markdown"
-      className="title-action copy-conversation"
+      className="copy-conversation"
     />
   )
 }
@@ -61,17 +61,17 @@ export type MenuItem = {
 // task row sits inside a row that selects on click and moves focus on arrows.
 function ActionsMenu({
   className = 'task-menu',
-  triggerClassName,
-  triggerLabel,
   trigger,
+  triggerLabel,
+  compact,
   items,
   autoFocusTrigger,
 }: {
   className?: string
-  triggerClassName: string
+  trigger?: { className: string; content: React.ReactNode }
   // Names the trigger for assistive tech.
   triggerLabel: string
-  trigger: React.ReactNode
+  compact?: boolean
   items: MenuItem[]
   autoFocusTrigger?: boolean
 }) {
@@ -128,26 +128,41 @@ function ActionsMenu({
 
   if (items.length === 0) return null
 
+  const triggerProps = {
+    ref: triggerRef,
+    'aria-haspopup': 'menu' as const,
+    'aria-expanded': open,
+    autoFocus: autoFocusTrigger,
+    onClick: (e: React.MouseEvent<HTMLButtonElement>) => {
+      e.stopPropagation()
+      setOpen((o) => !o)
+    },
+    // Keep Enter/Space (and arrows) from bubbling to the row's key handler,
+    // which would otherwise select the task or move row focus.
+    onKeyDown: (e: React.KeyboardEvent<HTMLButtonElement>) => e.stopPropagation(),
+  }
+
   return (
     <div className={className} ref={containerRef}>
-      <button
-        ref={triggerRef}
-        type="button"
-        className={triggerClassName}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={triggerLabel}
-        autoFocus={autoFocusTrigger}
-        onClick={(e) => {
-          e.stopPropagation()
-          setOpen((o) => !o)
-        }}
-        // Keep Enter/Space (and arrows) from bubbling to the row's key handler,
-        // which would otherwise select the task or move row focus.
-        onKeyDown={(e) => e.stopPropagation()}
-      >
-        {trigger}
-      </button>
+      {trigger ? (
+        <button
+          type="button"
+          className={trigger.className}
+          aria-label={triggerLabel}
+          {...triggerProps}
+        >
+          {trigger.content}
+        </button>
+      ) : (
+        <IconButton
+          label={triggerLabel}
+          title={null}
+          compact={compact}
+          {...triggerProps}
+        >
+          <KebabIcon size={compact ? 13 : 15} />
+        </IconButton>
+      )}
       {open && (
         <div
           ref={popupRef}
@@ -198,10 +213,8 @@ export function TaskActionsMenu({
   onAction: (action: TaskAction) => void
 }) {
   return (
-    <ActionsMenu
-      triggerClassName="task-kebab"
-      triggerLabel="Task actions"
-      trigger="⋮"
+    <KebabMenu
+      label="Task actions"
       items={actions.map(({ action, label, group }, i) => ({
         key: action,
         label,
@@ -240,48 +253,41 @@ export function FilterMenu<T extends string>({
     return (
       <div className="filter-chip">
         {picked}
-        <button
-          type="button"
+        <IconButton
           className="filter-chip-clear"
-          aria-label={`Clear ${picked}`}
-          title={`Clear ${picked}`}
+          label={`Clear ${picked}`}
           onClick={() => {
             setCleared(true)
             onChange(defaultValue)
           }}
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-            <path
-              d="M7 7l10 10M17 7 7 17"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-            />
-          </svg>
-        </button>
+          <CloseIcon size={13} />
+        </IconButton>
       </div>
     )
   }
   return (
     <ActionsMenu
       className="filter-menu"
-      triggerClassName="filter-menu-trigger"
       triggerLabel={label}
       autoFocusTrigger={cleared}
-      trigger={
-        <>
-          {picked}
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-            <path
-              d="m6 9 6 6 6-6"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </>
-      }
+      trigger={{
+        className: 'filter-menu-trigger',
+        content: (
+          <>
+            {picked}
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="m6 9 6 6 6-6"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </>
+        ),
+      }}
       items={options.map((o) => ({
         key: o.value,
         label: (
@@ -298,9 +304,24 @@ export function FilterMenu<T extends string>({
   )
 }
 
-export function KebabMenu({ label, items }: { label: string; items: MenuItem[] }) {
+export function KebabMenu({
+  label,
+  className,
+  compact,
+  items,
+}: {
+  label: string
+  className?: string
+  compact?: boolean
+  items: MenuItem[]
+}) {
   return (
-    <ActionsMenu triggerClassName="task-kebab" triggerLabel={label} trigger="⋮" items={items} />
+    <ActionsMenu
+      className={className}
+      triggerLabel={label}
+      compact={compact}
+      items={items}
+    />
   )
 }
 
@@ -315,11 +336,9 @@ export function SectionActionsMenu({
   onArchive: () => void
 }) {
   return (
-    <ActionsMenu
+    <KebabMenu
       className="task-menu section-menu"
-      triggerClassName="task-kebab"
-      triggerLabel="Section actions"
-      trigger="⋮"
+      label="Section actions"
       items={[
         {
           key: 'archive',
