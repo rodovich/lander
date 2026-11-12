@@ -19,7 +19,7 @@ export function AttachButton({
     <span className="attach">
       <button
         type="button"
-        className="attach-btn"
+        className="title-action"
         title="Attach files or drop them here"
         aria-label="Attach files"
         disabled={disabled}
@@ -62,7 +62,7 @@ export function AttachButton({
 
 function PaperclipIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path
         d="M21.44 11.05l-9.19 9.19a5 5 0 0 1-7.07-7.07l9.19-9.19a3 3 0 0 1 4.24 4.24l-9.2 9.19a1 1 0 0 1-1.41-1.41l8.49-8.49"
         stroke="currentColor"

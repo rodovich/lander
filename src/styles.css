@@ -986,10 +986,11 @@ body {
   background: rgba(102, 68, 238, 0.06);
 }
 
-.new-task button {
+.new-task .launch-btn {
+  margin-left: auto;
+  padding: 6px 12px;
   font: inherit;
   font-weight: 600;
-  padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg-tinted);
@@ -997,18 +998,11 @@ body {
   cursor: pointer;
 }
 
-.new-task button:disabled {
+.new-task .launch-btn:disabled {
   opacity: 0.5;
   cursor: default;
 }
 
-.new-task .launch-btn {
-  margin-left: auto;
-  padding: 6px 12px;
-}
-
-/* Paperclip attach control, shared by the new-task form and the reply composer.
-   The nested selectors outrank the broad `.new-task button` rule. */
 .attach {
   display: inline-flex;
   align-items: center;
@@ -1017,26 +1011,6 @@ body {
 }
 .attach .attach-input {
   display: none;
-}
-.attach .attach-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4px;
-  border: none;
-  border-radius: 6px;
-  background: none;
-  color: var(--muted);
-  font-weight: 400;
-  cursor: pointer;
-}
-.attach .attach-btn:hover:not(:disabled) {
-  color: var(--fg);
-  background: var(--bg);
-}
-.attach .attach-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 .attach .attach-info {
   display: inline-flex;
@@ -1539,9 +1513,14 @@ body {
   opacity: 0.6;
 }
 
-.title-action:hover {
+.title-action:hover:not(:disabled) {
   opacity: 1;
   background: var(--selected);
+}
+
+.title-action:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 /* The conversation copy takes the row's slack, sitting at its far right: it

@@ -60,7 +60,7 @@ describe('ComposerPanel', () => {
     expect(textarea(render({ busy: true }))).not.toContain('disabled')
     expect(textarea(render({ textareaDisabled: true }))).toContain('disabled')
     expect(render({ busy: true })).toContain(
-      '<button type="button" class="attach-btn" title="Attach files or drop them here" aria-label="Attach files" disabled="">',
+      '<button type="button" class="title-action" title="Attach files or drop them here" aria-label="Attach files" disabled="">',
     )
   })
 
