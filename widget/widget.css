@@ -15,7 +15,7 @@
 .panel {
   width: min(500px, calc(100vw - 32px));
   height: min(500px, calc(100vh - 72px));
-  border: 1px solid var(--border);
+  border: 1px solid var(--external-border);
   border-radius: 8px;
   overflow: hidden;
   background: var(--bg);
@@ -34,7 +34,7 @@ iframe {
   position: relative;
   display: flex;
   padding: 8px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--external-border);
   border-radius: 50%;
   background: var(--bg);
   color: var(--fg);

@@ -5,6 +5,7 @@
   --fg: rgba(17, 0, 0, 0.85);
   --muted: rgba(17, 0, 0, 0.55);
   --border: rgba(17, 0, 0, 0.12);
+  --external-border: rgba(17, 0, 0, 0.2);
   --border-secondary: rgba(17, 0, 0, 0.06);
   --bg-tinted: rgba(17, 0, 0, 0.03);
   --selected: rgba(17, 0, 0, 0.06);
