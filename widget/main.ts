@@ -75,5 +75,14 @@ window.addEventListener('blur', () => setTimeout(reportView))
 document.addEventListener('visibilitychange', reportView)
 
 toggle.addEventListener('click', () => setOpen(!!panel.hidden))
+// Clicks in the frame land in its own document and never reach this window.
+// Listening without cancelling leaves the page's own handling untouched.
+window.addEventListener(
+  'pointerdown',
+  (event) => {
+    if (!panel.hidden && !event.composedPath().includes(host)) setOpen(false)
+  },
+  { capture: true },
+)
 document.body.append(host)
 setOpen(sessionStorage.getItem(OPEN_KEY) === 'true')

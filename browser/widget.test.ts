@@ -93,7 +93,8 @@ describe('the widget in an app’s page', () => {
       // A page-wide overlay with a z-index in the range easel's overlays use.
       res.end(`<!doctype html>
         <body>
-          <div style="position: fixed; inset: 0; z-index: 1000000000"></div>
+          <div style="position: fixed; inset: 0; z-index: 1000000000"
+            onclick="window.appClicks = (window.appClicks ?? 0) + 1"></div>
           <script src="${lander.url}widget.js" data-embed-url="${embed}"></script>
         </body>`)
     })
@@ -160,6 +161,15 @@ describe('the widget in an app’s page', () => {
     await toggle(page).click()
     await embeddedTitle(page).waitFor()
     expect(await frame(page).getAttribute('data-mark')).toBe('first')
+  })
+
+  it('closes when the page is clicked outside it, and the page still gets the click', async () => {
+    const page = await openWidget()
+    await embeddedTitle(page).click()
+    expect(await toggle(page).getAttribute('aria-expanded')).toBe('true')
+    await page.mouse.click(1000, 100)
+    await frame(page).waitFor({ state: 'hidden' })
+    expect(await page.evaluate(() => (window as { appClicks?: number }).appClicks)).toBe(1)
   })
 
   it('copies a message’s text from inside the frame', async () => {
