@@ -1027,9 +1027,8 @@ body.embed-preview-page {
   font-size: 11px;
 }
 
-/* Full-file preview. Rendered in a body portal so it stays fixed over the
-   scrolling conversation and sidebar regardless of their overflow contexts. */
-.attachment-preview-backdrop {
+/* Modal (src/modal.tsx). */
+.modal-backdrop {
   position: fixed;
   inset: 0;
   z-index: 100;
@@ -1039,7 +1038,7 @@ body.embed-preview-page {
   background: var(--shadow);
 }
 
-.attachment-preview-modal {
+.modal {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   width: min(960px, 100%);
@@ -1053,8 +1052,8 @@ body.embed-preview-page {
   outline: none;
 }
 
-.attachment-preview-head,
-.attachment-preview-foot {
+.modal-head,
+.modal-foot {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1062,11 +1061,11 @@ body.embed-preview-page {
   background: var(--bg);
 }
 
-.attachment-preview-head {
+.modal-head {
   border-bottom: 1px solid var(--border);
 }
 
-.attachment-preview-heading {
+.modal-heading {
   display: flex;
   align-items: baseline;
   gap: 10px;
@@ -1074,24 +1073,28 @@ body.embed-preview-page {
   flex: 1;
 }
 
-.attachment-preview-name {
+.modal-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 600;
 }
 
-.attachment-preview-count,
-.attachment-preview-meta {
+.modal-foot {
+  justify-content: space-between;
+  border-top: 1px solid var(--border);
+}
+
+.modal-meta {
+  min-width: 0;
+  overflow: hidden;
   color: var(--muted);
   font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.attachment-preview-count {
-  flex: none;
-}
-
-.attachment-preview-close,
+.modal-close,
 .attachment-preview-arrow,
 .attachment-preview-actions > button {
   border: 1px solid var(--border);
@@ -1102,27 +1105,77 @@ body.embed-preview-page {
   cursor: pointer;
 }
 
-.attachment-preview-close:hover,
+.modal-close:hover,
 .attachment-preview-arrow:hover:not(:disabled),
 .attachment-preview-actions > button:hover:not(:disabled) {
   border-color: var(--riding);
   color: var(--riding);
 }
 
-.attachment-preview-close:focus-visible,
+.modal-close:focus-visible,
 .attachment-preview-arrow:focus-visible,
 .attachment-preview-actions > button:focus-visible {
   outline: 2px solid var(--riding);
   outline-offset: 2px;
 }
 
-.attachment-preview-close {
+.modal-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 30px;
   height: 30px;
   padding: 0;
+}
+
+.modal-text-wrap {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.modal-text {
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 20px;
+  overflow: auto;
+  background: var(--bg);
+  color: var(--fg);
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .modal-backdrop {
+    padding: 8px;
+  }
+
+  .modal {
+    height: calc(100vh - 16px);
+  }
+
+  .modal-head,
+  .modal-foot {
+    padding: 10px;
+  }
+
+  .modal-meta {
+    display: none;
+  }
+
+  .modal-foot {
+    justify-content: flex-end;
+  }
+}
+
+.attachment-preview-count {
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .attachment-preview-content {
@@ -1190,27 +1243,6 @@ body.embed-preview-page {
   width: min(520px, 90%);
 }
 
-.attachment-preview-text-wrap {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-}
-
-.attachment-preview-text {
-  width: 100%;
-  min-height: 0;
-  margin: 0;
-  padding: 20px;
-  overflow: auto;
-  background: var(--bg);
-  color: var(--fg);
-  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
 .attachment-preview-markdown {
   width: 100%;
   min-height: 0;
@@ -1250,18 +1282,6 @@ body.embed-preview-page {
   line-height: 1;
 }
 
-.attachment-preview-foot {
-  justify-content: space-between;
-  border-top: 1px solid var(--border);
-}
-
-.attachment-preview-meta {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .attachment-preview-actions {
   display: flex;
   align-items: center;
@@ -1274,29 +1294,8 @@ body.embed-preview-page {
 }
 
 @media (max-width: 640px) {
-  .attachment-preview-backdrop {
-    padding: 8px;
-  }
-
-  .attachment-preview-modal {
-    height: calc(100vh - 16px);
-  }
-
-  .attachment-preview-head,
-  .attachment-preview-foot {
-    padding: 10px;
-  }
-
   .attachment-preview-arrow {
     width: 30px;
-  }
-
-  .attachment-preview-meta {
-    display: none;
-  }
-
-  .attachment-preview-foot {
-    justify-content: flex-end;
   }
 }
 

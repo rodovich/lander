@@ -5,6 +5,7 @@ import { AppIcon } from './appIcon'
 import { CopyButton } from './copyButton'
 import { formatDuration } from './format'
 import { KebabMenu, type MenuItem } from './menus'
+import { Modal } from './modal'
 import { startPoll, type Poll } from './poll'
 import type { AppAction, AppStatus, ManagedApp } from './types'
 
@@ -131,45 +132,16 @@ function AppLogModal({
   path?: string
   onClose: () => void
 }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   return createPortal(
-    <div
-      className="attachment-preview-backdrop"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose()
-      }}
-    >
-      <div className="attachment-preview-modal" role="dialog" aria-modal="true" aria-label="App log">
-        <div className="attachment-preview-head">
-          <div className="attachment-preview-heading">
-            <span className="attachment-preview-name">App log</span>
-          </div>
-          <button
-            type="button"
-            className="attachment-preview-close"
-            aria-label="Close log"
-            title="Close log"
-            onClick={onClose}
-          >
-            ✕
-          </button>
-        </div>
-        <div className="attachment-preview-text-wrap">
-          <pre className="attachment-preview-text">{text || 'No output yet.'}</pre>
-        </div>
-        <div className="attachment-preview-foot">
-          <span className="attachment-preview-meta">{path}</span>
-          {path && <CopyButton text={path} label="Copy log path" size={13} />}
-        </div>
+    <Modal title="App log" closeLabel="Close log" onClose={onClose}>
+      <div className="modal-text-wrap">
+        <pre className="modal-text">{text || 'No output yet.'}</pre>
       </div>
-    </div>,
+      <div className="modal-foot">
+        <span className="modal-meta">{path}</span>
+        {path && <CopyButton text={path} label="Copy log path" size={13} />}
+      </div>
+    </Modal>,
     document.body,
   )
 }

@@ -4,7 +4,6 @@ import {
   useCallback,
   useContext,
   useEffect,
-  useId,
   useRef,
   useState,
 } from 'react'
@@ -12,6 +11,7 @@ import { createPortal } from 'react-dom'
 import { loadAttachment } from './api'
 import { formatBytes } from './format'
 import { Markdown } from './markdown'
+import { Modal } from './modal'
 import { SegmentedControl } from './segmentedControl'
 import { useTaskLink } from './taskLinkContext'
 import type { Attachment } from './types'
@@ -354,8 +354,6 @@ export function FilePreviewModal({
 }) {
   const kind = previewKind(file)
   const linkTask = useTaskLink()
-  const titleId = useId()
-  const modalRef = useRef<HTMLDivElement>(null)
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [copied, setCopied] = useState(false)
   const [scale, setScale] = useState<ImageScale>('auto')
@@ -370,34 +368,8 @@ export function FilePreviewModal({
   const preview = loadedPreview.fileId === file.id ? loadedPreview : LOADING_PREVIEW
 
   useEffect(() => {
-    modalRef.current?.focus()
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => {
-      document.body.style.overflow = previousOverflow
-    }
-  }, [])
-
-  useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Tab') {
-        const focusable = Array.from(
-          modalRef.current?.querySelectorAll<HTMLElement>(
-            'button:not(:disabled):not([tabindex="-1"]), audio[controls], video[controls], iframe',
-          ) ?? [],
-        )
-        const first = focusable[0]
-        const last = focusable[focusable.length - 1]
-        if (!first || !last) return
-        if (
-          event.shiftKey &&
-          (document.activeElement === first || document.activeElement === modalRef.current)
-        )
-          last.focus()
-        else if (!event.shiftKey && document.activeElement === last) first.focus()
-        else return
-      } else if (event.key === 'Escape') onClose()
-      else if (event.defaultPrevented || event.target instanceof HTMLMediaElement) return
+      if (event.defaultPrevented || event.target instanceof HTMLMediaElement) return
       else if (event.key === 'ArrowLeft' && total > 1) onMove(-1)
       else if (event.key === 'ArrowRight' && total > 1) onMove(1)
       else return
@@ -405,7 +377,7 @@ export function FilePreviewModal({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, onMove, total])
+  }, [onMove, total])
 
   useEffect(() => {
     let canceled = false
@@ -506,157 +478,132 @@ export function FilePreviewModal({
   const scaledImage = imageStyle !== undefined
 
   return (
-    <div
-      className="attachment-preview-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose()
-      }}
+    <Modal
+      title={file.name}
+      headExtra={
+        <span className="attachment-preview-count">
+          {index + 1} of {total}
+        </span>
+      }
+      closeLabel="Close preview"
+      onClose={onClose}
     >
-      <div
-        ref={modalRef}
-        className="attachment-preview-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        tabIndex={-1}
-      >
-        <div className="attachment-preview-head">
-          <div className="attachment-preview-heading">
-            <span id={titleId} className="attachment-preview-name" title={file.name}>
-              {file.name}
-            </span>
-            <span className="attachment-preview-count">
-              {index + 1} of {total}
-            </span>
-          </div>
-          <button
-            type="button"
-            className="attachment-preview-close"
-            aria-label="Close preview"
-            title="Close preview"
-            onClick={onClose}
-          >
-            ✕
-          </button>
+      <div className="attachment-preview-content">
+        <button
+          type="button"
+          className="attachment-preview-arrow"
+          aria-label="Previous attachment"
+          title="Previous attachment"
+          disabled={total <= 1}
+          onClick={() => onMove(-1)}
+        >
+          ‹
+        </button>
+        <div className={`attachment-preview-viewport${scaledImage ? ' scaled' : ''}`}>
+          {preview.status === 'loading' ? (
+            <div className="attachment-preview-status">
+              <span className="spinner" aria-hidden />
+              Loading preview…
+            </div>
+          ) : preview.status === 'error' ? (
+            <div className="attachment-preview-status">Preview could not be loaded.</div>
+          ) : kind === 'image' ? (
+            <img
+              className={`attachment-preview-image${scaledImage ? ' scaled' : ''}`}
+              src={preview.objectUrl!}
+              alt={file.name}
+              style={imageStyle}
+              onLoad={(event) =>
+                setNaturalSize({
+                  width: event.currentTarget.naturalWidth,
+                  height: event.currentTarget.naturalHeight,
+                })
+              }
+            />
+          ) : kind === 'html' ? (
+            <iframe
+              className="attachment-preview-document"
+              sandbox={HTML_PREVIEW_SANDBOX}
+              referrerPolicy="no-referrer"
+              srcDoc={sandboxedHtml(preview.text!)}
+              title={file.name}
+            />
+          ) : kind === 'pdf' ? (
+            <iframe
+              className="attachment-preview-document"
+              src={preview.objectUrl!}
+              title={file.name}
+            />
+          ) : kind === 'video' ? (
+            <video className="attachment-preview-video" src={preview.objectUrl!} controls />
+          ) : kind === 'audio' ? (
+            <audio className="attachment-preview-audio" src={preview.objectUrl!} controls />
+          ) : kind === 'text' || kind === 'markdown' ? (
+            <div className="modal-text-wrap">
+              {kind === 'markdown' ? (
+                <div className="attachment-preview-markdown message-text">
+                  <Markdown text={preview.text!} linkTask={linkTask} />
+                </div>
+              ) : (
+                <pre className="modal-text">{preview.text}</pre>
+              )}
+              {preview.truncated && (
+                <div className="attachment-preview-truncated">
+                  Preview limited to the first {formatBytes(MAX_TEXT_PREVIEW_BYTES)}.
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="attachment-preview-unknown">
+              <span className="attachment-preview-file-icon" aria-hidden>
+                📄
+              </span>
+              <span>No preview is available for this file type.</span>
+            </div>
+          )}
         </div>
+        <button
+          type="button"
+          className="attachment-preview-arrow"
+          aria-label="Next attachment"
+          title="Next attachment"
+          disabled={total <= 1}
+          onClick={() => onMove(1)}
+        >
+          ›
+        </button>
+      </div>
 
-        <div className="attachment-preview-content">
-          <button
-            type="button"
-            className="attachment-preview-arrow"
-            aria-label="Previous attachment"
-            title="Previous attachment"
-            disabled={total <= 1}
-            onClick={() => onMove(-1)}
-          >
-            ‹
-          </button>
-          <div className={`attachment-preview-viewport${scaledImage ? ' scaled' : ''}`}>
-            {preview.status === 'loading' ? (
-              <div className="attachment-preview-status">
-                <span className="spinner" aria-hidden />
-                Loading preview…
-              </div>
-            ) : preview.status === 'error' ? (
-              <div className="attachment-preview-status">Preview could not be loaded.</div>
-            ) : kind === 'image' ? (
-              <img
-                className={`attachment-preview-image${scaledImage ? ' scaled' : ''}`}
-                src={preview.objectUrl!}
-                alt={file.name}
-                style={imageStyle}
-                onLoad={(event) =>
-                  setNaturalSize({
-                    width: event.currentTarget.naturalWidth,
-                    height: event.currentTarget.naturalHeight,
-                  })
-                }
-              />
-            ) : kind === 'html' ? (
-              <iframe
-                className="attachment-preview-document"
-                sandbox={HTML_PREVIEW_SANDBOX}
-                referrerPolicy="no-referrer"
-                srcDoc={sandboxedHtml(preview.text!)}
-                title={file.name}
-              />
-            ) : kind === 'pdf' ? (
-              <iframe
-                className="attachment-preview-document"
-                src={preview.objectUrl!}
-                title={file.name}
-              />
-            ) : kind === 'video' ? (
-              <video className="attachment-preview-video" src={preview.objectUrl!} controls />
-            ) : kind === 'audio' ? (
-              <audio className="attachment-preview-audio" src={preview.objectUrl!} controls />
-            ) : kind === 'text' || kind === 'markdown' ? (
-              <div className="attachment-preview-text-wrap">
-                {kind === 'markdown' ? (
-                  <div className="attachment-preview-markdown message-text">
-                    <Markdown text={preview.text!} linkTask={linkTask} />
-                  </div>
-                ) : (
-                  <pre className="attachment-preview-text">{preview.text}</pre>
-                )}
-                {preview.truncated && (
-                  <div className="attachment-preview-truncated">
-                    Preview limited to the first {formatBytes(MAX_TEXT_PREVIEW_BYTES)}.
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="attachment-preview-unknown">
-                <span className="attachment-preview-file-icon" aria-hidden>
-                  📄
-                </span>
-                <span>No preview is available for this file type.</span>
-              </div>
-            )}
-          </div>
-          <button
-            type="button"
-            className="attachment-preview-arrow"
-            aria-label="Next attachment"
-            title="Next attachment"
-            disabled={total <= 1}
-            onClick={() => onMove(1)}
-          >
-            ›
-          </button>
-        </div>
-
-        <div className="attachment-preview-foot">
-          <span className="attachment-preview-meta">
-            {formatBytes(file.size)} · {file.mime}
-          </span>
-          <div className="attachment-preview-actions">
-            {kind === 'image' && (
-              <SegmentedControl
-                label="Scale"
-                value={scale}
-                onChange={setScale}
-                options={IMAGE_SCALE_OPTIONS}
-              />
-            )}
-            {kind === 'html' && (
-              <button
-                type="button"
-                disabled={preview.text === null}
-                onClick={() => openHtmlInTab(file.name, preview.text!)}
-              >
-                Open in tab
-              </button>
-            )}
-            <button type="button" disabled={!preview.blob} onClick={() => void copy()}>
-              {copied ? 'Copied ✓' : 'Copy'}
+      <div className="modal-foot">
+        <span className="modal-meta">
+          {formatBytes(file.size)} · {file.mime}
+        </span>
+        <div className="attachment-preview-actions">
+          {kind === 'image' && (
+            <SegmentedControl
+              label="Scale"
+              value={scale}
+              onChange={setScale}
+              options={IMAGE_SCALE_OPTIONS}
+            />
+          )}
+          {kind === 'html' && (
+            <button
+              type="button"
+              disabled={preview.text === null}
+              onClick={() => openHtmlInTab(file.name, preview.text!)}
+            >
+              Open in tab
             </button>
-            <button type="button" disabled={!preview.blob} onClick={download}>
-              Download
-            </button>
-          </div>
+          )}
+          <button type="button" disabled={!preview.blob} onClick={() => void copy()}>
+            {copied ? 'Copied ✓' : 'Copy'}
+          </button>
+          <button type="button" disabled={!preview.blob} onClick={download}>
+            Download
+          </button>
         </div>
       </div>
-    </div>
+    </Modal>
   )
 }
