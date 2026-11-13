@@ -19,7 +19,7 @@
   border-radius: 8px;
   overflow: hidden;
   background: var(--bg);
-  box-shadow: 0 8px 24px var(--shadow);
+  box-shadow: 0 4px 8px var(--shadow);
 }
 .panel[hidden] {
   display: none;
@@ -40,7 +40,7 @@ iframe {
   color: var(--fg);
   font: inherit;
   cursor: pointer;
-  box-shadow: 0 2px 8px var(--shadow);
+  box-shadow: 0 1px 2px var(--shadow);
 }
 .toggle img {
   width: 20px;

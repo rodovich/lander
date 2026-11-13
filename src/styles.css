@@ -618,7 +618,7 @@ body {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(17, 0, 0, 0.16);
+  box-shadow: 0 4px 8px var(--shadow);
   font-size: 13px;
 }
 
@@ -1027,7 +1027,7 @@ body {
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(17, 0, 0, 0.55);
+  background: var(--shadow);
 }
 
 .attachment-preview-modal {
@@ -1040,7 +1040,7 @@ body {
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--bg);
-  box-shadow: 0 20px 60px rgba(17, 0, 0, 0.28);
+  box-shadow: 0 8px 16px var(--shadow);
   outline: none;
 }
 
@@ -1304,7 +1304,7 @@ body {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 8px 24px var(--shadow);
+  box-shadow: 0 4px 8px var(--shadow);
 }
 
 .telemetry-flow {
@@ -1652,7 +1652,7 @@ body {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 8px 24px var(--shadow);
+  box-shadow: 0 4px 8px var(--shadow);
   font-size: 12px;
 }
 
@@ -2690,7 +2690,7 @@ body {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(17, 0, 0, 0.16);
+  box-shadow: 0 4px 8px var(--shadow);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   font-size: 13px;
 }
@@ -2805,7 +2805,7 @@ body {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
-  box-shadow: 0 6px 18px rgba(17, 0, 0, 0.16);
+  box-shadow: 0 4px 8px var(--shadow);
 }
 
 /* One grant scope in that menu, read like a kebab menu's items. */
@@ -3434,7 +3434,7 @@ body.resizing-row {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
-  box-shadow: 0 2px 8px var(--shadow);
+  box-shadow: 0 4px 8px var(--shadow);
   font-size: 12px;
   white-space: nowrap;
   z-index: 1;
