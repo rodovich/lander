@@ -4,6 +4,8 @@ import { GalleryModal, OpenGalleryContext, type Gallery } from './attachments'
 import { Composer } from './composer'
 import { Conversation } from './conversation'
 import { ErrorBoundary } from './errorBoundary'
+import { usePersistentState } from './hooks'
+import { ResizeHandle } from './resizeHandle'
 import { DEFAULT_VIEW } from './format'
 import { startPoll } from './poll'
 import { MonotonicRequestGate } from './requestOrder'
@@ -19,7 +21,7 @@ import { POLL_GAP_MS } from './useTaskData'
 import { useTimelineDisclosure } from './useTimelineDisclosure'
 import type { EmbedMessage, WidgetMessage } from '../widget/messages'
 
-const COMPOSER_HEIGHT = 130
+const COMPOSER_HEIGHT = 135
 const NO_LINKS: TaskLink[] = []
 const noop = () => {}
 
@@ -202,6 +204,10 @@ export function EmbedTask({ taskRef }: { taskRef: TaskRef }) {
   })
   useReportToWidget(task)
   const disclosure = useTimelineDisclosure(task)
+  const [composerHeight, setComposerHeight] = usePersistentState(
+    'lander:size:embedComposer',
+    COMPOSER_HEIGHT,
+  )
   const draft = useReplyDrafts(task, {
     setError,
     onSent: noop,
@@ -230,8 +236,15 @@ export function EmbedTask({ taskRef }: { taskRef: TaskRef }) {
             onRetry={tryAgain}
           />}
           </OpenGalleryContext.Provider>
+          <ResizeHandle
+            height={composerHeight}
+            setHeight={setComposerHeight}
+            min={96}
+            reserveTop={200}
+            label="Resize reply area"
+          />
           {draft && (
-            <Composer task={task} height={COMPOSER_HEIGHT} draft={draft} showUsage={false} />
+            <Composer task={task} height={composerHeight} draft={draft} showUsage={false} />
           )}
         </ErrorBoundary>
       )}

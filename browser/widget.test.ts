@@ -196,6 +196,35 @@ describe('the widget in an app’s page', () => {
     expect(await toggle(page).getAttribute('aria-expanded')).toBe('true')
   })
 
+  it('fits three lines of a reply without scrolling', async () => {
+    const page = await openWidget()
+    const reply = embedded(page).getByPlaceholder('Reply…')
+    await reply.fill('One\nTwo\nThree')
+    const [scrollHeight, clientHeight] = await reply.evaluate((el) => [
+      el.scrollHeight,
+      el.clientHeight,
+    ])
+    expect(scrollHeight).toBeLessThanOrEqual(clientHeight)
+  })
+
+  it('resizes the reply box from its handle, following a drag past the panel', async () => {
+    const page = await openWidget()
+    const reply = embedded(page).getByPlaceholder('Reply…')
+    const handle = embedded(page).getByRole('separator', { name: 'Resize reply area' })
+    const start = (await reply.boundingBox())!.height
+    const box = (await handle.boundingBox())!
+    const x = box.x + box.width / 2
+    const y = box.y + box.height / 2
+    await page.mouse.move(x, y)
+    await page.mouse.down()
+    await page.mouse.move(x, y - 60, { steps: 4 })
+    await expect.poll(async () => (await reply.boundingBox())!.height).toBe(start + 60)
+    // Below the panel, outside the frame, the drag still shrinks the box.
+    await page.mouse.move(x, page.viewportSize()!.height - 2, { steps: 4 })
+    await page.mouse.up()
+    await expect.poll(async () => (await reply.boundingBox())!.height).toBeLessThan(start)
+  })
+
   it('copies a message’s text from inside the frame', async () => {
     const page = await openWidget()
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
