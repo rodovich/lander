@@ -5,6 +5,7 @@ import {
   insertAttachmentMarkers,
   removeAttachmentMarkers,
   shouldAttachPastedText,
+  uniquelyNamedFiles,
 } from './composerAttachments'
 import { clipboardImageFiles } from './fileDrop'
 import { useFileDrop } from './hooks'
@@ -88,12 +89,13 @@ export function ComposerPanel({
     }
   }, [value, files])
 
-  function addFiles(picked: File[], replaceSelection = false) {
-    if (busy || textareaDisabled || !showAttach || picked.length === 0) return
+  function addFiles(selected: File[], replaceSelection = false) {
+    if (busy || textareaDisabled || !showAttach || selected.length === 0) return
+    const picked = uniquelyNamedFiles(files, selected)
     const input = inputRef.current
     const start = input?.selectionStart ?? value.length
     const end = (replaceSelection ? input?.selectionEnd : input?.selectionStart) ?? value.length
-    const insertion = insertAttachmentMarkers(value, start, end, files.length, picked.length)
+    const insertion = insertAttachmentMarkers(value, start, end, picked)
     pendingSelection.current = { text: insertion.text, start: insertion.caret, end: insertion.caret }
     insertions.current.push({
       before: { text: value, start, end },
@@ -181,10 +183,7 @@ export function ComposerPanel({
           const text = e.clipboardData.getData('text/plain')
           if (shouldAttachPastedText(text)) {
             e.preventDefault()
-            const number = files.length + 1
-            addFiles([new File([text], number === 1 ? 'paste.txt' : `paste-${number}.txt`, {
-              type: 'text/plain',
-            })], true)
+            addFiles([new File([text], 'paste.txt', { type: 'text/plain' })], true)
             return
           }
           // Left to the browser, a paste this handler has read sometimes inserts
@@ -200,7 +199,7 @@ export function ComposerPanel({
             onClear={() => {
               insertions.current = []
               onKeepFiles(0)
-              onChange(removeAttachmentMarkers(value, files.length))
+              onChange(removeAttachmentMarkers(value, files))
             }}
             disabled={busy}
           />
