@@ -22,7 +22,7 @@ export function widgetScript(): Plugin {
               rolldownOptions: { input: ENTRY, output: { format: 'iife' } },
             },
           })) as Rolldown.RolldownOutput
-          res.setHeader('Content-Type', 'text/javascript')
+          res.setHeader('Content-Type', 'text/javascript; charset=utf-8')
           res.setHeader('Cache-Control', 'no-cache')
           res.end(output.output[0].code)
         } catch (error) {

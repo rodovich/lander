@@ -57,7 +57,7 @@ describe('the web server', { timeout: 30_000 }, () => {
     const { url } = await serve()
     const response = await fetch(`${url}widget.js`)
     expect(response.status).toBe(200)
-    expect(response.headers.get('content-type')).toBe('text/javascript')
+    expect(response.headers.get('content-type')).toBe('text/javascript; charset=utf-8')
     const script = await response.text()
     expect(script).toContain('z-index: 2147483647')
     // A function body, like a classic script, can't hold import or export statements.
