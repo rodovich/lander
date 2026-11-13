@@ -62,5 +62,5 @@ iframe {
 .toggle.riding::after {
   border-color: transparent;
   border-top-color: var(--riding);
-  animation: spin 0.7s linear infinite;
+  animation: spin 1.4s linear infinite;
 }
