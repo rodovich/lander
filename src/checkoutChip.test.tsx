@@ -20,10 +20,10 @@ describe('CheckoutChanges', () => {
       split: { commits, committed: committed.map(file), uncommitted: uncommitted.map(file) },
     })
     expect(heads(split(2, ['a.ts'], ['build/out.js']))).toEqual([
-      'Committed (2 commits)',
+      '2 commits',
       'Uncommitted',
     ])
-    expect(heads(split(1, ['a.ts'], []))).toEqual(['Committed (1 commit)'])
+    expect(heads(split(1, ['a.ts'], []))).toEqual(['1 commit'])
     expect(heads(split(0, [], ['a.ts']))).toEqual(['Uncommitted'])
     expect(heads({ ...split(0, [], []), files: [] })).toEqual(['No changes'])
   })

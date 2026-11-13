@@ -110,7 +110,7 @@ export function CheckoutChanges({ checkout }: { checkout: CheckoutReport }) {
   const lists: { head: string; files: ChangedFile[] }[] = []
   if (split) {
     const { commits, committed, uncommitted } = split
-    if (commits) lists.push({ head: `Committed (${unit(commits, 'commit')})`, files: committed })
+    if (commits) lists.push({ head: unit(commits, 'commit'), files: committed })
     if (uncommitted.length) lists.push({ head: 'Uncommitted', files: uncommitted })
   } else if (files.length) {
     lists.push({ head: `${unit(files.length, 'file')} changed`, files })
