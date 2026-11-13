@@ -46,8 +46,9 @@ export function checkoutNote(checkout: string, root: string): string {
   return (
     `This task works in a git worktree lander created for it at \`${checkout}\`, ` +
     `starting detached at whatever the project's main checkout (\`${root}\`) had ` +
-    'checked out. Commit on a branch you create: lander removes this worktree ' +
-    'when the task is landed or archived, and leaves branches alone.'
+    'checked out. Commit on a branch you create, and switch branches here rather ' +
+    'than making another worktree: lander removes this worktree when the task is ' +
+    'landed or archived, and leaves branches alone.'
   )
 }
 
