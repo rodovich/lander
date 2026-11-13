@@ -1707,6 +1707,12 @@ body {
   grid-column: span 2;
 }
 
+/* The list's totals and heading are always its first three cells. */
+.checkout-files > :nth-child(-n + 3) {
+  padding-bottom: 4px;
+  font-weight: 600;
+}
+
 /* Every list scrolls together under the worktree and branch. */
 .checkout-changes {
   max-height: 50vh;
