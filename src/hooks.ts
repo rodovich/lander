@@ -112,14 +112,11 @@ const VIEWPORT_MARGIN = 8
 // Where a `position: fixed` popup goes, relative to its trigger's live viewport
 // rect, so it stays inside the window: it hangs under the trigger, flipping
 // *above* it when there isn't room below, and left-aligns with it, flipping to
-// right-align when there isn't room to the right — then is clamped into the
-// window if even that overflows. The popup is measured after it mounts (hidden
+// right-align when there isn't room to the right — then is clamped horizontally
+// into the window if even that overflows. The popup is measured after it mounts (hidden
 // for one layout tick), so both decisions use its real size, and it re-anchors
-// on scroll/resize. Open state belongs to the caller; useAnchoredPopup adds it
-// with dismissal for a standalone popup, while a popup whose open state lives
-// elsewhere (a rule row's scope menu) uses this directly. `gap` is the distance
-// it stands off its trigger.
-export function useAnchoredPosition(open: boolean, gap: number) {
+// on scroll/resize. `gap` is the distance it stands off its trigger.
+function useAnchoredPosition(open: boolean, gap: number) {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const popupRef = useRef<HTMLDivElement>(null)
   const [style, setStyle] = useState<CSSProperties | null>(null)

@@ -67,6 +67,7 @@ export function ActionsMenu({
   compact,
   items,
   autoFocusTrigger,
+  disabled,
 }: {
   className?: string
   popupClassName?: string
@@ -76,6 +77,7 @@ export function ActionsMenu({
   compact?: boolean
   items: MenuItem[]
   autoFocusTrigger?: boolean
+  disabled?: boolean
 }) {
   const { open, setOpen, containerRef, triggerRef, popupRef, popupStyle, positioned } =
     useAnchoredPopup({ gap: 4 })
@@ -136,13 +138,17 @@ export function ActionsMenu({
     'aria-haspopup': 'menu' as const,
     'aria-expanded': open,
     autoFocus: autoFocusTrigger,
+    disabled,
     onClick: (e: React.MouseEvent<HTMLButtonElement>) => {
       e.stopPropagation()
       setOpen((o) => !o)
     },
     // Keep Enter/Space (and arrows) from bubbling to the row's key handler,
-    // which would otherwise select the task or move row focus.
-    onKeyDown: (e: React.KeyboardEvent<HTMLButtonElement>) => e.stopPropagation(),
+    // which would otherwise select the task or move row focus. Escape still
+    // bubbles, to close a popup the menu sits in.
+    onKeyDown: (e: React.KeyboardEvent<HTMLButtonElement>) => {
+      if (e.key !== 'Escape') e.stopPropagation()
+    },
   }
 
   return (
@@ -312,11 +318,13 @@ export function KebabMenu({
   className,
   compact,
   items,
+  disabled,
 }: {
   label: string
   className?: string
   compact?: boolean
   items: MenuItem[]
+  disabled?: boolean
 }) {
   return (
     <ActionsMenu
@@ -324,6 +332,7 @@ export function KebabMenu({
       triggerLabel={label}
       compact={compact}
       items={items}
+      disabled={disabled}
     />
   )
 }

@@ -2783,52 +2783,6 @@ body.embed-preview-page {
   box-shadow: inset 0 0 0 2px var(--riding);
 }
 
-.rule-row-menu {
-  position: relative;
-  flex-shrink: 0;
-}
-
-/* The two-scope grant menu, fixed-anchored to a row's kebab (top/left set inline
-   from its measured rect) so it can shift left or flip up to stay inside the
-   window. Stacks within the fixed .rule-popup, above its rows. */
-.rule-row-menu-popup {
-  position: fixed;
-  z-index: 1;
-  min-width: 150px;
-  padding: 4px;
-  display: flex;
-  flex-direction: column;
-  border-radius: 6px;
-}
-
-/* One grant scope in that menu, read like a kebab menu's items. */
-.rule-row-menu-item {
-  padding: 7px 10px;
-  border: none;
-  border-radius: 6px;
-  background: none;
-  color: var(--fg);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 400;
-  text-align: left;
-  cursor: pointer;
-}
-
-.rule-row-menu-item:hover {
-  background: var(--bg-tinted);
-}
-
-/* Codex's unsupported project scope reads disabled, not clickable. */
-.rule-row-menu-item:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.rule-row-menu-item:disabled:hover {
-  background: none;
-}
-
 /* The checkmark that replaces the kebab once a row is granted, keeping the popup
    open for the turn's other denials. */
 .rule-row-granted {

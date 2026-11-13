@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { BlockedSummary, GrantControl, GrantedRules, RuleRow } from './grants'
+import { BlockedSummary, GrantControl, GrantedRules, grantScopes, RuleRow } from './grants'
 
 const noop = async () => true
 
@@ -35,8 +35,6 @@ describe('RuleRow', () => {
       <RuleRow
         rule="Bash(git push)"
         grants={{ task: true, project: true }}
-        menuOpen={false}
-        onToggleMenu={() => {}}
         granted={null}
         onGrant={() => {}}
         {...props}
@@ -51,29 +49,10 @@ describe('RuleRow', () => {
     expect(html).not.toContain('Allow in task')
   })
 
-  it('opens both grant scopes for a claude task when the menu is open', () => {
-    const html = render({ menuOpen: true })
-    expect(html).toContain('Allow in task')
-    expect(html).toContain('Allow in project')
-  })
-
-  it('shows only project scope when task scope is unsupported (agy)', () => {
-    const html = render({
-      menuOpen: true,
-      grants: { task: false, project: true },
-    })
-    expect(html).toContain('Allow in project')
-    expect(html).not.toContain('Allow in task')
-    expect(html).not.toContain('Save rule')
-  })
-
-  it('shows only task scope when project scope is unsupported', () => {
-    const html = render({
-      menuOpen: true,
-      grants: { task: true, project: false },
-    })
-    expect(html).toContain('Allow in task')
-    expect(html).not.toContain('Allow in project')
+  it('offers each grant scope the flow supports', () => {
+    expect(grantScopes({ task: true, project: true })).toEqual(['task', 'project'])
+    expect(grantScopes({ task: false, project: true })).toEqual(['project'])
+    expect(grantScopes({ task: true, project: false })).toEqual(['task'])
   })
 
   const grantedAs = { scope: 'task', rule: 'Bash(git push)' }

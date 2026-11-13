@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { useAnchoredPopup, useAnchoredPosition } from './hooks'
-import { IconButton, KebabIcon } from './iconButton'
+import { useAnchoredPopup } from './hooks'
+import { IconButton } from './iconButton'
+import { KebabMenu } from './menus'
 import type { BlockedRequest } from './permissions'
 import type { FlowCaps, Task } from './types'
 
@@ -29,28 +30,27 @@ type GrantScope = 'task' | 'project'
 // granted — which may differ from the rule the row was seeded with.
 export type Granted = { scope: GrantScope; rule: string }
 
+export function grantScopes(grants: FlowCaps['grants']): GrantScope[] {
+  return (['task', 'project'] as const).filter((scope) => grants[scope])
+}
+
 // One editable permission rule with a kebab of grant scopes, drawn by RulePopup.
 // The rule string is click-to-edit like the task title — click swaps in an input
 // seeded with the current rule; Enter/blur commits, Escape reverts — and the
 // committed draft is exactly what the kebab actions grant, so the user can shape
-// the rule (`git log` → `git:*`) before allowing it. Which row's kebab is open,
-// and what has been granted, belong to the popup. Rule strings stay opaque
-// agent-owned data: which scopes a grant is offered in comes from the task's
-// server-derived `grants` capability flags (`Allow in task` when `grants.task`
-// is true, `Allow in project` when `grants.project` is true).
+// the rule (`git log` → `git:*`) before allowing it. What has been granted
+// belongs to the popup. Rule strings stay opaque agent-owned data: which scopes
+// a grant is offered in comes from the task's server-derived `grants` capability
+// flags (see grantScopes).
 export function RuleRow({
   rule: initialRule,
   grants,
-  menuOpen,
-  onToggleMenu,
   granted,
   onGrant,
   autoEdit,
 }: {
   rule: string
   grants: FlowCaps['grants']
-  menuOpen: boolean
-  onToggleMenu: () => void
   // Null shows the kebab; a grant shows the checkmark and the rule it covered.
   granted: Granted | null
   onGrant: (rule: string, scope: GrantScope) => void
@@ -61,15 +61,6 @@ export function RuleRow({
   const [committed, setCommitted] = useState(initialRule)
   const [draft, setDraft] = useState(initialRule)
   const inputRef = useRef<HTMLInputElement>(null)
-  // The scope menu is fixed-anchored to the kebab like the popup it sits in, so
-  // it stays inside the window even when the kebab is near its edge.
-  const {
-    triggerRef: kebabRef,
-    popupRef: menuRef,
-    popupStyle: menuStyle,
-  } = useAnchoredPosition(menuOpen, 2)
-  const canGrantTask = grants.task
-  const canGrantProject = grants.project
 
   useEffect(() => {
     if (editing) {
@@ -133,49 +124,16 @@ export function RuleRow({
           ✓
         </span>
       ) : (
-        <div className="rule-row-menu">
-          <IconButton
-            ref={kebabRef}
-            compact
-            label="Grant scope"
-            title={null}
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            disabled={!committed || (!canGrantTask && !canGrantProject)}
-            onClick={onToggleMenu}
-          >
-            <KebabIcon size={13} />
-          </IconButton>
-          {menuOpen && (
-            <div
-              ref={menuRef}
-              className="popup rule-row-menu-popup"
-              role="menu"
-              style={menuStyle}
-            >
-              {canGrantTask && (
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="rule-row-menu-item"
-                  onClick={() => onGrant(committed, 'task')}
-                >
-                  Allow in task
-                </button>
-              )}
-              {canGrantProject && (
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="rule-row-menu-item"
-                  onClick={() => onGrant(committed, 'project')}
-                >
-                  Allow in project
-                </button>
-              )}
-            </div>
-          )}
-        </div>
+        <KebabMenu
+          label="Grant scope"
+          compact
+          disabled={!committed}
+          items={grantScopes(grants).map((scope) => ({
+            key: scope,
+            label: `Allow in ${scope}`,
+            onSelect: () => onGrant(committed, scope),
+          }))}
+        />
       )}
     </div>
   )
@@ -186,8 +144,7 @@ const AUTHORING_KEY = '\0new'
 
 // A trigger that opens a fixed-anchored popup of rule rows, each grantable in
 // task or project scope. Fixed-positioned like the other header/chip popups so
-// neither the scrolling timeline nor the header can clip it. Owns the rows'
-// shared bookkeeping: at most one row's kebab open at a time, and what each row
+// neither the scrolling timeline nor the header can clip it. Owns what each row
 // has been granted. The grants live here, above the popup, so a checkmark can
 // outlive the popup closing — unless `forgetOnClose`, for a popup whose every
 // open should start fresh.
@@ -219,7 +176,6 @@ function RulePopup({
 }) {
   const { open, setOpen, containerRef, triggerRef, popupRef, popupStyle } =
     useAnchoredPopup()
-  const [openMenuKey, setOpenMenuKey] = useState<string | null>(null)
   const [granted, setGranted] = useState<Record<string, Granted>>({})
   const [permissionAdded, setPermissionAdded] = useState(false)
   const [retrying, setRetrying] = useState(false)
@@ -230,9 +186,7 @@ function RulePopup({
   const [authoringRound, setAuthoringRound] = useState(0)
 
   useEffect(() => {
-    if (open) return
-    setOpenMenuKey(null)
-    if (forgetOnClose) setGranted({})
+    if (!open && forgetOnClose) setGranted({})
   }, [open, forgetOnClose])
 
   const row = (key: string, rule: string, autoEdit?: boolean) => (
@@ -240,11 +194,8 @@ function RulePopup({
       key={key}
       rule={rule}
       grants={grants}
-      menuOpen={openMenuKey === key}
-      onToggleMenu={() => setOpenMenuKey((k) => (k === key ? null : key))}
       granted={granted[key] ?? null}
       onGrant={async (committed, scope) => {
-        setOpenMenuKey(null)
         setGranting((n) => n + 1)
         try {
           if (!(await onAllow(committed, scope))) return
@@ -405,8 +356,7 @@ export function GrantControl({
   onRetry?: () => Promise<boolean>
 }) {
   const canGrantTask = grants.task
-  const canGrantProject = grants.project
-  if (!canGrantTask && !canGrantProject) return null
+  if (!grantScopes(grants).length) return null
 
   return (
     <RulePopup
