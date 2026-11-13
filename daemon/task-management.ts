@@ -118,8 +118,7 @@ function appPart(task: Pick<Ctx['task'], 'app'>): ContextPart | undefined {
     key: 'app',
     text:
       `This checkout's app is running at ${task.app.url}, started by the user through ` +
-      'lander. Use it rather than starting another copy. If it needs restarting, ask ' +
-      'the user to restart it from the task header.',
+      'lander. Use it rather than starting another copy.',
   }
 }
 
