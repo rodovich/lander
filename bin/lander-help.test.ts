@@ -186,7 +186,7 @@ describe('composed messages', () => {
     const { stdout, code } = await execLander(['compose', 'fix the bug'])
     expect(code).toBe(0)
     expect(stdout).toContain('fix the bug')
-    expect(stdout).toContain('check it against what the user requested')
+    expect(stdout).toContain('Review the message against what the user requested')
     expect(stdout).toContain('lander launch --composed new-task')
   })
 })

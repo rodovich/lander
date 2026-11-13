@@ -369,12 +369,11 @@ async function composeMessage(args) {
   // handed to the user, not to briefs for tasks the launcher managed itself.
   const check = managed
     ? `Run \`lander launch --composed ${id}\`, with any other flags you need.`
-    : 'Launched, this message starts a task the user will work with, independently ' +
-      'of you. If you will manage the new task instead, compose it again with ' +
-      '`--managed`. Otherwise, before you launch or send it, go through each thing this message ' +
-      'asks its recipient to do and check it against what the user requested. ' +
-      'Remove any request that is not covered: compose the message again without ' +
-      `it, and use the new id. Then run \`lander launch --composed ${id}\` or ` +
+    : 'If you launch this message, it starts a task the user will work with ' +
+      'independently of you. Review the message against what the user requested: ' +
+      'if it includes any requests, instructions, or prohibitions the user did not ' +
+      'ask for, compose the message again without them and use the new id. ' +
+      `Then run \`lander launch --composed ${id}\` or ` +
       `\`lander send <task id> --composed ${id}\`.`
   console.log(`Composed message ${id}:\n\n${message.trimEnd()}\n\n${check}`)
 }
