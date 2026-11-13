@@ -1,6 +1,7 @@
 // The lander widget, which runs only as the classic script the web server
 // bundles at /widget.js: `document.currentScript` is null in a module.
-import type { EmbedMessage, WidgetMessage } from './messages'
+import type { Gallery } from '../src/attachments'
+import { PREVIEW_PARAM, type EmbedMessage, type WidgetMessage } from './messages'
 import styles from './widget.css?inline'
 
 const script = document.currentScript as HTMLScriptElement
@@ -37,8 +38,43 @@ panel.append(frame)
 const embedOrigin = new URL(embedUrl).origin
 let embedReady = false
 
-function tellEmbed(message: WidgetMessage) {
-  frame.contentWindow?.postMessage(message, embedOrigin)
+function tellEmbed(message: WidgetMessage, target = frame) {
+  target.contentWindow?.postMessage(message, embedOrigin)
+}
+
+// A second frame of the embed page shows attachment previews over the whole
+// page, since the panel's frame can't draw outside the panel. It loads on the
+// first preview and stays loaded, hidden, for the next. It shows only once its
+// page is ready, so a page that never loads can't cover the app.
+let previewFrame: HTMLIFrameElement | null = null
+let previewReady = false
+let pendingGallery: Gallery | null = null
+
+function showPreview(gallery: Gallery) {
+  if (!previewFrame) {
+    const url = new URL(embedUrl!)
+    url.searchParams.set(PREVIEW_PARAM, '1')
+    previewFrame = document.createElement('iframe')
+    previewFrame.className = 'preview'
+    previewFrame.title = 'lander attachment preview'
+    previewFrame.allow = 'clipboard-write'
+    previewFrame.hidden = true
+    previewFrame.src = url.href
+    root.append(previewFrame)
+  }
+  if (!previewReady) {
+    pendingGallery = gallery
+    return
+  }
+  tellEmbed({ type: 'lander-widget-preview', gallery }, previewFrame)
+  previewFrame.hidden = false
+  // The preview's keys work only once its frame has focus.
+  previewFrame.focus()
+}
+
+function hidePreview() {
+  if (previewFrame) previewFrame.hidden = true
+  frame.focus()
 }
 
 // The embed shows the conversation only while the panel is open, and marks
@@ -58,9 +94,19 @@ function setOpen(open: boolean) {
 }
 
 window.addEventListener('message', (event: MessageEvent<EmbedMessage | undefined>) => {
-  if (event.source !== frame.contentWindow || event.origin !== embedOrigin) return
+  if (event.origin !== embedOrigin) return
   const message = event.data
-  if (message?.type === 'lander-embed-ready') {
+  if (previewFrame && event.source === previewFrame.contentWindow) {
+    if (message?.type === 'lander-preview-ready') {
+      previewReady = true
+      if (pendingGallery) showPreview(pendingGallery)
+      pendingGallery = null
+    } else if (message?.type === 'lander-preview-closed') hidePreview()
+    return
+  }
+  if (event.source !== frame.contentWindow) return
+  if (message?.type === 'lander-embed-preview') showPreview(message.gallery)
+  else if (message?.type === 'lander-embed-ready') {
     embedReady = true
     reportView()
   } else if (message?.type === 'lander-embed-focus') setTimeout(reportView)

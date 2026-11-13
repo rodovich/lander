@@ -42,6 +42,16 @@ const UNREAD_TASK = {
   rides: [{ id: 'r1', startedAt: '2026-11-10T00:00:10.000Z', endedAt: '2026-11-10T00:01:00.000Z' }],
 }
 
+const ATTACHMENT_TASK = {
+  ...TASK,
+  items: [
+    {
+      ...TASK.items[0],
+      attachments: [{ id: 'a1', name: 'notes.txt', mime: 'text/plain', size: 17 }],
+    },
+  ],
+}
+
 // UNREAD_TASK between enough earlier and later messages to fill the panel
 // several times over on each side.
 const ownMessages = (name: string, at: string) =>
@@ -77,6 +87,8 @@ describe('the widget in an app’s page', () => {
   beforeAll(async () => {
     api = await serveApi((path) => {
       if (path === '/api/proj/tasks/t1') return Response.json(task)
+      if (path === '/api/proj/attachments/a1')
+        return new Response('The attached notes', { headers: { 'content-type': 'text/plain' } })
       if (path === '/api/proj/tasks/t1/app')
         return Response.json({ app: { url: `${framingOrigin}/` } })
       if (path === '/api/proj/tasks/t1/seen') {
@@ -170,6 +182,18 @@ describe('the widget in an app’s page', () => {
     await page.mouse.click(1000, 100)
     await frame(page).waitFor({ state: 'hidden' })
     expect(await page.evaluate(() => (window as { appClicks?: number }).appClicks)).toBe(1)
+  })
+
+  it('previews an attachment over the whole page, and closes the preview with Escape', async () => {
+    task = ATTACHMENT_TASK
+    const page = await openWidget()
+    await embedded(page).getByRole('button', { name: /notes\.txt/ }).click()
+    const preview = page.locator('lander-widget iframe.preview')
+    await page.frameLocator('lander-widget iframe.preview').getByText('The attached notes').waitFor()
+    expect(await preview.boundingBox()).toEqual({ x: 0, y: 0, ...page.viewportSize() })
+    await page.keyboard.press('Escape')
+    await preview.waitFor({ state: 'hidden' })
+    expect(await toggle(page).getAttribute('aria-expanded')).toBe('true')
   })
 
   it('copies a message’s text from inside the frame', async () => {

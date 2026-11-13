@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { loadTask } from './api'
+import { loadAttachment, loadTask } from './api'
+import { GalleryModal, OpenGalleryContext, type Gallery } from './attachments'
 import { Composer } from './composer'
 import { Conversation } from './conversation'
 import { ErrorBoundary } from './errorBoundary'
@@ -9,7 +10,7 @@ import { MonotonicRequestGate } from './requestOrder'
 import { isUnread } from './readMarker'
 import { NO_GRANTS } from './taskMeta'
 import { taskHref, taskKeyOf, type TaskRef } from './taskRef'
-import type { TaskLink, TaskWithProject } from './types'
+import type { Attachment, TaskLink, TaskWithProject } from './types'
 import { useFencedTasks } from './useFencedTasks'
 import { useReadMarker, useViewingState } from './useReadMarker'
 import { useReplyDrafts } from './useReplyDrafts'
@@ -135,6 +136,41 @@ function useWidgetView(): { open: boolean; active: boolean } {
   return view
 }
 
+const openGalleryInWidget = (gallery: Gallery) =>
+  tellWidget({ type: 'lander-embed-preview', gallery })
+
+// The page the widget's preview frame holds: an attachment preview over the
+// whole of the app's page, opened from the panel's conversation.
+export function EmbedPreview({ projectSlug }: { projectSlug: string }) {
+  const [gallery, setGallery] = useState<Gallery | null>(null)
+  const load = useCallback(
+    (file: Attachment) => loadAttachment(projectSlug, file.id),
+    [projectSlug],
+  )
+  useEffect(() => {
+    const onMessage = (event: MessageEvent<WidgetMessage | undefined>) => {
+      if (event.source === window.parent && event.data?.type === 'lander-widget-preview')
+        setGallery(event.data.gallery)
+    }
+    window.addEventListener('message', onMessage)
+    tellWidget({ type: 'lander-preview-ready' })
+    return () => window.removeEventListener('message', onMessage)
+  }, [])
+  const close = useCallback(() => {
+    setGallery(null)
+    tellWidget({ type: 'lander-preview-closed' })
+  }, [])
+  if (!gallery) return null
+  return (
+    <GalleryModal
+      gallery={gallery}
+      load={load}
+      onSelect={(index) => setGallery({ ...gallery, index })}
+      onClose={close}
+    />
+  )
+}
+
 // What the widget's button shows.
 function useReportToWidget(task: TaskWithProject | null) {
   const unread = task ? isUnread(task) : false
@@ -178,6 +214,7 @@ export function EmbedTask({ taskRef }: { taskRef: TaskRef }) {
     <EmbedPane task={task} error={error ?? pollError}>
       {task && (
         <ErrorBoundary label="this task">
+          <OpenGalleryContext.Provider value={framed ? openGalleryInWidget : null}>
           {/* Rendered only while the panel is open, so each opening lays it out
               and scrolls to the first unread entry, as opening a task does. */}
           {(!framed || widget.open) && <Conversation
@@ -192,6 +229,7 @@ export function EmbedTask({ taskRef }: { taskRef: TaskRef }) {
             onTaskAction={runTaskAction}
             onRetry={tryAgain}
           />}
+          </OpenGalleryContext.Provider>
           {draft && (
             <Composer task={task} height={COMPOSER_HEIGHT} draft={draft} showUsage={false} />
           )}

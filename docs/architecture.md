@@ -61,7 +61,7 @@ are erased. `shared/boundary.test.ts` enforces that.
 ## The app widget
 
 The widget puts one task's conversation inside the app lander started for it.
-Four pieces make it up. All but the embed page, which shares the main UI's
+Five pieces make it up. All but the embed page, which shares the main UI's
 components from `src/`, live in `widget/`.
 
 - **The embed page.** `embed.html` (entry `src/embedMain.tsx`, component
@@ -89,8 +89,15 @@ components from `src/`, live in `widget/`.
   `data-embed-url`, builds a button and a panel in a shadow root on a
   `<lander-widget>` element at the largest z-index, and frames the embed page
   as soon as it loads, with `allow="clipboard-write"` so copy buttons work.
+  Clicking the page outside the widget closes the panel.
+- **The preview frame.** An attachment preview opened in the panel shows over
+  the whole page, in a second frame of the embed page with `?preview` added to
+  its query. That page renders only the preview modal. The loader creates the
+  frame on the first preview and keeps it, hidden, for the next, and shows it
+  only once its page reports ready, so a page that fails to load can't cover
+  the app.
 
-The loader and the embed page talk only through `postMessage`, in the messages
+The loader and the embed pages talk only through `postMessage`, in the messages
 `widget/messages.ts` types for both:
 
 | Message | From → to | Meaning |
@@ -99,11 +106,15 @@ The loader and the embed page talk only through `postMessage`, in the messages
 | `lander-widget-view` `{ open, active }` | widget → embed | Whether the panel is open, and whether it's also in view (the page visible and focused). When framed, the embed renders the conversation only while `open`, so each opening scrolls to the first unread entry as opening a task does, and it advances the read marker only while `active`, never on its own focus. |
 | `lander-embed-focus` | embed → widget | Focus entered or left the frame; recompute `active`, since focus leaving the frame for another window fires nothing on the page. |
 | `lander-task-state` `{ unread, riding }` | embed → widget | What the button shows. |
+| `lander-embed-preview` `{ gallery }` | embed → widget | Preview this message's files, starting at `gallery.index`, in the preview frame instead of the panel. |
+| `lander-preview-ready` | preview → widget | The preview frame is listening; show it and send it any preview waiting. |
+| `lander-widget-preview` `{ gallery }` | widget → preview | Show this gallery's preview. |
+| `lander-preview-closed` | preview → widget | The preview closed; hide the frame and return focus to the panel. |
 
-The embed sends its messages to any origin, since it doesn't know the page's and
-only the task's app may frame it; the widget sends to lander's origin only. The
-widget accepts messages only from its frame's window and lander's origin, and the
-embed accepts `lander-widget-view` only from its parent. `vite.config.test.ts`
+The embed pages send their messages to any origin, since they don't know the page's and
+only the task's app may frame them; the widget sends to lander's origin only. The
+widget accepts messages only from its frames' windows and lander's origin, and the
+embed pages accept messages only from their parent. `vite.config.test.ts`
 covers the framing policy's decisions, the CORS setting, and that `/widget.js`
 is a classic script under `npm test`;
 `browser/widget.test.ts` covers the widget in Chrome (see

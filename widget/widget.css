@@ -30,6 +30,13 @@ iframe {
   height: 100%;
   border: 0;
 }
+.preview {
+  position: fixed;
+  inset: 0;
+}
+.preview[hidden] {
+  display: none;
+}
 .toggle {
   position: relative;
   display: flex;

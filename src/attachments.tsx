@@ -1,4 +1,13 @@
-import { forwardRef, useCallback, useEffect, useId, useRef, useState } from 'react'
+import {
+  createContext,
+  forwardRef,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from 'react'
 import { createPortal } from 'react-dom'
 import { loadAttachment } from './api'
 import { formatBytes } from './format'
@@ -182,11 +191,42 @@ export function MessageAttachments({
   return <FileGallery files={attachments} load={load} />
 }
 
+export type Gallery = { files: Attachment[]; index: number }
+
+// Opens a gallery's preview somewhere other than this document, in place of
+// the gallery's own modal. A page provides one where its own modal would have
+// too little room.
+export const OpenGalleryContext = createContext<((gallery: Gallery) => void) | null>(null)
+
+export function GalleryModal({
+  gallery: { files, index },
+  load,
+  onSelect,
+  onClose,
+}: {
+  gallery: Gallery
+  load: LoadFile
+  onSelect: (index: number) => void
+  onClose: () => void
+}) {
+  return (
+    <FilePreviewModal
+      file={files[index]}
+      load={load}
+      index={index}
+      total={files.length}
+      onClose={onClose}
+      onMove={(direction) => onSelect(adjacentFileIndex(index, direction, files.length))}
+    />
+  )
+}
+
 // A row of file chips that open into a shared preview modal. One modal serves
 // all the files in the row, so its arrows move within that row rather than
 // across unrelated turns. A portal keeps the fixed backdrop out of the
 // scrolling conversation's stacking and overflow contexts.
 function FileGallery({ files, load }: { files: Attachment[]; load: LoadFile }) {
+  const openGallery = useContext(OpenGalleryContext)
   const [selected, setSelected] = useState<number | null>(null)
   const chipRefs = useRef<Array<HTMLButtonElement | null>>([])
   const active = selected === null ? null : files[selected]
@@ -200,11 +240,6 @@ function FileGallery({ files, load }: { files: Attachment[]; load: LoadFile }) {
     setSelected(null)
     requestAnimationFrame(() => opener?.focus())
   }
-  const move = (direction: -1 | 1) =>
-    setSelected((index) =>
-      index === null ? null : adjacentFileIndex(index, direction, files.length),
-    )
-
   return (
     <>
       <div className="message-attachments">
@@ -216,20 +251,18 @@ function FileGallery({ files, load }: { files: Attachment[]; load: LoadFile }) {
             }}
             file={file}
             load={load}
-            onOpen={() => setSelected(index)}
+            onOpen={() => (openGallery ? openGallery({ files, index }) : setSelected(index))}
           />
         ))}
       </div>
       {active &&
         typeof document !== 'undefined' &&
         createPortal(
-          <FilePreviewModal
-            file={active}
+          <GalleryModal
+            gallery={{ files, index: selected! }}
             load={load}
-            index={selected!}
-            total={files.length}
+            onSelect={setSelected}
             onClose={close}
-            onMove={move}
           />,
           document.body,
         )}

@@ -24,6 +24,10 @@ body {
   font-size: 14px;
 }
 
+body.embed-preview-page {
+  background: transparent;
+}
+
 .layout {
   flex: 1;
   min-height: 0;
