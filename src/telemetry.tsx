@@ -97,7 +97,7 @@ export function UsageButton({ telemetry }: { telemetry: FlowTelemetry }) {
         Usage
       </button>
       {open && (
-        <div ref={popupRef} id={popupId} className="telemetry-popup"
+        <div ref={popupRef} id={popupId} className="popup telemetry-popup"
           role="dialog"
           aria-label="Usage"
           style={popupStyle}

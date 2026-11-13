@@ -169,7 +169,7 @@ export function ActionsMenu({
       {open && (
         <div
           ref={popupRef}
-          className={'task-menu-popup' + (popupClassName ? ` ${popupClassName}` : '')}
+          className={'popup task-menu-popup' + (popupClassName ? ` ${popupClassName}` : '')}
           role="menu"
           style={popupStyle}
           onClick={(e) => e.stopPropagation()}

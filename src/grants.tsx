@@ -149,7 +149,7 @@ export function RuleRow({
           {menuOpen && (
             <div
               ref={menuRef}
-              className="rule-row-menu-popup"
+              className="popup rule-row-menu-popup"
               role="menu"
               style={menuStyle}
             >
@@ -278,7 +278,7 @@ function RulePopup({
         </IconButton>
       )}
       {open && (
-        <div ref={popupRef} className="rule-popup" style={popupStyle}>
+        <div ref={popupRef} className="popup rule-popup" style={popupStyle}>
           {head}
           {rules.map((r) => row(r.key, r.rule))}
           {/* Remounted fresh after each grant, and each time the popup reopens

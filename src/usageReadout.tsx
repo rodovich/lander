@@ -72,7 +72,7 @@ export function UsageReadout({ task }: { task: Task }) {
         ))}
       </button>
       {open && (
-        <div className="usage-details" id={panelId}>
+        <div className="popup usage-details" id={panelId}>
           <table className="usage-table">
             <thead>
               <tr>

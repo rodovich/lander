@@ -148,7 +148,7 @@ export function ChartTooltip({
   const inset = 80
   return (
     <div
-      className="chart-tooltip"
+      className="popup chart-tooltip"
       style={{ left: Math.min(Math.max(x, inset), Math.max(inset, width - inset)), top }}
     >
       <div className="chart-tooltip-title">{title}</div>

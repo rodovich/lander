@@ -77,7 +77,7 @@ export function CheckoutChip({ checkout }: { checkout: CheckoutReport }) {
         )}
       </button>
       {open && (
-        <div ref={popupRef} className="checkout-popup" role="dialog" style={popupStyle}>
+        <div ref={popupRef} className="popup checkout-popup" role="dialog" style={popupStyle}>
           <div className="checkout-popup-section checkout-fields">
             <span className="checkout-label">Worktree</span>
             <code className="checkout-value" title={path}>

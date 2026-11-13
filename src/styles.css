@@ -28,6 +28,15 @@ body.embed-preview-page {
   background: transparent;
 }
 
+/* The surface every menu, popup, and tooltip floats on, paired with a class of
+   its own for position and size. Ahead of those classes so they can override it. */
+.popup {
+  background: var(--bg);
+  border: 1px solid var(--external-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 8px var(--shadow);
+}
+
 .layout {
   flex: 1;
   min-height: 0;
@@ -619,10 +628,6 @@ body.embed-preview-page {
   padding: 4px;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
-  border: 1px solid var(--external-border);
-  border-radius: 8px;
-  box-shadow: 0 4px 8px var(--shadow);
   font-size: 13px;
 }
 
@@ -1305,10 +1310,6 @@ body.embed-preview-page {
   flex-direction: column;
   gap: 16px;
   padding: 12px 16px 14px;
-  background: var(--bg);
-  border: 1px solid var(--external-border);
-  border-radius: 8px;
-  box-shadow: 0 4px 8px var(--shadow);
 }
 
 .telemetry-flow {
@@ -1653,10 +1654,6 @@ body.embed-preview-page {
   z-index: 100;
   width: 460px;
   max-width: 80vw;
-  background: var(--bg);
-  border: 1px solid var(--external-border);
-  border-radius: 8px;
-  box-shadow: 0 4px 8px var(--shadow);
   font-size: 12px;
 }
 
@@ -2691,10 +2688,6 @@ body.embed-preview-page {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  background: var(--bg);
-  border: 1px solid var(--external-border);
-  border-radius: 8px;
-  box-shadow: 0 4px 8px var(--shadow);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   font-size: 13px;
 }
@@ -2806,10 +2799,7 @@ body.embed-preview-page {
   padding: 4px;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
-  border: 1px solid var(--external-border);
   border-radius: 6px;
-  box-shadow: 0 4px 8px var(--shadow);
 }
 
 /* One grant scope in that menu, read like a kebab menu's items. */
@@ -3074,10 +3064,6 @@ body.resizing-row {
   flex-direction: column;
   gap: 8px;
   padding: 10px 12px;
-  background: var(--bg);
-  border: 1px solid var(--external-border);
-  border-radius: 8px;
-  box-shadow: 0 4px 8px var(--shadow);
   font-size: 12px;
   white-space: nowrap;
 }
@@ -3435,10 +3421,7 @@ body.resizing-row {
   flex-direction: column;
   gap: 3px;
   padding: 8px 10px;
-  border: 1px solid var(--external-border);
   border-radius: 6px;
-  background: var(--bg);
-  box-shadow: 0 4px 8px var(--shadow);
   font-size: 12px;
   white-space: nowrap;
   z-index: 1;
