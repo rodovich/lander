@@ -1,22 +1,27 @@
-import { memo, useRef } from 'react'
-import { ComposerPanel } from './composerPanel'
+import { memo, useRef, type ReactNode, type RefObject } from 'react'
+import { ComposerPanel, type AttachFiles } from './composerPanel'
 import { UsageReadout } from './usageReadout'
 import type { TaskWithProject } from './types'
 import type { ReplyDraft } from './useReplyDrafts'
 
 // The reply bar under the open conversation: the task's draft and its
-// attachments, sending, and, unless hidden, the corner usage readout. The draft
-// itself lives above (see useReplyDrafts), so closing the task doesn't lose it.
+// attachments, sending, and, in the action row's right corner, the usage
+// readout unless hidden and any controls passed in. The draft itself lives
+// above (see useReplyDrafts), so closing the task doesn't lose it.
 export const Composer = memo(function Composer({
   task,
   height,
   draft,
   showUsage = true,
+  actions,
+  attachRef,
 }: {
   task: TaskWithProject
   height: number
   draft: ReplyDraft
   showUsage?: boolean
+  actions?: ReactNode
+  attachRef?: RefObject<AttachFiles | null>
 }) {
   const composerRef = useRef<HTMLTextAreaElement>(null)
 
@@ -43,7 +48,13 @@ export const Composer = memo(function Composer({
       onAddFiles={draft.addFiles}
       onKeepFiles={draft.keepFiles}
       showAttach={!task.archived}
-      actions={showUsage && <UsageReadout task={task} />}
+      actions={
+        <>
+          {showUsage && <UsageReadout task={task} />}
+          {actions}
+        </>
+      }
+      attachRef={attachRef}
     />
   )
 })

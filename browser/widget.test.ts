@@ -100,14 +100,37 @@ describe('the widget in an app’s page', () => {
     })
     lander = await serveWeb(api.url, { entries: ['embed.html'] })
     const embed = embedUrl(lander.url.replace(/\/$/, ''), 'proj', 't1').replaceAll('&', '&amp;')
-    app = http.createServer((_req, res) => {
+    const widget = `<script src="${lander.url}widget.js" data-embed-url="${embed}"></script>`
+    app = http.createServer((req, res) => {
       res.setHeader('content-type', 'text/html')
+      if (req.url === '/form') {
+        res.end(`<!doctype html>
+          <body>
+            <form id="profile" style="margin: 200px" onsubmit="return false">
+              <label>Name <input name="name"></label>
+              <button type="submit" class="btn css-1x2y3z"
+                onclick="window.appClicks = (window.appClicks ?? 0) + 1">Save changes</button>
+              <button type="button" class="btn">Cancel</button>
+            </form>
+            <script>
+              // What a page's "click outside" and Escape handlers would see.
+              window.pageEvents = []
+              for (const type of ['pointerdown', 'mousedown', 'click', 'keydown'])
+                document.addEventListener(type, (event) => {
+                  if (type === 'keydown' || event.target.localName === 'lander-widget')
+                    window.pageEvents.push(type)
+                })
+            </script>
+            ${widget}
+          </body>`)
+        return
+      }
       // A page-wide overlay with a z-index in the range easel's overlays use.
       res.end(`<!doctype html>
         <body>
           <div style="position: fixed; inset: 0; z-index: 1000000000"
             onclick="window.appClicks = (window.appClicks ?? 0) + 1"></div>
-          <script src="${lander.url}widget.js" data-embed-url="${embed}"></script>
+          ${widget}
         </body>`)
     })
     await new Promise<void>((listening) => app.listen(0, '127.0.0.1', listening))
@@ -133,12 +156,12 @@ describe('the widget in an app’s page', () => {
     if (app) await new Promise<void>((closed) => app.close(() => closed()))
   })
 
-  async function openApp(beforeLoad?: (page: Page) => void): Promise<Page> {
+  async function openApp(beforeLoad?: (page: Page) => void, path = '/'): Promise<Page> {
     const context = await browser.newContext()
     contexts.push(context)
     const page = await context.newPage()
     beforeLoad?.(page)
-    await page.goto(appOrigin)
+    await page.goto(`${appOrigin}${path}`)
     return page
   }
 
@@ -147,8 +170,8 @@ describe('the widget in an app’s page', () => {
   const embedded = (page: Page) => page.frameLocator('lander-widget iframe')
   const embeddedTitle = (page: Page) => embedded(page).getByText('Fix the banner')
 
-  async function openWidget(): Promise<Page> {
-    const page = await openApp()
+  async function openWidget(path?: string): Promise<Page> {
+    const page = await openApp(undefined, path)
     await toggle(page).click()
     await embeddedTitle(page).waitFor()
     return page
@@ -194,6 +217,70 @@ describe('the widget in an app’s page', () => {
     await page.keyboard.press('Escape')
     await preview.waitFor({ state: 'hidden' })
     expect(await toggle(page).getAttribute('aria-expanded')).toBe('true')
+  })
+
+  describe('picking an element', () => {
+    const pickButton = (page: Page) => embedded(page).getByRole('button', { name: 'Pick an element' })
+    const outline = (page: Page) => page.locator('lander-widget .pick-outline')
+
+    // The picking layer takes the pointer, so Playwright's own hover and click,
+    // which wait for the element itself to receive them, would never proceed.
+    async function pointAt(page: Page, name: string) {
+      const box = (await page.getByRole('button', { name }).boundingBox())!
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+      return box
+    }
+
+    it('hides the widget, outlines the element under the pointer, and attaches a reference to the one clicked', async () => {
+      const page = await openWidget('/form')
+      let uploaded = ''
+      await page.route('**/api/proj/attachments', async (route) => {
+        uploaded = route.request().postDataBuffer()?.toString('utf8') ?? ''
+        await route.fulfill({ json: { attachments: [{ id: 'up1' }] } })
+      })
+      const reply = embedded(page).getByPlaceholder('Reply…')
+      await reply.fill('Make  wider.')
+      await reply.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(5, 5))
+
+      await pickButton(page).click()
+      await frame(page).waitFor({ state: 'hidden' })
+      await toggle(page).waitFor({ state: 'hidden' })
+      await page.evaluate(() => ((window as { pageEvents?: string[] }).pageEvents = []))
+      const box = await pointAt(page, 'Save changes')
+      await expect.poll(() => outline(page).boundingBox()).toEqual(box)
+      expect(await page.locator('lander-widget .pick-label').textContent()).toContain('button.btn')
+      await pointAt(page, 'Cancel')
+      await expect.poll(() => outline(page).boundingBox()).not.toEqual(box)
+
+      await pointAt(page, 'Save changes')
+      await expect.poll(() => outline(page).boundingBox()).toEqual(box)
+      await page.mouse.down()
+      await page.mouse.up()
+      await frame(page).waitFor()
+      expect(await page.evaluate(() => (window as { appClicks?: number }).appClicks)).toBeUndefined()
+      expect(await page.evaluate(() => (window as { pageEvents?: string[] }).pageEvents)).toEqual([])
+      await expect.poll(() => reply.inputValue()).toBe('Make [element.txt] wider.')
+
+      await reply.press('Enter')
+      await expect.poll(() => uploaded).toContain('filename="element.txt"')
+      expect(uploaded).toContain(`Element on ${appOrigin}/form (viewport 1280×720)`)
+      expect(uploaded).toContain('selector: #profile > button:nth-of-type(1)')
+      expect(uploaded).toContain('role: button "Save changes"')
+      expect(uploaded).toContain('html: <button type="submit" class="btn css-1x2y3z"')
+    })
+
+    it('brings the widget back without attaching anything on Escape', async () => {
+      const page = await openWidget('/form')
+      await pickButton(page).click()
+      await frame(page).waitFor({ state: 'hidden' })
+      await pointAt(page, 'Save changes')
+      await page.evaluate(() => ((window as { pageEvents?: string[] }).pageEvents = []))
+      await page.keyboard.press('Escape')
+      await frame(page).waitFor()
+      expect(await page.evaluate(() => (window as { pageEvents?: string[] }).pageEvents)).toEqual([])
+      await expect(outline(page).count()).resolves.toBe(0)
+      expect(await embedded(page).getByPlaceholder('Reply…').inputValue()).toBe('')
+    })
   })
 
   it('fits three lines of a reply without scrolling', async () => {

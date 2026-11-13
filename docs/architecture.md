@@ -96,6 +96,14 @@ components from `src/`, live in `widget/`.
   frame on the first preview and keeps it, hidden, for the next, and shows it
   only once its page reports ready, so a page that fails to load can't cover
   the app.
+- **The element picker.** The composer's pick button, at the right of its
+  action row, has the loader hide its button and panel and lay a layer over the
+  page that takes the pointer, outlining the element beneath it
+  (`widget/picker.ts`). A click describes that element for an agent reading the
+  app's source (`widget/describeElement.ts`): the page's URL, a selector that
+  matches only it, its role and accessible name, its text, its opening tag, and
+  its box. The embed attaches that as `element.txt` where the reply's cursor
+  was. Escape cancels.
 
 The loader and the embed pages talk only through `postMessage`, in the messages
 `widget/messages.ts` types for both:
@@ -110,6 +118,8 @@ The loader and the embed pages talk only through `postMessage`, in the messages
 | `lander-preview-ready` | preview → widget | The preview frame is listening; show it and send it any preview waiting. |
 | `lander-widget-preview` `{ gallery }` | widget → preview | Show this gallery's preview. |
 | `lander-preview-closed` | preview → widget | The preview closed; hide the frame and return focus to the panel. |
+| `lander-embed-pick` | embed → widget | Let the user pick an element on the page. |
+| `lander-widget-picked` `{ reference }` | widget → embed | The picked element's description, to attach to the reply. Nothing is sent when picking is cancelled. |
 
 The embed pages send their messages to any origin, since they don't know the page's and
 only the task's app may frame them; the widget sends to lander's origin only. The

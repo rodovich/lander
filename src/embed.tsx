@@ -2,9 +2,11 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { loadAttachment, loadTask } from './api'
 import { GalleryModal, OpenGalleryContext, type Gallery } from './attachments'
 import { Composer } from './composer'
+import type { AttachFiles } from './composerPanel'
 import { Conversation } from './conversation'
 import { ErrorBoundary } from './errorBoundary'
 import { usePersistentState } from './hooks'
+import { IconButton } from './iconButton'
 import { ResizeHandle } from './resizeHandle'
 import { DEFAULT_VIEW } from './format'
 import { startPoll } from './poll'
@@ -111,31 +113,64 @@ const isFramed = () => window.parent !== window
 // lander lets frame the task can receive it.
 const tellWidget = (message: EmbedMessage) => window.parent.postMessage(message, '*')
 
+function useWidgetMessage<T extends WidgetMessage['type']>(
+  type: T,
+  onMessage: (message: Extract<WidgetMessage, { type: T }>) => void,
+) {
+  const handler = useRef(onMessage)
+  handler.current = onMessage
+  useEffect(() => {
+    if (!isFramed()) return
+    const listener = (event: MessageEvent<WidgetMessage | undefined>) => {
+      if (event.source === window.parent && event.data?.type === type)
+        handler.current(event.data as Extract<WidgetMessage, { type: T }>)
+    }
+    window.addEventListener('message', listener)
+    return () => window.removeEventListener('message', listener)
+  }, [type])
+}
+
 // Whether the widget's panel is open, and whether it's in view, as the widget
 // reports them. The frame's own focus can't decide either: the panel is read
 // without being clicked into, and a closed panel's frame still runs.
 function useWidgetView(): { open: boolean; active: boolean } {
   const [view, setView] = useState({ open: false, active: false })
+  useWidgetMessage('lander-widget-view', (message) =>
+    setView({ open: message.open === true, active: message.active === true }),
+  )
   useEffect(() => {
     if (!isFramed()) return
-    const onMessage = (event: MessageEvent<WidgetMessage | undefined>) => {
-      if (event.source === window.parent && event.data?.type === 'lander-widget-view')
-        setView({ open: event.data.open === true, active: event.data.active === true })
-    }
     // Focus leaving this frame for another window fires nothing on the page
     // around it, so this tells the widget to look again.
     const onFocusChange = () => tellWidget({ type: 'lander-embed-focus' })
-    window.addEventListener('message', onMessage)
     window.addEventListener('focus', onFocusChange)
     window.addEventListener('blur', onFocusChange)
     tellWidget({ type: 'lander-embed-ready' })
     return () => {
-      window.removeEventListener('message', onMessage)
       window.removeEventListener('focus', onFocusChange)
       window.removeEventListener('blur', onFocusChange)
     }
   }, [])
   return view
+}
+
+function PickElementIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M10 20H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v5" />
+      <path d="m13 13 8 3-3.5 1.5L16 21z" />
+    </svg>
+  )
 }
 
 const openGalleryInWidget = (gallery: Gallery) =>
@@ -149,15 +184,8 @@ export function EmbedPreview({ projectSlug }: { projectSlug: string }) {
     (file: Attachment) => loadAttachment(projectSlug, file.id),
     [projectSlug],
   )
-  useEffect(() => {
-    const onMessage = (event: MessageEvent<WidgetMessage | undefined>) => {
-      if (event.source === window.parent && event.data?.type === 'lander-widget-preview')
-        setGallery(event.data.gallery)
-    }
-    window.addEventListener('message', onMessage)
-    tellWidget({ type: 'lander-preview-ready' })
-    return () => window.removeEventListener('message', onMessage)
-  }, [])
+  useWidgetMessage('lander-widget-preview', (message) => setGallery(message.gallery))
+  useEffect(() => tellWidget({ type: 'lander-preview-ready' }), [])
   const close = useCallback(() => {
     setGallery(null)
     tellWidget({ type: 'lander-preview-closed' })
@@ -215,6 +243,21 @@ export function EmbedTask({ taskRef }: { taskRef: TaskRef }) {
     taskLinks: NO_LINKS,
     taskLinksLoaded: false,
   })
+  // The picked element's reference goes where the reply's cursor was.
+  const attachRef = useRef<AttachFiles | null>(null)
+  useWidgetMessage('lander-widget-picked', (message) =>
+    attachRef.current?.([new File([message.reference], 'element.txt', { type: 'text/plain' })]),
+  )
+  const pickButton = framed && !task?.archived && (
+    <IconButton
+      label="Pick an element"
+      title="Pick an element on the page to refer to"
+      disabled={draft?.sending}
+      onClick={() => tellWidget({ type: 'lander-embed-pick' })}
+    >
+      <PickElementIcon />
+    </IconButton>
+  )
 
   return (
     <EmbedPane task={task} error={error ?? pollError}>
@@ -244,7 +287,14 @@ export function EmbedTask({ taskRef }: { taskRef: TaskRef }) {
             label="Resize reply area"
           />
           {draft && (
-            <Composer task={task} height={composerHeight} draft={draft} showUsage={false} />
+            <Composer
+              task={task}
+              height={composerHeight}
+              draft={draft}
+              showUsage={false}
+              actions={pickButton}
+              attachRef={attachRef}
+            />
           )}
         </ErrorBoundary>
       )}

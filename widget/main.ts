@@ -1,7 +1,9 @@
 // The lander widget, which runs only as the classic script the web server
 // bundles at /widget.js: `document.currentScript` is null in a module.
 import type { Gallery } from '../src/attachments'
+import { describeElement } from './describeElement'
 import { PREVIEW_PARAM, type EmbedMessage, type WidgetMessage } from './messages'
+import { pickElement } from './picker'
 import styles from './widget.css?inline'
 
 const script = document.currentScript as HTMLScriptElement
@@ -77,6 +79,16 @@ function hidePreview() {
   frame.focus()
 }
 
+// Picking hides the panel without closing it, so the embed keeps its place.
+async function pick() {
+  if (host.classList.contains('picking')) return
+  host.classList.add('picking')
+  const element = await pickElement(root, host)
+  host.classList.remove('picking')
+  frame.focus()
+  if (element) tellEmbed({ type: 'lander-widget-picked', reference: describeElement(element) })
+}
+
 // The embed shows the conversation only while the panel is open, and marks
 // the task read only while it's also in view.
 function reportView() {
@@ -106,6 +118,7 @@ window.addEventListener('message', (event: MessageEvent<EmbedMessage | undefined
   }
   if (event.source !== frame.contentWindow) return
   if (message?.type === 'lander-embed-preview') showPreview(message.gallery)
+  else if (message?.type === 'lander-embed-pick') void pick()
   else if (message?.type === 'lander-embed-ready') {
     embedReady = true
     reportView()

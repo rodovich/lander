@@ -2967,10 +2967,11 @@ body.resizing-row {
 }
 
 /* The action row under a composer's textarea, shared by the reply bar and the
-   new-task form: the attach control at the left, and the usage readout or the
-   Launch button in the right corner. A two-column grid rather than a flex row,
-   so the right-hand column holds the corner even when the attach control isn't
-   rendered at all — an archived task has nothing to attach to. */
+   new-task form: the attach control at the left, and everything else — the
+   usage readout, the Launch button, the widget's pick button — in the right
+   corner. A two-column grid rather than a flex row, so the right-hand column
+   holds the corner even when the attach control isn't rendered at all — an
+   archived task has nothing to attach to. */
 .composer-actions {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -2978,11 +2979,14 @@ body.resizing-row {
   gap: 20px;
 }
 
-/* The corner usage readout: the summary line, in the action row's right-hand
-   column, and the breakdown panel it opens — positioned against this box. */
+.composer-actions > :not(.attach) {
+  grid-column: 2;
+}
+
+/* The corner usage readout: the summary line and the breakdown panel it
+   opens — positioned against this box. */
 .usage-readout {
   position: relative;
-  grid-column: 2;
 }
 
 /* The summary itself: provider & model, working time, cost. Muted like the bar

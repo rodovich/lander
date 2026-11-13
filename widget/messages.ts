@@ -9,6 +9,7 @@ export const PREVIEW_PARAM = 'preview'
 export type WidgetMessage =
   | { type: 'lander-widget-view'; open: boolean; active: boolean }
   | { type: 'lander-widget-preview'; gallery: Gallery }
+  | { type: 'lander-widget-picked'; reference: string }
 
 export type EmbedMessage =
   | { type: 'lander-embed-ready' }
@@ -17,3 +18,4 @@ export type EmbedMessage =
   | { type: 'lander-embed-preview'; gallery: Gallery }
   | { type: 'lander-preview-ready' }
   | { type: 'lander-preview-closed' }
+  | { type: 'lander-embed-pick' }

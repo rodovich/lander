@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from 'react'
+import { useImperativeHandle, useLayoutEffect, useRef } from 'react'
 import type { RefObject } from 'react'
 import { AttachButton } from './attachButton'
 import {
@@ -11,6 +11,8 @@ import { clipboardImageFiles } from './fileDrop'
 import { useFileDrop } from './hooks'
 
 type DraftSelection = { text: string; start: number; end: number }
+
+export type AttachFiles = (files: File[]) => void
 
 // The shell both composers wear — the reply bar under a conversation and the
 // new-task form in the sidebar. It owns the interactions the two share and must
@@ -40,6 +42,7 @@ export function ComposerPanel({
   onAddFiles,
   onKeepFiles,
   showAttach = true,
+  attachRef,
 }: {
   // A form when submitting is the panel's purpose (the new-task form's Launch
   // button is its submit), a plain div otherwise.
@@ -68,6 +71,8 @@ export function ComposerPanel({
   onKeepFiles: (count: number) => void
   // Hidden where there is nothing to attach to — an archived task.
   showAttach?: boolean
+  // Attaches files from outside the panel, as the paperclip does.
+  attachRef?: RefObject<AttachFiles | null>
 }) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const ordinaryPaste = useRef(false)
@@ -106,6 +111,8 @@ export function ComposerPanel({
     onAddFiles(picked)
     onChange(insertion.text)
   }
+
+  useImperativeHandle(attachRef, () => addFiles)
 
   function undoInsertion(): boolean {
     const last = insertions.current.pop()
