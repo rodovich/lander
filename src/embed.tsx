@@ -246,7 +246,7 @@ export function EmbedTask({ taskRef }: { taskRef: TaskRef }) {
   // The picked element's reference goes where the reply's cursor was.
   const attachRef = useRef<AttachFiles | null>(null)
   useWidgetMessage('lander-widget-picked', (message) =>
-    attachRef.current?.([new File([message.reference], 'element.txt', { type: 'text/plain' })]),
+    attachRef.current?.([new File([message.reference], 'element', { type: 'text/plain' })]),
   )
   const pickButton = framed && !task?.archived && (
     <IconButton

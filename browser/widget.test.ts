@@ -259,10 +259,10 @@ describe('the widget in an app’s page', () => {
       await frame(page).waitFor()
       expect(await page.evaluate(() => (window as { appClicks?: number }).appClicks)).toBeUndefined()
       expect(await page.evaluate(() => (window as { pageEvents?: string[] }).pageEvents)).toEqual([])
-      await expect.poll(() => reply.inputValue()).toBe('Make [element.txt] wider.')
+      await expect.poll(() => reply.inputValue()).toBe('Make [element] wider.')
 
       await reply.press('Enter')
-      await expect.poll(() => uploaded).toContain('filename="element.txt"')
+      await expect.poll(() => uploaded).toContain('filename="element"')
       expect(uploaded).toContain(`Element on ${appOrigin}/form (viewport 1280×720)`)
       expect(uploaded).toContain('selector: #profile > button:nth-of-type(1)')
       expect(uploaded).toContain('role: button "Save changes"')

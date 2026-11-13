@@ -102,7 +102,7 @@ components from `src/`, live in `widget/`.
   (`widget/picker.ts`). A click describes that element for an agent reading the
   app's source (`widget/describeElement.ts`): the page's URL, a selector that
   matches only it, its role and accessible name, its text, its opening tag, and
-  its box. The embed attaches that as `element.txt` where the reply's cursor
+  its box. The embed attaches that as `element` where the reply's cursor
   was. Escape cancels.
 
 The loader and the embed pages talk only through `postMessage`, in the messages
