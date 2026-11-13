@@ -122,6 +122,21 @@ describe('the widget in an app’s page', () => {
                 })
             </script>
             ${widget}
+            <div id="bubble-popup"><button type="button">Bubble option</button></div>
+            <div id="capture-popup"><button type="button">Capture option</button></div>
+            <script>
+              // Popups that close on a click outside them, registered after the
+              // widget as an app's bundle would be: one as react-bootstrap's
+              // overlays do, the other as lander's own panel does.
+              const bubble = document.getElementById('bubble-popup')
+              document.addEventListener('click', (event) => {
+                if (!bubble.contains(event.target)) bubble.hidden = true
+              })
+              const capture = document.getElementById('capture-popup')
+              window.addEventListener('pointerdown', (event) => {
+                if (!capture.contains(event.target)) capture.hidden = true
+              }, true)
+            </script>
           </body>`)
         return
       }
@@ -267,6 +282,50 @@ describe('the widget in an app’s page', () => {
       expect(uploaded).toContain('selector: #profile > button:nth-of-type(1)')
       expect(uploaded).toContain('role: button "Save changes"')
       expect(uploaded).toContain('html: <button type="submit" class="btn css-1x2y3z"')
+    })
+
+    const popupsOpen = (page: Page) =>
+      page.evaluate(() =>
+        ['bubble-popup', 'capture-popup'].map((id) => !document.getElementById(id)!.hidden),
+      )
+
+    it('keeps the app’s popups open while its own UI is used, and leaves the app’s clicks to the app', async () => {
+      const page = await openWidget('/form')
+      expect(await popupsOpen(page)).toEqual([true, true])
+
+      await pickButton(page).click()
+      await frame(page).waitFor({ state: 'hidden' })
+      await pointAt(page, 'Bubble option')
+      await page.mouse.down()
+      await page.mouse.up()
+      await frame(page).waitFor()
+      expect(await popupsOpen(page)).toEqual([true, true])
+      await expect
+        .poll(() => embedded(page).getByPlaceholder('Reply…').inputValue())
+        .toBe('[element]')
+
+      await page.getByRole('button', { name: 'Save changes' }).focus()
+      await page.keyboard.press('Enter')
+      expect(await page.evaluate(() => (window as { appClicks?: number }).appClicks)).toBe(1)
+      expect(await popupsOpen(page)).toEqual([false, true])
+      await page.mouse.click(1000, 100)
+      expect(await popupsOpen(page)).toEqual([false, false])
+    })
+
+    it('lets a drag that starts in the app end in the app, over the widget’s button', async () => {
+      const page = await openApp(undefined, '/form')
+      type Released = { releasedOn?: string }
+      await page.evaluate(() =>
+        document.addEventListener('mouseup', (event) => {
+          ;(window as Released).releasedOn = (event.target as Element).localName
+        }),
+      )
+      const box = (await toggle(page).boundingBox())!
+      await page.mouse.move(1000, 100)
+      await page.mouse.down()
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 4 })
+      await page.mouse.up()
+      expect(await page.evaluate(() => (window as Released).releasedOn)).toBe('lander-widget')
     })
 
     it('brings the widget back without attaching anything on Escape', async () => {

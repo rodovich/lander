@@ -3,6 +3,7 @@
 import type { Gallery } from '../src/attachments'
 import { describeElement } from './describeElement'
 import { PREVIEW_PARAM, type EmbedMessage, type WidgetMessage } from './messages'
+import { keepOwnPresses } from './ownPresses'
 import { pickElement } from './picker'
 import styles from './widget.css?inline'
 
@@ -17,6 +18,7 @@ const OPEN_KEY = 'lander-widget-open'
 // z-index there is, only the page's top layer, such as a modal <dialog>, can
 // cover it.
 const host = document.createElement('lander-widget')
+const onOwnPress = keepOwnPresses(host)
 const root = host.attachShadow({ mode: 'open' })
 root.innerHTML = `
   <style>${styles}</style>
@@ -83,7 +85,7 @@ function hidePreview() {
 async function pick() {
   if (host.classList.contains('picking')) return
   host.classList.add('picking')
-  const element = await pickElement(root, host)
+  const element = await pickElement(root, host, onOwnPress)
   host.classList.remove('picking')
   frame.focus()
   if (element) tellEmbed({ type: 'lander-widget-picked', reference: describeElement(element) })
@@ -133,7 +135,10 @@ window.addEventListener('focus', reportView)
 window.addEventListener('blur', () => setTimeout(reportView))
 document.addEventListener('visibilitychange', reportView)
 
-toggle.addEventListener('click', () => setOpen(!!panel.hidden))
+onOwnPress(toggle, 'click', () => setOpen(!!panel.hidden))
+// Focus stays in the app, so a popup there that closes when it loses focus
+// stays open while the user opens the panel.
+onOwnPress(toggle, 'mousedown', (event) => event.preventDefault())
 // Clicks in the frame land in its own document and never reach this window.
 // Listening without cancelling leaves the page's own handling untouched.
 window.addEventListener(

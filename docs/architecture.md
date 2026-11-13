@@ -90,6 +90,15 @@ components from `src/`, live in `widget/`.
   `<lander-widget>` element at the largest z-index, and frames the embed page
   as soon as it loads, with `allow="clipboard-write"` so copy buttons work.
   Clicking the page outside the widget closes the panel.
+- **Presses on the widget's UI.** The app's "click outside" handlers would
+  close its popups on a press on the widget's button or the picker's layer. The
+  loader keeps those presses, and the releases and clicks that end them, from
+  the app (`widget/ownPresses.ts`): a capture-phase listener on the window,
+  registered when the script runs and so usually ahead of the app's own, stops
+  them and hands them to the widget's handlers itself. A drag that starts in the
+  app still ends there, and pressing the widget's button doesn't take focus
+  from the app. Presses inside the panel's frame never reach the app, but focus
+  moving into the frame still closes a popup that closes on blur.
 - **The preview frame.** An attachment preview opened in the panel shows over
   the whole page, in a second frame of the embed page with `?preview` added to
   its query. That page renders only the preview modal. The loader creates the

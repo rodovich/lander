@@ -1,4 +1,5 @@
 import { sourceClasses } from './describeElement'
+import type { OnOwnPress } from './ownPresses'
 
 // What the overlay labels the element under the pointer with, as DevTools does.
 function label(element: Element, box: DOMRect) {
@@ -9,10 +10,13 @@ function label(element: Element, box: DOMRect) {
 
 // Lets the user point at an element on the page and click to pick it, like
 // DevTools' inspector. A layer over the whole page takes the pointer, so no
-// element there is hovered or clicked, stops presses and clicks from bubbling
-// to the page's own listeners, and outlines the element beneath it. Resolves
-// with the element clicked, or null on Escape.
-export function pickElement(root: ShadowRoot, host: Element): Promise<Element | null> {
+// element there is hovered or clicked, and outlines the element beneath it.
+// Resolves with the element clicked, or null on Escape.
+export function pickElement(
+  root: ShadowRoot,
+  host: Element,
+  onOwnPress: OnOwnPress,
+): Promise<Element | null> {
   const layer = document.createElement('div')
   layer.className = 'pick-layer'
   layer.tabIndex = -1
@@ -51,9 +55,6 @@ export function pickElement(root: ShadowRoot, host: Element): Promise<Element | 
   }
 
   return new Promise((resolve) => {
-    const keep = (event: Event) => event.stopPropagation()
-    const kept = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'dblclick', 'contextmenu']
-
     function finish(element: Element | null) {
       layer.remove()
       window.removeEventListener('keydown', onKey, true)
@@ -67,18 +68,16 @@ export function pickElement(root: ShadowRoot, host: Element): Promise<Element | 
     function onKey(event: KeyboardEvent) {
       if (event.key !== 'Escape') return
       event.preventDefault()
-      event.stopPropagation()
+      event.stopImmediatePropagation()
       finish(null)
     }
 
-    for (const type of kept) layer.addEventListener(type, keep)
     layer.addEventListener('pointermove', (event) => {
       event.stopPropagation()
       pointer = { x: event.clientX, y: event.clientY }
       show()
     })
-    layer.addEventListener('click', (event) => {
-      event.stopPropagation()
+    onOwnPress(layer, 'click', (event) => {
       pointer = { x: event.clientX, y: event.clientY }
       show()
       if (target) finish(target)
