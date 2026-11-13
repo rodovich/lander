@@ -251,7 +251,7 @@ export function EmbedTask({ taskRef }: { taskRef: TaskRef }) {
   const pickButton = framed && !task?.archived && (
     <IconButton
       label="Pick an element"
-      title="Pick an element on the page to refer to"
+      title="Pick an element on the page"
       disabled={draft?.sending}
       onClick={() => tellWidget({ type: 'lander-embed-pick' })}
     >
