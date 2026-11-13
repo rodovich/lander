@@ -62,7 +62,7 @@ export function AppRowView({
       items={[
         { key: 'restart', label: 'Restart', onSelect: () => onAction('restart') },
         { key: 'stop', label: 'Stop', onSelect: () => onAction('stop') },
-        { key: 'log', label: 'View log', onSelect: onViewLog },
+        { key: 'log', label: 'View log', separatorBefore: true, onSelect: onViewLog },
       ] satisfies MenuItem[]}
     />
   )
