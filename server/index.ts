@@ -755,6 +755,24 @@ async function runTurn(
         `${flowRegistry(project.slug).map((f) => f.name).join(', ') || '(none)'}.`,
     )
 
+  // Last, so a manager that ended during the waits above is seen.
+  const ended = await endedManager(project, task)
+  // Not wedgeForRetry: a retry or relaunch would meet this same check for as
+  // long as the managing task stays ended.
+  if (ended) {
+    const reason =
+      `This task can't take a turn: task ${ended.id}, which manages it, ` +
+      `${ended.archived ? 'is archived' : 'has landed'}.`
+    await mutateTask(file, (t) => {
+      const at = new Date().toISOString()
+      recordUndispatchedRide(t, at)
+      recordStatusTransition(t, 'wedged', at, 'system', undefined, reason)
+      t.status = 'wedged'
+      t.updatedAt = at
+    }).catch(() => {})
+    return 'crashed'
+  }
+
   // Mark riding and record the run before sending, so a crash between here and the
   // first update still leaves a resumable pointer (recoverQueues reattaches via
   // the persisted runId/runCursor). Don't bump updatedAt: the riding flip isn't a
@@ -1168,12 +1186,18 @@ export async function releaseCheckoutIfAtRest(slug: string, id: string): Promise
     if (!task) return
     // Its turn ending may be what the owner was waiting on.
     if (task.worktreeOf) return await releaseCheckoutIfAtRest(slug, task.worktreeOf)
-    if (!checkoutReleasable(task, { archived: !live })) return
+    const managerEnded = !!(await endedManager(project, task))
+    if (!checkoutReleasable(task, { archived: !live, managerEnded })) return
     const sharing = (await readTasks(project.dataDir)).filter((t) => t.worktreeOf === id)
     // After the last await, so a turn that started meanwhile still holds it.
-    // A sharing task's hooks read this checkout too.
+    // A sharing task's hooks read this checkout too. Its queued messages don't
+    // hold it: runTurn won't run them while a task managing it has ended.
     const holds = (t: Task) =>
-      inFlight(slug, t.id, t) || !!t.pendingHooks?.length || hookDispatchInFlightFor(project, t.id)
+      running.has(taskKey(slug, t.id)) ||
+      !!t.runId ||
+      !!openRide(t) ||
+      !!t.pendingHooks?.length ||
+      hookDispatchInFlightFor(project, t.id)
     if (running.has(taskKey(slug, id)) || sharing.some(holds)) return
     sendToDaemon({ type: 'release-checkout', project: slug, taskId: id })
   } catch (e) {
@@ -1507,6 +1531,46 @@ async function readProjectFamily(project: Project): Promise<Family> {
   return familyOf(project, tasks, edges, awaitingAnswer)
 }
 
+// The landed or archived task that manages this one, directly or through the
+// tasks between them. Undefined while every manager up the chain is active.
+async function endedManager(
+  project: Project,
+  task: Pick<Task, 'managed' | 'spawnedBy'>,
+): Promise<{ id: string; archived: boolean } | undefined> {
+  const seen = new Set<string>()
+  for (let t = task; t.managed && t.spawnedBy && !seen.has(t.spawnedBy); ) {
+    const id = t.spawnedBy
+    seen.add(id)
+    const live = await readTask(project.dataDir, id)
+    if (!live)
+      return (await readTask(project.archiveDir, id)) ? { id, archived: true } : undefined
+    if (live.status === 'landed') return { id, archived: false }
+    t = live
+  }
+  return undefined
+}
+
+// A task's managed tasks, and theirs, end with it: their runs stop and their
+// worktrees are released, and runTurn wedges any turn one of them would take
+// later. Their statuses stay as they were.
+async function endManagedTasks(project: Project, id: string): Promise<void> {
+  try {
+    const family = await readProjectFamily(project)
+    const pending = [...family.childrenOf(id)]
+    for (let child = pending.pop(); child !== undefined; child = pending.pop()) {
+      pending.push(...family.childrenOf(child))
+      const runId = (await readTask(project.dataDir, child))?.runId
+      if (runId) await interruptRun(project, child, runId)
+      void releaseCheckoutIfAtRest(project.slug, child)
+    }
+  } catch (e) {
+    console.warn(
+      `ending the managed tasks of ${project.slug}/${id} failed:`,
+      e instanceof Error ? e.message : String(e),
+    )
+  }
+}
+
 async function deliverChildResults(
   project: Project,
   parent: string,
@@ -1515,6 +1579,8 @@ async function deliverChildResults(
 ): Promise<void> {
   const family = await readFamily(project, parent, edges, awaitingAnswer)
   if (!wakeDue(parent, family)) return
+  // Its own work has ended, so the turn would only be stopped.
+  if (await endedManager(project, family.tasks.get(parent) as Task)) return
   const children = (edges.get(parent) ?? []).flatMap((id) => family.tasks.get(id) ?? [])
   let drive = false
   let claimed = false
@@ -1551,6 +1617,8 @@ async function wakeNotified(
   // to read a courtesy note is the "resurrect a finished task to report it has
   // nothing to do" failure that landing-disarms-wakeups exists to prevent.
   if (!target || target.status === 'landed') return
+  // Nor is one whose manager has ended, whose turn would only be wedged.
+  if (await endedManager(project, target)) return
 
   let drive = false
   let claimed = false
@@ -3183,6 +3251,8 @@ async function landFromHook(
 
   const now = new Date().toISOString()
   let deduped = false
+  // Read before the mutation, whose callback can't wait on other tasks' files.
+  const managing = unsettledChildren(id, await readProjectFamily(project))
   try {
     await mutateTask(file, (t) => {
       // A replay of an action already delivered, ahead of every refusal — the
@@ -3197,6 +3267,8 @@ async function landFromHook(
       // acted on at all, whatever the target's current state happens to be.
       if (!freshHookFire(t, cred.fireId)) throw new HookRefusal('stale')
       if (t.status === 'wedged') throw new HookRefusal('wedged')
+      // Landing would end the managed tasks it is waiting on.
+      if (managing.length) throw new HookRefusal('managing')
       // "Not riding" is not what publicTask derives: that reads an open ride or
       // a runId, and neither is set in the window after /messages queues a
       // prompt and before driveTask opens the ride. Landing there would leave a
@@ -3233,6 +3305,7 @@ async function landFromHook(
       return c.json({ ok: false, reason: e.reason, error: e.message }, 403)
     throw e
   }
+  if (!deduped) void endManagedTasks(project, id)
   return c.json({ ok: true, ...(deduped ? { deduped: true } : {}) })
 }
 
@@ -3382,8 +3455,10 @@ app.patch('/api/:project/tasks/:id', async (c) => {
     }
 
     if (interrupt && runId) await interruptRun(project, id, runId)
-    if (changedStatusAt && body.status === 'landed')
+    if (changedStatusAt && body.status === 'landed') {
       void releaseCheckoutIfAtRest(project.slug, id)
+      void endManagedTasks(project, id)
+    }
 
     const updated = await readTask(project.dataDir, id)
     return c.json(publicTask(updated ?? task))
@@ -3864,7 +3939,10 @@ app.post('/api/:project/tasks/:id/archive', async (c) => {
       return c.json({ error: 'task already exists in destination pool' }, 409)
     if (riding)
       return c.json({ error: 'cannot archive a task while it is riding' }, 409)
-    if (archived) void releaseCheckoutIfAtRest(project.slug, id)
+    if (archived) {
+      void releaseCheckoutIfAtRest(project.slug, id)
+      void endManagedTasks(project, id)
+    }
     return c.json(publicTask({ ...task!, archived }))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)

@@ -139,6 +139,7 @@ export type HookRefusalReason =
   | 'wedged'
   | 'riding'
   | 'scheduled'
+  | 'managing'
   | 'stale'
 
 // The prose lives here rather than in the host, which reports it verbatim: the
@@ -149,6 +150,8 @@ const REFUSALS: Record<HookRefusalReason, string> = {
   wedged: 'the task is wedged, holding a question for its human',
   riding: 'the task is working again',
   scheduled: 'the task has a ride scheduled, which landing would delete',
+  managing:
+    'managed tasks the task launched are still working or have results it has not read, and landing would end them',
   stale:
     'the task has moved on since this fire was recorded, so the finding is out of date',
 }

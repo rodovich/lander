@@ -113,7 +113,7 @@ timeline automatically. Lander refuses all three:
   since the trigger.
 
 It also refuses `nudge` while the task is wedged, and `land` while it is wedged,
-working, or waiting on a scheduled ride.
+working, waiting on a scheduled ride, or waiting on managed tasks it launched.
 
 A hook's own `land` or `nudge` doesn't fire that hook again, but the ride a
 `nudge` starts does end, so a `ride-ended` hook that nudges will see its own

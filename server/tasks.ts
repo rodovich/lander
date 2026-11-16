@@ -436,9 +436,10 @@ export function recordRideEnded(
 }
 
 // Whether a task is done with the checkout the daemon manages for it: landed or
-// archived, with no run or open ride, and no hook fires left to dispatch, since
-// a hook reads the task's checkout. The caller also rules out a live drainer,
-// which only it can see.
+// archived, or managed by a task that is (directly or further up), with no run
+// or open ride, and no hook fires left to dispatch, since a hook reads the
+// task's checkout. The caller also rules out a live drainer, which only it can
+// see.
 export function checkoutReleasable(
   task: {
     status: string
@@ -446,10 +447,10 @@ export function checkoutReleasable(
     rides?: Ride[]
     pendingHooks?: PendingHook[]
   },
-  { archived }: { archived: boolean },
+  { archived, managerEnded = false }: { archived: boolean; managerEnded?: boolean },
 ): boolean {
   if (task.runId || openRide(task) || task.pendingHooks?.length) return false
-  return archived || task.status === 'landed'
+  return archived || managerEnded || task.status === 'landed'
 }
 
 // Open a ride for a run being handed to the daemon: push `{ id, startedAt }`. The
@@ -1762,7 +1763,6 @@ export function clearPendingTriggers(task: PendingTriggers): void {
   delete task.waitingFor
   delete task.watch
 }
-
 function watchStateKey(watch: Pick<Watch, 'watcher' | 'args'>): string {
   const sorted = Object.fromEntries(
     Object.entries(watch.args).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),

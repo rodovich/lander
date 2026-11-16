@@ -1008,6 +1008,33 @@ describe('the land', () => {
     expect(t.scheduledFor ?? t.waitingFor).toBeTruthy() // the wakeup survives
   })
 
+  it('refuses a target waiting on a managed task it launched', async () => {
+    await seed()
+    await writeFile(
+      path.join(tasksDir, 'tsk-landed-child.json'),
+      JSON.stringify({
+        id: 'tsk-landed-child',
+        title: 'Still working',
+        status: 'riding',
+        createdAt: AT,
+        updatedAt: AT,
+        token: 'token-tsk-landed-child',
+        shape: 2,
+        items: [],
+        rides: [],
+        runId: 'run-landed-child',
+        managed: true,
+        spawnedBy: ID,
+        spawnedByProject: slug,
+      }),
+    )
+    const res = await land(cred().token)
+    expect(res.status).toBe(403)
+    expect((await res.json()).reason).toBe('managing')
+    expect((await raw()).status).toBe('riding')
+    await rm(path.join(tasksDir, 'tsk-landed-child.json'))
+  })
+
   // The queue is not in publicTask's "live run" derivation, so a task that has
   // been sent a message but whose ride has not opened reads as paced.
   it('refuses a target with a queued prompt and no open ride', async () => {
@@ -4071,6 +4098,55 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     await releaseCheckoutIfAtRest(slug, `${p}-sharer`)
     await waitFor(() => released().includes(`${p}-owner`))
     expect(released()).toEqual([`${p}-control`, `${p}-owner`])
+  })
+
+  const landAsUser = (id: string) =>
+    app.request(`/api/${slug}/tasks/${id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', 'x-lander-ui-token': UI_TOKEN },
+      body: JSON.stringify({ status: 'landed' }),
+    })
+  const managedBy = (parent: string) => ({ managed: true, spawnedBy: parent, spawnedByProject: slug })
+
+  it('releases the worktrees of the managed tasks under a landed task, leaving their statuses', async () => {
+    await seed('end-parent')
+    await seed('end-child', managedBy('end-parent'))
+    await seed('end-grandchild', { ...managedBy('end-child'), status: 'wedged' })
+    expect((await landAsUser('end-parent')).status).toBe(200)
+    for (const id of ['end-child', 'end-grandchild'])
+      await waitFor(() =>
+        received.some((m) => m.type === 'release-checkout' && m.taskId === id),
+      )
+    expect((await readRaw('end-child')).status).toBe('riding')
+    expect((await readRaw('end-grandchild')).status).toBe('wedged')
+  })
+
+  it('stops the run of a managed task under a landed task', async () => {
+    await seed('stop-parent')
+    await seed('stop-child', {
+      ...managedBy('stop-parent'),
+      runId: 'run-stop-child',
+      rides: [{ id: 'run-stop-child', startedAt: AT }],
+    })
+    expect((await landAsUser('stop-parent')).status).toBe(200)
+    await waitFor(() => received.some((m) => m.type === 'interrupt' && m.runId === 'run-stop-child'))
+    // The interrupt goes unanswered here, so close the ride the land is waiting on.
+    await seed('stop-child', managedBy('stop-parent'))
+  })
+
+  it('wedges a turn of a managed task whose manager has landed, naming it', async () => {
+    await seed('gate-parent', { status: 'landed' })
+    await seed('gate-child', managedBy('gate-parent'))
+    expect((await post(`/api/${slug}/tasks/gate-child/messages`, { message: 'go' })).status).toBe(200)
+    const raw = await waitForRaw('gate-child', (r) => r.status === 'wedged')
+    expect(raw.items as Raw[]).toContainEqual(
+      expect.objectContaining({
+        eventKind: 'wedged',
+        reason: "This task can't take a turn: task gate-parent, which manages it, has landed.",
+      }),
+    )
+    expect(asksOf(raw)).toEqual([])
+    expect(startRuns('gate-child')).toEqual([])
   })
 
   // A flow reads its durable state as a free ride-in on start-run, and its

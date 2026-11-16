@@ -992,6 +992,12 @@ describe('checkoutReleasable', () => {
       checkoutReleasable({ status: 'landed', pendingHooks: [fire] }, { archived: true }),
     ).toBe(false)
   })
+
+  it('releases a task whose manager has ended, whatever its status, once nothing runs', () => {
+    const ended = { archived: false, managerEnded: true }
+    expect(checkoutReleasable({ status: 'riding', rides: closedRide }, ended)).toBe(true)
+    expect(checkoutReleasable({ status: 'riding', runId: 'r1' }, ended)).toBe(false)
+  })
 })
 
 describe('recordStatusTransition', () => {
