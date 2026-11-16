@@ -2091,10 +2091,12 @@ body.embed-preview-page {
   color: var(--riding);
 }
 
-/* A linked task reference (a bare id/short id swapped for the task's title).
-   Set apart from ordinary links with a tinted chip — same shape as the tool-call
-   chips — colored by the task's status so its state reads at a glance. */
-.message-text a.task-mention {
+/* A linked task reference (a bare id/short id swapped for the task's title), or
+   a timeline note's linked task — one awaited by an event, or the subject of an
+   action. Set apart from ordinary links with a tinted chip — same shape as the
+   tool-call chips — colored by the task's status so its state reads at a glance. */
+a.task-mention,
+.timeline-note-link {
   padding: 1px 6px;
   border-radius: 4px;
   text-decoration: none;
@@ -2103,34 +2105,41 @@ body.embed-preview-page {
   color: var(--riding);
 }
 
-.message-text a.task-mention:hover {
+a.task-mention:hover,
+.timeline-note-link:hover {
   background: color-mix(in srgb, var(--riding) 20%, transparent);
 }
 
-.message-text a.task-mention.wedged {
+a.task-mention.wedged,
+.timeline-note-link.wedged {
   background: color-mix(in srgb, var(--wedged) 12%, transparent);
   color: var(--wedged);
 }
 
-.message-text a.task-mention.wedged:hover {
+a.task-mention.wedged:hover,
+.timeline-note-link.wedged:hover {
   background: color-mix(in srgb, var(--wedged) 20%, transparent);
 }
 
-.message-text a.task-mention.landed {
+a.task-mention.landed,
+.timeline-note-link.landed {
   background: color-mix(in srgb, var(--landed) 12%, transparent);
   color: var(--landed);
 }
 
-.message-text a.task-mention.landed:hover {
+a.task-mention.landed:hover,
+.timeline-note-link.landed:hover {
   background: color-mix(in srgb, var(--landed) 20%, transparent);
 }
 
-.message-text a.task-mention.paced {
+a.task-mention.paced,
+.timeline-note-link.paced {
   background: color-mix(in srgb, var(--muted) 14%, transparent);
   color: var(--muted);
 }
 
-.message-text a.task-mention.paced:hover {
+a.task-mention.paced:hover,
+.timeline-note-link.paced:hover {
   background: color-mix(in srgb, var(--muted) 22%, transparent);
 }
 
@@ -2300,48 +2309,6 @@ body.embed-preview-page {
   flex-shrink: 0;
   font-size: 12px;
   color: var(--muted);
-}
-
-/* A linked task — one awaited by an event, or the subject of an action — wears
-   the same status-tinted chip as a task mention, colored by its current status. */
-.timeline-note-link {
-  padding: 1px 6px;
-  border-radius: 4px;
-  text-decoration: none;
-  font-weight: 600;
-  background: color-mix(in srgb, var(--riding) 12%, transparent);
-  color: var(--riding);
-}
-
-.timeline-note-link:hover {
-  background: color-mix(in srgb, var(--riding) 20%, transparent);
-}
-
-.timeline-note-link.wedged {
-  background: color-mix(in srgb, var(--wedged) 12%, transparent);
-  color: var(--wedged);
-}
-
-.timeline-note-link.wedged:hover {
-  background: color-mix(in srgb, var(--wedged) 20%, transparent);
-}
-
-.timeline-note-link.landed {
-  background: color-mix(in srgb, var(--landed) 12%, transparent);
-  color: var(--landed);
-}
-
-.timeline-note-link.landed:hover {
-  background: color-mix(in srgb, var(--landed) 20%, transparent);
-}
-
-.timeline-note-link.paced {
-  background: color-mix(in srgb, var(--muted) 14%, transparent);
-  color: var(--muted);
-}
-
-.timeline-note-link.paced:hover {
-  background: color-mix(in srgb, var(--muted) 22%, transparent);
 }
 
 /* The tasks a note can't name on one line, stacked beneath it. */
