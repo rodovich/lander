@@ -1170,7 +1170,10 @@ export async function releaseCheckoutIfAtRest(slug: string, id: string): Promise
     if (!checkoutReleasable(task, { archived: !live })) return
     const sharing = (await readTasks(project.dataDir)).filter((t) => t.worktreeOf === id)
     // After the last await, so a turn that started meanwhile still holds it.
-    if (running.has(taskKey(slug, id)) || sharing.some((t) => inFlight(slug, t.id, t))) return
+    // A sharing task's hooks read this checkout too.
+    const holds = (t: Task) =>
+      inFlight(slug, t.id, t) || !!t.pendingHooks?.length || hookDispatchInFlightFor(project, t.id)
+    if (running.has(taskKey(slug, id)) || sharing.some(holds)) return
     sendToDaemon({ type: 'release-checkout', project: slug, taskId: id })
   } catch (e) {
     console.warn(

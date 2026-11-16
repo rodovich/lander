@@ -4011,25 +4011,32 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
     }
   })
 
-  it('keeps a worktree while a task sharing it is mid-turn, and releases it when that turn ends', async () => {
+  it.each([
+    ['is mid-turn', 'wt-turn', { runId: 'run-wt-turn-sharer' }],
+    [
+      'has hook fires to dispatch',
+      'wt-fires',
+      { status: 'landed', pendingHooks: [{ id: 'fire-1-abc', trigger: 'landed', by: 'agent', at: AT }] },
+    ],
+  ])('keeps a worktree while a task sharing it %s, and releases it after', async (_label, p, holding) => {
     const released = () =>
       received
-        .filter((m) => m.type === 'release-checkout' && m.taskId?.startsWith('wt-'))
+        .filter((m) => m.type === 'release-checkout' && m.taskId?.startsWith(p))
         .map((m) => m.taskId)
-    await seed('wt-owner', { status: 'landed' })
-    await seed('wt-sharer', { worktreeOf: 'wt-owner', runId: 'run-wt-sharer' })
-    await seed('wt-idle-sharer', { worktreeOf: 'wt-owner' })
-    await seed('wt-control', { status: 'landed' })
-    await releaseCheckoutIfAtRest(slug, 'wt-owner')
+    await seed(`${p}-owner`, { status: 'landed' })
+    await seed(`${p}-sharer`, { worktreeOf: `${p}-owner`, ...holding })
+    await seed(`${p}-idle-sharer`, { worktreeOf: `${p}-owner` })
+    await seed(`${p}-control`, { status: 'landed' })
+    await releaseCheckoutIfAtRest(slug, `${p}-owner`)
     // Sent after anything the owner's check sent, on the same socket.
-    await releaseCheckoutIfAtRest(slug, 'wt-control')
-    await waitFor(() => released().includes('wt-control'))
-    expect(released()).toEqual(['wt-control'])
+    await releaseCheckoutIfAtRest(slug, `${p}-control`)
+    await waitFor(() => released().includes(`${p}-control`))
+    expect(released()).toEqual([`${p}-control`])
 
-    await seed('wt-sharer', { worktreeOf: 'wt-owner' })
-    await releaseCheckoutIfAtRest(slug, 'wt-sharer')
-    await waitFor(() => released().includes('wt-owner'))
-    expect(released()).toEqual(['wt-control', 'wt-owner'])
+    await seed(`${p}-sharer`, { worktreeOf: `${p}-owner` })
+    await releaseCheckoutIfAtRest(slug, `${p}-sharer`)
+    await waitFor(() => released().includes(`${p}-owner`))
+    expect(released()).toEqual([`${p}-control`, `${p}-owner`])
   })
 
   // A flow reads its durable state as a free ride-in on start-run, and its

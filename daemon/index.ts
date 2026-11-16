@@ -342,9 +342,9 @@ function resolveRunPaths(msg: StartRunMessage, caps: ProviderCaps): RunPaths {
 }
 
 // Which checkout a hook resolution reads, or a watcher works in. The tree
-// that matters is the one the target task is working in: its own checkout when
-// it has one, otherwise wherever the same provider-owned resolveLaunchDir a run
-// uses would launch it.
+// that matters is the one the target task is working in: its own checkout, or
+// the one it shares, when there is one, otherwise wherever the same
+// provider-owned resolveLaunchDir a run uses would launch it.
 //
 // It falls back to the project root twice over: for a flow the daemon does not
 // know (a resolve can arrive for any task, including one whose flow this build
@@ -366,10 +366,10 @@ function resolveTaskCwd(
 } {
   const root = pathBySlug.get(project)
   if (!root) throw new Error(`daemon serves no project for slug ${project}`)
-  // The task's own checkout, while there is one to read — which is why a
-  // landed task's checkout outlives its pending `landed` fires.
+  // The server keeps a checkout until every task that reads it, its owner and
+  // any task sharing it, has no hook fires left to dispatch.
   if (hints.taskId && projectOptions.worktrees(root)) {
-    const checkout = existingCheckout(root, hints.taskId)
+    const checkout = existingCheckout(root, hints.worktreeOf ?? hints.taskId)
     if (checkout) return { root, cwd: checkout }
   }
   const caps = hints.flow ? CAPS[hints.flow] : undefined

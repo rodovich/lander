@@ -327,21 +327,18 @@ export type ResolveProjectHooksResult =
 // root's tip), then — only for pairs neither the store nor that tip can answer —
 // scans the trust root's history for versions that have since moved on. Both
 // answers are cached, so the scan happens at most once per pair per tip.
-export async function resolveProjectHooks(input: {
-  project: Project
-  select?: HookSelector[]
-  // The target's checkout, when resolving for a particular task: the tree that
-  // matters is the one it is working in.
-  taskId?: string
-  flow?: string
-  recordedCwd?: string
-  now?: () => string
-  // The daemon round trip, injectable so the join, the tip ingestion and the
-  // two-phase scan can be driven without one. Everything below is the half of
-  // the feature that has no git in it, and it was reachable only through a live
-  // daemon until this seam existed.
-  resolve?: typeof requestHooksResolution
-}): Promise<ResolveProjectHooksResult> {
+export async function resolveProjectHooks(
+  input: CheckoutHints & {
+    project: Project
+    select?: HookSelector[]
+    now?: () => string
+    // The daemon round trip, injectable so the join, the tip ingestion and the
+    // two-phase scan can be driven without one. Everything below is the half of
+    // the feature that has no git in it, and it was reachable only through a live
+    // daemon until this seam existed.
+    resolve?: typeof requestHooksResolution
+  },
+): Promise<ResolveProjectHooksResult> {
   const ask = input.resolve ?? requestHooksResolution
   const { project } = input
   const now = input.now ?? (() => new Date().toISOString())
@@ -351,6 +348,7 @@ export async function resolveProjectHooks(input: {
   const target = {
     project: project.slug,
     ...(input.taskId ? { taskId: input.taskId } : {}),
+    ...(input.worktreeOf ? { worktreeOf: input.worktreeOf } : {}),
     ...(input.flow ? { flow: input.flow } : {}),
     ...(input.recordedCwd ? { recordedCwd: input.recordedCwd } : {}),
     ...(trustRoot ? { trustRoot } : {}),
@@ -466,17 +464,19 @@ export async function taskCheckout(
     flow?: string
     agent?: string
     cwd?: string
+    worktreeOf?: string
   }>(project.dataDir, id)
   return task ? checkoutHints(id, task) : null
 }
 
 export function checkoutHints(
   id: string,
-  task: { flow?: string; agent?: string; cwd?: string },
+  task: { flow?: string; agent?: string; cwd?: string; worktreeOf?: string },
 ): CheckoutHints {
   const flow = task.flow ?? task.agent
   return {
     taskId: id,
+    ...(task.worktreeOf ? { worktreeOf: task.worktreeOf } : {}),
     ...(flow ? { flow } : {}),
     ...(task.cwd ? { recordedCwd: task.cwd } : {}),
   }

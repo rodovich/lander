@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   approveHookPairs,
   candidatePairs,
+  checkoutHints,
   clearHookMissCache,
   effectiveApprovals,
   emptyHooksStore,
@@ -314,6 +315,16 @@ describe('resolveProjectHooks', () => {
   beforeEach(() => {
     project.hooksFile = path.join(dir, 'hooks.json')
     clearHookMissCache()
+  })
+
+  it('asks the daemon about the worktree a task shares', async () => {
+    const resolve = daemon({})
+    await resolveProjectHooks({
+      project,
+      ...checkoutHints('child', { flow: 'codex', worktreeOf: 'parent' }),
+      resolve,
+    })
+    expect(resolve.calls[0]).toMatchObject({ taskId: 'child', worktreeOf: 'parent' })
   })
 
   it('joins the daemon’s answer against the store', async () => {

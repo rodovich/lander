@@ -295,6 +295,8 @@ export type HooksResolution = {
 // derives from the id rather than from any hint the task wrote.
 export type CheckoutHints = {
   taskId?: string
+  // The task whose checkout `taskId` shares, as on StartRunMessage.
+  worktreeOf?: string
   flow?: string
   recordedCwd?: string
 }
@@ -337,11 +339,7 @@ export type HookRunMessage = {
   // The target, plus the hints that locate its checkout — resolved the same way
   // a run's launch dir is, so a task working in its own checkout is answered
   // from that checkout.
-  target: {
-    id: string
-    flow?: string
-    recordedCwd?: string
-  }
+  target: { id: string } & Omit<CheckoutHints, 'taskId'>
   trigger: {
     kind: string
     by: string
