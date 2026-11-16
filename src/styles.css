@@ -1558,6 +1558,15 @@ body.embed-preview-page {
   margin-top: 0;
 }
 
+.detail-meta > * {
+  flex-shrink: 0;
+}
+
+.detail-meta .task-parent {
+  flex-shrink: 1;
+  max-width: none;
+}
+
 .app-row {
   display: flex;
   align-items: center;
