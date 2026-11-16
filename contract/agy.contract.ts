@@ -293,7 +293,7 @@ describe.skipIf(!VERSION)(`agy contract (${VERSION})`, () => {
       prompt: [
         'Do these steps in order and continue to the next step whatever happens.',
         '1. Start one subagent whose only task is to call run_command with CommandLine "echo subagent-probe" and then report what happened.',
-        '2. Wait until that subagent has reported back or is no longer active, checking with manage_subagents.',
+        '2. Without ending your turn, wait until that subagent has reported back or is no longer active, checking with manage_subagents.',
         `3. Call write_to_file yourself to create ${after} with content "after".`,
         '4. Reply "done".',
       ].join('\n'),
