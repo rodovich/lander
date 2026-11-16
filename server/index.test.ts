@@ -62,6 +62,7 @@ const UI_TOKEN = 'test-ui-token'
 const AT = '2026-01-01T00:00:00.000Z'
 
 let app: (typeof import('./index'))['app']
+let releaseCheckoutIfAtRest: (typeof import('./index'))['releaseCheckoutIfAtRest']
 let projectDir: string
 let secondProjectDir: string
 let dataDirRoot: string
@@ -213,7 +214,7 @@ beforeAll(async () => {
   process.env.PROJECT_DIRS = `${projectDir}\n${secondProjectDir}`
   process.env.LANDER_UI_TOKEN = UI_TOKEN
 
-  ;({ app } = await import('./index'))
+  ;({ app, releaseCheckoutIfAtRest } = await import('./index'))
 })
 
 afterAll(async () => {
@@ -2493,6 +2494,20 @@ describe('acting task coordination history', () => {
     expect((await rawTask(childId)).managed).toBe(expected)
   })
 
+  it("puts a managed child in its launcher's worktree, or that worktree's owner's, unless asked for its own", async () => {
+    const launch = async (by: string, flags: Record<string, unknown>) => {
+      const res = await launchAs(by, slug, { title: 'Child', ...flags })
+      expect(res.status).toBe(201)
+      return rawTask(((await res.json()) as { id: string }).id)
+    }
+    const owner = await createTask('Worktree owner')
+    const child = await launch(owner.id, { managed: true })
+    expect(child.worktreeOf).toBe(owner.id)
+    expect((await launch(String(child.id), { managed: true })).worktreeOf).toBe(owner.id)
+    expect((await launch(owner.id, { managed: true, worktree: true })).worktreeOf).toBeUndefined()
+    expect((await launch(owner.id, {})).worktreeOf).toBeUndefined()
+  })
+
   it('records both deferred message forms, echoing what the sender wrote', async () => {
     const actor = await createTask('Message action actor')
     const immediate = await createTask('Immediate recipient')
@@ -3994,6 +4009,27 @@ describe('platform-kill wedge (daemon vanishes mid-run)', () => {
       const raw = await readRaw(f.slice(0, -'.json'.length)).catch(() => null)
       if (raw?.runId) closeRunChannel(String(raw.runId))
     }
+  })
+
+  it('keeps a worktree while a task sharing it is mid-turn, and releases it when that turn ends', async () => {
+    const released = () =>
+      received
+        .filter((m) => m.type === 'release-checkout' && m.taskId?.startsWith('wt-'))
+        .map((m) => m.taskId)
+    await seed('wt-owner', { status: 'landed' })
+    await seed('wt-sharer', { worktreeOf: 'wt-owner', runId: 'run-wt-sharer' })
+    await seed('wt-idle-sharer', { worktreeOf: 'wt-owner' })
+    await seed('wt-control', { status: 'landed' })
+    await releaseCheckoutIfAtRest(slug, 'wt-owner')
+    // Sent after anything the owner's check sent, on the same socket.
+    await releaseCheckoutIfAtRest(slug, 'wt-control')
+    await waitFor(() => released().includes('wt-control'))
+    expect(released()).toEqual(['wt-control'])
+
+    await seed('wt-sharer', { worktreeOf: 'wt-owner' })
+    await releaseCheckoutIfAtRest(slug, 'wt-sharer')
+    await waitFor(() => released().includes('wt-owner'))
+    expect(released()).toEqual(['wt-control', 'wt-owner'])
   })
 
   // A flow reads its durable state as a free ride-in on start-run, and its

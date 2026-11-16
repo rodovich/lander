@@ -408,6 +408,7 @@ async function launchTask(rest) {
     else if (a === '--after') o.after = rest[++i]
     else if (a === '--composed') composed = rest[++i]
     else if (a === '--flow') o.flow = rest[++i]
+    else if (a === '--worktree') o.worktree = true
     // --key <name> <value> pairs accumulate into the flow's config. Values are
     // coerced at this boundary so a flow receives real booleans/numbers.
     else if (a === '--key') {
@@ -1362,7 +1363,7 @@ const USAGE = {
   land: 'land [id…]',
   compose: 'compose [--managed] <message|->',
   launch:
-    'launch --composed <message id> [--title <t>] [--date <when>|--time <min>] [--after <ids>] [--flow <name>] [--key <k> <v>]… [--attach <paths…>]',
+    'launch --composed <message id> [--title <t>] [--date <when>|--time <min>] [--after <ids>] [--flow <name>] [--key <k> <v>]… [--worktree] [--attach <paths…>]',
   list: 'list [--status <s>] [--since <when>] [--until <when>] [--text <terms>] [--archived] [--json]',
   view: 'view <id> [--expand] [--messages <N|all>] [--clip <N|all>] [--json]',
   send: 'send <task id> --composed <message id> [--date <when>|--time <min>] [--after <ids>] [--await] [--attach <paths…>]',

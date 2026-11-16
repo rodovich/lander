@@ -54,7 +54,9 @@ export function checkoutNote({
     `starting detached at whatever the project's main checkout (\`${root}\`) had ` +
     'checked out. Commit on a branch you create, and switch branches here rather ' +
     'than making another worktree: lander removes this worktree when the task is ' +
-    'landed or archived, and leaves branches alone.'
+    'landed or archived, and leaves branches alone. Managed tasks you launch share ' +
+    'this worktree; pass `--worktree` to `lander launch` if one needs another branch ' +
+    'or commit checked out, or will edit files that you or its siblings are editing.'
   )
 }
 

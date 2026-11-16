@@ -39,7 +39,7 @@ exports[`claude transcript regressions > a task checkout is the launch dir, snap
 - A command that runs until stopped (a dev server, a file watcher, \`tail -f\`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.
 - Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.
 
-This task works in a git worktree lander created for it at \`/repo/.worktrees/task-1\`, starting detached at whatever the project's main checkout (\`/repo\`) had checked out. Commit on a branch you create, and switch branches here rather than making another worktree: lander removes this worktree when the task is landed or archived, and leaves branches alone.",
+This task works in a git worktree lander created for it at \`/repo/.worktrees/task-1\`, starting detached at whatever the project's main checkout (\`/repo\`) had checked out. Commit on a branch you create, and switch branches here rather than making another worktree: lander removes this worktree when the task is landed or archived, and leaves branches alone. Managed tasks you launch share this worktree; pass \`--worktree\` to \`lander launch\` if one needs another branch or commit checked out, or will edit files that you or its siblings are editing.",
         "--output-format",
         "stream-json",
         "--verbose",

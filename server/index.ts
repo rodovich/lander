@@ -296,6 +296,10 @@ type Task = {
   // Set when the spawner said it will manage this task rather than leave it to
   // the user, which delivers this task's results to the spawner (managed.ts).
   managed?: true
+  // The task whose worktree this managed task works in: its spawner, or the
+  // task whose worktree its spawner shares, unless it was launched with
+  // `--worktree`. The daemon decides whether the project has worktrees at all.
+  worktreeOf?: string
   // For a task with managed children: the end time of the latest ride of each
   // child that this task has read or been delivered, by child id.
   childrenSeen?: Record<string, string>
@@ -777,6 +781,7 @@ async function runTurn(
     project: project.slug,
     // cwd hint — the daemon does the stat/fallback resolution locally.
     recordedCwd: task.cwd,
+    ...(task.worktreeOf ? { worktreeOf: task.worktreeOf } : {}),
     // Present only on the turn an incoming message revived, so the daemon can
     // tell the resumed session which of its own last acts no longer holds — the
     // wedge/land it called, or the ride the message cleared.
@@ -1021,6 +1026,15 @@ function claimTaskRun(project: Project, id: string): boolean {
   return true
 }
 
+function inFlight(slug: string, id: string, task: Task): boolean {
+  return (
+    running.has(taskKey(slug, id)) ||
+    !!task.runId ||
+    !!openRide(task) ||
+    !!task.queued?.length
+  )
+}
+
 // Drive a task's turns to completion: run the given opening turn, then drain
 // any messages queued onto the task while it ran — the whole queue joins into
 // one turn (see the batch note below) — until the queue empties. Only one
@@ -1130,7 +1144,7 @@ async function driveClaimedTask(project: Project, id: string): Promise<void> {
   if (continueDriving) void driveClaimedTask(project, id)
   // A task that landed itself mid-turn kept its checkout for the rest of that
   // turn; this is where it lets go.
-  else void releaseCheckoutIfAtRest(project, id)
+  else void releaseCheckoutIfAtRest(project.slug, id)
 }
 
 // Tell the daemon a task is done with its checkout, once nothing can still
@@ -1143,16 +1157,24 @@ async function driveClaimedTask(project: Project, id: string): Promise<void> {
 // Called wherever one of those conditions can come true: a status write that
 // lands, an archive, a drainer exiting, a hook dispatch finishing. Sent for
 // every project — the daemon owns whether there is a worktree to remove.
-async function releaseCheckoutIfAtRest(project: Project, id: string): Promise<void> {
+export async function releaseCheckoutIfAtRest(slug: string, id: string): Promise<void> {
+  const project = PROJECT_BY_SLUG.get(slug)
+  if (!project) return
   try {
-    if (running.has(taskKey(project.slug, id)) || hookDispatchInFlightFor(project, id)) return
+    if (running.has(taskKey(slug, id)) || hookDispatchInFlightFor(project, id)) return
     const live = await readTask(project.dataDir, id)
     const task = live ?? (await readTask(project.archiveDir, id))
-    if (!task || !checkoutReleasable(task, { archived: !live })) return
-    sendToDaemon({ type: 'release-checkout', project: project.slug, taskId: id })
+    if (!task) return
+    // Its turn ending may be what the owner was waiting on.
+    if (task.worktreeOf) return await releaseCheckoutIfAtRest(slug, task.worktreeOf)
+    if (!checkoutReleasable(task, { archived: !live })) return
+    const sharing = (await readTasks(project.dataDir)).filter((t) => t.worktreeOf === id)
+    // After the last await, so a turn that started meanwhile still holds it.
+    if (running.has(taskKey(slug, id)) || sharing.some((t) => inFlight(slug, t.id, t))) return
+    sendToDaemon({ type: 'release-checkout', project: slug, taskId: id })
   } catch (e) {
     console.warn(
-      `release-checkout for ${project.slug}/${id} failed:`,
+      `release-checkout for ${slug}/${id} failed:`,
       e instanceof Error ? e.message : String(e),
     )
   }
@@ -1612,14 +1634,7 @@ async function sweepOnce(): Promise<void> {
       }
       if (task.managed && task.spawnedBy)
         edges.set(task.spawnedBy, [...(edges.get(task.spawnedBy) ?? []), id])
-      collectAwaitingAnswer(
-        task,
-        running.has(taskKey(project.slug, id)) ||
-          !!task.runId ||
-          !!openRide(task) ||
-          !!task.queued?.length,
-        awaitingAnswer,
-      )
+      collectAwaitingAnswer(task, inFlight(project.slug, id, task), awaitingAnswer)
       // Deliver due scheduled messages first — independent of the task's own
       // scheduled launch, and even while it's running (delivery just enqueues).
       // Let deliverScheduledMessages decide due-ness (it weighs time and await
@@ -1627,7 +1642,7 @@ async function sweepOnce(): Promise<void> {
       if (task.scheduledMessages?.length)
         await deliverScheduledMessages(project, id, now)
       if (running.has(taskKey(project.slug, id)) || task.runId || openRide(task))
-        touchApp(project.slug, id, 'ride')
+        touchApp(project.slug, task.worktreeOf ?? id, 'ride')
       // Dispatch this task's recorded fires. ABOVE the `running` guard below,
       // for the same reason scheduled-message delivery is: `running` holds every
       // task with a live driveTask, including one working through a chain of
@@ -1652,7 +1667,7 @@ async function sweepOnce(): Promise<void> {
         // A landed task's checkout waits for its fires (releaseCheckoutIfAtRest),
         // so each dispatch that finishes is a chance it can now go.
         void dispatchPendingHooks(project, id, { api }).then(() =>
-          releaseCheckoutIfAtRest(project, id),
+          releaseCheckoutIfAtRest(project.slug, id),
         )
       }
       // Then launch a deferred task whose trigger has fired.
@@ -2734,6 +2749,7 @@ app.post('/api/:project/tasks', async (c) => {
       time?: unknown
       after?: unknown
       managed?: unknown
+      worktree?: unknown
       flow?: unknown
       flowConfig?: unknown
       attachments?: unknown
@@ -2904,6 +2920,9 @@ app.post('/api/:project/tasks', async (c) => {
             spawnedBy: principal.id,
             spawnedByProject: principal.slug,
             ...(body.managed === true ? { managed: true as const } : {}),
+            ...(body.managed === true && body.worktree !== true
+              ? { worktreeOf: principal.task.worktreeOf ?? principal.id }
+              : {}),
           }
         : {}),
       // The hook that caused this task, or the one inherited from the task that
@@ -3143,8 +3162,7 @@ async function landFromHook(
       // a runId, and neither is set in the window after /messages queues a
       // prompt and before driveTask opens the ride. Landing there would leave a
       // turn riding on a landed task, since the crossing never touches `queued`.
-      if (openRide(t) || t.runId || t.queued?.length || running.has(taskKey(project.slug, id)))
-        throw new HookRefusal('riding')
+      if (inFlight(project.slug, id, t)) throw new HookRefusal('riding')
       // The wakeup the crossing would silently delete.
       if (hasPendingTrigger(t)) throw new HookRefusal('scheduled')
 
@@ -3312,7 +3330,7 @@ app.patch('/api/:project/tasks/:id', async (c) => {
 
     if (interrupt && runId) await interruptRun(project, id, runId)
     if (changedStatusAt && body.status === 'landed')
-      void releaseCheckoutIfAtRest(project, id)
+      void releaseCheckoutIfAtRest(project.slug, id)
 
     const updated = await readTask(project.dataDir, id)
     return c.json(publicTask(updated ?? task))
@@ -3793,7 +3811,7 @@ app.post('/api/:project/tasks/:id/archive', async (c) => {
       return c.json({ error: 'task already exists in destination pool' }, 409)
     if (riding)
       return c.json({ error: 'cannot archive a task while it is riding' }, 409)
-    if (archived) void releaseCheckoutIfAtRest(project, id)
+    if (archived) void releaseCheckoutIfAtRest(project.slug, id)
     return c.json(publicTask({ ...task!, archived }))
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
