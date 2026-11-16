@@ -1,7 +1,7 @@
 import { memo, type ReactNode } from 'react'
 import { AskForm } from './asks'
 import { MessageAttachments } from './attachments'
-import { formatTimestamp } from './format'
+import { formatDuration, formatTimestamp } from './format'
 import { BlockedSummary } from './grants'
 import { blockedRequests } from './permissions'
 import { splitNotices } from '../shared/turnCollapse'
@@ -90,6 +90,11 @@ export const RideTurn = memo(function RideTurn({
       <div className="message-head">
         <span className="message-role">agent</span>
         <span className="message-time">{formatTimestamp(ride.startedAt)}</span>
+        {ride.durationMs !== undefined && (
+          <span className="message-time" title="Time worked">
+            {formatDuration(ride.durationMs)}
+          </span>
+        )}
       </div>
       <div className="steps">
         <TurnTrace

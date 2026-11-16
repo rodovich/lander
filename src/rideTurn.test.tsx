@@ -303,6 +303,20 @@ describe('RideTurn cross-task actions', () => {
   })
 })
 
+describe('RideTurn header', () => {
+  it('shows how long the run worked beside its start time', () => {
+    const html = render([flow('m1', 'done')], {
+      ride: settledRide({ durationMs: 83_000 }),
+    })
+    expect(html).toContain('>1m 23s</span>')
+  })
+
+  it('shows no duration for a run that never reported one', () => {
+    const html = render([flow('m1', 'done')])
+    expect(count(html, 'class="message-time"')).toBe(1)
+  })
+})
+
 describe('RideTurn settled/open footers', () => {
   it('shows the working spinner only while the ride is open, never a blocked summary', () => {
     const html = render(
