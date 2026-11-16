@@ -84,7 +84,7 @@ export function sharedCheckout(root: string, owner: string): string {
   const dir = existingCheckout(root, owner)
   if (dir) return dir
   throw new Error(
-    `This task shares task ${owner}'s worktree, which no longer exists. Lander removes it when that task is landed or archived.`,
+    `The worktree this task shares with task ${owner} no longer exists. Lander removes it when that task is landed or archived.`,
   )
 }
 

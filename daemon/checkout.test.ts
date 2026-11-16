@@ -61,7 +61,9 @@ describe('task checkouts', () => {
     const dir = await ensureCheckout(root, 'owner')
     expect(sharedCheckout(root, 'owner')).toBe(dir)
     await removeCheckout(root, 'owner')
-    expect(() => sharedCheckout(root, 'owner')).toThrow(/task owner's worktree, which no longer exists/)
+    expect(() => sharedCheckout(root, 'owner')).toThrow(
+      /The worktree this task shares with task owner no longer exists/,
+    )
   })
 
   describe('cleanUpAndRemoveCheckout', () => {
