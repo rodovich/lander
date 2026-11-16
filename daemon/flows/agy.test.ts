@@ -214,7 +214,7 @@ it.each([undefined, 'expired-session'])('does not use old context sizes when con
 
 it('keeps replacement-session usage whole when a refusal prompts another subprocess', async () => {
   const g = fixture([[init('replacement-session'), toolStep(2, 'run_command', { CommandLine: 'echo probe' }), result({
-    denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
+    denied_actions: [{ action: 'command', display_name: 'Bash' }],
     usage: { input_tokens: 200, output_tokens: 20 },
   })]], {
     sessionId: 'expired-session',
@@ -644,7 +644,7 @@ it('marks refused tool calls blocked from their denial error or agy\'s log, pres
       }),
       result({
         response: 'Running the check now.',
-        denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
+        denied_actions: [{ action: 'command', display_name: 'Bash' }],
       }),
     ]])
     withProse.start = {
@@ -680,7 +680,7 @@ it('marks refused tool calls blocked from their denial error or agy\'s log, pres
       items.filter((it) => it.kind === 'notice').map((it) => it.text)
     const deniedCommand = result({
       response: '',
-      denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
+      denied_actions: [{ action: 'command', display_name: 'Bash' }],
     })
     const silentGitPush = [
       init('conv-1'),
@@ -700,7 +700,7 @@ it('marks refused tool calls blocked from their denial error or agy\'s log, pres
 
     const itemsUnlogged = await turnItems(silentGitPush)
     expect(notices(itemsUnlogged)).toEqual([
-      'Antigravity denied a RunCommand call this turn without saying which one.',
+      'Antigravity denied a Bash call this turn without saying which one.',
     ])
     expect(blockedRequests(itemsUnlogged)).toEqual([])
 
@@ -732,7 +732,7 @@ it('marks refused tool calls blocked from their denial error or agy\'s log, pres
         })),
       result({
         response: '',
-        denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
+        denied_actions: [{ action: 'command', display_name: 'Bash' }],
       }),
     ]])
     deniedBeforeLaterCommands.start = { ...deniedBeforeLaterCommands.start, env: withProse.start.env }
@@ -763,7 +763,7 @@ it('prompts the agent again with only what it can\'t see, for as long as agy kee
       toolStep(step, 'run_command', { CommandLine }),
       result({
         response: '',
-        denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
+        denied_actions: [{ action: 'command', display_name: 'Bash' }],
         usage,
       }),
     ]
@@ -818,7 +818,7 @@ it('prompts the agent again for a subagent\'s refusal only when it made no call 
         toolStep(3, 'manage_subagents', { Action: 'list' }),
         result({
           response: 'Done',
-          denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
+          denied_actions: [{ action: 'command', display_name: 'Bash' }],
         }),
       ]])
       g.start = { ...g.start, env }
@@ -832,14 +832,14 @@ it('prompts the agent again for a subagent\'s refusal only when it made no call 
     expect(carriedOn.spawns).toHaveLength(1)
     expect(carriedOn.kinds).not.toContain('reprompt')
     expect(carriedOn.items).toContainEqual(expect.objectContaining({
-      kind: 'notice', text: 'Antigravity refused a RunCommand call in a subagent.',
+      kind: 'notice', text: 'Antigravity refused a Bash call in a subagent.',
     }))
     expect(blockedRequests(carriedOn.items)).toEqual([])
 
     const stopped = await drive(new Date(refusedAt.getTime() - 1000))
     expect(stopped.spawns).toHaveLength(2)
     expect(stopped.spawns[1].args.slice(0, 2)).toEqual([
-      '-p', agyRepromptMessage([{ in: 'subagent', action: 'RunCommand', conversation: 'sub-conv' }]),
+      '-p', agyRepromptMessage([{ in: 'subagent', action: 'Bash', conversation: 'sub-conv' }]),
     ])
   } finally {
     vi.useRealTimers()
@@ -888,16 +888,16 @@ it('records the installed agy version on the ride', async () => {
 it('states each kind of refusal the agent can\'t place for itself, and nothing about ones it saw', () => {
   expect(agyRepromptMessage([
     { in: 'turn', tool: 'run_command', input: 'echo seen', seen: true },
-    { in: 'subagent', action: 'RunCommand', conversation: 'sub-1' },
+    { in: 'subagent', action: 'Bash', conversation: 'sub-1' },
     { in: 'unknown', action: 'WriteToFile' },
   ])).toBe([
     '[lander] Antigravity ended your turn because it refused 3 calls needing a permission the user has not granted. No allow rule covered those calls; your goal may still be fine. You may reach it with a command the user has already allowed for that purpose, but not by running a refused command through another shell, interpreter, script, or wrapper.',
-    '- A RunCommand call by your subagent (conversation sub-1) was refused.',
+    '- A Bash call by your subagent (conversation sub-1) was refused.',
     '- Antigravity did not say which WriteToFile call it refused.',
   ].join('\n'))
-  expect(agyRepromptMessage([{ in: 'subagent', action: 'RunCommand', conversation: 'sub-1' }])).toBe([
+  expect(agyRepromptMessage([{ in: 'subagent', action: 'Bash', conversation: 'sub-1' }])).toBe([
     '[lander] Your turn ended after Antigravity refused a call needing a permission the user has not granted. No allow rule covered that call; your goal may still be fine. You may reach it with a command the user has already allowed for that purpose, but not by running the refused command through another shell, interpreter, script, or wrapper.',
-    '- A RunCommand call by your subagent (conversation sub-1) was refused.',
+    '- A Bash call by your subagent (conversation sub-1) was refused.',
   ].join('\n'))
   expect(agyRepromptMessage([{ in: 'turn', tool: 'run_command', input: 'git push', seen: false }])).toBe([
     '[lander] Antigravity ended your turn because it refused a call needing a permission the user has not granted. No allow rule covered that call; your goal may still be fine. You may reach it with a command the user has already allowed for that purpose, but not by running the refused command through another shell, interpreter, script, or wrapper.',
@@ -982,7 +982,7 @@ it('ignores a stale result.error when a turn completes or reprompts past an earl
         },
       }),
       errorResult('', {
-        denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
+        denied_actions: [{ action: 'command', display_name: 'Bash' }],
       }),
     ]])
     f.exitCode = 3

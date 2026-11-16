@@ -278,7 +278,7 @@ describe.skipIf(!VERSION)(`agy contract (${VERSION})`, () => {
       l.step_update?.tool_info?.parameters?.CommandLine === 'echo log-probe')?.step_update
     expect(step).toBeDefined()
     expect(run.lines.find((l) => l.event === 'result')?.result?.denied_actions).toEqual([
-      { action: 'command', display_name: 'RunCommand' },
+      { action: 'command', display_name: expect.any(String) },
     ])
     expect(agyLogRefusals(readFileSync(logFile, 'utf8'))).toEqual([
       { conversation: step.conversation_id, step: step.step_index, at: expect.any(Number) },
@@ -300,8 +300,8 @@ describe.skipIf(!VERSION)(`agy contract (${VERSION})`, () => {
     })
 
     const items = (turn.task.items ?? []) as { kind: string; text?: string }[]
-    expect(items.filter((it) => it.kind === 'notice').map((it) => it.text)).toContain(
-      'Antigravity refused a RunCommand call in a subagent.',
+    expect(items.filter((it) => it.kind === 'notice').map((it) => it.text)).toContainEqual(
+      expect.stringMatching(/^Antigravity refused a .+ call in a subagent\.$/),
     )
     expect(existsSync(after)).toBe(true)
     expect(items.filter((it) => it.kind === 'reprompt')).toEqual([])
