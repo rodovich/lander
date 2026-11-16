@@ -113,9 +113,11 @@ const VIEWPORT_MARGIN = 8
 // rect, so it stays inside the window: it hangs under the trigger, flipping
 // *above* it when there isn't room below, and left-aligns with it, flipping to
 // right-align when there isn't room to the right — then is clamped horizontally
-// into the window if even that overflows. The popup is measured after it mounts (hidden
-// for one layout tick), so both decisions use its real size, and it re-anchors
-// on scroll/resize. `gap` is the distance it stands off its trigger.
+// into the window if even that overflows. Its height is capped at the room on
+// the side it opens toward, so a tall popup scrolls rather than running
+// off the window. The popup is measured
+// after it mounts (hidden for one layout tick), so both decisions use its real
+// size, and it re-anchors on scroll/resize. `gap` is the distance it stands off its trigger.
 function useAnchoredPosition(open: boolean, gap: number) {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const popupRef = useRef<HTMLDivElement>(null)
@@ -129,8 +131,11 @@ function useAnchoredPosition(open: boolean, gap: number) {
     const place = () => {
       const r = triggerRef.current?.getBoundingClientRect()
       if (!r) return
-      const ph = popupRef.current?.offsetHeight ?? 0
-      const pw = popupRef.current?.offsetWidth ?? 0
+      const p = popupRef.current
+      // The content's full height, even while a max-height from an earlier
+      // placement is cutting it short.
+      const ph = p ? p.scrollHeight + p.offsetHeight - p.clientHeight : 0
+      const pw = p?.offsetWidth ?? 0
       const spaceBelow = window.innerHeight - r.bottom
       const spaceAbove = r.top
       // Flip up only once the height is known (ph > 0) and below can't hold it
@@ -143,6 +148,8 @@ function useAnchoredPosition(open: boolean, gap: number) {
         ...(openUp
           ? { bottom: window.innerHeight - r.top + gap }
           : { top: r.bottom + gap }),
+        maxHeight: (openUp ? spaceAbove : spaceBelow) - gap - VIEWPORT_MARGIN,
+        overflowY: 'auto',
       })
     }
     place()

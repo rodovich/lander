@@ -1772,8 +1772,6 @@ body.embed-preview-page {
 .subtasks-popup {
   width: 380px;
   max-width: 80vw;
-  max-height: 50vh;
-  overflow-y: auto;
 }
 
 .subtasks-item {
