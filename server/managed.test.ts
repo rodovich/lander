@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { REPLIES_MAX_CHARS, childResults, settled, wakeDue, type Family, type FamilyTask } from './managed'
+import {
+  REPLIES_MAX_CHARS,
+  childResults,
+  settled,
+  unsettledChildren,
+  wakeDue,
+  type Family,
+  type FamilyTask,
+} from './managed'
 
 const AT = (n: number) => new Date(Date.UTC(2026, 0, 1, 0, 0, n)).toISOString()
 
@@ -183,5 +191,35 @@ describe('settled', () => {
     expect(settled('A', family([quiet(), finished], { A: ['G'] }))).toBe(false)
     const seen = quiet({ childrenSeen: { G: finished.rides![0].endedAt! } })
     expect(settled('A', family([seen, finished], { A: ['G'] }))).toBe(true)
+  })
+})
+
+describe('unsettledChildren', () => {
+  it('names the children still working or with results not yet read', () => {
+    const working = task('W', [{ from: fromParent, open: true }])
+    const unread = task('U', [{ from: fromParent, text: 'done' }])
+    const read = task('R', [{ from: fromParent, text: 'done' }])
+    const parent = task('P', [], { childrenSeen: { R: read.rides![0].endedAt! } })
+    expect(
+      unsettledChildren('P', family([parent, working, unread, read], { P: ['W', 'U', 'R'] })),
+    ).toEqual(['W', 'U'])
+  })
+
+  it('does not hold a parent on a landed child, whatever that child left unread', () => {
+    const child = task('C', [{ from: fromParent, text: 'done' }], { status: 'landed' })
+    const grandchild = task('G', [{ from: { task: 'C', via: 'launch' }, text: 'ported' }])
+    const parent = task('P', [], { childrenSeen: { C: child.rides![0].endedAt! } })
+    expect(
+      unsettledChildren('P', family([parent, child, grandchild], { P: ['C'], C: ['G'] })),
+    ).toEqual([])
+  })
+
+  it('holds a parent on a landed child while that child’s own child still runs', () => {
+    const child = task('C', [{ from: fromParent, text: 'done' }], { status: 'landed' })
+    const grandchild = task('G', [{ from: { task: 'C', via: 'launch' }, open: true }])
+    const parent = task('P', [], { childrenSeen: { C: child.rides![0].endedAt! } })
+    expect(
+      unsettledChildren('P', family([parent, child, grandchild], { P: ['C'], C: ['G'] })),
+    ).toEqual(['C'])
   })
 })

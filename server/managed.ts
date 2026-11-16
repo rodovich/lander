@@ -88,11 +88,20 @@ function queuedToRun(task: FamilyTask): boolean {
 export function settled(id: string, family: Family): boolean {
   const task = family.tasks.get(id)
   if (!task) return true
+  // Lander delivers nothing to a landed task, so only work still running under
+  // it holds it, not results or answers it hasn't received.
+  if (task.status === 'landed')
+    return idle(task, family) && family.childrenOf(id).every((c) => settled(c, family))
   if (!idle(task, family) || queuedToRun(task) || task.pendingNotify) return false
   if (family.awaitingAnswer.has(id)) return false
-  return family.childrenOf(id).every((childId) => {
+  return unsettledChildren(id, family).length === 0
+}
+
+export function unsettledChildren(id: string, family: Family): string[] {
+  const task = family.tasks.get(id)
+  return family.childrenOf(id).filter((childId) => {
     const child = family.tasks.get(childId)
-    return settled(childId, family) && !(child && hasWakingActivity(task, child))
+    return !settled(childId, family) || (!!task && !!child && hasWakingActivity(task, child))
   })
 }
 

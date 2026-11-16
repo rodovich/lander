@@ -185,6 +185,7 @@ import { createComposedStore, type ComposedMessage } from './composed'
 import {
   answerNotice,
   childResults,
+  unsettledChildren,
   wakeDue,
   type Family,
   type FamilyTask,
@@ -1461,12 +1462,49 @@ async function readFamily(
     tasks.set(id, task)
     pending.push(...(edges.get(id) ?? []))
   }
+  return familyOf(project, tasks, edges, awaitingAnswer)
+}
+
+function familyOf(
+  project: Project,
+  tasks: Map<string, Task>,
+  edges: Map<string, string[]>,
+  awaitingAnswer: Set<string>,
+): Family {
   return {
     tasks,
     childrenOf: (id) => edges.get(id) ?? [],
     driving: (id) => running.has(taskKey(project.slug, id)),
     awaitingAnswer,
   }
+}
+
+function noteFamily(
+  project: Project,
+  id: string,
+  task: Task,
+  edges: Map<string, string[]>,
+  awaitingAnswer: Set<string>,
+): void {
+  if (task.managed && task.spawnedBy) {
+    const children = edges.get(task.spawnedBy)
+    if (children) children.push(id)
+    else edges.set(task.spawnedBy, [id])
+  }
+  collectAwaitingAnswer(task, inFlight(project.slug, id, task), awaitingAnswer)
+}
+
+// Every active task's managed family, read now rather than from the sweep's
+// last pass, so a child launched since then counts.
+async function readProjectFamily(project: Project): Promise<Family> {
+  const tasks = new Map<string, Task>()
+  const edges = new Map<string, string[]>()
+  const awaitingAnswer = new Set<string>()
+  for (const task of await readTasks(project.dataDir)) {
+    tasks.set(task.id, task)
+    noteFamily(project, task.id, task, edges, awaitingAnswer)
+  }
+  return familyOf(project, tasks, edges, awaitingAnswer)
 }
 
 async function deliverChildResults(
@@ -1635,9 +1673,7 @@ async function sweepOnce(): Promise<void> {
       } catch {
         continue
       }
-      if (task.managed && task.spawnedBy)
-        edges.set(task.spawnedBy, [...(edges.get(task.spawnedBy) ?? []), id])
-      collectAwaitingAnswer(task, inFlight(project.slug, id, task), awaitingAnswer)
+      noteFamily(project, id, task, edges, awaitingAnswer)
       // Deliver due scheduled messages first — independent of the task's own
       // scheduled launch, and even while it's running (delivery just enqueues).
       // Let deliverScheduledMessages decide due-ness (it weighs time and await
@@ -3236,7 +3272,8 @@ app.patch('/api/:project/tasks/:id', async (c) => {
     // unrelated one. Self-land (a task landing itself, the no-id `lander land`)
     // and any UI-initiated land stay unrestricted. Other status changes keep
     // their existing openness — this gate is specifically the land-by-id path.
-    if (body.status === 'landed' && principal.kind === 'task' && !isSelfPrincipal(principal, project, id)) {
+    const selfInitiated = isSelfPrincipal(principal, project, id)
+    if (body.status === 'landed' && principal.kind === 'task' && !selfInitiated) {
       let spawnedByPrincipal =
         task.spawnedBy === principal.id && task.spawnedByProject === principal.slug
       if (task.spawnedBy === principal.id && task.spawnedByProject === undefined) {
@@ -3252,6 +3289,20 @@ app.patch('/api/:project/tasks/:id', async (c) => {
         return c.json({ error: 'a task may only land tasks it launched' }, 403)
     }
 
+    // A task that launched managed tasks said it would read their results.
+    if (body.status === 'landed' && selfInitiated) {
+      const unsettled = unsettledChildren(id, await readProjectFamily(project))
+      if (unsettled.length)
+        return c.json(
+          {
+            error:
+              `managed tasks you launched are still working or have results you haven't read: ${unsettled.join(', ')}. ` +
+              'End your turn to get their results, or land them first with `lander land <ids>`.',
+          },
+          409,
+        )
+    }
+
     // Any status change from anyone but the task's own CLI stops an in-flight
     // run: the run is being pulled out from under the agent — the human
     // redirecting a wedge or pacing it, or a spawner winding down a child it
@@ -3263,7 +3314,6 @@ app.patch('/api/:project/tasks/:id', async (c) => {
     // (applyDone only wedges a still-riding task on a non-deliberate exit)
     // leaves the new status as-is. A pace (`paced`, stored as `riding`) is only
     // the interrupt: the closed ride is what serves the task back as paced.
-    const selfInitiated = isSelfPrincipal(principal, project, id)
     const runId = task.runId
     const interrupt = typeof body.status === 'string' && !selfInitiated && !!runId
 

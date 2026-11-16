@@ -110,7 +110,7 @@ A task's agent can call back into lander to manage itself. When the daemon launc
 
 | Command | Effect |
 |---------|--------|
-| `lander land` | Mark **this** task `landed`. |
+| `lander land` | Mark **this** task `landed`. Refused while a managed task it launched is still working or has results it hasn't read. |
 | `lander wedge [--option id:label]...` | Mark **this** task `wedged` — it's blocked and needs the user. Repeatable `--option id:label` raises a choice ask whose buttons render under your message (your message is the question); the chosen option's label arrives as the next user message. |
 | `lander ask --option id:label...` | Raise an **advisory** choice question on **this** task *without* wedging — the task stays paced and nothing appears in the list. The option buttons render under your message and the chosen option's label arrives as the next user message. The user may instead just reply, which supersedes the ask. (Choice-only: a free-text ask would just duplicate the composer.) |
 | `lander ride --date <when>` / `--time <minutes>` / `--after <ids>` | Schedule a ride: **this** task rides again when the trigger fires (a time, or other tasks landing); once its turn ends it waits until then, and is notified with a generated message naming the trigger that fired — "Current date: …" for a time, "Tasks landed: …" for `--after`. |

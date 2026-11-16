@@ -2494,6 +2494,40 @@ describe('acting task coordination history', () => {
     expect((await rawTask(childId)).managed).toBe(expected)
   })
 
+  it('refuses a task landing itself while a managed task it launched is still working', async () => {
+    const actor = await createTask('Managing self-lander')
+    const child = (over: Record<string, unknown>) =>
+      writeFile(
+        path.join(tasksDir, 'tsk-working-child.json'),
+        JSON.stringify({
+          id: 'tsk-working-child',
+          flow: 'claude',
+          title: 'Working child',
+          status: 'riding',
+          createdAt: AT,
+          updatedAt: AT,
+          token: 'token-working-child',
+          shape: 2,
+          items: [],
+          rides: [],
+          managed: true,
+          spawnedBy: actor.id,
+          spawnedByProject: slug,
+          ...over,
+        }),
+      )
+    const land = () =>
+      asTask(actor.id, `/api/${slug}/tasks/${actor.id}`, 'PATCH', { status: 'landed' })
+    await child({ runId: 'run-working-child' })
+    const refused = await land()
+    expect(refused.status).toBe(409)
+    expect(((await refused.json()) as { error: string }).error).toContain('tsk-working-child')
+    expect((await rawTask(actor.id)).status).not.toBe('landed')
+
+    await child({ status: 'landed' })
+    expect((await land()).status).toBe(200)
+  })
+
   it("puts a managed child in its launcher's worktree, or that worktree's owner's, unless asked for its own", async () => {
     const launch = async (by: string, flags: Record<string, unknown>) => {
       const res = await launchAs(by, slug, { title: 'Child', ...flags })
