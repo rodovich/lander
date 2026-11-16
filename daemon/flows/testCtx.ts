@@ -170,6 +170,7 @@ export type DriverTurnFixture = {
   root: string
   cwd: string
   checkout?: string
+  worktreeOf?: string
   recordedCwd?: string
   env?: Record<string, string>
   attachments?: StartRunMessage['attachments']
@@ -188,6 +189,7 @@ export async function captureDriverTurn(
       task: fixture.task,
       attachments: fixture.attachments,
       recordedCwd: fixture.recordedCwd,
+      worktreeOf: fixture.worktreeOf,
       sessionId: fixture.task.sessionId,
       prompt: fixture.prompt ?? 'go',
       env: fixture.env ?? {},

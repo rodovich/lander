@@ -11,6 +11,7 @@ import {
   cleanUpAndRemoveCheckout,
   ensureCheckout,
   removeCheckout,
+  sharedCheckout,
 } from './checkout'
 
 const git = (cwd: string, ...args: string[]) =>
@@ -54,6 +55,13 @@ describe('task checkouts', () => {
   it('refuses a directory in its place that is not a worktree', async () => {
     mkdirSync(path.join(root, '.worktrees', 't1'), { recursive: true })
     await expect(ensureCheckout(root, 't1')).rejects.toThrow(/is not a git worktree/)
+  })
+
+  it("is shared as its owner's, and never recreated for a task sharing it", async () => {
+    const dir = await ensureCheckout(root, 'owner')
+    expect(sharedCheckout(root, 'owner')).toBe(dir)
+    await removeCheckout(root, 'owner')
+    expect(() => sharedCheckout(root, 'owner')).toThrow(/task owner's worktree, which no longer exists/)
   })
 
   describe('cleanUpAndRemoveCheckout', () => {

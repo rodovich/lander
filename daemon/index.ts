@@ -57,6 +57,7 @@ import {
   createTaskLocks,
   ensureCheckout,
   existingCheckout,
+  sharedCheckout,
   removeCheckout,
   cleanUpAndRemoveCheckout,
 } from './checkout'
@@ -268,8 +269,10 @@ const checkoutKey = (project: string, taskId: string) => `${project}\0${taskId}`
 // one. Undefined (nothing to wait for) otherwise.
 function prepareRun(msg: StartRunMessage, paths: RunPaths): Promise<void> | undefined {
   if (!paths.checkout) return undefined
-  return checkoutLock(checkoutKey(msg.project, msg.taskId), async () => {
-    await ensureCheckout(paths.root, msg.taskId)
+  const owner = msg.worktreeOf ?? msg.taskId
+  return checkoutLock(checkoutKey(msg.project, owner), async () => {
+    if (msg.worktreeOf) sharedCheckout(paths.root, owner)
+    else await ensureCheckout(paths.root, owner)
   })
 }
 
@@ -321,16 +324,17 @@ function releaseCheckout(msg: ReleaseCheckoutMessage): void {
 // the call.
 //
 // A project that enables worktrees overrides all of that: the run launches in
-// the task's own checkout, whatever the flow would have chosen (prepareRun
-// creates it first). That is daemon policy, not a provider's, so the flows'
-// resolvers never see it.
+// the task's own checkout, or the one it shares, whatever the flow would have
+// chosen (prepareRun creates its own first). That is daemon policy, not a
+// provider's, so the flows' resolvers never see it.
 function resolveRunPaths(msg: StartRunMessage, caps: ProviderCaps): RunPaths {
   const root = pathBySlug.get(msg.project)
   if (!root) throw new Error(`daemon serves no project for slug ${msg.project}`)
-  const app = runningApp(msg.project, msg.taskId)
+  const owner = msg.worktreeOf ?? msg.taskId
+  const app = runningApp(msg.project, owner)
   const withApp = app ? { app } : {}
   if (projectOptions.worktrees(root)) {
-    const checkout = checkoutPath(root, msg.taskId)
+    const checkout = checkoutPath(root, owner)
     return { root, cwd: checkout, checkout, ...withApp }
   }
   const launch = caps.resolveLaunchDir({ root, recordedCwd: msg.recordedCwd, isDir })

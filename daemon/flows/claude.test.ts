@@ -122,6 +122,22 @@ describe('Claude flow', () => {
     ).not.toContain('git worktree lander created')
   })
 
+  it("tells an agent in its launcher's checkout that it is sharing it, and nothing more", async () => {
+    const wt = '/repo/.worktrees/parent'
+    const launch = await runClaude({
+      task: {},
+      root: '/repo',
+      cwd: wt,
+      checkout: wt,
+      worktreeOf: 'parent',
+    })
+    const systemPrompt = launch.args[launch.args.indexOf('--append-system-prompt') + 1]
+    expect(systemPrompt).toContain(
+      "You are sharing your parent task's worktree at `/repo/.worktrees/parent`.",
+    )
+    expect(systemPrompt).not.toContain('git worktree lander created')
+  })
+
   it('reads LANDER.md from the checkout, falling back to the root', async () => {
     const wt = '/repo/.worktrees/t1'
     const docs: Record<string, string> = { '/repo': 'ROOT DOC' }

@@ -146,10 +146,12 @@ export type CtxTask = {
   // resolveLaunchDir chose.
   cwd: string
   root: string
-  // The git worktree the daemon created for this task and launched it in (so
-  // also `cwd`), when the project enables them. The flow's writable workspace,
-  // and what the agent is told about. Absent otherwise.
+  // The git worktree the daemon launched this task in (so also `cwd`), when the
+  // project enables them. The flow's writable workspace, and what the agent is
+  // told about. Absent otherwise.
   checkout?: string
+  // Set when that worktree is another task's, which this one shares.
+  checkoutShared?: true
   // The cwd the previous turn's shell ended in, for the manual-cd hint.
   recordedCwd?: string
   allow?: string[]
@@ -1056,6 +1058,9 @@ export function createCtxRuntime(
       cwd,
       root,
       ...(checkout !== undefined ? { checkout } : {}),
+      ...(checkout !== undefined && start.worktreeOf !== undefined
+        ? { checkoutShared: true as const }
+        : {}),
       ...(start.recordedCwd !== undefined
         ? { recordedCwd: start.recordedCwd }
         : {}),

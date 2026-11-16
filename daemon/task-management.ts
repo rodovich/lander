@@ -42,7 +42,13 @@ export function fillTaskPrompt(taskPromptTemplate: string, id: string): string {
   return taskPromptTemplate.replace('{{id}}', id)
 }
 
-export function checkoutNote(checkout: string, root: string): string {
+export function checkoutNote({
+  checkout,
+  checkoutShared,
+  root,
+}: Pick<Ctx['task'], 'checkout' | 'checkoutShared' | 'root'>): string | undefined {
+  if (checkout === undefined) return undefined
+  if (checkoutShared) return `You are sharing your parent task's worktree at \`${checkout}\`.`
   return (
     `This task works in a git worktree lander created for it at \`${checkout}\`, ` +
     `starting detached at whatever the project's main checkout (\`${root}\`) had ` +
@@ -217,7 +223,10 @@ export function turnPromptParts(
 
 export function prepareUserMessagePrompt(
   ctx: {
-    task: Pick<Ctx['task'], 'taskId' | 'root' | 'checkout' | 'watchers' | 'app'>
+    task: Pick<
+      Ctx['task'],
+      'taskId' | 'root' | 'checkout' | 'checkoutShared' | 'watchers' | 'app'
+    >
     turn: Parameters<typeof turnPromptParts>[0]
     state: Pick<Ctx['state'], 'get' | 'set'>
   },
@@ -232,9 +241,8 @@ export function prepareUserMessagePrompt(
   },
 ): { prompt: string; commitDelivered(): void } {
   const taskPrompt = fillTaskPrompt(taskPromptTemplate, ctx.task.taskId)
-  const rendered = ctx.task.checkout
-    ? `${taskPrompt}\n\n${checkoutNote(ctx.task.checkout, ctx.task.root)}`
-    : taskPrompt
+  const note = checkoutNote(ctx.task)
+  const rendered = note ? `${taskPrompt}\n\n${note}` : taskPrompt
   const digest = deliveryDigest(rendered)
   const sendTaskPrompt = shouldDeliver(
     sessionId,

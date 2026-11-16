@@ -77,6 +77,17 @@ export async function ensureCheckout(
   return dir
 }
 
+// The checkout of the task `owner`, for a task that shares it. Never created:
+// that would bring back a tree its owner was done with, detached and without
+// the work it held.
+export function sharedCheckout(root: string, owner: string): string {
+  const dir = existingCheckout(root, owner)
+  if (dir) return dir
+  throw new Error(
+    `This task shares task ${owner}'s worktree, which no longer exists. Lander removes it when that task is landed or archived.`,
+  )
+}
+
 // Remove the task's checkout if there is one. Twice `--force`: once for a dirty
 // tree (landing means done, and its branches stay), twice for a lock some tool
 // left behind.

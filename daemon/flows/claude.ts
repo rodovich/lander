@@ -380,6 +380,7 @@ function buildClaudeArgs(
     existsSync(dir),
   )
   const tmpDirArgs = scratchRoots.flatMap((dir) => ['--add-dir', dir])
+  const note = checkoutNote(ctx.task)
   const allowed: string[] = ['Bash(lander:*)']
   if (ctx.task.allow?.length) allowed.push(...ctx.task.allow)
 
@@ -426,7 +427,7 @@ function buildClaudeArgs(
       fillTaskPrompt(taskPromptTemplate, ctx.task.taskId),
       GIT_TIPS,
       LONG_COMMAND_TIPS,
-      ...(ctx.task.checkout ? [checkoutNote(ctx.task.checkout, ctx.task.root)] : []),
+      ...(note ? [note] : []),
       ...(projectDoc ? [projectDocBlock(projectDoc)] : []),
     ].join('\n\n'),
     '--output-format',

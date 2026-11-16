@@ -134,6 +134,9 @@ export type StartRunMessage = {
   // cwd hint — the recorded task.cwd. The daemon does the stat/fallback
   // resolution locally.
   recordedCwd?: string
+  // The task whose worktree this task works in, when it isn't its own. The
+  // daemon ignores it in a project without worktrees.
+  worktreeOf?: string
   // Set only on the first turn after an incoming message revived this task. The
   // daemon renders it as a small `<task-revived>` prompt block. One-shot: the
   // server clears the task-side marker as it launches this run, so a later turn

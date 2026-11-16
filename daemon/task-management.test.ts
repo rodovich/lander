@@ -297,4 +297,16 @@ describe('prepareUserMessagePrompt', () => {
       'do work\n\n<attached-files/>\n\n<task-revived/>\n\n<ride-scheduled/>',
     )
   })
+
+  it("tells a task in its launcher's checkout only that it is sharing it", () => {
+    const { ctx } = makeCtx({}, '/repo/.worktrees/parent')
+    const { prompt } = prepareUserMessagePrompt(
+      { ...ctx, task: { ...ctx.task, checkoutShared: true } },
+      { sessionId: undefined, taskPromptTemplate: TEMPLATE, readProjectDoc: () => undefined },
+    )
+    expect(prompt).toContain(
+      "This task id is t1.\n\nYou are sharing your parent task's worktree at `/repo/.worktrees/parent`.",
+    )
+    expect(prompt).not.toContain('git worktree lander created')
+  })
 })
