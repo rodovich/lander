@@ -26,6 +26,22 @@ describe('LifecycleNote', () => {
     expect(html).toContain('Fix the parser <span class="timeline-note-label landed">landed')
   })
 
+  it('links a task named in a wedge’s reason', () => {
+    const html = render(
+      {
+        ...base,
+        eventKind: 'wedged',
+        title: 'Child',
+        reason: "This task can't take a turn: task 0crPAGEfml, which manages it, has landed.",
+      },
+      (id) =>
+        id === '0crPAGEfml' ? { href: '/proj/0crPAGEfml', title: 'Parent', status: 'landed' } : undefined,
+    )
+    expect(html).toContain(
+      ': This task can&#x27;t take a turn: task <a class="timeline-note-link landed" href="/proj/0crPAGEfml">Parent</a>, which manages it, has landed.',
+    )
+  })
+
   it('shows the firing time beside a scheduled verb', () => {
     const html = render({
       ...base,

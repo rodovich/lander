@@ -1,5 +1,6 @@
 import { MessageNote } from './messageNote'
 import { useTaskLink } from './taskLinkContext'
+import { taskHref } from './taskRef'
 import { TaskChip } from './timelineNote'
 import type { MessageItem } from './types'
 
@@ -27,8 +28,7 @@ export function SentMessageNote({
     <MessageNote item={item} slug={slug} openOn={openOn}>
       received message from{' '}
       <TaskChip
-        id={sender}
-        slug={slug}
+        href={taskHref(slug, sender)}
         title={current?.title || sender}
         status={current?.status}
         createdAt={current?.createdAt}

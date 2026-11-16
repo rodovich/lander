@@ -51,7 +51,7 @@ export function safeHref(url: string): string | undefined {
 // once told agents to print. The CLI no longer accepts either — this is
 // display-only, so those older conversations keep linking. 8 is the floor
 // because it is long enough that an ordinary word rarely collides.
-const TASK_ID =
+export const TASK_ID =
   /(?<![0-9A-Za-z_-])(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9A-Za-z_-]{8,10})(?![0-9A-Za-z_-])/gi
 
 const TASK_MENTION_CLASS = 'task-mention'

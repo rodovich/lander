@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { Collapsible, CollapsibleRow } from './collapsible'
 import { formatTimestamp } from './format'
-import { taskHref } from './taskRef'
+import { TASK_ID, type TaskLinkResolver } from './markdown'
 
 // The statuses that have a tint of their own. Anything else — a status this
 // client doesn't know, or one carrying whitespace that would inject a second
@@ -22,14 +22,12 @@ export function TaskStatus({ status }: { status: string }) {
 // alike. The caller resolves the title, because which one is right differs —
 // an event names the task as it was, an action as it is now.
 export function TaskChip({
-  id,
-  slug,
+  href,
   title,
   status,
   createdAt,
 }: {
-  id: string
-  slug: string
+  href: string
   title: ReactNode
   status?: string
   createdAt?: string
@@ -37,12 +35,26 @@ export function TaskChip({
   return (
     <a
       className={`timeline-note-link${statusClass(status)}`}
-      href={taskHref(slug, id)}
+      href={href}
       title={createdAt ? formatTimestamp(createdAt) : undefined}
     >
       {title}
     </a>
   )
+}
+
+// For text that isn't markdown, such as an event's reason.
+export function TaskMentions({ text, linkTask }: { text: string; linkTask: TaskLinkResolver }) {
+  const parts: ReactNode[] = []
+  let last = 0
+  for (const match of text.matchAll(TASK_ID)) {
+    const link = linkTask(match[0])
+    if (!link) continue
+    parts.push(text.slice(last, match.index), <TaskChip key={match.index} {...link} />)
+    last = match.index + match[0].length
+  }
+  parts.push(text.slice(last))
+  return <>{parts}</>
 }
 
 // One quiet, unbubbled row: prose about something that happened, with the

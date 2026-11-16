@@ -1,7 +1,8 @@
 import { formatTimestamp } from './format'
 import { MessageNote } from './messageNote'
 import { useTaskLink } from './taskLinkContext'
-import { TaskChip, TimelineNote } from './timelineNote'
+import { taskHref } from './taskRef'
+import { TaskChip, TaskMentions, TimelineNote } from './timelineNote'
 import type { EventItem, MessageItem } from './types'
 
 // How each lifecycle event verb reads in the timeline. Exported so the
@@ -56,8 +57,7 @@ export function LifecycleNote({
       const current = linkTask(t.id, slug)
       return (
         <TaskChip
-          id={t.id}
-          slug={slug}
+          href={taskHref(slug, t.id)}
           title={t.title}
           status={current?.status}
           createdAt={current?.createdAt}
@@ -95,7 +95,11 @@ export function LifecycleNote({
             </span>
           )}
       </span>
-      {event.reason && <>: {event.reason}</>}
+      {event.reason && (
+        <>
+          : <TaskMentions text={event.reason} linkTask={linkTask} />
+        </>
+      )}
     </>
   )
   return message ? (

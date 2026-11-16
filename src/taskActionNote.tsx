@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { formatTimestamp } from './format'
 import { useTaskLink } from './taskLinkContext'
+import { taskHref } from './taskRef'
 import { statusClass, TaskChip, TimelineNote } from './timelineNote'
 import type {
   TaskActionItem,
@@ -14,8 +15,7 @@ function RefLink({ task }: { task: TaskActionRef }) {
   const current = useTaskLink()(task.id, task.projectSlug)
   return (
     <TaskChip
-      id={task.id}
-      slug={task.projectSlug}
+      href={taskHref(task.projectSlug, task.id)}
       title={current?.title || task.title || task.id}
       status={current?.status}
       createdAt={current?.createdAt}

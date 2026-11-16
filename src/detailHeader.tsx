@@ -7,7 +7,7 @@ import { IconButton } from './iconButton'
 import { CopyConversationButton, CopyIdButton, TaskActionsMenu } from './menus'
 import { availableTaskActions } from './taskActions'
 import type { TaskAction } from './taskActions'
-import { taskKeyOf } from './taskRef'
+import { taskHref, taskKeyOf } from './taskRef'
 import { SubtasksChip } from './subtasks'
 import { TaskChip, TaskStatus } from './timelineNote'
 import type { FlowCaps, TaskWithProject } from './types'
@@ -159,8 +159,7 @@ export const DetailHeader = memo(function DetailHeader({
           <span className="task-parent">
             in{' '}
             <TaskChip
-              id={parent.id}
-              slug={parent.projectSlug}
+              href={taskHref(parent.projectSlug, parent.id)}
               title={parent.title}
               status={parent.status}
             />

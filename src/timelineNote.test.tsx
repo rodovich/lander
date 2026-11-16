@@ -51,7 +51,7 @@ describe('TaskChip', () => {
   it('tints only a status the stylesheet knows', () => {
     const chip = (status?: string) =>
       renderToStaticMarkup(
-        <TaskChip id="abc" slug="proj" title="A task" status={status} />,
+        <TaskChip href="/proj/abc" title="A task" status={status} />,
       )
     expect(chip('wedged')).toContain('class="timeline-note-link wedged"')
     expect(chip('wedged')).toContain('href="/proj/abc"')

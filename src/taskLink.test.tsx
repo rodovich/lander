@@ -25,7 +25,7 @@ describe('task link tooltips', () => {
 
   it('shows the creation time on task chips used in conversation notes', () => {
     const html = renderToStaticMarkup(
-      <TaskChip id={ID} slug="proj" title="A task" createdAt={CREATED} />,
+      <TaskChip href={`/proj/${ID}`} title="A task" createdAt={CREATED} />,
     )
     expect(html).toContain(`title="${formatTimestamp(CREATED)}"`)
   })
