@@ -89,6 +89,11 @@ describe('the widget in an app’s page', () => {
       if (path === '/api/proj/tasks/t1') return Response.json(task)
       if (path === '/api/proj/attachments/a1')
         return new Response('The attached notes', { headers: { 'content-type': 'text/plain' } })
+      if (path === '/api/proj/attachments/a2')
+        return new Response(
+          '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20" fill="red"/></svg>',
+          { headers: { 'content-type': 'image/svg+xml' } },
+        )
       if (path === '/api/proj/tasks/t1/app')
         return Response.json({ app: { url: `${framingOrigin}/` } })
       if (path === '/api/proj/tasks/t1/seen') {
@@ -232,6 +237,30 @@ describe('the widget in an app’s page', () => {
     await page.keyboard.press('Escape')
     await preview.waitFor({ state: 'hidden' })
     expect(await toggle(page).getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('copies an SVG attachment as a PNG image', async () => {
+    task = {
+      ...TASK,
+      items: [
+        {
+          ...TASK.items[0],
+          attachments: [{ id: 'a2', name: 'diagram.svg', mime: 'image/svg+xml', size: 104 }],
+        },
+      ],
+    }
+    const page = await openWidget()
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+    await embedded(page).getByRole('button', { name: /diagram\.svg/ }).click()
+    const preview = page.frameLocator('lander-widget iframe.preview')
+    await preview.getByRole('button', { name: 'Copy' }).click()
+    await preview.getByRole('button', { name: 'Copied ✓' }).waitFor()
+    const copied = await page.evaluate(async () => {
+      const [item] = await navigator.clipboard.read()
+      const bitmap = await createImageBitmap(await item.getType('image/png'))
+      return { width: bitmap.width, height: bitmap.height }
+    })
+    expect(copied).toEqual({ width: 40, height: 20 })
   })
 
   describe('picking an element', () => {

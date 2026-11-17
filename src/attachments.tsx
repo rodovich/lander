@@ -155,19 +155,19 @@ export function adjacentFileIndex(
   return (index + direction + total) % total
 }
 
-// Re-encode an image blob as PNG, the only format browsers reliably accept for
-// clipboard writes. A PNG source is returned untouched; anything else is drawn
-// to a canvas and exported.
-async function toPng(b: Blob): Promise<Blob> {
-  if (b.type === 'image/png') return b
-  const bitmap = await createImageBitmap(b)
+// Re-encode the image at a URL as PNG, the only format browsers reliably accept
+// for clipboard writes. It goes through an <img> because createImageBitmap
+// rejects vector Blobs such as SVG.
+async function toPng(url: string): Promise<Blob> {
+  const img = new Image()
+  img.src = url
+  await img.decode()
   const canvas = document.createElement('canvas')
-  canvas.width = bitmap.width
-  canvas.height = bitmap.height
+  canvas.width = img.naturalWidth
+  canvas.height = img.naturalHeight
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('no 2d context')
-  ctx.drawImage(bitmap, 0, 0)
-  bitmap.close()
+  ctx.drawImage(img, 0, 0)
   return await new Promise<Blob>((resolve, reject) =>
     canvas.toBlob((out) => (out ? resolve(out) : reject(new Error('toBlob failed'))), 'image/png'),
   )
@@ -459,7 +459,8 @@ export function FilePreviewModal({
       ) {
         // Clipboard writes must begin during the click's user activation. The
         // API accepts a pending PNG promise, so conversion may finish afterward.
-        const png = toPng(preview.blob)
+        const png =
+          preview.blob.type === 'image/png' ? preview.blob : toPng(preview.objectUrl!)
         await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
       } else {
         await navigator.clipboard.writeText(await preview.blob.text())
