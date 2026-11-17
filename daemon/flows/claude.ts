@@ -59,15 +59,18 @@ const GIT_TIPS = [
   '- Commit or push only when the user asks. If on the default branch, branch first.',
 ].join('\n')
 
-// The CLI keeps the turn's process waiting on a background command and wakes
-// the agent when it ends, and the daemon's idle watchdog allows for the wait.
-// Without this note, an agent given an hour-long suite detached it instead.
+// The CLI keeps the turn's process waiting on the main agent's background
+// command and wakes the agent when it ends, and the daemon's idle watchdog
+// allows for the wait. Without this note, an agent given an hour-long suite
+// detached it instead. Forks read the note too, and before it had a bullet for
+// them, one returned to its parent before its command finished.
 const LONG_COMMAND_TIPS = [
   '# Long-running commands',
   '- For a command that finishes on its own but may take more than a few minutes (a test suite, build or benchmark), use Bash `run_in_background: true`, send its output to a file, and set a timeout that covers the whole run. Split longer work into pieces.',
   '- While it runs you may keep working. If you run out of other work before it finishes, end your turn instead of waiting, polling or monitoring. You are woken in this session when the command finishes or is stopped; until then the task shows as working and new messages wait.',
   '- A command that runs until stopped (a dev server, a file watcher, `tail -f`) keeps the task working and new messages waiting until it stops or times out. Stop any such command before ending your turn. Restart it in a later turn if needed.',
   "- Don't detach a command to escape these limits: lander can neither stop it nor wake you when it ends.",
+  "- In a subagent, run long commands in the foreground instead, in pieces that each finish within the 10-minute Bash timeout. Ending its turn ends a subagent: nothing wakes it when a background command finishes, and the command is killed when the task's turn ends.",
 ].join('\n')
 
 export type ClaudeFlowDeps = {
