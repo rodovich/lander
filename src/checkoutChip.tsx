@@ -10,7 +10,7 @@ function BranchIcon() {
         <circle cx="4.5" cy="3.5" r="1.6" />
         <circle cx="4.5" cy="12.5" r="1.6" />
         <circle cx="11.5" cy="5.5" r="1.6" />
-        <path d="M4.5 5.1v5.8M11.5 7.1c0 2.4-2 3-5.4 4" />
+        <path d="M4.5 5.1v5.8M11.5 7.1C11.5 9.6 4.5 8.6 4.5 10.9" />
       </g>
     </svg>
   )
