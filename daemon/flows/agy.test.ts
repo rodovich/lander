@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import {
   agyLogRefusals,
   agyUsageBody,
@@ -13,7 +13,6 @@ import {
   onGrant,
   onStatus,
   agyRepromptMessage,
-  lostConversationBrief,
   resolveLaunchDir,
 } from './agy'
 import { announcedFlows, buildFlows, FLOW_MODULES, providerCaps } from './index'
@@ -212,48 +211,17 @@ it('does not use old context sizes when a task with no conversation starts one',
   })
 })
 
-describe('when agy cannot find the conversation it is asked to resume', () => {
-  const resumedState = async () => {
-    const g = fixture([[init('lost-conversation'), event('step_update', {
-      step_index: 1, step_type: 'agent_response', state: 'DONE', text_delta: 'Earlier',
-      usage: { input_tokens: 900, cache_read_tokens: 600, output_tokens: 10 },
-    }), result({ usage: { input_tokens: 900, cache_read_tokens: 600, output_tokens: 10 } })]])
-    return applyEvents(goldenInput(g).start, (await driveFlow(g, flow())).events)
-      .flowState as Record<string, unknown>
-  }
-
-  it('stops the replacement and starts a new conversation told where to read the old one', async () => {
-    const g = fixture([[init('unwanted-replacement')]], await resumedState())
-    g.later = [{ chunks: [[init('new-conversation'), response(1, 'Read it'), result({
-      usage: { input_tokens: 400, output_tokens: 40 },
-    })]] }]
-    const driven = await driveFlow(g, flow())
-    expect(driven.spawns).toHaveLength(2)
-    expect(driven.spawns[0].args).toEqual(expect.arrayContaining(['--conversation', 'lost-conversation']))
-    expect(driven.spawns[0].child.killed).toBe(true)
-    expect(driven.spawns[1].args).not.toContain('--conversation')
-    expect(driven.spawns[1].args[1]).toBe([
-      'Task task-1.',
-      projectDocBlock('Project instructions'),
-      lostConversationBrief('task-1'),
-      'do the thing',
-    ].join('\n\n'))
-    expect(steps(driven.events)).toContainEqual(expect.objectContaining({ kind: 'notice' }))
-    expect(applyEvents(goldenInput(g).start, driven.events)).toMatchObject({
-      flowState: {
-        sessionId: 'new-conversation',
-        threadUsage: { input: 400, output: 40, cacheRead: 0, cacheCreation: 0 },
-      },
-      rides: [{ usage: { input: 400, output: 40, cacheRead: 0, cacheCreation: 0 } }],
-    })
-  })
-
-  it('keeps nothing of the old conversation when the new one is interrupted before any output', async () => {
-    const g = fixture([[init('unwanted-replacement')]], await resumedState())
-    g.later = [{ chunks: [[init('new-conversation')]], exitCode: 1 }]
-    const driven = await driveFlow(g, flow())
-    expect(applyEvents(goldenInput(g).start, driven.events).flowState).toEqual({ sessionId: 'new-conversation' })
-  })
+it('stops agy and reports the session lost when it starts a new conversation instead of resuming', async () => {
+  const warning = 'warning: conversation "lost-conversation" not found'
+  const g = fixture([[init('unwanted-replacement'), response(1, 'Hi')]], { sessionId: 'lost-conversation' })
+  g.stderrChunks = [`${warning}\n`]
+  const driven = await driveFlow(g, flow())
+  expect(driven.spawns).toHaveLength(1)
+  expect(driven.spawns[0].args).toEqual(expect.arrayContaining(['--conversation', 'lost-conversation']))
+  expect(driven.spawns[0].child.killed).toBe(true)
+  expect(driven.result).toEqual({ exitCode: 1, stderr: warning, cause: 'session-lost' })
+  expect(steps(driven.events)).toEqual([])
+  expect(applyEvents(goldenInput(g).start, driven.events).flowState).toEqual({ sessionId: 'lost-conversation' })
 })
 
 it('groups each response with the tool calls it made', async () => {

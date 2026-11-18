@@ -116,7 +116,11 @@ export async function driveLive(
     task,
     ride: task.rides!.at(-1)!,
     events,
-    result: { exitCode: done?.exitCode ?? null, stderr: done?.stderr ?? '' } as TurnResult,
+    result: {
+      exitCode: done?.exitCode ?? null,
+      stderr: done?.stderr ?? '',
+      ...(done?.cause ? { cause: done.cause } : {}),
+    } as TurnResult,
   }
 }
 

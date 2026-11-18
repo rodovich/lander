@@ -52,6 +52,15 @@ describe.skipIf(!VERSION)(`codex contract (${VERSION})`, () => {
     expect(replyText(second)).toContain('PLUM-7')
   })
 
+  it('reports the session lost when asked to resume a thread the CLI does not have', async () => {
+    const turn = await driveLive(flow, {
+      root: scratchDir({ git: true }),
+      prior: { flowState: { sessionId: '00000000-1111-2222-3333-444444444444' } },
+      prompt: 'Reply with exactly: ok. Run no commands.',
+    })
+    expect(turn.result).toMatchObject({ exitCode: 1, cause: 'session-lost' })
+  })
+
   // turn.completed.usage is the thread's running total, restored on resume
   // (codex exec builds it from the thread total; 0.145–0.153 lost the restore to
   // a decoding bug, fixed in 0.154.0). Two near-identical tiny turns: a running

@@ -54,7 +54,6 @@ export {
   changedContextParts,
   type ContextPart,
   prepareUserMessagePrompt,
-  forgetDeliveries,
   // Deliver-once, for a provider whose only prose channel is the user message.
   deliveryDigest,
   shouldDeliver,

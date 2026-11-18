@@ -116,6 +116,16 @@ describe('daemon run manager', () => {
     })
   })
 
+  it('relays the cause a flow gives its done', () => {
+    const h = harness()
+    h.manager.startRun(makeStart())
+    push(h.hosts[0], { kind: 'done', exitCode: 1, stderr: 'gone', cause: 'session-lost' })
+    expect(h.messages.find((m) => m.type === 'done')).toMatchObject({
+      exitCode: 1,
+      cause: 'session-lost',
+    })
+  })
+
   it('hands the host a HostInput with the resolved paths and start fields', async () => {
     const h = harness({
       materialize: async () => ({

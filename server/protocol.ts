@@ -614,11 +614,13 @@ export type UpdateMessage = {
   committed?: true
 }
 
-// Why the daemon synthesized a done itself instead of relaying the host's own:
-// the idle watchdog fired, the daemon was shutting down (stopAll), or the
-// host died without reporting a result. Absent on a natural done — the exit
-// code and stderr carry the story there.
-export type DoneCause = 'idle-timeout' | 'daemon-shutdown' | 'host-crash'
+// Why a run failed, when that is known beyond its exit code and stderr. The
+// daemon synthesizes a done for the first three: the idle watchdog fired, the
+// daemon was shutting down (stopAll), or the host died without reporting a
+// result. A flow reports `session-lost` when its CLI no longer has the session
+// the turn asked to resume, which no retry of that session can fix.
+export type DoneCause = 'idle-timeout' | 'daemon-shutdown' | 'host-crash' | FlowDoneCause
+export type FlowDoneCause = 'session-lost'
 
 // The run finished. Sent with retry/replay until the server acks; a `done` for an
 // already-done run is a no-op (idempotency by runId).
@@ -628,7 +630,6 @@ export type DoneMessage = {
   exitCode: number
   interrupted: boolean
   stderr: string
-  // Present only on a daemon-synthesized done: why the run had to be ended.
   cause?: DoneCause
   // For cause 'idle-timeout': the idle window that expired, so the retry ask
   // can name the actual duration.

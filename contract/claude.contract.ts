@@ -46,6 +46,15 @@ describe.skipIf(!VERSION)(`claude contract (${VERSION})`, () => {
     expect(replyText(second)).toContain('PLUM-7')
   })
 
+  it('reports the session lost when asked to resume one the CLI does not have', async () => {
+    const turn = await driveLive(flow, {
+      root: scratchDir({ git: true }),
+      prior: { flowState: { sessionId: '00000000-1111-2222-3333-444444444444' } },
+      prompt: 'Reply with exactly: ok. Use no tools.',
+    })
+    expect(turn.result).toMatchObject({ exitCode: 1, cause: 'session-lost' })
+  })
+
   // Since CLI 2.1.278, total_cost_usd and modelUsage are the session's running
   // totals across --resume, while result.usage is the turn's own; the flow
   // charges each turn the difference (flow/claude-stream.ts sessionCost).

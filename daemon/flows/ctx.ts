@@ -27,6 +27,7 @@ import { existsSync } from 'node:fs'
 import type { ChildProcess } from 'node:child_process'
 import type {
   FlowMeta,
+  FlowDoneCause,
   RevivedMarker,
   ScheduledRide,
   StatePatchOp,
@@ -273,7 +274,7 @@ export type CtxScratch = {
   fresh: boolean
 }
 
-export type TurnResult = { exitCode: number; stderr?: string }
+export type TurnResult = { exitCode: number; stderr?: string; cause?: FlowDoneCause }
 
 export type Ctx = {
   turn: CtxTurn
@@ -1170,6 +1171,7 @@ export function createCtxRuntime(
       kind: 'done',
       exitCode: outcome.exitCode,
       stderr: outcome.stderr ?? '',
+      ...(outcome.cause ? { cause: outcome.cause } : {}),
     })
   }
 

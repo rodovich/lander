@@ -948,6 +948,7 @@ describe('reduceStreamLine', () => {
       AT,
     )
     expect(r.turnStarted).toBeUndefined()
+    expect(r.sessionNotFound).toBe(true)
   })
 
   it('reports the text of a synthetic API-error message, still as a text step', () => {

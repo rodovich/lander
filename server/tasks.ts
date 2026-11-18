@@ -1588,7 +1588,7 @@ export function applyRelaunch(
   message: string,
   at: string,
   by: string,
-  { repeat, flow }: { repeat?: RepeatSpec; flow?: string } = {},
+  { repeat, flow, reason }: { repeat?: RepeatSpec; flow?: string; reason?: string } = {},
 ): void {
   recordStatusTransition(
     task,
@@ -1597,6 +1597,7 @@ export function applyRelaunch(
     by,
   )
   const divider = sealForRelaunch(task, at, flow)
+  if (reason) divider.reason = reason
   queueEventPrompt(task, divider, message, at, {
     task: task.id,
     via: 'relaunch',

@@ -557,6 +557,7 @@ export function createRunManager({
             exitCode: event.exitCode,
             stderr: event.stderr,
             interrupted: false,
+            ...(event.cause ? { cause: event.cause } : {}),
             reported: true,
           })
           break

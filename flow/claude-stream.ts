@@ -101,6 +101,9 @@ export function reduceStreamLine(
   // Set on a `result` event: the agent has finished a model turn. The process
   // can outlive it, waiting on background work (see backgroundTaskIds).
   turnEnded?: true
+  // Set on the result a --resume ends with when the CLI has no transcript for
+  // the session.
+  sessionNotFound?: true
   // From a `system`/`task_started` event: the CLI began tracking a task for this
   // tool call — a command, a monitor or a subagent.
   taskStarted?: { taskId: string; toolUseId: string }
@@ -130,6 +133,7 @@ export function reduceStreamLine(
   let rateLimitResetsAt: string | undefined
   let sessionTotals: SessionTotals | undefined
   let turnEnded: true | undefined
+  let sessionNotFound: true | undefined
   let taskStarted: { taskId: string; toolUseId: string } | undefined
   let backgroundTaskIds: string[] | undefined
   let backgroundLimits: { toolUseId: string; limitMs: number }[] | undefined
@@ -270,6 +274,11 @@ export function reduceStreamLine(
     }
   } else if (ev.type === 'result') {
     turnEnded = true
+    if (
+      Array.isArray(ev.errors) &&
+      ev.errors.some((e: unknown) => typeof e === 'string' && e.startsWith('No conversation found with session ID'))
+    )
+      sessionNotFound = true
     if (typeof ev.result === 'string') finalText = ev.result
     if (Array.isArray(ev.permission_denials))
       blockedIds = ev.permission_denials
@@ -320,6 +329,7 @@ export function reduceStreamLine(
     rateLimitResetsAt,
     sessionTotals,
     ...(turnEnded ? { turnEnded } : {}),
+    ...(sessionNotFound ? { sessionNotFound } : {}),
     ...(taskStarted ? { taskStarted } : {}),
     ...(backgroundTaskIds ? { backgroundTaskIds } : {}),
     ...(backgroundLimits ? { backgroundLimits } : {}),

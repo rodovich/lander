@@ -1,7 +1,7 @@
 // The per-turn flow host's input and output protocol.
 
 import type { ChildProcess, SpawnOptions } from 'node:child_process'
-import type { StartRunMessage, StatePatchOp } from '../server/protocol'
+import type { FlowDoneCause, StartRunMessage, StatePatchOp } from '../server/protocol'
 import type { Step, Usage } from '../shared/stream'
 import type { MaterializedFiles } from './attachments'
 
@@ -48,7 +48,7 @@ export type HostEvent =
   // not emitted here (this executor's `done` is dropped by the settle-once gate
   // when the supervisor already settled). exitCode already accounts for
   // terminalError; stderr is the agent's stderr joined with any terminalError.
-  | { kind: 'done'; exitCode: number; stderr: string }
+  | { kind: 'done'; exitCode: number; stderr: string; cause?: FlowDoneCause }
   // A flow's durable-state write (ctx.state.set/delete/push/patch), batched. The
   // supervisor buffers these on the Run record and re-sends them on resume-from
   // alongside mintedSession/sentContext, then forwards each as a

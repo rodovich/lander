@@ -83,19 +83,14 @@ describe.skipIf(!VERSION)(`agy contract (${VERSION})`, () => {
     }
   })
 
-  it('starts a new conversation under a new id, exiting 0, when --conversation names one it cannot find', () => {
-    const root = testRoot()
+  it('reports the session lost when asked to resume a conversation the CLI does not have', async () => {
     const missing = '00000000-1111-2222-3333-444444444444'
-    const run = runJsonl('agy', [
-      '-p', 'Reply with only OK. Do not use tools.', '--output-format', 'stream-json',
-      '--print-timeout', '0s', '--conversation', missing,
-    ], { cwd: root })
-    expect(run.exit, run.stderr).toBe(0)
-    expect(run.stderr).toContain(`conversation "${missing}" not found`)
-    const first = run.lines[0]
-    expect(first.event).toBe('init')
-    expect(first.conversation_id).toEqual(expect.any(String))
-    expect(first.conversation_id).not.toBe(missing)
+    const turn = await driveLive(flow, {
+      root: testRoot(),
+      prior: { flowState: { sessionId: missing } },
+      prompt: 'Reply with only OK. Do not use tools.',
+    })
+    expect(turn.result).toMatchObject({ exitCode: 1, cause: 'session-lost' })
   })
 
   it('allows command(lander) and workspace file edits under --mode accept-edits and --project', async () => {

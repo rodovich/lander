@@ -8,7 +8,6 @@ import {
   addUsage,
   codexTurnUsage,
   diffEdits,
-  forgetDeliveries,
   fullToolInput,
   prepareUserMessagePrompt,
   readThreadUsage,
@@ -419,7 +418,7 @@ export function makeFlow({
       const version = readCliVersion?.()
       const known = ctx.state.get(['sessionId'])
       const sessionId = typeof known === 'string' && known ? known : undefined
-      let { prompt, commitDelivered } = prepareUserMessagePrompt(ctx, {
+      const { prompt, commitDelivered } = prepareUserMessagePrompt(ctx, {
         sessionId,
         taskPromptTemplate,
         readProjectDoc,
@@ -434,7 +433,7 @@ export function makeFlow({
       addDir('/tmp')
       addDir(process.env.TMPDIR)
       if (ctx.turn.filesDir && ctx.turn.filesDirExists) addDir(ctx.turn.filesDir)
-      let priorTotal = sessionId
+      const priorTotal = sessionId
         ? readThreadUsage(ctx.state.get(['threadUsage']))
         : { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 }
       let conversation = sessionId
@@ -442,33 +441,16 @@ export function makeFlow({
       let liveUsage: Usage | undefined
       const cliVersion = version && await version
       if (cliVersion) ctx.emit.meter({ cliVersion })
-      let first = true
-      for (;;) {
+      for (let first = true; ; first = false) {
         const run = await runAgy(ctx, [
           '-p', message, '--output-format', 'stream-json', '--print-timeout', '0s',
           '--mode', 'accept-edits', '--project', projectId,
           ...(conversation ? ['--conversation', conversation] : []),
           ...[...dirs].flatMap((dir) => ['--add-dir', dir]),
-        ], { sessionId: conversation, priorTotal, liveUsage, readLog: readAgyLog, detectLostConversation: first })
-        if (run.lostConversation && !ctx.signal.aborted) {
-          for (const key of ['sessionId', 'contextTokens', 'threadUsage']) ctx.state.delete([key])
-          forgetDeliveries(ctx.state)
-          ctx.emit.notice(
-            "Antigravity couldn't find this task's conversation, so this turn " +
-              'started a new one and the agent was told how to read the earlier messages.',
-          )
-          ;({ prompt, commitDelivered } = prepareUserMessagePrompt(
-            { ...ctx, turn: { ...ctx.turn, prompts: [lostConversationBrief(ctx.task.taskId), ...ctx.turn.prompts] } },
-            { sessionId: undefined, taskPromptTemplate, readProjectDoc },
-          ))
-          conversation = undefined
-          message = prompt
-          priorTotal = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 }
-          liveUsage = undefined
-          continue
-        }
+        ], { sessionId: conversation, priorTotal, liveUsage, readLog: readAgyLog })
+        if (run.lostConversation)
+          return { exitCode: 1, stderr: run.stderr.trim(), cause: 'session-lost' }
         if (first && run.producedOutput) commitDelivered()
-        first = false
         // agy ends the turn at a call no rule covers instead of letting the
         // agent carry on without it, so tell the agent and let it choose.
         if (run.refusals.length > 0 && !run.terminalError && !ctx.signal.aborted && run.conversationId) {
@@ -485,13 +467,6 @@ export function makeFlow({
       }
     },
   }
-}
-
-export function lostConversationBrief(taskId: string): string {
-  return (
-    "[lander] Antigravity couldn't find this task's earlier conversation, so this is a new one. " +
-    `Use \`lander view ${taskId} --messages all\` to read the conversation so far, then respond to the message below.`
-  )
 }
 
 // One refused call, as far as lander can identify it. `seen` is set when the
@@ -540,7 +515,6 @@ type RunOpts = {
   sessionId: string | undefined
   priorTotal: Usage | undefined
   liveUsage: Usage | undefined
-  detectLostConversation: boolean
 }
 
 async function runAgy(
@@ -564,7 +538,7 @@ async function runAgy(
 async function reduceAgy(
   ctx: Ctx,
   args: string[],
-  { sessionId, priorTotal, liveUsage: startUsage, detectLostConversation, readRunLog }: RunOpts & {
+  { sessionId, priorTotal, liveUsage: startUsage, readRunLog }: RunOpts & {
     readRunLog: () => string | undefined
   },
 ): Promise<AgyRun> {
@@ -601,7 +575,7 @@ async function reduceAgy(
   let pendingText: number | undefined
   let lastText = ''
   let conversationId = sessionId
-  let awaitingResumedId = detectLostConversation && sessionId !== undefined
+  let awaitingResumedId = sessionId !== undefined
   let producedOutput = false
   let lastStepDone = false
   let maxStep = -1
@@ -652,8 +626,7 @@ async function reduceAgy(
     if (typeof event.conversation_id === 'string' && event.conversation_id) {
       // agy answers a --conversation id it can't find by starting a new
       // conversation, saying so only on stderr. Stop it as soon as the new id
-      // shows, so the turn's work happens in a conversation told where the
-      // history is.
+      // shows, so the agent doesn't work on without the history.
       if (awaitingResumedId && event.conversation_id !== sessionId) {
         child.kill()
         const exitCode = await child.exit

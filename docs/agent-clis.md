@@ -119,6 +119,24 @@ whatever the task's flow.
 connect, and a timer for just after the soonest window resets. The flow's
 `onStatus` hook owns the content (`daemon/index.ts`, "Usage").
 
+**Lost sessions.** A CLI can lose the session a turn resumes: Claude Code
+deletes transcripts after 30 days, and agy has lost one after 10 idle days and
+an upgrade. No
+retry of that session can work, so each flow detects the loss and ends the
+turn with `cause: 'session-lost'`. The server then relaunches the task on the
+same flow, as "Relaunch and retry" would, and gives the reason on the relaunch
+divider. Each CLI says it differently (confirmed Claude 2.1.327, Codex 0.169,
+agy 1.5.11):
+
+| CLI | Resuming a session it doesn't have |
+|---|---|
+| Claude | exits 1; the result's `errors` reads `No conversation found with session ID: …` |
+| Codex | exits 1 with nothing on stdout; stderr reads `… no rollout found for thread id …` |
+| agy | warns on stderr, starts a new conversation under a new id, and exits 0 |
+
+Because agy carries on, its flow stops agy at the first event naming a
+different conversation id, before the agent works without its history.
+
 **Retrying at a reset.** When a turn fails, the retry ask can offer to retry when
 usage resets. Claude's stream reports outright that a limit refused the turn
 (`rate_limit_event` with status `rejected`), so its ask reads "Usage limit
@@ -230,12 +248,6 @@ The Antigravity flow runs `agy -p <message> --output-format stream-json
 attachment store. `--project` names a lander-managed project config,
 `~/.gemini/config/projects/lander-<hash>.json`, where project-scope grants
 land through the flow's `onGrant` hook. agy has no per-task rule channel.
-
-Given a `--conversation` id it can't find, agy warns on stderr and starts a new
-conversation, exiting 0 (confirmed v1.5.11). The flow stops that process when
-the stream's first event names a different id, then starts a new conversation
-with the first-turn prompt and a note telling the agent to read the task with
-`lander view`, and shows a notice on the turn.
 
 agy ends its turn at a call no rule covers instead of letting the agent continue
 without it. The flow passes `--log-file` so it can tell which call was refused,

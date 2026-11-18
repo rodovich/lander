@@ -79,6 +79,36 @@ for (const [label, goldens, flow] of [
   })
 }
 
+describe('a resumed session the CLI no longer has', () => {
+  it('is reported lost by claude', async () => {
+    const error = 'No conversation found with session ID: sess-gone'
+    const g: Golden = {
+      name: 'claude resume of a missing session',
+      chunks: [[JSON.stringify({
+        type: 'result', subtype: 'error_during_execution', is_error: true, num_turns: 0, errors: [error],
+      })]],
+      exitCode: 1,
+      stderrChunks: [`${error}\n`],
+      start: { flowState: { sessionId: 'sess-gone' } },
+    }
+    const flow = await driveFlow(g, claudeFlow())
+    expect(doneOf(flow.events)).toEqual({ kind: 'done', exitCode: 1, stderr: error, cause: 'session-lost' })
+  })
+
+  it('is reported lost by codex', async () => {
+    const error = 'Error: thread/resume: thread/resume failed: no rollout found for thread id thread-gone (code -32600)'
+    const g: Golden = {
+      name: 'codex resume of a missing thread',
+      chunks: [],
+      exitCode: 1,
+      stderrChunks: [`${error}\n`],
+      start: { flowState: { sessionId: 'thread-gone' } },
+    }
+    const flow = await driveFlow(g, codexFlow())
+    expect(doneOf(flow.events)).toEqual({ kind: 'done', exitCode: 1, stderr: error, cause: 'session-lost' })
+  })
+})
+
 describe('claude thread identity', () => {
   it('resumes a legacy top-level session rather than minting a fresh one', async () => {
     // The bug this exists to catch is silent: the flow would mint, the

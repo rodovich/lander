@@ -8,6 +8,7 @@ const AT = '2026-01-01T00:00:00.000Z'
 // A minimal riding task with the opening user item and an open ride the run is
 // streaming into (the state runTurn leaves before the first batch lands).
 const task = (over: Partial<ApplyTask> = {}): ApplyTask => ({
+  id: 'task-1',
   status: 'riding',
   title: 't',
   items: [{ id: 'u0', at: AT, kind: 'message', role: 'user', text: 'do it' }],
@@ -403,6 +404,32 @@ describe('applyDone', () => {
     applyDone(t, done({ exitCode: 1 }), { at: AT, askId: 'ask-x-0' })
     expect(t.retry).toBeUndefined()
     expect(t.items!.some((i) => i.kind === 'ask')).toBe(false)
+  })
+
+  it('relaunches instead of asking when the agent’s session could not be found', () => {
+    const t = { ...task(), flowState: { sessionId: 'gone' } }
+    const at = '2026-01-01T00:05:00.000Z'
+    applyDone(
+      t,
+      done({ exitCode: 1, cause: 'session-lost', stderr: 'No conversation found with session ID: gone' }),
+      { at, askId: 'ask-x-0' },
+    )
+    expect(t.status).toBe('riding')
+    expect(t.items!.some((i) => i.kind === 'ask')).toBe(false)
+    expect(t.flowState).toBeUndefined()
+    expect(t.queued).toEqual([expect.stringContaining('lander view task-1 --messages all')])
+    expect(t.items!.find((i) => i.kind === 'event')).toMatchObject({
+      eventKind: 'relaunched',
+      reason: "the agent's session could not be found",
+    })
+    expect(t.rides![0]).toMatchObject({ outcome: 'error', error: { cause: 'session-lost' } })
+  })
+
+  it('leaves a lost session to the agent’s own relaunch when one already sealed the run', () => {
+    const t = task({ sealedRunId: 'r1', queued: ['the agent’s relaunch'] })
+    applyDone(t, done({ exitCode: 1, cause: 'session-lost' }), { at: AT, askId: 'ask-x-0' })
+    expect(t.queued).toEqual(['the agent’s relaunch'])
+    expect(t.items!.some((i) => i.kind === 'event')).toBe(false)
   })
 
   it('names an idle kill in the retry ask and stashes the cause on the ride', () => {

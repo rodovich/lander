@@ -20,6 +20,8 @@ import type { Step, Usage } from '../shared/stream'
 import type { UpdateMessage, DoneMessage } from './protocol'
 import {
   openRide,
+  applyRelaunch,
+  relaunchBrief,
   clearRunPointers,
   closeRide,
   isSealedRun,
@@ -44,6 +46,8 @@ import { createRetryAsk, type Ask } from './asks'
 // typing it structurally also lets the functions be unit-tested against minimal
 // fixtures.
 export type ApplyTask = {
+  id: string
+  queued?: string[]
   status: string
   title: string
   items?: Item[]
@@ -358,28 +362,37 @@ export function applyDone(
   }
   // An assistant error — a non-zero exit that isn't a deliberate interrupt — needs
   // the user's attention, so wedge the task with the platform retry ask (usage-limit
-  // or generic error). Only override a still-riding task: a self-wedge/land the
-  // agent set stands, and so does a relaunch that sealed this run: it already
-  // queued the fresh session's first turn, which a retry would only duplicate or
-  // follow with a "try again" the session can't place. Name the failure when we
-  // can — the daemon's synthesized-done cause, or the first stderr line of a
-  // natural non-zero exit; a usage-limit wedge keeps its reset-time wording.
+  // or generic error). The exception is a session the CLI no longer has: resuming
+  // it again can only fail the same way, and the ask's only working option would
+  // be to relaunch, so relaunch on the task's flow without asking. Only override
+  // a still-riding task: a self-wedge/land the agent set stands, and so does a
+  // relaunch that sealed this run: it already queued the fresh session's first
+  // turn, which a retry would only duplicate or follow with a "try again" the
+  // session can't place. Name the failure when we can — the daemon's
+  // synthesized-done cause, or the first stderr line of a natural non-zero exit;
+  // a usage-limit wedge keeps its reset-time wording.
   if (
     done.exitCode !== 0 &&
     !done.interrupted &&
     task.status === 'riding' &&
     !isSealedRun(task, task.runId)
   ) {
-    const prompt = rateLimitResetsAt ? undefined : failurePrompt(done)
-    wedgeForRetry(task, {
-      committed: turnCommitted(ride, rideItems),
-      askId,
-      at,
-      resetsAt: rateLimitResetsAt,
-      usageFullUntil: done.usageFullUntil,
-      ...(prompt ? { prompt } : {}),
-      otherFlows,
-    })
+    if (done.cause === 'session-lost')
+      applyRelaunch(task, relaunchBrief(task.id), at, 'system', {
+        reason: "the agent's session could not be found",
+      })
+    else {
+      const prompt = rateLimitResetsAt ? undefined : failurePrompt(done)
+      wedgeForRetry(task, {
+        committed: turnCommitted(ride, rideItems),
+        askId,
+        at,
+        resetsAt: rateLimitResetsAt,
+        usageFullUntil: done.usageFullUntil,
+        ...(prompt ? { prompt } : {}),
+        otherFlows,
+      })
+    }
   }
   // Close the ride: interrupted on a deliberate stop, error on a non-zero
   // non-interrupt exit, else done. Usage already rides on it (applyUpdate). A run

@@ -180,6 +180,7 @@ export function makeFlow({
         : { costUsd: 0, tokens: 0 }
       let stderrText = ''
       let apiError: string | undefined
+      let sessionNotFound = false
       const waitingUntil = backgroundWait()
 
       const collectStderr = (async () => {
@@ -201,6 +202,7 @@ export function makeFlow({
           }
         }
         if (r.apiError) apiError = r.apiError
+        if (r.sessionNotFound) sessionNotFound = true
         ctx.emit.waiting(waitingUntil(r, Date.parse(ctx.now())))
         if (r.drivingModel) ctx.emit.meter({ drivingModel: r.drivingModel })
         if (r.cliVersion) ctx.emit.meter({ cliVersion: r.cliVersion })
@@ -316,6 +318,7 @@ export function makeFlow({
         // The API error leads: the retry ask quotes the first line, and the
         // CLI's own stderr can open with a terse machine-formatted diagnostic.
         stderr: [apiError, stderrText.trim()].filter(Boolean).join('\n'),
+        ...(resuming && sessionNotFound ? { cause: 'session-lost' as const } : {}),
       }
     },
   }

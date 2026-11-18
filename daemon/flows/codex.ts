@@ -252,6 +252,11 @@ export function makeFlow({
         stderr: [stderrText.trim(), terminalError?.trim()]
           .filter(Boolean)
           .join('\n'),
+        // `exec resume` of a thread whose rollout is gone exits 1 having
+        // streamed nothing.
+        ...(sessionId && exitCode !== 0 && stderrText.includes('no rollout found for thread id')
+          ? { cause: 'session-lost' as const }
+          : {}),
       }
     },
   }
