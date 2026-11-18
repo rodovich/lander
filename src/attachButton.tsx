@@ -61,7 +61,7 @@ function PaperclipIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path
-        d="M21.44 11.05l-9.19 9.19a5 5 0 0 1-7.07-7.07l9.19-9.19a3 3 0 0 1 4.24 4.24l-9.2 9.19a1 1 0 0 1-1.41-1.41l8.49-8.49"
+        d="M16 6l-8.41 8.59a2 2 0 0 0 2.83 2.83l8.41-8.59a4 4 0 1 0-5.66-5.66l-8.38 8.55a6 6 0 1 0 8.49 8.49l8.38-8.55"
         stroke="currentColor"
         strokeWidth="1.8"
         strokeLinecap="round"
