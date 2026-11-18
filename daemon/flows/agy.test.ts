@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   agyLogRefusals,
   agyUsageBody,
@@ -13,6 +13,7 @@ import {
   onGrant,
   onStatus,
   agyRepromptMessage,
+  lostConversationBrief,
   resolveLaunchDir,
 } from './agy'
 import { announcedFlows, buildFlows, FLOW_MODULES, providerCaps } from './index'
@@ -189,7 +190,7 @@ it('keeps a checkpoint when the stream ends before the next response', async () 
   expect(task.flowState).not.toHaveProperty('contextTokens')
 })
 
-it.each([undefined, 'expired-session'])('does not use old context sizes when conversation %s starts fresh', async (sessionId) => {
+it('does not use old context sizes when a task with no conversation starts one', async () => {
   const g = fixture([[init('fresh-checkpoint'),
     event('step_update', { step_index: 0, step_type: 'checkpoint', state: 'DONE' }),
     event('step_update', {
@@ -199,7 +200,6 @@ it.each([undefined, 'expired-session'])('does not use old context sizes when con
   ]], {
     contextTokens: 1500,
     threadUsage: { input: 100, cacheRead: 50, output: 5, cacheCreation: 0 },
-    ...(sessionId ? { sessionId } : {}),
   })
   const driven = await driveFlow(g, flow())
   expect(steps(driven.events).filter(s => s.kind === 'context')).toEqual([
@@ -212,44 +212,47 @@ it.each([undefined, 'expired-session'])('does not use old context sizes when con
   })
 })
 
-it('keeps replacement-session usage whole when a refusal prompts another subprocess', async () => {
-  const g = fixture([[init('replacement-session'), toolStep(2, 'run_command', { CommandLine: 'echo probe' }), result({
-    denied_actions: [{ action: 'command', display_name: 'Bash' }],
-    usage: { input_tokens: 200, output_tokens: 20 },
-  })]], {
-    sessionId: 'expired-session',
-    threadUsage: { input: 100, output: 10, cacheRead: 0, cacheCreation: 0 },
-  })
-  g.later = [{ chunks: [[init('replacement-session'), result({
-    usage: { input_tokens: 400, output_tokens: 40 },
-  })]] }]
-  const driven = await driveFlow(g, flow(undefined, refusalLine('replacement-session', 2)))
-  expect(driven.spawns).toHaveLength(2)
-  expect(applyEvents(goldenInput(g).start, driven.events)).toMatchObject({
-    flowState: { sessionId: 'replacement-session' },
-    rides: [{ usage: { input: 400, output: 40, cacheRead: 0, cacheCreation: 0 } }],
-  })
-})
+describe('when agy cannot find the conversation it is asked to resume', () => {
+  const resumedState = async () => {
+    const g = fixture([[init('lost-conversation'), event('step_update', {
+      step_index: 1, step_type: 'agent_response', state: 'DONE', text_delta: 'Earlier',
+      usage: { input_tokens: 900, cache_read_tokens: 600, output_tokens: 10 },
+    }), result({ usage: { input_tokens: 900, cache_read_tokens: 600, output_tokens: 10 } })]])
+    return applyEvents(goldenInput(g).start, (await driveFlow(g, flow())).events)
+      .flowState as Record<string, unknown>
+  }
 
-it('drops expired usage when a replacement session is interrupted before final totals', async () => {
-  const first = fixture([[init('replacement-session'), event('step_update', {
-    step_index: 1, step_type: 'agent_response', state: 'DONE', text_delta: 'Interrupted',
-    usage: { input_tokens: 200, output_tokens: 20 },
-  })]], {
-    sessionId: 'expired-session',
-    threadUsage: { input: 100, output: 10, cacheRead: 0, cacheCreation: 0 },
+  it('stops the replacement and starts a new conversation told where to read the old one', async () => {
+    const g = fixture([[init('unwanted-replacement')]], await resumedState())
+    g.later = [{ chunks: [[init('new-conversation'), response(1, 'Read it'), result({
+      usage: { input_tokens: 400, output_tokens: 40 },
+    })]] }]
+    const driven = await driveFlow(g, flow())
+    expect(driven.spawns).toHaveLength(2)
+    expect(driven.spawns[0].args).toEqual(expect.arrayContaining(['--conversation', 'lost-conversation']))
+    expect(driven.spawns[0].child.killed).toBe(true)
+    expect(driven.spawns[1].args).not.toContain('--conversation')
+    expect(driven.spawns[1].args[1]).toBe([
+      'Task task-1.',
+      projectDocBlock('Project instructions'),
+      lostConversationBrief('task-1'),
+      'do the thing',
+    ].join('\n\n'))
+    expect(steps(driven.events)).toContainEqual(expect.objectContaining({ kind: 'notice' }))
+    expect(applyEvents(goldenInput(g).start, driven.events)).toMatchObject({
+      flowState: {
+        sessionId: 'new-conversation',
+        threadUsage: { input: 400, output: 40, cacheRead: 0, cacheCreation: 0 },
+      },
+      rides: [{ usage: { input: 400, output: 40, cacheRead: 0, cacheCreation: 0 } }],
+    })
   })
-  first.exitCode = 1
-  const driven = await driveFlow(first, flow())
-  const prior = applyEvents(goldenInput(first).start, driven.events)
-  expect(prior.flowState).not.toHaveProperty('threadUsage')
-  const resumed = fixture([[init('replacement-session'), event('step_update', {
-    step_index: 3, step_type: 'agent_response', state: 'DONE', text_delta: 'Resumed',
-    usage: { input_tokens: 200, output_tokens: 20 },
-  }), result({ usage: { input_tokens: 400, output_tokens: 40 } })]], prior.flowState as Record<string, unknown>)
-  const after = await driveFlow(resumed, flow())
-  expect(applyEvents(goldenInput(resumed).start, after.events)).toMatchObject({
-    rides: [{ usage: { input: 200, output: 20, cacheRead: 0, cacheCreation: 0 } }],
+
+  it('keeps nothing of the old conversation when the new one is interrupted before any output', async () => {
+    const g = fixture([[init('unwanted-replacement')]], await resumedState())
+    g.later = [{ chunks: [[init('new-conversation')]], exitCode: 1 }]
+    const driven = await driveFlow(g, flow())
+    expect(applyEvents(goldenInput(g).start, driven.events).flowState).toEqual({ sessionId: 'new-conversation' })
   })
 })
 

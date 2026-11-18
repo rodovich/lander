@@ -223,6 +223,12 @@ export function turnPromptParts(
   ].filter((part): part is string => part !== undefined)
 }
 
+// For a flow whose provider session was replaced: what prepareUserMessagePrompt
+// recorded as delivered went to the old session.
+export function forgetDeliveries(state: Pick<Ctx['state'], 'delete'>): void {
+  for (const key of ['taskPrompt', 'landerDoc', 'contextParts']) state.delete([key])
+}
+
 export function prepareUserMessagePrompt(
   ctx: {
     task: Pick<

@@ -231,6 +231,12 @@ attachment store. `--project` names a lander-managed project config,
 `~/.gemini/config/projects/lander-<hash>.json`, where project-scope grants
 land through the flow's `onGrant` hook. agy has no per-task rule channel.
 
+Given a `--conversation` id it can't find, agy warns on stderr and starts a new
+conversation, exiting 0 (confirmed v1.5.11). The flow stops that process when
+the stream's first event names a different id, then starts a new conversation
+with the first-turn prompt and a note telling the agent to read the task with
+`lander view`, and shows a notice on the turn.
+
 agy ends its turn at a call no rule covers instead of letting the agent continue
 without it. The flow passes `--log-file` so it can tell which call was refused,
 including a sub-agent's, then resumes the same conversation in the same ride with
